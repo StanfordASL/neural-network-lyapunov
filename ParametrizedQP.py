@@ -34,25 +34,35 @@ class ParametrizedQP:
         con = torch.zeros(size, self.num_vars, device=self.device).type(self.dtype)
         for i in range(len(names)):
             var_range = self.var_selector[names[i]] 
-            con[:,var_range[0]:var_range[1]] = coeffs[i].to(self.device).type(self.dtype)
+            con[:,var_range[0]:var_range[1]] = coeffs[i]
         return con
         
+    def _convert_type(self,x):
+        if not isinstance(x,self.dtype):
+            x = self.dtype(x)
+        x.to(self.device)
+        return x
+        
     def add_ineq(self,names,coeffs,bound):
+        coeffs = [self._convert_type(c) for c in coeffs]
+        bound = self._convert_type(bound)
         con = self._build_con(names,coeffs)
         self.G = torch.cat((self.G, con), 0)
-        self.h = torch.cat((self.h, bound.to(self.device).type(self.dtype)), 0)
+        self.h = torch.cat((self.h, bound), 0)
         
     def add_eq(self,names,coeffs,bound):
+        coeffs = [self._convert_type(c) for c in coeffs]
+        bound = self._convert_type(bound)
         con = self._build_con(names,coeffs)
         self.A = torch.cat((self.A, con), 0)
-        self.b = torch.cat((self.b, bound.to(self.device).type(self.dtype)), 0)   
+        self.b = torch.cat((self.b, bound), 0)   
         
     def set_obj(self,name,quadratic=None,linear=None):
         var_range = self.var_selector[name]
         if type(quadratic) != type(None):
-            self.Q[var_range[0]:var_range[1],var_range[0]:var_range[1]] = quadratic.to(self.device).type(self.dtype)
+            self.Q[var_range[0]:var_range[1],var_range[0]:var_range[1]] = self._convert_type(quadratic)
         if type(linear) != type(None):
-            self.q[var_range[0]:var_range[1]] = linear.to(self.device).type(self.dtype)
+            self.q[var_range[0]:var_range[1]] = self._convert_type(linear)
             
     def eval_obj(self,x):
-        return .5 * x @ self.Q @ x.T + self.q @ x.T    
+        return .5 * x @ self.Q @ x.T + self.q @ x.T 
