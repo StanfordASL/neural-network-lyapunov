@@ -9,22 +9,23 @@ class ControlLyapunovFixedActivationPath:
     control action u, such that the value function goes downhill.
 
     Mathematically, if we denote the ReLU output as η(x), and the dynamics as
-    ẋ = Ax + Bu, then the control Lyapunov condition is
-    ∃ u ∈ U, s.t ∂η/∂x * Ax + ∂η/∂x *Bu ≤ 0
+    ẋ = Ax + Bu + d, then the control Lyapunov condition is
+    ∃ u ∈ U, s.t ∂η/∂x * Ax + ∂η/∂x * Bu + ∂η/∂x * d ≤ 0
     Assuming that the admissible set of control action U is a polytope, with
     vertices uᵢ*, and the ReLU network output along this activation path is 
     η(x) = gᵀx+h, while P*x ≤ q, then the control Lyapunov condition that the
     optimal cost of the following problem is no larger than 0.
-    max gᵀAx + min_i gᵀBuᵢ
+    max gᵀAx + min_i gᵀBuᵢ + gᵀd
     s.t Px ≤ q
     """
-    def __init__(self, g, P, q, A, B, u_vertices):
+    def __init__(self, g, P, q, A, B, d, u_vertices):
         """
         @param g The gradient of the ReLU output along this path.
         @param P P*x <= q is the constraint that x activates this path.
         @param q P*x <= q is the constraint that x activates this path.
-        @param A The dynamics is ẋ = Ax + Bu
-        @param B The dynamics is ẋ = Ax + Bu
+        @param A The dynamics is ẋ = Ax + Bu + d
+        @param B The dynamics is ẋ = Ax + Bu + d
+        @param d The dynamics is ẋ = Ax + Bu + d
         @param u_vertices u_vertices[:,i] is the i'th vertex of the control
         action polytope U.
         """
@@ -39,7 +40,9 @@ class ControlLyapunovFixedActivationPath:
         assert(A.shape[0] == xdim)
         assert(B.shape[0] == A.shape[0])
         assert(B.shape[1] == u_vertices.shape[0])
-        cost_constant = np.min(g.T.dot(B * u_vertices))
+        assert(d.shape[0] == xdim)
+        assert(d.shape[1] == 1)
+        cost_constant = np.min(g.T.dot(B * u_vertices)) + g.T.dot(d)
 
         self.objective = g.T * (self.x) + cost_constant
         self.constraints = [P * self.x <= q]
