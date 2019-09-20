@@ -21,93 +21,94 @@ class TestReLU(unittest.TestCase):
             [4, -1, -2, 3], dtype=self.datatype)
         self.linear3 = nn.Linear(4, 1)
         self.linear3.weight.data = torch.tensor(
-            [4, 5, 6, 7], dtype=self.datatype)
-        self.linear3.bias.data = torch.tensor(-10, dtype=self.datatype)
+            [[4, 5, 6, 7]], dtype=self.datatype)
+        self.linear3.bias.data = torch.tensor([-10], dtype=self.datatype)
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                    nn.ReLU(),
                                    self.linear3)
 
-    def test_compute_relu_activation_path(self):
+    def test_compute_relu_activation_pattern(self):
         x = torch.tensor([-6, 4], dtype=self.datatype)
-        activation_path = ReLUToOptimization.ComputeReLUActivationPath(
+        activation_pattern = ReLUToOptimization.ComputeReLUActivationPattern(
             self.model, x)
-        self.assertEqual(len(activation_path), 2)
-        self.assertEqual(len(activation_path[0]), 3)
-        self.assertEqual(len(activation_path[1]), 4)
+        self.assertEqual(len(activation_pattern), 2)
+        self.assertEqual(len(activation_pattern[0]), 3)
+        self.assertEqual(len(activation_pattern[1]), 4)
         x_linear1 = self.linear1.forward(x)
         x_relu1 = nn.ReLU().forward(x_linear1)
         for i in range(3):
-            self.assertEqual(x_linear1[i] >= 0, activation_path[0][i])
+            self.assertEqual(x_linear1[i] >= 0, activation_pattern[0][i])
         x_linear2 = self.linear2.forward(x_relu1)
         for i in range(4):
-            self.assertEqual(x_linear2[i] >= 0, activation_path[1][i])
+            self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
 
-    def test_relu_given_activation_path(self):
-        def test_relu_given_activation_path_util(self, x):
-            activation_path = ReLUToOptimization.ComputeReLUActivationPath(
+    def test_relu_given_activation_pattern(self):
+        def test_relu_given_activation_pattern_util(self, x):
+            activation_pattern = ReLUToOptimization.ComputeReLUActivationPattern(
                 self.model, x)
-            (g, h, P, q) = ReLUToOptimization.ReLUGivenActivationPath(
-                self.model, 2, activation_path)
+            (g, h, P, q) = ReLUToOptimization.ReLUGivenActivationPattern(
+                self.model, 2, activation_pattern)
             output_expected = self.model.forward(x)
             output = g.T @ x.reshape((2, 1)) + h
             self.assertAlmostEqual(output, output_expected, 10)
             self.assertTrue(torch.all(torch.le(P @ (x.reshape((-1, 1))), q)))
 
-        test_relu_given_activation_path_util(
+        test_relu_given_activation_pattern_util(
             self, torch.tensor([-6, 4], dtype=self.datatype))
-        test_relu_given_activation_path_util(
+        test_relu_given_activation_pattern_util(
             self, torch.tensor([-10, 4], dtype=self.datatype))
-        test_relu_given_activation_path_util(
+        test_relu_given_activation_pattern_util(
             self, torch.tensor([3, -4], dtype=self.datatype))
-        test_relu_given_activation_path_util(
+        test_relu_given_activation_pattern_util(
             self, torch.tensor([-3, -4], dtype=self.datatype))
 
-    def test_relu_free_path_constructor(self):
-        relu_free_path = ReLUToOptimization.ReLUFreePath(self.model)
-        self.assertEqual(len(relu_free_path.relu_unit_index), 2)
-        self.assertListEqual(relu_free_path.relu_unit_index[0], [0, 1, 2])
-        self.assertListEqual(relu_free_path.relu_unit_index[1], [3, 4, 5, 6])
-        self.assertEqual(relu_free_path.num_relu_units, 7)
+    def test_relu_free_pattern_constructor(self):
+        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
+        self.assertEqual(len(relu_free_pattern.relu_unit_index), 2)
+        self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
+        self.assertListEqual(
+            relu_free_pattern.relu_unit_index[1], [3, 4, 5, 6])
+        self.assertEqual(relu_free_pattern.num_relu_units, 7)
 
-    def test_relu_free_path_output_constraint(self):
-        relu_free_path = ReLUToOptimization.ReLUFreePath(self.model)
+    def test_relu_free_pattern_output_constraint(self):
+        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
         x_lo = torch.tensor([-1, -2], dtype=self.datatype)
         x_up = torch.tensor([2, 3], dtype=self.datatype)
-        (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out, z_lo, z_up) = relu_free_path.output_constraint(
+        (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
             self.model, x_lo, x_up)
         print("z_lo:{}\nz_up:{}".format(z_lo, z_up))
         num_z_lo_positive = np.sum([z_lo_i >= 0 for z_lo_i in z_lo])
         num_z_up_negative = np.sum([z_up_i <= 0 for z_up_i in z_up])
-        num_ineq = (relu_free_path.num_relu_units -
+        num_ineq = (relu_free_pattern.num_relu_units -
                     num_z_lo_positive - num_z_up_negative) * 4
         num_eq = (num_z_lo_positive + num_z_up_negative) * 2
         self.assertListEqual(
             list(Ain1.shape), [num_ineq, 2])
         self.assertListEqual(list(Ain2.shape), [
-                             num_ineq, relu_free_path.num_relu_units])
+                             num_ineq, relu_free_pattern.num_relu_units])
         self.assertListEqual(list(Ain3.shape), [
-                             num_ineq, relu_free_path.num_relu_units])
+                             num_ineq, relu_free_pattern.num_relu_units])
         self.assertListEqual(
             list(rhs_in.shape), [num_ineq, 1])
         self.assertListEqual(
             list(Aeq1.shape), [num_eq, 2])
         self.assertListEqual(list(Aeq2.shape), [
-                             num_eq, relu_free_path.num_relu_units])
+                             num_eq, relu_free_pattern.num_relu_units])
         self.assertListEqual(list(Aeq3.shape), [
-                             num_eq, relu_free_path.num_relu_units])
+                             num_eq, relu_free_pattern.num_relu_units])
         self.assertListEqual(
             list(rhs_eq.shape), [num_eq, 1])
 
         def test_input_x(x):
-            # For an arbitrary input x, compute its activation path and output
+            # For an arbitrary input x, compute its activation pattern and output
             # of each ReLU unit, check if they satisfy the constraint
             # Ain1*x+Ain2*z+Ain3*β <= rhs_in
             # Aeq1*x+Aeq2*z+Aeq3*β <= rhs_eq
             assert(torch.all(torch.ge(x, x_lo.squeeze())))
             assert(torch.all(torch.le(x, x_up.squeeze())))
-            (z, beta, output) = relu_free_path.ComputeReLUUnitOutputsAndActivation(
+            (z, beta, output) = relu_free_pattern.compute_relu_unit_outputs_and_activation(
                 self.model, x)
-            for i in range(relu_free_path.num_relu_units):
+            for i in range(relu_free_pattern.num_relu_units):
                 self.assertTrue(
                     torch.le(z[i][0], torch.max(z_up[i], torch.tensor(0.))))
                 self.assertTrue(
@@ -140,6 +141,61 @@ class TestReLU(unittest.TestCase):
         test_input_x(torch.tensor([-0.15, -0.2]))
         test_input_x(torch.tensor([1.1, -0.22]))
         test_input_x(torch.tensor([1.5, -0.8]))
+
+    def test_compute_alpha_index(self):
+        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 0)), 0)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 1)), 1)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 2)), 2)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 3)), 3)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 0)), 4)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 1)), 5)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 2)), 6)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 3)), 7)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 0)), 8)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 1)), 9)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 2)), 10)
+        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 3)), 11)
+
+    def test_output_gradient(self):
+        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
+        (M, B1, B2, d) = relu_free_pattern.output_gradient(self.model)
+        num_alpha = 12
+        self.assertListEqual(list(M.shape), [num_alpha, 2])
+
+        # Enumerate all the possible activation pattern, with only one ReLU
+        # unit active at each layer. Compute the gradient of the ReLU
+        # network network for each activation pattern through
+        # ReLUGivenActivationPattern(), and compare the result aginst M.
+        activation_pattern = [[False, False, False],
+                              [False, False, False, False]]
+        for i0 in range(3):
+            activation_pattern[0] = [False, False, False]
+            activation_pattern[0][i0] = True
+            for i1 in range(4):
+                activation_pattern[1] = [False, False, False, False]
+                activation_pattern[1][i1] = True
+                (g, _, _, _) = ReLUToOptimization.ReLUGivenActivationPattern(
+                    self.model, 2, activation_pattern)
+                alpha_index = relu_free_pattern.compute_alpha_index((i0, i1))
+                self.assertTrue(
+                    torch.all(torch.abs(M[alpha_index] - g.reshape((1, -1))) < 1E-5))
+                alpha_value = torch.zeros((num_alpha, 1))
+                alpha_value[alpha_index][0] = 1.
+                beta_value = torch.zeros((relu_free_pattern.num_relu_units, 1))
+                beta_value[relu_free_pattern.relu_unit_index[0][i0]][0] = 1.
+                beta_value[relu_free_pattern.relu_unit_index[1][i1]][0] = 1.
+                self.assertTrue(
+                    torch.all(B1 @ alpha_value + B2 @beta_value - d < 1E-5))
+                # Now perturb alpha value a bit, by negating a value from 1
+                # to 0 or vice versa, the perturbed alpha and beta should
+                # violate the constraint.
+                perturbed_alpha_entry = np.random.randint(
+                    0, alpha_value.numel())
+                alpha_value[perturbed_alpha_entry] = 1. - \
+                    alpha_value[perturbed_alpha_entry]
+                self.assertFalse(
+                    torch.all(B1 @ alpha_value + B2 @beta_value - d < 1E-5))
 
 
 if __name__ == "__main__":

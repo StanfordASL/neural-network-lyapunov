@@ -1,43 +1,45 @@
 # -*- coding: utf-8 -*-
+import queue
+
 import torch
 import torch.nn as nn
 import numpy as np
 
 
-def ComputeReLUActivationPath(model_relu, x):
+def ComputeReLUActivationPattern(model_relu, x):
     """
-    For a given input x to a ReLU network, returns the activation path for
+    For a given input x to a ReLU network, returns the activation pattern for
     this input.
     @param model_relu A ReLU network (constructed by Sequential Linear and
     ReLU units).
     @param x A numpy array, the input to the network.
-    @return activation_path A list of length num_relu_layers.
-    activation_path[i] is a list of 0/1, with size equal to the number of
-    ReLU units in the i'th layer. If activation_path[i][j] = 1, then in the
+    @return activation_pattern A list of length num_relu_layers.
+    activation_pattern[i] is a list of 0/1, with size equal to the number of
+    ReLU units in the i'th layer. If activation_pattern[i][j] = 1, then in the
     i'th layer, the j'th unit is activated.
     """
-    activation_path = []
+    activation_pattern = []
     layer_x = x
     for layer in model_relu:
         if (isinstance(layer, nn.Linear)):
             layer_x = layer.forward(layer_x)
         elif isinstance(layer, nn.ReLU):
-            activation_path.append([relu_x >= 0 for relu_x in layer_x])
+            activation_pattern.append([relu_x >= 0 for relu_x in layer_x])
             layer_x = layer.forward(layer_x)
-    return activation_path
+    return activation_pattern
 
 
-def ReLUGivenActivationPath(model_relu, x_size, activation_path):
+def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern):
     """
-    Given a ReLU network, and a given activation path, the ReLU network can
+    Given a ReLU network, and a given activation pattern, the ReLU network can
     be represented as
     ReLU(x) = gᵀx+h, while P*x ≤ q
     we return the quantity g, h, P and q.
     @param model_relu A ReLU network.
     @param x_size The size of the input x.
-    @param activation_path A list of length num_relu_layers.
-    activation_path[i] is a list of True/False, with size equal to the number
-    of ReLU units in the i'th layer. If activation_path[i][j] = True, then in
+    @param activation_pattern A list of length num_relu_layers.
+    activation_pattern[i] is a list of True/False, with size equal to the number
+    of ReLU units in the i'th layer. If activation_pattern[i][j] = True, then in
     the i'th layer, the j'th unit is activated.
     @return (g, h, P, q)  g is a column vector, h is a scalar. P is a 2D
     matrix, and q is a column vector
@@ -55,10 +57,10 @@ def ReLUGivenActivationPath(model_relu, x_size, activation_path):
                 layer.bias.data.reshape((-1, 1))
             num_linear_layer_output = layer.weight.data.shape[0]
         elif (isinstance(layer, nn.ReLU)):
-            assert(len(activation_path[relu_layer_count])
+            assert(len(activation_pattern[relu_layer_count])
                    == num_linear_layer_output)
             for row, activation_flag in enumerate(
-                    activation_path[relu_layer_count]):
+                    activation_pattern[relu_layer_count]):
                 if activation_flag:
                     # If this row is active, then A.row(i) * x + b(i) >= 0
                     # is the same as -A.row(i) * x <= b(i)
@@ -75,12 +77,12 @@ def ReLUGivenActivationPath(model_relu, x_size, activation_path):
         else:
             raise Exception(
                 "The ReLU network only allows ReLU and linear units.")
-    g = A_layer
+    g = A_layer.T
     h = b_layer
     return (g, h, P, q)
 
 
-class ReLUFreePath:
+class ReLUFreePattern:
     """
     The output of ReLU network is a piecewise linear function of the input.
     We will formulate the ReLU network using mixed-integer linear constraint.
@@ -95,12 +97,17 @@ class ReLUFreePath:
         # the index of the j'th ReLU unit on the i'th layer.
         self.relu_unit_index = []
         self.num_relu_units = 0
+        layer_count = 0
         for layer in model:
             if (isinstance(layer, nn.Linear)):
                 self.relu_unit_index.append(list(range(
                     self.num_relu_units,
                     self.num_relu_units + layer.weight.data.shape[0])))
                 self.num_relu_units += layer.weight.data.shape[0]
+                if layer_count == 0:
+                    self.x_size = layer.weight.data.shape[1]
+                layer_count += 1
+
         # The last linear layer is not connected to a ReLU layer.
         self.num_relu_units -= len(self.relu_unit_index[-1])
         self.relu_unit_index = self.relu_unit_index[:-1]
@@ -142,7 +149,9 @@ class ReLUFreePath:
         where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
         β = [β₀; β₁; ...; βₙ₋₁]. Note that the network output zₙ is the LAST
         entry of z.
-        @param model A ReLU network
+        @param model A ReLU network. This network must have the same structure
+        as the network in the class constructor (but the weights can be
+        different).
         @param x_lo A 1-D vector, the lower bound of input x.
         @param x_up A 1-D vector, the upper bound of input x.
         @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
@@ -152,18 +161,17 @@ class ReLUFreePath:
         Notice that z_lo[i] and z_up[i] are the bounds of z[i] BEFORE
         applying the ReLU activation function.
         """
-        x_size = x_lo.numel()
         assert(len(x_lo.shape) == 1)
         assert(len(x_up.shape) == 1)
         assert(torch.all(torch.le(x_lo, x_up)))
 
         # Each ReLU unit introduces at most 4 inequality constraints.
-        Ain1 = torch.zeros((4 * self.num_relu_units, x_size))
+        Ain1 = torch.zeros((4 * self.num_relu_units, self.x_size))
         Ain2 = torch.zeros((4 * self.num_relu_units, self.num_relu_units))
         Ain3 = torch.zeros((4 * self.num_relu_units, self.num_relu_units))
         rhs_in = torch.empty((4 * self.num_relu_units, 1))
         # Each ReLU unit introduces at most 2 equality constraints.
-        Aeq1 = torch.zeros((2 * self.num_relu_units, x_size))
+        Aeq1 = torch.zeros((2 * self.num_relu_units, self.x_size))
         Aeq2 = torch.zeros((2 * self.num_relu_units, self.num_relu_units))
         Aeq3 = torch.zeros((2 * self.num_relu_units, self.num_relu_units))
         rhs_eq = torch.empty((2 * self.num_relu_units, 1))
@@ -185,7 +193,7 @@ class ReLUFreePath:
                         z_up[z_bound_index] = layer.bias.data[j].clone()
                         # z0 is the input x.
                         if layer_count == 0:
-                            zi_size = x_size
+                            zi_size = self.x_size
                             zi_lo = x_lo
                             zi_up = x_up
                         else:
@@ -279,7 +287,7 @@ class ReLUFreePath:
                     a_out = torch.zeros((self.num_relu_units, 1))
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
                         a_out[self.relu_unit_index[layer_count - 1][k]
-                              ][0] = layer.weight.data[k]
+                              ][0] = layer.weight.data[0][k]
                     b_out = layer.bias.item()
 
             elif (isinstance(layer, nn.ReLU)):
@@ -302,7 +310,7 @@ class ReLUFreePath:
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out, z_lo, z_up)
 
-    def ComputeReLUUnitOutputsAndActivation(self, model, x):
+    def compute_relu_unit_outputs_and_activation(self, model, x):
         """
         This is a utility function for output_constraint(). Given a network
         input x, this function computes the vector containing each ReLU unit
@@ -333,12 +341,33 @@ class ReLUFreePath:
 
         return (z, beta, output)
 
+    def compute_alpha_index(self, relu_unit_layer_indices):
+        """
+        Compute the index of α given an activation path (one and only one
+        active ReLU unit on each layer). You could refer to output_gradient()
+        function for the definition of α. Given a tuple (i₀, i₁, ..., iₙ₋₁)
+        meaning that on the k'th layer, iₖ'th ReLU unit is active, we give
+        the index of α[i₀][i₁]...[iₙ₋₁] in the vector α.
+        @param relu_unit_layer_indices A tuple of length num_ReLU_layers in the
+        ReLU network. relu_unit_layer_indices[i] is the active ReLU unit on the
+        i'th layer.
+        """
+        assert(len(relu_unit_layer_indices) == len(self.relu_unit_index))
+        index = 0
+        for i in range(len(self.relu_unit_index)):
+            # Go through each layer
+            assert (relu_unit_layer_indices[i] >= 0 and relu_unit_layer_indices[i] < len(
+                self.relu_unit_index[i]))
+            index = index * \
+                len(self.relu_unit_index[i]) + relu_unit_layer_indices[i]
+        return index
+
     def output_gradient(self, model):
         """
         The ReLU network output is a piecewise linear function of the input x.
         Hence the gradient of the output w.r.t the input can be expressed as
         a linear function of some binary variable α, namely
-        ∂ReLU(x)/∂x = αᵀA
+        ∂ReLU(x)/∂x = αᵀM
         with the additional linear constraint
         B1 * α + B2 * β ≤ d
         where β are also binary variables, β = [β₀; β₁; ...; βₙ₋₁], with
@@ -349,11 +378,111 @@ class ReLUFreePath:
         ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... * diag(β₀) * W₀
         This is a multilinear function of β, and we will introduce new binary
         variable α to represent the product of β.
-        We define α[i₀][i₁]...[iₙ₋₁]=β₀[i₀]*β₁[i₁]*...*βₙ₋₁[iₙ₋₁] and the gradient
-        ∂ReLU(x)/∂x could be written as a linear function of α.
+        We define α[i₀][i₁]...[iₙ₋₁]=β₀[i₀]*β₁[i₁]*...*βₙ₋₁[iₙ₋₁] and the
+        gradient ∂ReLU(x)/∂x could be written as a linear function of α.
         To impose the constraint that α is the product of β, we introduce the
         following linear constraints
         α[i₀][i₁]...[iₙ₋₁] ≤ βₖ[iₖ] ∀ k=0,...,n-1
         α[i₀][i₁]...[iₙ₋₁] ≥ β₀[i₀] + ... + βₙ₋₁[iₙ₋₁] - (n-1)
+        @param model A ReLU network. This network must have the same structure
+        as the network in the class constructor (but the weights can be
+        different).
+        @return (M, B1, B2, d) A, B1, B2 are 2-D matrices, d is a column
+        vector.
         """
-        pass
+
+        """
+        In order to compute the gradient
+        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... * diag(β₀) * W₀
+        as a multilinear function of β, we notice that by setting all but one ReLU
+        unit to be active in each layer, the gradient of the network output is
+        the coefficient of the monomial, which contains the product of β in the
+        active ReLU units. So a straightforward approach is to enumerate all the
+        activation patterns (with only one ReLU unit active in each layer),
+        compute the gradient of the output (as we did in ReLUGivenActivationPattern()),
+        and then set the corresponding row in matrix A as the gradient. This
+        approach is inefficient as there are exponential number of activation
+        patterns. On the other hand, two activation patterns could share a lot
+        of intermediate result, if they share the same pattern in the first few
+        layers. So instead of enumerating all activation patterns, we consider the 
+        activation pattern from layer to layer.
+        """
+
+        # LinearUnitGradient stores a length-k tuple of ReLU unit indices (one
+        # ReLU unit per layer) and the gradient of the k+1'th linear layer output,
+        # when only the ReLU units with the given indices are active. For example
+        # if LinearUnitGradient.activated_relu_indices = (2, 4), then
+        # LinearUnitGradient.gradient stores the gradient of the 3rd linear
+        # layer output, when only the 2nd unit on the first layer, and 4th unit
+        # on the second layer are active. Note that the value of
+        # LinearUnitGradient.gradient is a matrix. The i'th row of this matrix
+        # is the gradient of the i'th entry of the linear output.
+        class LinearUnitGradient:
+            def __init__(self, activated_relu_indices, gradient):
+                self.activated_relu_indices = activated_relu_indices
+                self.gradient = gradient
+
+        # layer_linear_unit_gradients stores all the LinearUnitGradient for this
+        # linear layer.
+        num_alpha = np.prod(np.array(
+            [len(layer_relu_unit_index) for layer_relu_unit_index in self.relu_unit_index]))
+
+        layer_linear_unit_gradients = queue.Queue(maxsize=num_alpha)
+        layer_count = 0
+        for layer in model:
+            if (isinstance(layer, nn.Linear)):
+                if layer_count == 0:
+                    linear_unit_gradient = LinearUnitGradient(
+                        (), layer.weight.data.clone())
+                    layer_linear_unit_gradients.put(linear_unit_gradient)
+                else:
+                    queue_size = layer_linear_unit_gradients.qsize()
+                    last_layer_linear_unit_gradient_count = 0
+                    while (last_layer_linear_unit_gradient_count < queue_size):
+                        last_layer_linear_unit_gradient = layer_linear_unit_gradients.get()
+                        last_layer_linear_unit_gradient_count += 1
+                        for layer_relu_unit_index in \
+                                range(len(self.relu_unit_index[layer_count - 1])):
+                            # We append the ReLU unit with index layer_relu_unit_index
+                            # to the activated path
+                            linear_unit_gradient = LinearUnitGradient(
+                                last_layer_linear_unit_gradient.activated_relu_indices +
+                                (layer_relu_unit_index,),
+                                layer.weight.data[:, layer_relu_unit_index].reshape(
+                                    (-1, 1))
+                                @ last_layer_linear_unit_gradient.gradient[layer_relu_unit_index].reshape((1, -1)))
+                            layer_linear_unit_gradients.put(
+                                linear_unit_gradient)
+
+            elif (isinstance(layer, nn.ReLU)):
+                layer_count += 1
+
+        # Now loop through layer_linear_unit_gradients, fill in the matrix M, and
+        # add the linear equality constraint B1 * α + B2 * β ≤ d
+        M = torch.empty((num_alpha, self.x_size))
+        num_ineq = num_alpha * (len(self.relu_unit_index) + 1)
+        B1 = torch.zeros((num_ineq, num_alpha))
+        B2 = torch.zeros((num_ineq, self.num_relu_units))
+        d = torch.zeros((num_ineq, 1))
+        ineq_constraint_count = 0
+        while (not layer_linear_unit_gradients.empty()):
+            layer_linear_unit_gradient = layer_linear_unit_gradients.get()
+            alpha_index = self.compute_alpha_index(
+                layer_linear_unit_gradient.activated_relu_indices)
+            M[alpha_index] = layer_linear_unit_gradient.gradient
+            # Now add the constraint
+            # α[i₀][i₁]...[iₙ₋₁] ≤ βₖ[iₖ] ∀ k=0,...,n-1
+            # α[i₀][i₁]...[iₙ₋₁] ≥ β₀[i₀] + ... + βₙ₋₁[iₙ₋₁] - (n-1)
+            num_layers = len(self.relu_unit_index)
+            B1[ineq_constraint_count + num_layers][alpha_index] = -1.
+            d[ineq_constraint_count + num_layers][0] = num_layers - 1.
+            for layer_count in range(num_layers):
+                B1[ineq_constraint_count + layer_count][alpha_index] = 1.
+                beta_index = self.relu_unit_index[layer_count][
+                    layer_linear_unit_gradient.activated_relu_indices[layer_count]]
+                d[ineq_constraint_count + layer_count][0] = 0.
+                B2[ineq_constraint_count + layer_count][beta_index] = -1.
+                B2[ineq_constraint_count + num_layers][beta_index] = 1
+            ineq_constraint_count += num_layers + 1
+
+        return (M, B1, B2, d)
