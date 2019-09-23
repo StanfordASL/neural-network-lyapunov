@@ -74,7 +74,8 @@ class TestReLU(unittest.TestCase):
         relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
         x_lo = torch.tensor([-1, -2], dtype=self.datatype)
         x_up = torch.tensor([2, 3], dtype=self.datatype)
-        (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
+        (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
+            z_lo, z_up) = relu_free_pattern.output_constraint(
             self.model, x_lo, x_up)
         print("z_lo:{}\nz_up:{}".format(z_lo, z_up))
         num_z_lo_positive = np.sum([z_lo_i >= 0 for z_lo_i in z_lo])
@@ -100,13 +101,14 @@ class TestReLU(unittest.TestCase):
             list(rhs_eq.shape), [num_eq, 1])
 
         def test_input_x(x):
-            # For an arbitrary input x, compute its activation pattern and output
-            # of each ReLU unit, check if they satisfy the constraint
+            # For an arbitrary input x, compute its activation pattern and
+            # output of each ReLU unit, check if they satisfy the constraint
             # Ain1*x+Ain2*z+Ain3*β <= rhs_in
             # Aeq1*x+Aeq2*z+Aeq3*β <= rhs_eq
             assert(torch.all(torch.ge(x, x_lo.squeeze())))
             assert(torch.all(torch.le(x, x_up.squeeze())))
-            (z, beta, output) = relu_free_pattern.compute_relu_unit_outputs_and_activation(
+            (z, beta, output) = \
+                relu_free_pattern.compute_relu_unit_outputs_and_activation(
                 self.model, x)
             for i in range(relu_free_pattern.num_relu_units):
                 self.assertTrue(
@@ -123,9 +125,10 @@ class TestReLU(unittest.TestCase):
                 torch.le(lhs_in.squeeze(),
                          rhs_in.squeeze() + torch.tensor(precision))))
             self.assertTrue(
-                torch.all(torch.le(torch.abs(lhs_eq.squeeze() - rhs_eq.squeeze()), precision)))
-            # Now perturb beta by changing some entry from 1 to 0, and vice versa.
-            # Now it should not satisfy the constraint.
+                torch.all(torch.le(torch.abs(lhs_eq.squeeze()
+                          - rhs_eq.squeeze()), precision)))
+            # Now perturb beta by changing some entry from 1 to 0, and vice
+            # versa. Now it should not satisfy the constraint.
             perturbed_beta_entry = np.random.randint(0, beta.numel())
             beta[perturbed_beta_entry] = 1 - beta[perturbed_beta_entry]
             lhs_in_perturbed = Ain1 @ x_vec + Ain2 @ z + Ain3 @ beta
@@ -133,7 +136,8 @@ class TestReLU(unittest.TestCase):
             self.assertFalse(torch.all(
                 torch.le(lhs_in_perturbed.squeeze(),
                          rhs_in.squeeze() + torch.tensor(precision))) and
-                torch.all(torch.le(torch.abs(lhs_eq_perturbed - rhs_eq), precision)))
+                torch.all(torch.le(torch.abs(lhs_eq_perturbed - rhs_eq),
+                          precision)))
 
         # Test with different input x.
         test_input_x(torch.tensor([0.7, 0.2]))
@@ -179,7 +183,8 @@ class TestReLU(unittest.TestCase):
                     self.model, 2, activation_pattern)
                 alpha_index = relu_free_pattern.compute_alpha_index((i0, i1))
                 self.assertTrue(
-                    torch.all(torch.abs(M[alpha_index] - g.reshape((1, -1))) < 1E-5))
+                    torch.all(torch.abs(M[alpha_index] - g.reshape((1, -1)))
+                              < 1E-5))
                 alpha_value = torch.zeros((num_alpha, 1))
                 alpha_value[alpha_index][0] = 1.
                 beta_value = torch.zeros((relu_free_pattern.num_relu_units, 1))

@@ -108,6 +108,9 @@ class ControlLyapunovFreeActivationPattern:
         We write the whole problem concisely in the following form
         max c₁ᵀs + t + c₂ᵀα
         s.t Ain1*x + Ain2*s + Ain3*t + Ain4*α + Ain5*β ≤ rhs
+        @note that this function does NOT impose the constraint that β is
+        the right ReLU activation pattern for the input x. This constraint
+        is imposed separately in ReLUFreePattern.output_constraint() function.
 
         @param A_dyn The A matrix in ẋ = Ax + Bu + d
         @param B_dyn The B matrix in ẋ = Ax + Bu + d
