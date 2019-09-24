@@ -29,35 +29,35 @@ class TestControlLyapunovFixedActivationPattern(unittest.TestCase):
 
 class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
     def setUp(self):
-        self.datatype = torch.float
+        self.dtype = torch.float64
         self.linear1 = nn.Linear(2, 3)
         self.linear1.weight.data = torch.tensor(
-            [[1, 2], [3, 4], [5, 6]], dtype=self.datatype)
+            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
         self.linear1.bias.data = torch.tensor(
-            [-11, 13, 4], dtype=self.datatype)
+            [-11, 13, 4], dtype=self.dtype)
         self.linear2 = nn.Linear(3, 4)
         self.linear2.weight.data = torch.tensor(
             [[-1, 0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1, 4, 6]],
-            dtype=self.datatype)
+            dtype=self.dtype)
         self.linear2.bias.data = torch.tensor(
-            [4, -1, -2, 3], dtype=self.datatype)
+            [4, -1, -2, 3], dtype=self.dtype)
         self.linear3 = nn.Linear(4, 1)
         self.linear3.weight.data = torch.tensor(
-            [[4, 5, 6, 7]], dtype=self.datatype)
-        self.linear3.bias.data = torch.tensor([-10], dtype=self.datatype)
+            [[4, 5, 6, 7]], dtype=self.dtype)
+        self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                    nn.ReLU(),
                                    self.linear3)
         self.dut = ControlLyapunov.ControlLyapunovFreeActivationPattern(
-            self.model)
+            self.model, self.dtype)
 
     def test_generate_program_verify_continuous_affine_system(self):
-        A_dyn = torch.tensor([[0, 1], [2, 3]], dtype=self.datatype)
-        B_dyn = torch.tensor([[2, 0], [0, 4]], dtype=self.datatype)
-        d_dyn = torch.tensor([[1], [-2]], dtype=self.datatype)
-        u_vertices = torch.tensor([[1, 2, 3], [-1, 3, 2]], dtype=self.datatype)
-        x_lo = torch.tensor([-2, -3], dtype=self.datatype)
-        x_up = torch.tensor([3, 4], dtype=self.datatype)
+        A_dyn = torch.tensor([[0, 1], [2, 3]], dtype=self.dtype)
+        B_dyn = torch.tensor([[2, 0], [0, 4]], dtype=self.dtype)
+        d_dyn = torch.tensor([[1], [-2]], dtype=self.dtype)
+        u_vertices = torch.tensor([[1, 2, 3], [-1, 3, 2]], dtype=self.dtype)
+        x_lo = torch.tensor([-2, -3], dtype=self.dtype)
+        x_up = torch.tensor([3, 4], dtype=self.dtype)
         (c1, c2, Ain1, Ain2, Ain3, Ain4, Ain5, rhs) = \
             self.dut.GenerateProgramVerifyContinuousAffineSystem(
             A_dyn, B_dyn, d_dyn, u_vertices, x_lo, x_up)
@@ -73,7 +73,7 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
             assert(torch.all(x.squeeze() >= x_lo))
 
             # First compute alpha
-            alpha = torch.zeros((12, 1))
+            alpha = torch.zeros((12, 1), dtype=self.dtype)
             assert(len(beta) == 2)
             for i0 in range(3):
                 for i1 in range(4):
@@ -83,7 +83,8 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
                     alpha[alpha_index][0] = 1 if beta[0][i0] == 1 and \
                         beta[1][i1] == 1 else 0
             # Now compute s, s(i, j) = alpha(i) * x(j)
-            s = torch.empty((alpha.shape[0] * x.shape[0], 1))
+            s = torch.empty(
+                (alpha.shape[0] * x.shape[0], 1), dtype=self.dtype)
             for i in range(alpha.shape[0]):
                 for j in range(x.shape[0]):
                     s[i * x.shape[0] + j][0] = alpha[i][0] * x[j][0]
@@ -91,35 +92,38 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
             (M, _, _, _) = self.dut.relu_free_pattern.output_gradient(
                 self.model)
             t = torch.tensor(
-                [[torch.min(alpha.T @ M @ B_dyn @ u_vertices).item()]])
+                [[torch.min(alpha.T @ M @ B_dyn @ u_vertices).item()]]
+            ).to(dtype=self.dtype)
             beta_vec = torch.tensor(
                 [beta_val for beta_layer in beta for beta_val in beta_layer]
-                ).reshape((-1, 1))
+            ).reshape((-1, 1)).to(dtype=self.dtype)
 
             def compute_lhs(s_val, t_val, alpha_val):
                 return Ain1.to_dense() @ x \
                     + Ain2.to_dense() @ s_val \
                     + Ain3.to_dense() @ t_val \
                     + Ain4.to_dense() @ alpha_val \
-                    + Ain5.to_dense() @ beta_vec.to(dtype=self.datatype)
+                    + Ain5.to_dense() @ beta_vec.to(dtype=self.dtype)
 
+            precision = 1E-10
             lhs = compute_lhs(s, t, alpha)
-            self.assertTrue(torch.all(lhs < rhs + 1E-4))
+            self.assertTrue(torch.all(lhs < rhs + precision))
 
             # Perturb s a bit, the constraint shouldn't be satisfied
             lhs = compute_lhs(
-                s + torch.empty(s.shape[0], 1).uniform_(-0.1, 0.1), t, alpha)
-            self.assertFalse(torch.all(lhs < rhs + 1E-4))
+                s + torch.empty(s.shape[0], 1, dtype=self.dtype).
+                uniform_(-0.1, 0.1), t, alpha)
+            self.assertFalse(torch.all(lhs < rhs + precision))
             # Now increase t a bit, the constraint shouldn't be satisfied.
             lhs = compute_lhs(s, t + 0.1, alpha)
-            self.assertFalse(torch.all(lhs < rhs + 1E-4))
+            self.assertFalse(torch.all(lhs < rhs + precision))
             # Perturb alpha a bit, the constraint shouldn't be satisfied.
             alpha_perturbed = alpha.clone()
             alpha_perturbed_index = np.random.randint(0, alpha.numel())
             alpha_perturbed[alpha_perturbed_index] = 1. - \
                 alpha_perturbed[alpha_perturbed_index]
             lhs = compute_lhs(s, t, alpha_perturbed)
-            self.assertFalse(torch.all(lhs < rhs + 1E-4))
+            self.assertFalse(torch.all(lhs < rhs + precision))
 
             # Now compute the expected cost
             cost_expected = alpha.T @ M @ A_dyn @ x + \
@@ -128,12 +132,14 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
             cost = c1.T @ s + t + c2.T @ alpha
             self.assertAlmostEqual(cost.item(), cost_expected.item(), 4)
 
-        test_generate_program_util(torch.tensor([[0.], [0.]]), [
+        test_generate_program_util(torch.tensor([[0.], [0.]],
+                                                dtype=self.dtype), [
                                    [1, 1, 0], [0, 0, 1, 1]])
-        test_generate_program_util(torch.tensor([[1.], [2.]]), [
+        test_generate_program_util(torch.tensor([[1.], [2.]],
+                                                dtype=self.dtype), [
                                    [1, 1, 0], [0, 0, 1, 1]])
         test_generate_program_util(torch.tensor(
-            [[-1.2], [-0.9]]), [[1, 0, 1], [0, 1, 0, 0]])
+            [[-1.2], [-0.9]], dtype=self.dtype), [[1, 0, 1], [0, 1, 0, 0]])
 
 
 if __name__ == '__main__':

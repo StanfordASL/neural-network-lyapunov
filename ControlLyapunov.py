@@ -36,6 +36,13 @@ class ControlLyapunovFixedActivationPattern:
         """
         xdim = g.size
         self.x = cp.Variable((xdim, 1))
+        self.dtype = g.dtype
+        assert(P.dtype == self.dtype)
+        assert(q.dtype == self.dtype)
+        assert(A.dtype == self.dtype)
+        assert(B.dtype == self.dtype)
+        assert(d.dtype == self.dtype)
+        assert(u_vertices.dtype == self.dtype)
         assert(g.shape[0] == xdim)
         assert(g.shape[1] == 1)
         assert(P.shape[1] == xdim)
@@ -67,9 +74,16 @@ class ControlLyapunovFreeActivationPattern:
     where f(x, u) is the state dynamics.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, dtype):
+        """
+        @param model A ReLU network.
+        @param dtype The data type for the pytorch tensor. Please use the same
+        datatype as the tensors in @p model.
+        """
         self.model = model
-        self.relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model)
+        self.dtype = dtype
+        self.relu_free_pattern = ReLUToOptimization.\
+            ReLUFreePattern(self.model, self.dtype)
 
     def GenerateProgramVerifyContinuousAffineSystem(self, A_dyn, B_dyn, d_dyn,
                                                     u_vertices, x_lo, x_up):
@@ -123,6 +137,12 @@ class ControlLyapunovFreeActivationPattern:
         column vectors. Ain1, Ain2, Ain3, Ain4, Ain5 are matrices.
         """
         x_size = self.relu_free_pattern.x_size
+        assert(A_dyn.dtype == self.dtype)
+        assert(B_dyn.dtype == self.dtype)
+        assert(d_dyn.dtype == self.dtype)
+        assert(u_vertices.dtype == self.dtype)
+        assert(x_lo.dtype == self.dtype)
+        assert(x_up.dtype == self.dtype)
         assert(A_dyn.shape[0] == x_size)
         assert(A_dyn.shape[1] == x_size)
         num_u = B_dyn.shape[1]
@@ -143,17 +163,17 @@ class ControlLyapunovFreeActivationPattern:
         # We will store Ain1, Ain2, Ain3, Ain4, Ain5 in sparse format, with
         # row/column indices and nonzero values.
         Ain1_indices = torch.empty((2, 2 * num_s), dtype=torch.int64)
-        Ain1_val = torch.empty(Ain1_indices.shape[1])
+        Ain1_val = torch.empty(Ain1_indices.shape[1], dtype=self.dtype)
         Ain2_indices = torch.empty((2, 4 * num_s), dtype=torch.int64)
-        Ain2_val = torch.empty(Ain2_indices.shape[1])
+        Ain2_val = torch.empty(Ain2_indices.shape[1], dtype=self.dtype)
         Ain3_indices = torch.empty((2, num_u_vertices), dtype=torch.int64)
-        Ain3_val = torch.empty(Ain3_indices.shape[1])
+        Ain3_val = torch.empty(Ain3_indices.shape[1], dtype=self.dtype)
         Ain4_indices = torch.empty((2, 4 * num_s + num_alpha * num_u_vertices
                                     + B1.numel()), dtype=torch.int64)
-        Ain4_val = torch.empty(Ain4_indices.shape[1])
+        Ain4_val = torch.empty(Ain4_indices.shape[1], dtype=self.dtype)
         Ain5_indices = torch.empty((2, B2.numel()), dtype=torch.int64)
-        Ain5_val = torch.empty(Ain5_indices.shape[1])
-        rhs = torch.empty((num_ineq, 1))
+        Ain5_val = torch.empty(Ain5_indices.shape[1], dtype=self.dtype)
+        rhs = torch.empty((num_ineq, 1), dtype=self.dtype)
         # First enforce the constraint s(i, j) = α(i)x(j). We impose
         # the following constraint
         # xₗₒ(j)α(i) - s(i, j) ≤ 0
@@ -268,7 +288,7 @@ class ControlLyapunovFreeActivationPattern:
                                          torch.Size((ineq_count, B2.shape[1])))
 
         # Now compute c1 and c2.
-        c1 = torch.empty((num_s, 1))
+        c1 = torch.empty((num_s, 1), dtype=self.dtype)
         for i in range(num_alpha):
             for j in range(x_size):
                 c1[compute_s_index(i, j)][0] = MA[i][j]
