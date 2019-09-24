@@ -15,7 +15,7 @@ class ValueFunction():
         min ∑(.5 xᵀ[n] Q x[n] + .5 uᵀ[n] R u[n] + .5 αᵀ[n] Z α[n] + qᵀx[n] + rᵀu[n] + zᵀα[n])
                 + .5 xᵀ[N] Qt x[N] + .5 uᵀ[N] Rt u[N] + .5 αᵀ[N] Zt α[N] + qtᵀx[N] + rtᵀu[N] + ztᵀα[N]
         Ain1 x[n] + Ain2 u[n] + Ain3 x[n+1] + Ain4 u[n+1] + Ain5 α[n] ≤ rhs_in_dyn
-        Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] ≤ rhs_eq_dyn
+        Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] = rhs_eq_dyn
         x_lo ≤ x[n] ≤ x_up
         u_lo ≤ u[n] ≤ u_up
         x[0] == x0
@@ -28,11 +28,11 @@ class ValueFunction():
         min .5 sᵀ Q2 s + .5 αᵀ Q3 α + q2ᵀ s + q3ᵀ α
         s.t. Ain1 x + Ain2 s + Ain3 α ≤ brhs_in
              Aeq1 x + Aeq2 s + Aeq3 α ≤ brhs_eq
-             α ∈ Z
+             α ∈ {0,1}
         """
 
-        Ain1_dyn, Ain2_dyn, Ain3_dyn, Ain4_dyn, rhs_in_dyn = sys.get_dyn_in()
-        Aeq1_dyn, Aeq2_dyn, Aeq3_dyn, Aeq4_dyn, rhs_eq_dyn = sys.get_dyn_eq()
+        Ain1_dyn, Ain2_dyn, Ain3_dyn, Ain4_dyn, Ain5_dyn, rhs_in_dyn = sys.get_dyn_in()
+        Aeq1_dyn, Aeq2_dyn, Aeq3_dyn, Aeq4_dyn, Aeq5_dyn, rhs_eq_dyn = sys.get_dyn_eq()
         
         xdim = Q.shape[0]
         udim = R.shape[0]
