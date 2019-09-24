@@ -1,295 +1,98 @@
 import torch
-import numpy as np
-import cvxpy as cp
-from ParametrizedQP import ParametrizedQP
 
-def bound_propagation(model, initial_bounds):
-    l, u = initial_bounds
-    bounds = []
-    
-    for layer in model:
-        if isinstance(layer, torch.nn.Linear):
-            l_ = (layer.weight.clamp(min=0) @ l.t() + layer.weight.clamp(max=0) @ u.t() 
-                  + layer.bias[:,None]).t()
-            u_ = (layer.weight.clamp(min=0) @ u.t() + layer.weight.clamp(max=0) @ l.t() 
-                  + layer.bias[:,None]).t()
-        elif isinstance(layer, torch.nn.ReLU):
-            l_ = l.clamp(min=0)
-            u_ = u.clamp(min=0)
-            
-        bounds.append((l_, u_))
-        l,u = l_, u_
-    return bounds
 
-class BallPaddleSystem():
-    g = -9.81
-    
-    def __init__(self,dt=.05,paddle_range=[0., 1.],u_max=5.,cr=.8,M=100.):
+class BallPaddleSystem:
+        
+    def __init__(self, dt=.01, cr=.8, M=100., dtype=torch.float64):
+        """        
+        Class to capture the dynamics of the ball paddle system in the form
+        Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] = rhs_eq_dyn
+        Ain1 x[n] + Ain2 u[n] + Ain3 x[n+1] + Ain4 u[n+1] + Ain5 α[n] ≤ rhs_in_dyn
+        where 
+        x[n] = [zp[n], zb[n], zbdot[n]]
+        u[n] = zpdot[n]
+        and α is a binary variable
+        
+        @param dt The time step size
+        @param cr The coefficient of restitution for contact between the ball and paddle
+        @param M the value used the "big-M" formulation of the piecewiser affine dynamics
+        @param dtype The datatype used to store the coefficients
+        """
         self.dt = dt
-        self.paddle_range = paddle_range
-        self.u_max = u_max
         self.cr = cr
-        self.M = M
+        self.M = M        
+        self.dtype = dtype
         
-    def add_dynamics_constraints(self,constraints,N,zb,zp,bi,
-                                 dt=None,paddle_range=None,u_max=None,cr=None,M=None):
-        if dt == None:
-            dt = self.dt
-        if paddle_range == None:
-            paddle_range = self.paddle_range
-        if u_max == None:
-            u_max = self.u_max
-        if cr == None:
-            cr = self.cr
-        if M == None:
-            M = self.M
+        self.g = -9.81
         
-        for n in range(N-1):
-            constraints += [
-                zp[0,n+1] == zp[0,n] + zp[1,n+1]*dt*.5 + zp[1,n]*dt*.5,
-                zb[0,n+1] == zb[0,n] + zb[1,n+1]*dt*.5 + zb[1,n]*dt*.5,
-
-                zb[1,n+1] - zb[1,n] - self.g*dt >= -M*bi[n],
-                zb[1,n+1] - zb[1,n] - self.g*dt <= M*bi[n], 
-                (zb[1,n+1] - zp[1,n]) + cr*(zb[1,n] - zp[1,n]) >= -M*(1-bi[n]),
-                (zb[1,n+1] - zp[1,n]) + cr*(zb[1,n] - zp[1,n]) <= M*(1-bi[n]),
-            
-                (zb[0,n] + (zb[1,n] + .5*self.g*dt)*dt) - (zp[0,n] + zp[1,n]*dt*.5 + zp[1,n+1]*dt*.5) <= M*(1-bi[n]),
-            ]
-        for n in range(N):
-            constraints += [
-                zp[0,n] <= paddle_range[1],
-                zp[0,n] >= paddle_range[0],
-                zp[1,n] <= u_max,
-                zp[1,n] >= -u_max,
-                zb[0,n] - zp[0,n] >= 0,
-            ]
-        
-        if isinstance(bi,cp.Variable):
-            constraints.append(cp.sum(bi) >= 2)
-        
-    def get_trajectory_miqp(self,paddle_x0,ball_x0,ball_xg,N):
-        constraints = []
-
-        zp = cp.Variable([2,N])
-        zb = cp.Variable([2,N])
-        bi = cp.Variable(N-1, boolean=True)
-
-        self.add_dynamics_constraints(constraints,N,zb,zp,bi)
-        constraints += [
-            zp[:,0] == paddle_x0,
-            zb[:,0] == ball_x0,
-            zb[:,N-1] == ball_xg,
-        ]
-           
-        objective = cp.Minimize(cp.sum_squares(zp[1,:]))
-
-        prob = cp.Problem(objective, constraints)
-
-        return (prob,objective,constraints,{"zp": zp, "zb": zb, "bi": bi})
-
-    def get_adversarial_miqp(self,model,paddle_x0,ball_x0_min,ball_x0_max,ball_xg,N):
-        device = next(model.parameters()).device
-
-        initial_bounds = (torch.tensor([ball_x0_min]).to(device), torch.tensor([ball_x0_max]).to(device))
-        bounds = bound_propagation(model, initial_bounds)
-
-        constraints = []
-        
-        zp = cp.Variable([2,N])
-        zb = cp.Variable([2,N])
-        bi = cp.Variable(N-1, boolean=True)
-
-        self.add_dynamics_constraints(constraints,N,zb,zp,bi)
-        constraints += [
-            zp[:,0] == paddle_x0,
-            zb[:,0] >= ball_x0_min,
-            zb[:,0] <= ball_x0_max,
-            zb[:,N-1] == ball_xg,
-        ]
-
-        linear_layers = [(layer, bound) for layer, bound in zip(model,bounds) if isinstance(layer, torch.nn.Linear)]
-        d = len(linear_layers)-1
-
-        z = ([cp.Variable(layer.in_features) for layer, _ in linear_layers] + 
-             [cp.Variable(linear_layers[-1][0].out_features)])
-        v = [cp.Variable(layer.out_features, boolean=True) for layer, _ in linear_layers[:-1]]
-
-        W = [layer.weight.detach().cpu().numpy() for layer,_ in linear_layers]
-        b = [layer.bias.detach().cpu().numpy() for layer,_ in linear_layers]
-        l = [l[0].detach().cpu().numpy() for _, (l,_) in linear_layers]
-        u = [u[0].detach().cpu().numpy() for _, (_,u) in linear_layers]
-        l0 = initial_bounds[0][0].view(-1).detach().cpu().numpy()
-        u0 = initial_bounds[1][0].view(-1).detach().cpu().numpy()
-
-        for i in range(len(linear_layers)-1):
-            constraints += [z[i+1] >= W[i] @ z[i] + b[i], 
-                            z[i+1] >= 0,
-                            cp.multiply(v[i], u[i]) >= z[i+1],
-                            W[i] @ z[i] + b[i] >= z[i+1] + cp.multiply((1-v[i]), l[i])]
-
-        constraints += [z[d+1] == W[d] @ z[d] + b[d]]
-        constraints += [z[0] >= l0, z[0] <= u0]
-        constraints += [z[0] == zb[:,0]]
-
-        objective = cp.Minimize(cp.sum_squares(zp[1,:]) - z[d+1])
-        
-        prob = cp.Problem(objective, constraints)
-        
-        return (prob,objective,constraints,{"zp": zp, "zb": zb, "bi": bi, "z": z, "v": v})
+        self._init_eq()
+        self._init_in()
     
-    def get_adversarial_qp(self,model,paddle_x0,ball_x0_min,ball_x0_max,ball_xg,N,bi=None,v=None):
-        device = next(model.parameters()).device
+        g = self.g
+        M = self.M
+        # 0 == zp[n] + u[n]*dt*.5 - zp[n+1] + u[n+1]*dt*.5
+        self._add_eq([1.,0.,0.],[.5*dt],[-1.,0.,0.],[.5*dt],[0.],[0.])
+        # 0 == zb[n] + zbdot[n]*dt*.5 - zb[n+1] + zbdot[n+1]*dt*.5
+        self._add_eq([0.,1.,.5*dt],[0.],[0.,-1.,.5*dt],[0.],[0.],[0.])
+        # zbdot[n] - zbdot[n+1] - M*a[n] <= -self.g*dt
+        self._add_in([0.,0.,1.],[0.],[0.,0.,-1.],[0.],[-M],[-g*dt])
+        # - zbdot[n] + zbdot[n+1] - M*a[n] <= self.g*dt
+        self._add_in([0.,0.,-1.],[0.],[0.,0.,1.],[0.],[-M],[g*dt])
+        # -cr*zbdot[n] + (cr+1)*u[n] - zbdot[n+1] + M*a[n] <= M
+        self._add_in([0.,0.,-cr],[1.+cr],[0.,0.,-1.],[0.],[M],[M])
+        # cr*zbdot[n] -(1+cr)*u[n] + zbdot[n+1] + M*a[n] <= M
+        self._add_in([0.,0.,cr],[-1.-cr],[0.,0.,1.],[0.],[M],[M])
+        # - zp[n] + zb[n] + dt*zbdot[n] - u[n]*dt*.5 - u[n+1]*dt*.5 + M*a[n] <= M - .5*g*dt*dt
+        self._add_in([-1.,1.,dt],[-.5*dt],[0.,0.,0.],[-.5*dt],[M],[M-.5*g*dt*dt])
+        # zp[n] - zb[n] <= 0
+        self._add_in([1.,-1.,0.],[0.],[0.,0.,0.],[0.],[0.],[0.])
+        
+    def _init_eq(self):
+        self.Aeq1 = torch.empty((0,3), dtype=self.dtype)
+        self.Aeq2 = torch.empty((0,1), dtype=self.dtype)
+        self.Aeq3 = torch.empty((0,3), dtype=self.dtype)
+        self.Aeq4 = torch.empty((0,1), dtype=self.dtype)
+        self.Aeq5 = torch.empty((0,1), dtype=self.dtype)
+        self.rhs_eq = torch.empty((0,1), dtype=self.dtype)
+        
+    def _init_in(self):
+        self.Ain1 = torch.empty((0,3), dtype=self.dtype)
+        self.Ain2 = torch.empty((0,1), dtype=self.dtype)
+        self.Ain3 = torch.empty((0,3), dtype=self.dtype)
+        self.Ain4 = torch.empty((0,1), dtype=self.dtype)
+        self.Ain5 = torch.empty((0,1), dtype=self.dtype)
+        self.rhs_in = torch.empty((0,1), dtype=self.dtype)
 
-        initial_bounds = (torch.tensor([ball_x0_min]).to(device), torch.tensor([ball_x0_max]).to(device))
-        bounds = bound_propagation(model, initial_bounds)
-
-        constraints = []
-
-        zp = cp.Variable([2,N])
-        zb = cp.Variable([2,N])
-        if isinstance(bi,type(None)):
-            bi = cp.Variable(N-1)
-            constraints += [bi >= 0.,
-                            bi <= 1.]
-            
-        self.add_dynamics_constraints(constraints,N,zb,zp,bi)
-        constraints += [
-            zp[:,0] == paddle_x0,
-            zb[:,0] >= ball_x0_min,
-            zb[:,0] <= ball_x0_max,
-            zb[:,N-1] == ball_xg,
-        ]
-
-        linear_layers = [(layer, bound) for layer, bound in zip(model,bounds) if isinstance(layer, torch.nn.Linear)]
-        d = len(linear_layers)-1
-
-        z = ([cp.Variable(layer.in_features) for layer, _ in linear_layers] + 
-             [cp.Variable(linear_layers[-1][0].out_features)])
+    def _add_eq(self, a1, a2, a3, a4, a5, rhsi):
+        self.Aeq1 = torch.cat((self.Aeq1, torch.Tensor(a1).type(self.dtype).unsqueeze(0)), 0)
+        self.Aeq2 = torch.cat((self.Aeq2, torch.Tensor(a2).type(self.dtype).unsqueeze(0)), 0)
+        self.Aeq3 = torch.cat((self.Aeq3, torch.Tensor(a3).type(self.dtype).unsqueeze(0)), 0)
+        self.Aeq4 = torch.cat((self.Aeq4, torch.Tensor(a4).type(self.dtype).unsqueeze(0)), 0)
+        self.Aeq5 = torch.cat((self.Aeq5, torch.Tensor(a5).type(self.dtype).unsqueeze(0)), 0)
+        self.rhs_eq = torch.cat((self.rhs_eq, torch.Tensor(rhsi).type(self.dtype).unsqueeze(0)), 0)
         
-        if isinstance(v,type(None)):
-            v = [cp.Variable(layer.out_features) for layer, _ in linear_layers[:-1]]
-            constraints += [vi >= 0. for vi in v]
-            constraints += [vi <= 1. for vi in v]
+    def _add_in(self, a1, a2, a3, a4, a5, rhsi):
+        self.Ain1 = torch.cat((self.Ain1, torch.Tensor(a1).type(self.dtype).unsqueeze(0)), 0)
+        self.Ain2 = torch.cat((self.Ain2, torch.Tensor(a2).type(self.dtype).unsqueeze(0)), 0)
+        self.Ain3 = torch.cat((self.Ain3, torch.Tensor(a3).type(self.dtype).unsqueeze(0)), 0)
+        self.Ain4 = torch.cat((self.Ain4, torch.Tensor(a4).type(self.dtype).unsqueeze(0)), 0)
+        self.Ain5 = torch.cat((self.Ain5, torch.Tensor(a5).type(self.dtype).unsqueeze(0)), 0)
+        self.rhs_in = torch.cat((self.rhs_in, torch.Tensor(rhsi).type(self.dtype).unsqueeze(0)), 0)
         
-        W = [layer.weight.detach().cpu().numpy() for layer,_ in linear_layers]
-                
-        b = [layer.bias.detach().cpu().numpy() for layer,_ in linear_layers]
-        l = [l[0].detach().cpu().numpy() for _, (l,_) in linear_layers]
-        u = [u[0].detach().cpu().numpy() for _, (_,u) in linear_layers]
-        l0 = initial_bounds[0][0].view(-1).detach().cpu().numpy()
-        u0 = initial_bounds[1][0].view(-1).detach().cpu().numpy()
-
-        for i in range(len(linear_layers)-1):
-            constraints += [z[i+1] >= W[i] @ z[i] + b[i], 
-                            z[i+1] >= 0,
-                            cp.multiply(v[i], u[i]) >= z[i+1],
-                            W[i] @ z[i] + b[i] >= z[i+1] + cp.multiply((1-v[i]), l[i])]
-
-        constraints += [z[d+1] == W[d] @ z[d] + b[d]]
-        constraints += [z[0] >= l0, z[0] <= u0]
+    def get_dyn_eq(self):
+        """
+        The equality part of the piecewise linear dynamics in the form
+        Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] = rhs_eq_dyn
         
-        constraints += [z[0] == zb[:,0]]
+        @return Aeq1, Aeq2, Aeq3, Aeq4, Aeq5, rhs_eq_dyn The coefficients as torch Tensor of self.dtype
+        """
+        return(self.Aeq1, self.Aeq2, self.Aeq3, self.Aeq4, self.Aeq5, self.rhs_eq)
         
-        objective = cp.Minimize(cp.sum_squares(zp[1,:]) - z[d+1])
-
-        prob = cp.Problem(objective, constraints)
+    def get_dyn_in(self):
+        """
+        The inequality part of the piecewise linear dynamics in the form
+        Ain1 x[n] + Ain2 u[n] + Ain3 x[n+1] + Ain4 u[n+1] + Ain5 α[n] <= rhs_in_dyn
         
-        return (prob,objective,constraints,{"zp": zp, "zb": zb, "bi": bi, "z": z, "v": v})
-    
-    def get_adversarial_qp_standard(self,model,paddle_x0,ball_x0_min,ball_x0_max,ball_xg,N,bi=None,v=None):
-        device = next(model.parameters()).device       
-        dtype = eval(next(model.parameters()).type())
-                    
-        prob = ParametrizedQP(device, dtype=dtype)
-        
-        for n in range(N):
-            prob.add_var("zp" + str(n), 2)
-            prob.add_var("zb" + str(n), 2)
-           
-        if isinstance(bi,type(None)):
-            for n in range(N-1):
-                prob.add_var("bi" + str(n), 1)
-            
-        for n in range(N-1):
-            prob.add_eq(["zp"+str(n),"zp"+str(n+1)],[[1.,.5*self.dt],[-1.,.5*self.dt]],[0.])
-            prob.add_eq(["zb"+str(n),"zb"+str(n+1)],[[1.,.5*self.dt],[-1.,.5*self.dt]],[0.])
-            
-            if isinstance(bi,type(None)):
-                prob.add_ineq(["zb"+str(n),"bi"+str(n),"zb"+str(n+1)],[[0.,1.],[-self.M],[0.,-1.]],[-self.g*self.dt])
-                prob.add_ineq(["zb"+str(n),"bi"+str(n),"zb"+str(n+1)],[[0.,-1.],[-self.M],[0.,1.]],[self.g*self.dt])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"bi"+str(n),"zb"+str(n+1)],[[0.,-self.cr],[0.,1.+self.cr],[self.M],[0.,-1.]],[self.M])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"bi"+str(n),"zb"+str(n+1)],[[0.,self.cr],[0.,-1.-self.cr],[self.M],[0.,1.]],[self.M])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"bi"+str(n),"zp"+str(n+1)],
-                              [[1.,self.dt],[-1.,-.5*self.dt],[self.M],[0.,-.5*self.dt]],[self.M-.5*self.g*self.dt**2])
-                prob.add_ineq(["bi"+str(n)],[[-1.]],[0.])
-                prob.add_ineq(["bi"+str(n)],[[1.]],[1.])
-            else:
-                prob.add_ineq(["zb"+str(n),"zb"+str(n+1)],[[0.,1.],[0.,-1.]],[-self.g*self.dt+self.M*bi[n]])
-                prob.add_ineq(["zb"+str(n),"zb"+str(n+1)],[[0.,-1.],[0.,1.]],[self.g*self.dt+self.M*bi[n]])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"zb"+str(n+1)],[[0.,-self.cr],[0.,1.+self.cr],[0.,-1.]],[self.M-self.M*bi[n]])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"zb"+str(n+1)],[[0.,self.cr],[0.,-1.-self.cr],[0.,1.]],[self.M-self.M*bi[n]])
-                prob.add_ineq(["zb"+str(n),"zp"+str(n),"zp"+str(n+1)],
-                              [[1.,self.dt],[-1.,-.5*self.dt],[0.,-.5*self.dt]],[self.M-.5*self.g*self.dt**2-self.M*bi[n]])
-            
-        for n in range(N):
-            prob.add_ineq(["zp"+str(n)],[[1.,0.]],[self.paddle_range[1]])
-            prob.add_ineq(["zp"+str(n)],[[0.,1.]],[self.u_max])
-            prob.add_ineq(["zp"+str(n)],[[-1.,0.]],[-self.paddle_range[0]])
-            prob.add_ineq(["zp"+str(n)],[[0.,-1.]],[self.u_max])
-            prob.add_ineq(["zb"+str(n),"zp"+str(n)],[[-1.,0.],[1.,0.]],[0.])
-
-        if isinstance(bi,type(None)):
-            prob.add_ineq(["bi"+str(n) for n in range(N-1)],[[-1.] for n in range(N-1)],[-2.])
-            
-        prob.add_eq(["zp0"],[np.eye(2)],paddle_x0)
-        prob.add_ineq(["zb0"],[-np.eye(2)],-ball_x0_min)
-        prob.add_ineq(["zb0"],[np.eye(2)],ball_x0_max)
-        prob.add_eq(["zb"+str(N-1)],[np.eye(2)],ball_xg)
-
-        initial_bounds = (torch.tensor([ball_x0_min]).to(device), torch.tensor([ball_x0_max]).to(device))
-        bounds = bound_propagation(model, initial_bounds)
-        linear_layers = [(layer, bound) for layer, bound in zip(model,bounds) if isinstance(layer, torch.nn.Linear)]
-        d = len(linear_layers)-1
-        
-        for i in range(len(linear_layers)):
-            prob.add_var("z"+str(i), linear_layers[i][0].in_features)
-        prob.add_var("z"+str(len(linear_layers)), linear_layers[-1][0].out_features)
-        if isinstance(v,type(None)):
-            for i in range(len(linear_layers)-1):
-                prob.add_var("v"+str(i), linear_layers[i][0].out_features)
-        
-        W = [layer.weight for layer,_ in linear_layers]
-        b = [layer.bias for layer,_ in linear_layers]
-        l = [l[0] for _, (l,_) in linear_layers]
-        u = [u[0] for _, (_,u) in linear_layers]
-        l0 = initial_bounds[0][0].view(-1)
-        u0 = initial_bounds[1][0].view(-1)
-        
-        for i in range(len(linear_layers)-1):
-            prob.add_ineq(["z"+str(i),"z"+str(i+1)],[W[i],-np.eye(W[i].shape[0])],-b[i])
-            prob.add_ineq(["z"+str(i+1)],[-np.eye(W[i+1].shape[1])],np.zeros(W[i+1].shape[1]))
-            if isinstance(v,type(None)):
-                prob.add_ineq(["z"+str(i+1),"v"+str(i)],[np.eye(W[i+1].shape[1]),-torch.diag(u[i])],np.zeros(W[i+1].shape[1]))
-                prob.add_ineq(["z"+str(i+1),"z"+str(i),"v"+str(i)],[np.eye(W[i+1].shape[1]),-W[i],-torch.diag(l[i])],b[i]-l[i])
-                prob.add_ineq(["v"+str(i)],[-np.eye(linear_layers[i][0].out_features)],np.zeros(linear_layers[i][0].out_features))
-                prob.add_ineq(["v"+str(i)],[np.eye(linear_layers[i][0].out_features)],np.ones(linear_layers[i][0].out_features))
-            else:
-                prob.add_ineq(["z"+str(i+1)],
-                              [np.eye(W[i+1].shape[1])],torch.diag(u[i])@torch.tensor(v[i]))
-                prob.add_ineq(["z"+str(i+1),"z"+str(i)],
-                              [np.eye(W[i+1].shape[1]),-W[i]],b[i]-l[i]+torch.diag(l[i])@torch.tensor(v[i]))
-        
-        prob.add_eq(["z"+str(d+1),"z"+str(d)],[np.eye(1),-W[d]],b[d])
-        prob.add_ineq(["z0"],[-np.eye(W[0].shape[1])],-l0)
-        prob.add_ineq(["z0"],[np.eye(W[0].shape[1])],u0)
-                
-        prob.add_eq(["z0","zb0"],[np.eye(W[0].shape[1]),-np.eye(2)],np.zeros(2))
-        
-        for n in range(N):
-            prob.set_obj("zp"+str(n),quadratic=[[0.,0.],[0.,2.]])
-        prob.set_obj("z"+str(d+1),linear=[-1.])
-        
-        # TODO return indeces for Ws and bs to update them directly
-        
-        return prob
+        @return Ain1, Ain2, Ain3, Ain4, Ain5, rhs_in_dyn The coefficients as torch Tensor of self.dtype
+        """
+        return(self.Ain1, self.Ain2, self.Ain3, self.Ain4, self.Ain5, self.rhs_in)
