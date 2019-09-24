@@ -29,7 +29,7 @@ def ComputeReLUActivationPattern(model_relu, x):
     return activation_pattern
 
 
-def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern):
+def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
     """
     Given a ReLU network, and a given activation pattern, the ReLU network can
     be represented as
@@ -44,12 +44,12 @@ def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern):
     @return (g, h, P, q)  g is a column vector, h is a scalar. P is a 2D
     matrix, and q is a column vector
     """
-    A_layer = torch.eye(x_size)
-    b_layer = torch.zeros((x_size, 1))
+    A_layer = torch.eye(x_size, dtype=dtype)
+    b_layer = torch.zeros((x_size, 1), dtype=dtype)
     relu_layer_count = 0
     num_linear_layer_output = None
-    P = torch.empty((0, x_size))
-    q = torch.empty((0, 1))
+    P = torch.empty((0, x_size), dtype=dtype)
+    q = torch.empty((0, 1), dtype=dtype)
     for layer in model_relu:
         if (isinstance(layer, nn.Linear)):
             A_layer = layer.weight.data @ A_layer
@@ -88,7 +88,7 @@ class ReLUFreePattern:
     We will formulate the ReLU network using mixed-integer linear constraint.
     """
 
-    def __init__(self, model):
+    def __init__(self, model, dtype):
         """
         @param model A ReLU network.
         """
@@ -97,6 +97,7 @@ class ReLUFreePattern:
         # the index of the j'th ReLU unit on the i'th layer.
         self.relu_unit_index = []
         self.num_relu_units = 0
+        self.dtype = dtype
         layer_count = 0
         for layer in model:
             if (isinstance(layer, nn.Linear)):
@@ -161,28 +162,36 @@ class ReLUFreePattern:
         Notice that z_lo[i] and z_up[i] are the bounds of z[i] BEFORE
         applying the ReLU activation function.
         """
+        assert(x_lo.dtype == self.dtype)
+        assert(x_up.dtype == self.dtype)
         assert(len(x_lo.shape) == 1)
         assert(len(x_up.shape) == 1)
         assert(torch.all(torch.le(x_lo, x_up)))
 
         # Each ReLU unit introduces at most 4 inequality constraints.
-        Ain1 = torch.zeros((4 * self.num_relu_units, self.x_size))
-        Ain2 = torch.zeros((4 * self.num_relu_units, self.num_relu_units))
-        Ain3 = torch.zeros((4 * self.num_relu_units, self.num_relu_units))
-        rhs_in = torch.empty((4 * self.num_relu_units, 1))
+        Ain1 = torch.zeros((4 * self.num_relu_units, self.x_size),
+                           dtype=self.dtype)
+        Ain2 = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
+                           dtype=self.dtype)
+        Ain3 = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
+                           dtype=self.dtype)
+        rhs_in = torch.empty((4 * self.num_relu_units, 1), dtype=self.dtype)
         # Each ReLU unit introduces at most 2 equality constraints.
-        Aeq1 = torch.zeros((2 * self.num_relu_units, self.x_size))
-        Aeq2 = torch.zeros((2 * self.num_relu_units, self.num_relu_units))
-        Aeq3 = torch.zeros((2 * self.num_relu_units, self.num_relu_units))
-        rhs_eq = torch.empty((2 * self.num_relu_units, 1))
+        Aeq1 = torch.zeros((2 * self.num_relu_units, self.x_size),
+                           dtype=self.dtype)
+        Aeq2 = torch.zeros((2 * self.num_relu_units, self.num_relu_units),
+                           dtype=self.dtype)
+        Aeq3 = torch.zeros((2 * self.num_relu_units, self.num_relu_units),
+                           dtype=self.dtype)
+        rhs_eq = torch.empty((2 * self.num_relu_units, 1), dtype=self.dtype)
 
         eq_constraint_count = 0
         ineq_constraint_count = 0
         layer_count = 0
-        z_lo = torch.empty(self.num_relu_units)
-        z_up = torch.empty(self.num_relu_units)
-        z_lo_after = torch.empty(self.num_relu_units)
-        z_up_after = torch.empty(self.num_relu_units)
+        z_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
+        z_up = torch.empty(self.num_relu_units, dtype=self.dtype)
+        z_lo_after = torch.empty(self.num_relu_units, dtype=self.dtype)
+        z_up_after = torch.empty(self.num_relu_units, dtype=self.dtype)
         for layer in model:
             if (isinstance(layer, nn.Linear)):
                 if (layer_count < len(self.relu_unit_index)):
@@ -208,100 +217,112 @@ class ReLUFreePattern:
                                      self.relu_unit_index[layer_count - 1]]
                         for k in range(zi_size):
                             if (layer.weight.data[j][k] > 0):
-                                z_lo[z_bound_index] += layer.weight.data[j][k] * zi_lo[k]
-                                z_up[z_bound_index] += layer.weight.data[j][k] * zi_up[k]
+                                z_lo[z_bound_index] += \
+                                    layer.weight.data[j][k] * zi_lo[k]
+                                z_up[z_bound_index] +=\
+                                    layer.weight.data[j][k] * zi_up[k]
                             else:
-                                z_lo[z_bound_index] += layer.weight.data[j][k] * zi_up[k]
-                                z_up[z_bound_index] += layer.weight.data[j][k] * zi_lo[k]
+                                z_lo[z_bound_index] +=\
+                                    layer.weight.data[j][k] * zi_up[k]
+                                z_up[z_bound_index] +=\
+                                    layer.weight.data[j][k] * zi_lo[k]
                         assert(z_lo[z_bound_index] <= z_up[z_bound_index])
                         if z_lo[z_bound_index] < 0 and z_up[z_bound_index] > 0:
                             # Case 1, introduce 4 inequality constraint.
                             # zᵢ₊₁(j) ≥ 0
                             Ain2[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = -1.
+                                self.relu_unit_index[layer_count][j]] = -1.
                             rhs_in[ineq_constraint_count] = 0
                             ineq_constraint_count += 1
                             # zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
                             Ain2[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = -1.
+                                self.relu_unit_index[layer_count][j]] = -1.
                             if layer_count == 0:
-                                Ain1[ineq_constraint_count] = layer.weight.data[j].clone()
+                                Ain1[ineq_constraint_count] = \
+                                    layer.weight.data[j].clone()
                             else:
                                 for k in range(zi_size):
-                                    Ain2[ineq_constraint_count][self.relu_unit_index[layer_count-1]
-                                                                [k]] = layer.weight.data[j][k]
+                                    Ain2[ineq_constraint_count
+                                         ][self.relu_unit_index[
+                                             layer_count-1][k]] = \
+                                        layer.weight.data[j][k]
                             rhs_in[ineq_constraint_count] = -layer.bias.data[j]
                             ineq_constraint_count += 1
-                            # (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) + (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
+                            # (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) +
+                            # (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
                             Ain2[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count]
-                                                        [j]] = -z_lo[z_bound_index]
+                                self.relu_unit_index[layer_count][j]] =\
+                                -z_lo[z_bound_index]
                             if layer_count == 0:
-                                Ain1[ineq_constraint_count] = layer.weight.data[j].clone()
+                                Ain1[ineq_constraint_count] =\
+                                    layer.weight.data[j].clone()
                             else:
                                 for k in range(zi_size):
                                     Ain2[ineq_constraint_count][
-                                            self.relu_unit_index[layer_count-1]
-                                                                [k]] = layer.weight.data[j][k]
+                                        self.relu_unit_index[layer_count-1]
+                                        [k]] =\
+                                        layer.weight.data[j][k]
                             Ain3[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]]\
-                                    = z_up[z_bound_index] * z_lo[z_bound_index]\
-                                      - z_up[z_bound_index]
+                                self.relu_unit_index[layer_count][j]]\
+                                = z_up[z_bound_index] * z_lo[z_bound_index]\
+                                - z_up[z_bound_index]
                             rhs_in[ineq_constraint_count] = -layer.bias.data[j]
                             ineq_constraint_count += 1
                             # (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
                             Ain2[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = 1.
+                                self.relu_unit_index[layer_count][j]] = 1.
                             if layer_count == 0:
                                 Ain1[ineq_constraint_count] = \
-                                        -layer.weight.data[j]
+                                    -layer.weight.data[j]
                             else:
                                 for k in range(zi_size):
                                     Ain2[ineq_constraint_count][
-                                            self.relu_unit_index[layer_count-1]
-                                            [k]] = -layer.weight.data[j][k]
+                                        self.relu_unit_index[layer_count-1]
+                                        [k]] = -layer.weight.data[j][k]
                             Ain3[ineq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] \
-                                            = -z_lo[z_bound_index]
-                            rhs_in[ineq_constraint_count] = layer.bias.data[j] - \
-                                z_lo[z_bound_index]
+                                self.relu_unit_index[layer_count][j]] \
+                                = -z_lo[z_bound_index]
+                            rhs_in[ineq_constraint_count] =\
+                                layer.bias.data[j] - z_lo[z_bound_index]
                             ineq_constraint_count += 1
                         elif z_lo[z_bound_index] >= 0:
                             # Case 2, introduce 2 equality constraints
                             # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
                             Aeq2[eq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = 1.
+                                self.relu_unit_index[layer_count][j]] = 1.
                             if layer_count == 0:
                                 Aeq1[eq_constraint_count] = - \
                                     layer.weight.data[j]
                             else:
                                 for k in range(zi_size):
                                     Aeq2[eq_constraint_count][
-                                            self.relu_unit_index[layer_count-1]
-                                            [k]] = -layer.weight.data[j][k]
-                            rhs_eq[eq_constraint_count] = layer.bias.data[j].clone()
+                                        self.relu_unit_index[layer_count-1]
+                                        [k]] = -layer.weight.data[j][k]
+                            rhs_eq[eq_constraint_count] =\
+                                layer.bias.data[j].clone()
                             eq_constraint_count += 1
                             # βᵢ(j) = 1
                             Aeq3[eq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = 1.
+                                self.relu_unit_index[layer_count][j]] = 1.
                             rhs_eq[eq_constraint_count] = 1.
                             eq_constraint_count += 1
                         else:
                             # Case 3, introduce 2 equality constraints
                             # zᵢ₊₁(j) = 0
                             Aeq2[eq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = 1.
+                                self.relu_unit_index[layer_count][j]] = 1.
                             rhs_eq[eq_constraint_count] = 0.
                             eq_constraint_count += 1
                             # βᵢ(j) = 0
                             Aeq3[eq_constraint_count][
-                                    self.relu_unit_index[layer_count][j]] = 1.
+                                self.relu_unit_index[layer_count][j]] = 1.
                             rhs_eq[eq_constraint_count] = 0.
                             eq_constraint_count += 1
 
                 else:
                     # output layer.
-                    a_out = torch.zeros((self.num_relu_units, 1))
+                    a_out = torch.zeros((self.num_relu_units, 1),
+                                        dtype=self.dtype)
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
                         a_out[self.relu_unit_index[layer_count - 1][k]
                               ][0] = layer.weight.data[0][k]
@@ -310,12 +331,14 @@ class ReLUFreePattern:
             elif (isinstance(layer, nn.ReLU)):
                 # The ReLU network can potentially change the bound on z.
                 for j in range(len(self.relu_unit_index[layer_count])):
-                    z_lo_after[self.relu_unit_index[layer_count][j]] = torch.max(
+                    z_lo_after[self.relu_unit_index[layer_count][j]] =\
+                        torch.max(
                         z_lo[self.relu_unit_index[layer_count][j]],
-                        torch.tensor(0.))
-                    z_up_after[self.relu_unit_index[layer_count][j]] = torch.max(
+                        torch.tensor(0., dtype=self.dtype))
+                    z_up_after[self.relu_unit_index[layer_count][j]] =\
+                        torch.max(
                         z_up[self.relu_unit_index[layer_count][j]],
-                        torch.tensor(0.))
+                        torch.tensor(0., dtype=self.dtype))
 
                 layer_count += 1
         Ain1 = Ain1[:ineq_constraint_count]
@@ -328,7 +351,7 @@ class ReLUFreePattern:
         rhs_eq = rhs_eq[:eq_constraint_count]
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
-                b_out, z_lo, z_up)
+               b_out, z_lo, z_up)
 
     def compute_relu_unit_outputs_and_activation(self, model, x):
         """
@@ -339,11 +362,12 @@ class ReLUFreePattern:
         as the network in the class constructor (but the weights can be
         different).
         @param x The input to the ReLU network. A 1-D tensor.
-        @return (z, β, output) z, β are column vectors. Refer to output_constraint()
+        @return (z, β, output) z, β are column vectors. Refer to
+        output_constraint()
         function for their definition.
         """
-        z = torch.empty((self.num_relu_units, 1))
-        beta = torch.empty((self.num_relu_units, 1))
+        z = torch.empty((self.num_relu_units, 1), dtype=self.dtype)
+        beta = torch.empty((self.num_relu_units, 1), dtype=self.dtype)
         relu_unit_count = 0
         z_layer = x
         for layer in model:
@@ -376,7 +400,8 @@ class ReLUFreePattern:
         index = 0
         for i in range(len(self.relu_unit_index)):
             # Go through each layer
-            assert (relu_unit_layer_indices[i] >= 0 and relu_unit_layer_indices[i] < len(
+            assert (relu_unit_layer_indices[i] >= 0 and
+                    relu_unit_layer_indices[i] < len(
                 self.relu_unit_index[i]))
             index = index * \
                 len(self.relu_unit_index[i]) + relu_unit_layer_indices[i]
@@ -395,7 +420,8 @@ class ReLUFreePattern:
 
         To understand why this is true, notice that the gradient could be
         written as
-        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... * diag(β₀) * W₀
+        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... *
+                      diag(β₀) * W₀
         This is a multilinear function of β, and we will introduce new binary
         variable α to represent the product of β.
         We define α[i₀][i₁]...[iₙ₋₁]=β₀[i₀]*β₁[i₁]*...*βₙ₋₁[iₙ₋₁] and the
@@ -413,24 +439,29 @@ class ReLUFreePattern:
 
         """
         In order to compute the gradient
-        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... * diag(β₀) * W₀
-        as a multilinear function of β, we notice that by setting all but one ReLU
-        unit to be active in each layer, the gradient of the network output is
-        the coefficient of the monomial, which contains the product of β in the
-        active ReLU units. So a straightforward approach is to enumerate all the
-        activation patterns (with only one ReLU unit active in each layer),
-        compute the gradient of the output (as we did in ReLUGivenActivationPattern()),
+        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ...
+                      * diag(β₀) * W₀
+        as a multilinear function of β, we notice that by setting all but one
+        ReLU unit to be active in each layer, the gradient of the network
+        output is the coefficient of the monomial, which contains the product
+        of β in the active ReLU units. So a straightforward approach is to
+        enumerate all the activation patterns (with only one ReLU unit active
+        in each layer),
+        compute the gradient of the output (as we did in
+        ReLUGivenActivationPattern()),
         and then set the corresponding row in matrix A as the gradient. This
         approach is inefficient as there are exponential number of activation
         patterns. On the other hand, two activation patterns could share a lot
         of intermediate result, if they share the same pattern in the first few
-        layers. So instead of enumerating all activation patterns, we consider the 
-        activation pattern from layer to layer.
+        layers. So instead of enumerating all activation patterns, we consider
+        the activation pattern from layer to layer.
         """
 
         # LinearUnitGradient stores a length-k tuple of ReLU unit indices (one
-        # ReLU unit per layer) and the gradient of the k+1'th linear layer output,
-        # when only the ReLU units with the given indices are active. For example
+        # ReLU unit per layer) and the gradient of the k+1'th linear layer
+        # output,
+        # when only the ReLU units with the given indices are active. For
+        # example
         # if LinearUnitGradient.activated_relu_indices = (2, 4), then
         # LinearUnitGradient.gradient stores the gradient of the 3rd linear
         # layer output, when only the 2nd unit on the first layer, and 4th unit
@@ -442,11 +473,11 @@ class ReLUFreePattern:
                 self.activated_relu_indices = activated_relu_indices
                 self.gradient = gradient
 
-        # layer_linear_unit_gradients stores all the LinearUnitGradient for this
-        # linear layer.
+        # layer_linear_unit_gradients stores all the LinearUnitGradient for
+        # this linear layer.
         num_alpha = np.prod(np.array(
-            [len(layer_relu_unit_index) for layer_relu_unit_index \
-                    in self.relu_unit_index]))
+            [len(layer_relu_unit_index) for layer_relu_unit_index
+             in self.relu_unit_index]))
 
         layer_linear_unit_gradients = queue.Queue(maxsize=num_alpha)
         layer_count = 0
@@ -460,31 +491,37 @@ class ReLUFreePattern:
                     queue_size = layer_linear_unit_gradients.qsize()
                     last_layer_linear_unit_gradient_count = 0
                     while (last_layer_linear_unit_gradient_count < queue_size):
-                        last_layer_linear_unit_gradient = layer_linear_unit_gradients.get()
+                        last_layer_linear_unit_gradient =\
+                            layer_linear_unit_gradients.get()
                         last_layer_linear_unit_gradient_count += 1
                         for layer_relu_unit_index in \
-                                range(len(self.relu_unit_index[layer_count - 1])):
-                            # We append the ReLU unit with index layer_relu_unit_index
+                                range(len(
+                                      self.relu_unit_index[layer_count - 1])):
+                            # We append the ReLU unit with index
+                            # layer_relu_unit_index
                             # to the activated path
                             linear_unit_gradient = LinearUnitGradient(
-                                last_layer_linear_unit_gradient.activated_relu_indices +
+                                last_layer_linear_unit_gradient.
+                                activated_relu_indices +
                                 (layer_relu_unit_index,),
-                                layer.weight.data[:, layer_relu_unit_index].reshape(
-                                    (-1, 1))
-                                @ last_layer_linear_unit_gradient.gradient[layer_relu_unit_index].reshape((1, -1)))
+                                layer.weight.data[:, layer_relu_unit_index].
+                                reshape((-1, 1))
+                                @ last_layer_linear_unit_gradient.
+                                gradient[layer_relu_unit_index].
+                                reshape((1, -1)))
                             layer_linear_unit_gradients.put(
                                 linear_unit_gradient)
 
             elif (isinstance(layer, nn.ReLU)):
                 layer_count += 1
 
-        # Now loop through layer_linear_unit_gradients, fill in the matrix M, and
-        # add the linear equality constraint B1 * α + B2 * β ≤ d
-        M = torch.empty((num_alpha, self.x_size))
+        # Now loop through layer_linear_unit_gradients, fill in the matrix M,
+        # and add the linear equality constraint B1 * α + B2 * β ≤ d
+        M = torch.empty((num_alpha, self.x_size), dtype=self.dtype)
         num_ineq = num_alpha * (len(self.relu_unit_index) + 1)
-        B1 = torch.zeros((num_ineq, num_alpha))
-        B2 = torch.zeros((num_ineq, self.num_relu_units))
-        d = torch.zeros((num_ineq, 1))
+        B1 = torch.zeros((num_ineq, num_alpha), dtype=self.dtype)
+        B2 = torch.zeros((num_ineq, self.num_relu_units), dtype=self.dtype)
+        d = torch.zeros((num_ineq, 1), dtype=self.dtype)
         ineq_constraint_count = 0
         while (not layer_linear_unit_gradients.empty()):
             layer_linear_unit_gradient = layer_linear_unit_gradients.get()
@@ -500,7 +537,8 @@ class ReLUFreePattern:
             for layer_count in range(num_layers):
                 B1[ineq_constraint_count + layer_count][alpha_index] = 1.
                 beta_index = self.relu_unit_index[layer_count][
-                    layer_linear_unit_gradient.activated_relu_indices[layer_count]]
+                    layer_linear_unit_gradient.
+                    activated_relu_indices[layer_count]]
                 d[ineq_constraint_count + layer_count][0] = 0.
                 B2[ineq_constraint_count + layer_count][beta_index] = -1.
                 B2[ineq_constraint_count + num_layers][beta_index] = 1
