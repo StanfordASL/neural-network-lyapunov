@@ -59,7 +59,7 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
         x_lo = torch.tensor([-2, -3], dtype=self.dtype)
         x_up = torch.tensor([3, 4], dtype=self.dtype)
         (c1, c2, Ain1, Ain2, Ain3, Ain4, Ain5, rhs) = \
-            self.dut.GenerateProgramVerifyContinuousAffineSystem(
+            self.dut.generate_program_verify_continuous_affine_system(
             A_dyn, B_dyn, d_dyn, u_vertices, x_lo, x_up)
 
         def test_generate_program_util(x, beta):

@@ -85,8 +85,9 @@ class ControlLyapunovFreeActivationPattern:
         self.relu_free_pattern = ReLUToOptimization.\
             ReLUFreePattern(self.model, self.dtype)
 
-    def GenerateProgramVerifyContinuousAffineSystem(self, A_dyn, B_dyn, d_dyn,
-                                                    u_vertices, x_lo, x_up):
+    def generate_program_verify_continuous_affine_system(self, A_dyn, B_dyn,
+                                                         d_dyn, u_vertices,
+                                                         x_lo, x_up):
         """
         For a continuous affine system
         ẋ = Ax + Bu + d
