@@ -26,8 +26,8 @@ class ValueFunction:
                 + .5 xᵀ[N] Qt x[N] + .5 uᵀ[N] Rt u[N] + .5 αᵀ[N] Zt α[N] + qtᵀx[N] + rtᵀu[N] + ztᵀα[N]
         Ain1 x[n] + Ain2 u[n] + Ain3 x[n+1] + Ain4 u[n+1] + Ain5 α[n] ≤ rhs_in_dyn
         Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] = rhs_eq_dyn
-        x_lo ≤ x[n] ≤ x_up (optional)
-        u_lo ≤ u[n] ≤ u_up (optional)
+        x_lo ≤ x[n] ≤ x_up
+        u_lo ≤ u[n] ≤ u_up
         x[0] == x0
         x[N] == xs
         α[N] ∈ {0,1}
