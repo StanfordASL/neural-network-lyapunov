@@ -42,8 +42,9 @@ class ValueToOptimizationTest(unittest.TestCase):
          Aeq1, Aeq2, Aeq3, brhs_eq) = vf.traj_opt_x0xN(
             Q, R, Z, q, r, z, 
             Qt, Rt, Zt, qt, rt, zt, 
-            N, x0, xN,
-            x_lo, x_up, u_lo, u_up)
+            N, xN,
+            x_lo, x_up, u_lo, u_up,
+            x0 = x0)
     
         Q2 = Q2.detach().numpy()
         q2 = q2.detach().numpy()
@@ -121,8 +122,9 @@ class ValueToOptimizationTest(unittest.TestCase):
          Aeq1, Aeq2, Aeq3, brhs_eq) = vf.traj_opt_x0xN(
             Q, R, Z, q, r, z, 
             Qt, Rt, Zt, qt, rt, zt, 
-            N, x0, xN,
-            x_lo, x_up, u_lo, u_up)
+            N, xN,
+            x_lo, x_up, u_lo, u_up,
+            x0 = x0)
         
         x = torch.rand(3,N-1).type(sys.dtype)
         u0 = torch.rand(1).type(sys.dtype)
