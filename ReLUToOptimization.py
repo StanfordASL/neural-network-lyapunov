@@ -128,7 +128,7 @@ class ReLUFreePattern:
             active, then the constraints are
             zᵢ₊₁(j) ≥ 0
             zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
-            (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) + (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
+            zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
             (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
         case 2
             If 0 <= zₗₒ <= zᵤₚ, the ReLU unit is always active,  then
@@ -248,25 +248,11 @@ class ReLUFreePattern:
                                         layer.weight.data[j][k]
                             rhs_in[ineq_constraint_count] = -layer.bias.data[j]
                             ineq_constraint_count += 1
-                            # (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) +
-                            # (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
+                            # zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
                             Ain2[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] =\
-                                -z_lo[z_bound_index]
-                            if layer_count == 0:
-                                Ain1[ineq_constraint_count] =\
-                                    layer.weight.data[j].clone()
-                            else:
-                                for k in range(zi_size):
-                                    Ain2[ineq_constraint_count][
-                                        self.relu_unit_index[layer_count-1]
-                                        [k]] =\
-                                        layer.weight.data[j][k]
-                            Ain3[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]]\
-                                = z_up[z_bound_index] * z_lo[z_bound_index]\
-                                - z_up[z_bound_index]
-                            rhs_in[ineq_constraint_count] = -layer.bias.data[j]
+                                self.relu_unit_index[layer_count][j]] = 1
+                            Ain3[ineq_constraint_count][self.relu_unit_index[layer_count][j]] = -z_up[z_bound_index]
+                            rhs_in[ineq_constraint_count] = 0
                             ineq_constraint_count += 1
                             # (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
                             Ain2[ineq_constraint_count][
