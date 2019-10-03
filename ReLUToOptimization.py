@@ -441,20 +441,22 @@ class ReLUFreePattern:
         In order to compute the gradient
         ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ...
                       * diag(β₀) * W₀
-        as a multilinear function of β, we notice that by setting all but one
-        ReLU unit to be active in each layer, the gradient of the network
-        output is the coefficient of the monomial, which contains the product
-        of β in the active ReLU units. So a straightforward approach is to
-        enumerate all the activation patterns (with only one ReLU unit active
-        in each layer),
-        compute the gradient of the output (as we did in
-        ReLUGivenActivationPattern()),
-        and then set the corresponding row in matrix A as the gradient. This
-        approach is inefficient as there are exponential number of activation
-        patterns. On the other hand, two activation patterns could share a lot
-        of intermediate result, if they share the same pattern in the first few
-        layers. So instead of enumerating all activation patterns, we consider
-        the activation pattern from layer to layer.
+        Notice that the gradient ∂ReLU(x)/∂x can be written as a multilinear
+        polynomial of β. We will replace all the product of β terms with a new
+        binary variable α. If we define
+        α[i₀][i₁]...[iₙ₋₁] = ∏ₖ(βₖ[iₖ])
+        and the size of α is ∏ₖ(# of ReLU units in layer k).
+        Then we can write the output gradient as a linear function of α, we
+        write the gradient ∂ReLU(x)/∂x = αᵀM, where M is a big matrix depending
+        on the network weight w. In order to enforce the condition
+        α[i₀][i₁]...[iₙ₋₁] = ∏ₖ(βₖ[iₖ]), we introduce the linear constraints
+        α[i₀][i₁]...[iₙ₋₁] ≤ βₖ[iₖ] ∀ k=0,...,n-1
+        α[i₀][i₁]...[iₙ₋₁] ≥ β₀[i₀] + ... + βₙ₋₁[iₙ₋₁] - (n-1)
+        We will write these linear constraints as
+        B1 * α + B2 * β ≤ d
+
+        @param model A ReLU network
+        @return (M, B1, B2, d) M, B1, B2 are matrices, d is a column vector.
         """
 
         # LinearUnitGradient stores a length-k tuple of ReLU unit indices (one
