@@ -1,3 +1,5 @@
+import sys
+sys.path.append("..")
 import ReLUToOptimization
 import unittest
 import numpy as np
