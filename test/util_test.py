@@ -3,6 +3,7 @@ sys.path.append("..")
 import utils
 import torch
 import unittest
+import numpy as np
 
 
 class test_replace_binary_continuous_product(unittest.TestCase):
@@ -38,6 +39,51 @@ class test_replace_binary_continuous_product(unittest.TestCase):
         test_fun(-1, 0)
         test_fun(-2, -1)
         test_fun(-2, 1)
+
+
+class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    def test(self):
+        def test_fun(x_lo, x_up):
+            (A_x, A_y, A_beta, rhs) = utils.\
+                    replace_relu_with_mixed_integer_constraint(x_lo, x_up)
+            self.assertEqual(A_x.shape, (4, 1))
+            self.assertEqual(A_y.shape, (4, 1))
+            self.assertEqual(A_beta.shape, (4, 1))
+            self.assertEqual(rhs.shape, (4, 1))
+            # Now check at the vertices of the polytope, if there are 3
+            # inequality constraints being active, and one inactive.
+            vertices = torch.tensor([[x_lo, 0, 0],
+                                     [0, 0, 0],
+                                     [0, 0, 1],
+                                     [x_up, x_up, 1]], dtype=torch.float64)
+
+            for i in range(4):
+                lhs = A_x * vertices[i, 0] + A_y * vertices[i, 1] +\
+                        A_beta * vertices[i, 2]
+                self.assertTrue(torch.all(lhs <= rhs + 1E-12))
+                self.assertEqual((torch.abs(lhs - rhs) < 1E-12).
+                                 squeeze().sum().item(), 3)
+            # Given x, there is only one and only y satisfying y = max(0, x)
+            for x in np.linspace(x_lo, x_up, 5):
+                y = np.maximum(x, 0)
+                beta = 1 if x > 0 else 0
+                lhs = A_x * x + A_y * y + A_beta * beta
+                self.assertTrue(torch.all(lhs <= rhs + 1E-12))
+                # Now take many y that are not equal to max(0, x), such y
+                # should not satisfy the constraint
+                for y_not_satisfied in np.linspace(x_lo, x_up, 100):
+                    if (y_not_satisfied != y):
+                        lhs1 = A_x * x + A_y * y_not_satisfied + A_beta * 0
+                        self.assertFalse(torch.all(lhs1 <= rhs + 1E-12))
+                        lhs2 = A_x * x + A_y * y_not_satisfied + A_beta * 1
+                        self.assertFalse(torch.all(lhs2 <= rhs + 1E-12))
+
+        test_fun(-1, 1)
+        test_fun(-2, 10)
+        test_fun(-100, 1)
 
 
 if __name__ == "__main__":
