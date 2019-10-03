@@ -1,3 +1,5 @@
+import sys
+sys.path.append("..")
 import BallPaddleSystem
 
 import unittest
@@ -143,7 +145,7 @@ class BallPaddleSystemSim(unittest.TestCase):
             ]
         obj = cp.Minimize(0.)
         prob = cp.Problem(obj,con)
-        prob.solve(solver=cp.CPLEX)
+        prob.solve(solver=cp.GUROBI)
         
         # plt.plot((x.value)[1,:])
         # plt.show()
