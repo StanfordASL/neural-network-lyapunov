@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import torch
 import torch.nn as nn
+import cvxpy as cp
 
 
 class TestReLU(unittest.TestCase):
@@ -20,7 +21,7 @@ class TestReLU(unittest.TestCase):
             [[-1, 0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1, 4, 6]],
             dtype=self.dtype)
         self.linear2.bias.data = torch.tensor(
-            [4, -1, -2, 3], dtype=self.dtype)
+            [4, -1, -2, -20], dtype=self.dtype)
         self.linear3 = nn.Linear(4, 1)
         self.linear3.weight.data = torch.tensor(
             [[4, 5, 6, 7]], dtype=self.dtype)
@@ -138,14 +139,40 @@ class TestReLU(unittest.TestCase):
             # Now perturb beta by changing some entry from 1 to 0, and vice
             # versa. Now it should not satisfy the constraint.
             perturbed_beta_entry = np.random.randint(0, beta.numel())
-            beta[perturbed_beta_entry] = 1 - beta[perturbed_beta_entry]
-            lhs_in_perturbed = Ain1 @ x_vec + Ain2 @ z + Ain3 @ beta
-            lhs_eq_perturbed = Aeq1 @ x_vec + Aeq2 @ z + Aeq3 @ beta
+            beta_perturbed = beta.clone()
+            beta_perturbed[perturbed_beta_entry] =\
+                1 - beta[perturbed_beta_entry]
+            lhs_in_perturbed = Ain1 @ x_vec + Ain2 @ z + Ain3 @ beta_perturbed
+            lhs_eq_perturbed = Aeq1 @ x_vec + Aeq2 @ z + Aeq3 @ beta_perturbed
             self.assertFalse(torch.all(
                 torch.le(lhs_in_perturbed.squeeze(),
                          rhs_in.squeeze() + torch.tensor(precision))) and
                 torch.all(torch.le(torch.abs(lhs_eq_perturbed - rhs_eq),
                                    precision)))
+
+            # Now formulate an optimization problem, with fixed input, search
+            # for z and beta. There should be only one solution.
+            z_var = cp.Variable(relu_free_pattern.num_relu_units)
+            beta_var = cp.Variable(relu_free_pattern.num_relu_units,
+                                   boolean=True)
+            x_np = x.detach().numpy()
+            con = [Ain1.detach().numpy() @ x_np +
+                   Ain2.detach().numpy() @ z_var +
+                   Ain3.detach().numpy() @ beta_var <=
+                   rhs_in.squeeze().detach().numpy(),
+                   Aeq1.detach().numpy() @ x_np +
+                   Aeq2.detach().numpy() @ z_var +
+                   Aeq3.detach().numpy() @ beta_var ==
+                   rhs_eq.squeeze().detach().numpy()]
+            objective = cp.Minimize(0.)
+            prob = cp.Problem(objective, con)
+            prob.solve(solver=cp.GUROBI)
+            z_opt_var = z_var.value
+            beta_opt_var = beta_var.value
+            self.assertTrue(np.all(np.abs(
+                z_opt_var - z.squeeze().detach().numpy()) < 1E-5))
+            self.assertTrue(np.all(np.abs(
+                beta_opt_var - beta.squeeze().detach().numpy()) < 1E-5))
 
         # Test with different input x.
         test_input_x(torch.tensor([0.7, 0.2], dtype=self.dtype))

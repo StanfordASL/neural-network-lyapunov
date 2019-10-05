@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import utils
+
 
 def ComputeReLUActivationPattern(model_relu, x):
     """
@@ -128,8 +130,10 @@ class ReLUFreePattern:
             active, then the constraints are
             zᵢ₊₁(j) ≥ 0
             zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
-            (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) + (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
+            zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
             (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
+            This formulation is explained in
+            replace_relu_with_mixed_integer_constraint()
         case 2
             If 0 <= zₗₒ <= zᵤₚ, the ReLU unit is always active,  then
             the constraints are
@@ -228,63 +232,41 @@ class ReLUFreePattern:
                                     layer.weight.data[j][k] * zi_lo[k]
                         assert(z_lo[z_bound_index] <= z_up[z_bound_index])
                         if z_lo[z_bound_index] < 0 and z_up[z_bound_index] > 0:
-                            # Case 1, introduce 4 inequality constraint.
-                            # zᵢ₊₁(j) ≥ 0
-                            Ain2[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = -1.
-                            rhs_in[ineq_constraint_count] = 0
-                            ineq_constraint_count += 1
-                            # zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
-                            Ain2[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = -1.
+                            (A_relu_input, A_relu_output, A_relu_beta,
+                                relu_rhs) = utils.\
+                                replace_relu_with_mixed_integer_constraint(
+                                z_lo[z_bound_index],
+                                z_up[z_bound_index], self.dtype)
                             if layer_count == 0:
-                                Ain1[ineq_constraint_count] = \
-                                    layer.weight.data[j].clone()
+                                # If this layer is the input layer, then the
+                                # constraint is
+                                # A_relu_input * ((Wᵢx)(j)+bᵢ(j))
+                                # A_relu_output * zᵢ₊₁(j) +
+                                # A_relu_beta * βᵢ(j) <= relu_rhs
+                                Ain1[ineq_constraint_count:
+                                     ineq_constraint_count + 4] = A_relu_input\
+                                    @ layer.weight.data[j].reshape((1, -1))
                             else:
-                                for k in range(zi_size):
-                                    Ain2[ineq_constraint_count
-                                         ][self.relu_unit_index[
-                                             layer_count-1][k]] = \
-                                        layer.weight.data[j][k]
-                            rhs_in[ineq_constraint_count] = -layer.bias.data[j]
-                            ineq_constraint_count += 1
-                            # (Wᵢzᵢ)(j) + bᵢ(j) - zₗₒ zᵢ₊₁(j) +
-                            # (zᵤₚzₗₒ-zᵤₚ)βᵢ(j) ≤ 0
-                            Ain2[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] =\
-                                -z_lo[z_bound_index]
-                            if layer_count == 0:
-                                Ain1[ineq_constraint_count] =\
-                                    layer.weight.data[j].clone()
-                            else:
-                                for k in range(zi_size):
-                                    Ain2[ineq_constraint_count][
-                                        self.relu_unit_index[layer_count-1]
-                                        [k]] =\
-                                        layer.weight.data[j][k]
-                            Ain3[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]]\
-                                = z_up[z_bound_index] * z_lo[z_bound_index]\
-                                - z_up[z_bound_index]
-                            rhs_in[ineq_constraint_count] = -layer.bias.data[j]
-                            ineq_constraint_count += 1
-                            # (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
-                            Ain2[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            if layer_count == 0:
-                                Ain1[ineq_constraint_count] = \
-                                    -layer.weight.data[j]
-                            else:
-                                for k in range(zi_size):
-                                    Ain2[ineq_constraint_count][
-                                        self.relu_unit_index[layer_count-1]
-                                        [k]] = -layer.weight.data[j][k]
-                            Ain3[ineq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] \
-                                = -z_lo[z_bound_index]
-                            rhs_in[ineq_constraint_count] =\
-                                layer.bias.data[j] - z_lo[z_bound_index]
-                            ineq_constraint_count += 1
+                                # If this layer is not the input layer, then
+                                # the constraint is
+                                # A_relu_input * ((Wᵢzᵢ)(j)+bᵢ(j)) +
+                                # A_relu_output * zᵢ₊₁(j) +
+                                # A_relu_beta * βᵢ(j) <= relu_rhs
+                                Ain2[ineq_constraint_count:
+                                     ineq_constraint_count+4,
+                                     self.relu_unit_index[layer_count - 1]] =\
+                                    A_relu_input @\
+                                    layer.weight.data[j].reshape((1, -1))
+                            Ain2[ineq_constraint_count:ineq_constraint_count+4,
+                                 self.relu_unit_index[layer_count][j]] =\
+                                A_relu_output.squeeze()
+                            Ain3[ineq_constraint_count:ineq_constraint_count+4,
+                                 self.relu_unit_index[layer_count][j]] =\
+                                A_relu_beta.squeeze()
+                            rhs_in[ineq_constraint_count: ineq_constraint_count
+                                   + 4] =\
+                                relu_rhs - A_relu_input * layer.bias.data[j]
+                            ineq_constraint_count += 4
                         elif z_lo[z_bound_index] >= 0:
                             # Case 2, introduce 2 equality constraints
                             # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
