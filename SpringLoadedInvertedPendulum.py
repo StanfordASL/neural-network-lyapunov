@@ -127,6 +127,67 @@ class SLIP:
             + 0.5 * self.k * (self.l0 - state[0])**2\
             + self.mass * state[0] * np.cos(state[1]) * self.g
 
+    def apex_map(self, pos_x, apex_height, vel_x, leg_angle):
+        """
+        Given the state of the SLIP at apex (ż = 0) during the flight phase,
+        compute the state at the next apex.
+        @param pos_x The horizontal position.
+        @param apex_height The vertical height above the touchdown height,
+        namely z - ground_height, where z is the apex z position, and
+        ground_height is the height of the ground at the moment of touchdown.
+        @param vel_x The horizontal velocity.
+        @param leg_angle The angle (between the leg and z axis) at the moment
+        of touchdown.
+        @return (next_pos_x, next_apex_height, next_vel_x) The state at the
+        next apex.
+        If SLIP cannot reach next apex height (for example, if the current
+        apex height is below 0, or during the stance phase, the mass touches
+        the ground before the spring length increases to l0), then returns
+        (None, None, None)
+        """
+        cos_theta = np.cos(leg_angle)
+        if (apex_height - self.l0 * cos_theta < 0):
+            # The foot is below the ground at the apex.
+            return (None, None, None)
+        if (vel_x > 0 and leg_angle < 0):
+            return (None, None, None)
+        if (vel_x < 0 and leg_angle > 0):
+            return (None, None, None)
+        t_touchdown = np.sqrt(2 * (apex_height - self.l0 * cos_theta) / self.g)
+        pre_impact_state = np.array([pos_x + vel_x * t_touchdown,
+                                     self.l0*cos_theta,
+                                     vel_x,
+                                     self.g * t_touchdown])
+        post_impact_state = self.touchdown_transition(pre_impact_state,
+                                                      leg_angle)
+
+        def liftoff(t, x): return self.liftoff_guard(x)
+        liftoff.terminal = True
+        liftoff.direction = 1
+        def hitground1(t, x): return np.pi / 2 + x[1]
+        hitground1.terminal = True
+        hitground1.direction = -1
+        def hitground2(t, x): return x[1] - np.pi / 2
+        hitground2.terminal = True
+        hitground2.direction = 1
+        sol_stance = solve_ivp(lambda t, x: self.stance_dynamics(x),
+                               (0, np.inf),
+                               post_impact_state,
+                               events=[liftoff, hitground1, hitground2],
+                               rtol=1e-8)
+        if len(sol_stance.t_events[0]) > 0:
+            pre_liftoff_state = sol_stance.y[:, -1]
+        else:
+            return (None, None, None)
+        post_liftoff_state = self.liftoff_transition(pre_liftoff_state)
+        if post_liftoff_state[3] < 0:
+            # The vertical velocity is negative.
+            return (None, None, None)
+        t_to_apex = -post_liftoff_state[3]/self.g
+        next_pos_x = post_liftoff_state[0] + post_liftoff_state[2] * t_to_apex
+        next_apex_height = post_liftoff_state[1] + self.g / 2 * t_to_apex ** 2
+        return (next_pos_x, next_apex_height, post_liftoff_state[2])
+
     def simulate(self, x0, theta_step):
         """
         Simulate the SLIP model from an intial state x0 in the flight phase.

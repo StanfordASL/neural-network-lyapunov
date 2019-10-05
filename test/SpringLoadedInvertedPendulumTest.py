@@ -9,7 +9,13 @@ import SpringLoadedInvertedPendulum
 
 class SlipTest(unittest.TestCase):
     def setUp(self):
-        self.dut = SpringLoadedInvertedPendulum.SLIP(90, 1, 10.7, 9.81)
+        # Use the same setup as Underactuated Robotics.
+        mass = 80
+        l0 = 1
+        gravity = 9.81
+        dimensionless_spring_constant = 10.7
+        k = dimensionless_spring_constant * mass * gravity / l0
+        self.dut = SpringLoadedInvertedPendulum.SLIP(mass, l0, k, gravity)
 
     def test_touchdown_transition(self):
         def test_fun(pre_state):
@@ -69,6 +75,42 @@ class SlipTest(unittest.TestCase):
 
         test_fun(np.array([self.dut.l0, -0.2 * np.pi, 0.1, -0.2, 0.5]))
         test_fun(np.array([self.dut.l0, -0.3 * np.pi, 0.2, -0.4, -0.5]))
+
+    def test_apex_map(self):
+        pos_x = 0
+        apex_height = 1
+        vel_x = 3
+        (next_pos_x, next_apex_height, next_vel_x) =\
+            self.dut.apex_map(pos_x, apex_height, vel_x, np.pi / 6)
+        self.assertAlmostEqual(
+            self.dut.flight_phase_energy(np.array([pos_x,
+                                                   apex_height,
+                                                   vel_x,
+                                                   0])),
+            self.dut.flight_phase_energy(np.array([next_pos_x,
+                                                   next_apex_height,
+                                                   next_vel_x, 0])), 4)
+        (next_pos_x_shift, _, _) = self.dut.apex_map(pos_x + 1,
+                                                     apex_height,
+                                                     vel_x, np.pi / 6)
+        self.assertAlmostEqual(next_pos_x + 1, next_pos_x_shift, 5)
+
+        def check_failure_step(bad_pos_x, bad_apex_height, bad_vel_x,
+                               bad_leg_angle):
+            """
+            For some apex state, the robot can not reach the next apex.
+            """
+            (bad_next_pos_x, bad_next_apex_height, bad_next_vel_x) =\
+                self.dut.apex_map(bad_pos_x, bad_apex_height, bad_vel_x,
+                                  bad_leg_angle)
+            self.assertIsNone(bad_next_pos_x)
+            self.assertIsNone(bad_next_apex_height)
+            self.assertIsNone(bad_next_vel_x)
+
+        # Now test an apex height that is too low.
+        check_failure_step(0, 0.5, 3, np.pi / 6)
+        check_failure_step(1, 1, 3, -np.pi / 6)
+        check_failure_step(1, 1, -3, np.pi / 6)
 
 
 if __name__ == "__main__":
