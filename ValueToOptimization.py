@@ -15,8 +15,9 @@ class ValueFunction:
 
     def traj_opt_x0xN(self, Q, R, Z, q, r, z, 
                       Qt, Rt, Zt, qt, rt, zt,
-                      N, x0, xN,
-                      x_lo, x_up, u_lo, u_up):
+                      N, xN,
+                      x_lo, x_up, u_lo, u_up,
+                      x0=None):
         """
         Generates a trajectory optimization problem that is constrained by 
         its initial and final state (x0 and xN). The arguments correspond 
@@ -118,10 +119,11 @@ class ValueFunction:
         brhs_in = torch.cat((brhs_in,brhs_up,brhs_lo))
         
         # x[0] == x0
-        Aeq1 = torch.cat((Aeq1,torch.eye(xdim,dtype=sys.dtype)),0)
-        Aeq2 = torch.cat((Aeq2,torch.zeros(xdim,sdim,dtype=sys.dtype)),0)
-        Aeq3 = torch.cat((Aeq3,torch.zeros(xdim,alphadim,dtype=sys.dtype)),0)
-        brhs_eq = torch.cat((brhs_eq,x0))
+        if type(x0) != type(None):
+            Aeq1 = torch.cat((Aeq1,torch.eye(xdim,dtype=sys.dtype)),0)
+            Aeq2 = torch.cat((Aeq2,torch.zeros(xdim,sdim,dtype=sys.dtype)),0)
+            Aeq3 = torch.cat((Aeq3,torch.zeros(xdim,alphadim,dtype=sys.dtype)),0)
+            brhs_eq = torch.cat((brhs_eq,x0))
 
         # x[N] == xN
         Aeq1 = torch.cat((Aeq1,torch.zeros(xdim,xdim,dtype=sys.dtype)),0)

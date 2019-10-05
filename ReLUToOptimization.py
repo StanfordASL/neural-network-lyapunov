@@ -232,11 +232,43 @@ class ReLUFreePattern:
                                     layer.weight.data[j][k] * zi_lo[k]
                         assert(z_lo[z_bound_index] <= z_up[z_bound_index])
                         if z_lo[z_bound_index] < 0 and z_up[z_bound_index] > 0:
+<<<<<<< HEAD
                             (A_relu_input, A_relu_output, A_relu_beta,
                                 relu_rhs) = utils.\
                                 replace_relu_with_mixed_integer_constraint(
                                 z_lo[z_bound_index],
                                 z_up[z_bound_index], self.dtype)
+=======
+                            # Case 1, introduce 4 inequality constraint.
+                            # zᵢ₊₁(j) ≥ 0
+                            Ain2[ineq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = -1.
+                            rhs_in[ineq_constraint_count] = 0
+                            ineq_constraint_count += 1
+                            # zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
+                            Ain2[ineq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = -1.
+                            if layer_count == 0:
+                                Ain1[ineq_constraint_count] = \
+                                    layer.weight.data[j].clone()
+                            else:
+                                for k in range(zi_size):
+                                    Ain2[ineq_constraint_count
+                                         ][self.relu_unit_index[
+                                             layer_count-1][k]] = \
+                                        layer.weight.data[j][k]
+                            rhs_in[ineq_constraint_count] = -layer.bias.data[j]
+                            ineq_constraint_count += 1
+                            # zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
+                            Ain2[ineq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1
+                            Ain3[ineq_constraint_count][self.relu_unit_index[layer_count][j]] = -z_up[z_bound_index]
+                            rhs_in[ineq_constraint_count] = 0
+                            ineq_constraint_count += 1
+                            # (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
+                            Ain2[ineq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1.
+>>>>>>> c723c5ed618f0a12ca19cee37fa121110e89e211
                             if layer_count == 0:
                                 # If this layer is the input layer, then the
                                 # constraint is
