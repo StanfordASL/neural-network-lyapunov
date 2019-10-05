@@ -96,9 +96,12 @@ class ControlLyapunovFreeActivationPattern:
         control Lyapunov condition
         ∀ x, ∃ u ∈ ConvexHull(u), s.t ∂η /∂ x (Ax + Bu + d) ≤ 0
         Since the gradient of the ReLU network can be written as αᵀM, subject
-        to B1*α+B2*β ≤ d, the control Lyapunov condition is equivalent to
+        to B1*α+B2*β ≤ e (for details, please refer to
+        ReLUFreePattern.output_gradient()), the control Lyapunov condition is
+        equivalent to
         maxₓ min_u∈U αᵀMAx + αᵀMBu + αᵀMd
-        s.t B1*α+B2*β ≤ d
+        s.t B1*α+B2*β ≤ e
+
         If the maximal of this optimization problem is no larger than 0, then
         we prove that the network satisfies the control Lyapunov condition.
 
@@ -106,7 +109,7 @@ class ControlLyapunovFreeActivationPattern:
         variable t, and change the optimization problem to
         max αᵀMAx + t + αᵀMd
         s.t t ≤ αᵀMBuᵢ ∀ i
-            B1*α+B2*β ≤ d
+            B1*α+B2*β ≤ e
         where uᵢ is the i'th vertex of the the set of admissible control
         actions.
         Note that in the objective, we still have αᵀMAx where the decision
@@ -155,7 +158,7 @@ class ControlLyapunovFreeActivationPattern:
         assert(x_up.shape == (x_size,))
         assert(torch.all(torch.le(x_lo, x_up)))
 
-        (M, B1, B2, d) = self.relu_free_pattern.output_gradient(self.model)
+        (M, B1, B2, e) = self.relu_free_pattern.output_gradient(self.model)
         num_alpha = M.shape[0]
         num_s = num_alpha * x_size
         MA = M @ A_dyn
@@ -182,49 +185,34 @@ class ControlLyapunovFreeActivationPattern:
         # -x(j) + s(i,j) - xₗₒ(j)α(i) ≤ -xₗₒ(j)
         # x(j) - s(i, j) + xᵤₚ(j)α(i) ≤ xᵤₚ(j)
         ineq_count = 0
-        Ain1_entry_count = 0
-        Ain2_entry_count = 0
-        Ain3_entry_count = 0
-        Ain4_entry_count = 0
-        Ain5_entry_count = 0
+        Ain_indices = [[], Ain1_indices, Ain2_indices, Ain3_indices,
+                       Ain4_indices, Ain5_indices]
+        Ain_val = [[], Ain1_val, Ain2_val, Ain3_val, Ain4_val, Ain5_val]
+        Ain_entry_count = [[], 0, 0, 0, 0, 0]
 
         def compute_s_index(s_row, s_col):
             return s_row * x_size + s_col
 
+        def insert_Ain_entry(Ain_index, row_index, col_index, val):
+            Ain_indices[Ain_index][0][Ain_entry_count[Ain_index]] = row_index
+            Ain_indices[Ain_index][1][Ain_entry_count[Ain_index]] = col_index
+            Ain_val[Ain_index][Ain_entry_count[Ain_index]] = val
+            Ain_entry_count[Ain_index] += 1
+
         def insert_Ain1_entry(row_index, col_index, val):
-            nonlocal Ain1_entry_count
-            Ain1_indices[0][Ain1_entry_count] = row_index
-            Ain1_indices[1][Ain1_entry_count] = col_index
-            Ain1_val[Ain1_entry_count] = val
-            Ain1_entry_count += 1
+            insert_Ain_entry(1, row_index, col_index, val)
 
         def insert_Ain2_entry(row_index, col_index, val):
-            nonlocal Ain2_entry_count
-            Ain2_indices[0][Ain2_entry_count] = row_index
-            Ain2_indices[1][Ain2_entry_count] = col_index
-            Ain2_val[Ain2_entry_count] = val
-            Ain2_entry_count += 1
+            insert_Ain_entry(2, row_index, col_index, val)
 
         def insert_Ain3_entry(row_index, col_index, val):
-            nonlocal Ain3_entry_count
-            Ain3_indices[0][Ain3_entry_count] = row_index
-            Ain3_indices[1][Ain3_entry_count] = col_index
-            Ain3_val[Ain3_entry_count] = val
-            Ain3_entry_count += 1
+            insert_Ain_entry(3, row_index, col_index, val)
 
         def insert_Ain4_entry(row_index, col_index, val):
-            nonlocal Ain4_entry_count
-            Ain4_indices[0][Ain4_entry_count] = row_index
-            Ain4_indices[1][Ain4_entry_count] = col_index
-            Ain4_val[Ain4_entry_count] = val
-            Ain4_entry_count += 1
+            insert_Ain_entry(4, row_index, col_index, val)
 
         def insert_Ain5_entry(row_index, col_index, val):
-            nonlocal Ain5_entry_count
-            Ain5_indices[0][Ain5_entry_count] = row_index
-            Ain5_indices[1][Ain5_entry_count] = col_index
-            Ain5_val[Ain5_entry_count] = val
-            Ain5_entry_count += 1
+            insert_Ain_entry(5, row_index, col_index, val)
 
         for i in range(num_alpha):
             for j in range(x_size):
@@ -261,7 +249,7 @@ class ControlLyapunovFreeActivationPattern:
             rhs[ineq_count][0] = 0.
             ineq_count += 1
 
-        # Now add the constraint B1*α+B2*β ≤ d
+        # Now add the constraint B1*α+B2*β ≤ e
         for i in range(B1.shape[0]):
             for j in range(num_alpha):
                 if B1[i][j] != 0:
@@ -269,8 +257,13 @@ class ControlLyapunovFreeActivationPattern:
             for j in range(B2.shape[1]):
                 if B2[i][j] != 0:
                     insert_Ain5_entry(ineq_count, j, B2[i][j])
-            rhs[ineq_count][0] = d[i][0]
+            rhs[ineq_count][0] = e[i][0]
             ineq_count += 1
+        Ain1_entry_count = Ain_entry_count[1]
+        Ain2_entry_count = Ain_entry_count[2]
+        Ain3_entry_count = Ain_entry_count[3]
+        Ain4_entry_count = Ain_entry_count[4]
+        Ain5_entry_count = Ain_entry_count[5]
 
         Ain1 = torch.sparse.DoubleTensor(Ain1_indices[:, :Ain1_entry_count],
                                          Ain1_val[:Ain1_entry_count],
