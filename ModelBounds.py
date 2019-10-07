@@ -143,6 +143,7 @@ class ModelBounds:
         """
         a, k, P, q = ReLUToOptimization.ReLUGivenActivationPattern(model, x_lo.shape[0], activation_pattern, self.sys.dtype)
         
+        # adding the constraint x_lo <= x <= x_up
         P = torch.cat((P, torch.eye(3, dtype=self.sys.dtype), -torch.eye(3, dtype=self.sys.dtype)), axis=0)
         q = torch.cat((q, x_up.unsqueeze(1), -x_lo.unsqueeze(1)), axis=0)
         
@@ -151,7 +152,8 @@ class ModelBounds:
         # x size equal in both program
         assert(P.shape[1] == A1_.shape[1])
         
-        index_x = torch.sum(G1_,1) != 0.
+        # index_x are the constraints that actually depend on x
+        index_x = torch.sum(torch.abs(G1_),1) != 0.
         G1_x = G1_[index_x,:]
         G1 = G1_[~index_x,:]
         G2_x = G2_[index_x,:]
@@ -161,7 +163,8 @@ class ModelBounds:
         h_x = h_[index_x]
         h = h_[~index_x]
         
-        index_x = torch.sum(A1_,1) != 0.
+        # index_x are the constraints that actually depend on x
+        index_x = torch.sum(torch.abs(A1_),1) != 0.
         A1_x = A1_[index_x,:]
         A1 = A1_[~index_x,:]
         A2_x = A2_[index_x,:]
