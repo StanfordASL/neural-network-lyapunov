@@ -126,3 +126,155 @@ class ModelBounds:
         k = -b_out
 
         return(Q1,Q2,q1,q2,k,G1,G2,h,A1,A2,b)
+        
+    def lower_bound(self, model, x_lo, x_up, activation_pattern):
+        """
+        1) seperate the value constraints that don't depend on x
+        2) compute the P that corresponds to the activation path
+        3) write the dual of the inner maximization
+        4) Assemble the nonconvex MIQP
+        
+        5) solve it with CPLEX        
+        OR
+        5) guess alpha and s
+        6) solve (21) that gets you lambda
+        7) solve (20) that get you alpha and s
+        8) repeat (6-7) until satisfied
+        """
+        a, k, P, q = ReLUToOptimization.ReLUGivenActivationPattern(model, x_lo.shape[0], activation_pattern, self.sys.dtype)
+        
+        P = torch.cat((P, torch.eye(3, dtype=self.sys.dtype), -torch.eye(3, dtype=self.sys.dtype)), axis=0)
+        q = torch.cat((q, x_up.unsqueeze(1), -x_lo.unsqueeze(1)), axis=0)
+        
+        Q1, Q2, c1, c2, G1_, G2_, G3_, h_, A1_, A2_, A3_, b_ = self.value_opt
+        
+        # x size equal in both program
+        assert(P.shape[1] == A1_.shape[1])
+        
+        index_x = torch.sum(G1_,1) != 0.
+        G1_x = G1_[index_x,:]
+        G1 = G1_[~index_x,:]
+        G2_x = G2_[index_x,:]
+        G2 = G2_[~index_x,:]
+        G3_x = G3_[index_x,:]
+        G3 = G3_[~index_x,:]
+        h_x = h_[index_x]
+        h = h_[~index_x]
+        
+        index_x = torch.sum(A1_,1) != 0.
+        A1_x = A1_[index_x,:]
+        A1 = A1_[~index_x,:]
+        A2_x = A2_[index_x,:]
+        A2 = A2_[~index_x,:]
+        A3_x = A3_[index_x,:]
+        A3 = A3_[~index_x,:]
+        b_x = b_[index_x]
+        b = b_[~index_x]
+        
+        Q1 = Q1.detach().numpy()
+        Q2 = Q2.detach().numpy()
+        c1 = c1.detach().numpy()
+        c2 = c2.detach().numpy()
+        A1_x = A1_x.detach().numpy()
+        A1 = A1.detach().numpy()
+        A2_x = A2_x.detach().numpy()
+        A2 = A2.detach().numpy()
+        A3_x = A3_x.detach().numpy()
+        A3 = A3.detach().numpy()
+        b_x = b_x.squeeze().detach().numpy()
+        b = b.squeeze().detach().numpy()
+        G1_x = G1_x.detach().numpy()
+        G1 = G1.detach().numpy()
+        G2_x = G2_x.detach().numpy()
+        G2 = G2.detach().numpy()
+        G3_x = G3_x.detach().numpy()
+        G3 = G3.detach().numpy()
+        h_x = h_x.squeeze().detach().numpy()
+        h = h.squeeze().detach().numpy()
+        a = a.squeeze().detach().numpy()
+        k = k.squeeze().detach().numpy()
+        P = P.detach().numpy()
+        q = q.detach().numpy()       
+        
+        num_s = Q1.shape[0]
+        num_alpha = Q2.shape[0]
+        num_lambda1 = G2_x.shape[0]
+        num_lambda2 = q.shape[0]
+        num_nu = A2_x.shape[0]
+        
+        s_val = np.random.rand(num_s)
+        alpha_val = np.round(np.random.rand(num_alpha))
+        lambda1_val = np.random.rand(num_lambda1)
+        lambda2_val = np.random.rand(num_lambda2)
+        nu_val = np.random.rand(num_nu)
+
+        s = cp.Variable(num_s)
+        alpha = cp.Variable(num_alpha, boolean=True)
+        lambda1 = cp.Variable(num_lambda1)
+        lambda2 = cp.Variable(num_lambda2)
+        nu = cp.Variable(num_nu)
+
+        mul_prob_con = [
+            A1_x.T@nu + G1_x.T@lambda1 + P.T@lambda2 + a.T == 0.,
+            lambda1 >= 0.,
+            lambda2 >= 0.,
+        ]
+        
+        val_prob_con = [
+            A2@s + A3@alpha == b,
+            G2@s + G3@alpha <= h,
+        ]
+
+        epsilon = np.Inf
+        max_iter = 10
+        for iter in range(max_iter):
+            # solve for the multipliers: lambda1, lambda2, nu
+            mul_prob_obj = cp.Minimize(
+                (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
+                q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k)
+            mul_prob_obj = cp.Minimize(0.)
+            mul_prob = cp.Problem(mul_prob_obj,mul_prob_con)
+            mul_prob.solve(solver=cp.GUROBI, verbose=False)
+            lambda1_val = lambda1.value
+            lambda2_val = lambda2.value
+            nu_val = nu.value
+        
+            # solve for the value variables
+            val_prob_obj = cp.Minimize(
+                .5*cp.quad_form(s,Q1) + .5*cp.quad_form(alpha,Q2) +
+                c1.T@s + c2.T@alpha +
+                (h_x - G2_x@s - G3_x@alpha).T@lambda1_val +
+                q.T@lambda2_val +
+                (b_x - A2_x@s - A3_x@alpha).T@nu_val - k
+            )
+            val_prob = cp.Problem(val_prob_obj, val_prob_con)
+            val_prob.solve(solver=cp.GUROBI, verbose=False)
+            s_val = s.value
+            alpha_val = alpha.value
+        
+            # compute epsilon
+            epsilon_ = (.5*s_val.T@Q1@s_val + .5*alpha_val.T@Q2@alpha_val +
+                c1.T@s_val + c2.T@alpha_val +
+                (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1_val +
+                q.T@lambda2_val +
+                (b_x - A2_x@s_val - A3_x@alpha_val).T@nu_val - k)
+                    
+            # check for convergence
+            if np.abs(epsilon_ - epsilon) <= 1e-6:
+                epsilon = epsilon_
+                break
+                
+            epsilon = epsilon_
+            
+        # con = mul_prob_con + val_prob_con
+        # obj = cp.Minimize(.5*cp.quad_form(s,Q1) + .5*cp.quad_form(alpha,Q2) +
+        #         c1.T@s + c2.T@alpha +
+        #         (h_x - G2_x@s - G3_x@alpha).T@lambda1 +
+        #         q.T@lambda2 +
+        #         (b_x - A2_x@s - A3_x@alpha).T@nu - k)
+        # 
+        # prob = cp.Problem(obj, con)
+        # prob.solve(solver=cp.CPLEX, verbose=True)
+        # epsilon = obj.value
+        
+        return(-epsilon[0])
