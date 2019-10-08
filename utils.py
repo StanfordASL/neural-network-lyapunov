@@ -117,3 +117,22 @@ def compute_numerical_gradient(fun, x, dx=1e-7):
         grad[:, i:i+1] = (y_plus - y_minus).reshape((y_plus.size, 1))\
             / (2 * dx)
     return grad
+    
+    
+def torch_to_numpy(torch_array_list, squeeze=True):
+    """
+    Takes in a list of pytorch arrays and
+    returns a list of numpy arrays. Squeezes out any
+    extra dimensions as well
+    
+    @param squeeze: whether or not to squeeze extra dimesions
+    @param torch_array_list: A list of torch arrays
+    @return A list of numpy arrays corresponding to the torch arrays
+    """
+    numpy_array_list = []
+    for A in torch_array_list:
+        numpy_array_list.append(A.detach().numpy())
+    if squeeze:
+        for i in range(len(numpy_array_list)):
+            numpy_array_list[i] = numpy_array_list[i].squeeze()
+    return numpy_array_list
