@@ -3,6 +3,20 @@ from scipy.integrate import solve_ivp
 from utils import check_shape_and_type
 
 
+class SteppingStone:
+    """
+    A stepping stone in 2D is a flat region with a given height. Namely within
+    the range x = [stone_left, stone_right], the height of the terrain is
+    stone_height
+    """
+
+    def __init__(self, left, right, height):
+        assert(left < right)
+        self.left = left
+        self.right = right
+        self.height = height
+
+
 class SLIP:
     """
     Defines the dynamics of the spring loaded inverted pendulum.
@@ -247,3 +261,29 @@ class SLIP:
             x_step_start = self.liftoff_transition(sol_step_stance.y[:, -1])
             t_step_start = sol_step_stance.t[-1]
         return sol
+
+    def time_to_touchdown(self, flight_state, stepping_stone, leg_angle):
+        """
+        For a flight state, computes the time to next touchdown on a given
+        stepping stone. Returns None if the robot won't touch down on that
+        stepping stone.
+        @param flight_state [x;z;ẋ;ż] The state in the flight phase.
+        @param stepping_stone A SteppingStone object.
+        @param leg angle We assume that the leg angle (between leg and the
+        vertical line is a constant).
+        @return t The time to next touch down on that stepping stone. Returns
+        None if the robot won't touch down on that stepping stone.
+        """
+        cos_theta = np.cos(leg_angle)
+        sin_theta = np.sin(leg_angle)
+        foot_pos_z0 = flight_state[1] - self.l0 * cos_theta
+        if (stepping_stone.height > foot_pos_z0):
+            return None
+
+        t = (np.sqrt(flight_state[3] ** 2 -
+                     2 * self.g * (stepping_stone.height - flight_state[1])) +
+             flight_state[3]) / self.g
+        foot_pos_x = flight_state[0] + self.l0 * sin_theta +\
+            flight_state[2] * t
+        return t if foot_pos_x >= stepping_stone.left and\
+            foot_pos_x <= stepping_stone.right else None
