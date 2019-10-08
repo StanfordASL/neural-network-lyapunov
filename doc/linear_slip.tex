@@ -54,29 +54,22 @@ In order to compute $\frac{\partial\phi}{\partial{\mathbf{x}}_{apex}}$ and $\fra
 \end{align}
 Using Lemma \ref{lemma:gradient_x0}, we know
 \begin{align}
-	\frac{\mathbf{x}_{TD}^-}{\partial \mathbf{x}_{apex}} = \underbrace{I + \int_0^{t_{TD}} \frac{\partial f_{fl}}{\partial \mathbf{x}}\frac{\partial \mathbf{x}}{\partial \mathbf{x}_{apex}} d\tau}_{\left.\frac{\partial \mathbf{x}(t)}{\partial x_{apex}}\right|_{t=t_{TD}}} + f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}
+	\frac{\mathbf{x}_{TD}^-}{\partial \mathbf{x}_{apex}} = \underbrace{I + \int_0^{t_{TD}} \frac{\partial f_{fl}}{\partial \mathbf{x}}\frac{\partial \mathbf{x}}{\partial \mathbf{x}_{apex}} d\tau}_{\left.\frac{\partial \mathbf{x}(t)}{\partial x_{apex}}\right|_{t=t_{TD}}} + f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}\\
+	\frac{\mathbf{x}_{TD}^-}{\partial \mathbf{u}} = f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{u}}
 \end{align}
 Note that we have the term $f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ because the touch down time $t_{TD}$ is also a function of the initial apex state (and the control).
 
-To compute the term $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$, we notice that
+To compute the term $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ and $\frac{\partial t_{TD}}{\partial \mathbf{u}}$, we take a full derivative of the guard function $g_{TD}$. Since the touchdown always happens at $g_{TD} = 0$, we have
 \begin{align}
-	\dot{g}_{TD} = \frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)
+	dg_{TD} = \frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t=t_{TD}}d\mathbf{x}_{apex} + \frac{\partial g_{TD}}{\partial\mathbf{x}}f_{fl}(x^-_{TD})dt_{TD} + \frac{\partial g_{TD}}{\partial\mathbf{u}}d\mathbf{u} = 0
 \end{align}
-and 
+Hence we can compute $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ as
 \begin{align}
-	\frac{\partial g_{TD}}{\partial \mathbf{x}_{apex}} = \frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t = t_{TD}}
+	\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}} =-\left(\frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)\right)^{-1}\frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t = t_{TD}}
 \end{align}
-With the above two equations, we can compute $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ as
+and  $\frac{\partial t_{TD}}{\partial \mathbf{u}}$ as
 \begin{align}
-	\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}} =& \frac{\partial t_{TD}}{\partial g_{TD}}\frac{\partial g_{TD}}{\partial \mathbf{x}_{apex}}\\
-	=&\left(\frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)\right)^{-1}\frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t = t_{TD}}
-\end{align}
-
-Similarly, we compute the gradient w.r.t $\mathbf{u}$ as
-\begin{align}
-	\frac{\partial \mathbf{x}_{TD}^-}{\partial \mathbf{u}} =& f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{u}}\\
-	=&f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial g_{TD}}\frac{\partial g_{TD}}{\partial \mathbf{u}}\\
-	=&f_{fl}(\mathbf{x}_{TD}^-)
+	\frac{\partial t_{TD}}{\partial \mathbf{u}} = -\left(\frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)\right)^{-1}\frac{\partial g_{TD}}{\partial \mathbf{u}}
 \end{align}
 
 We can then compute the gradient of the post-touch-down state $\mathbf{x}_{TD}^+$ w.r.t the initial apex state using chain rule as

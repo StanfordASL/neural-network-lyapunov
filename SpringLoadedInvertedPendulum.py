@@ -40,7 +40,7 @@ class SLIP:
         """
         In the flight phase, the state is [x;y;xdot;ydot], the dynamics is
         state_dot = [xdot;ydot;0;-g]
-        @param state A 4 x 1 column vector. The state of the robot in the
+        @param state A lenght 4 numpy array. The state of the robot in the
         flight phase.
         @return state_dot The time derivative of the state.
         """
@@ -280,10 +280,73 @@ class SLIP:
         if (stepping_stone.height > foot_pos_z0):
             return None
 
-        t = (np.sqrt(flight_state[3] ** 2 -
-                     2 * self.g * (stepping_stone.height - flight_state[1])) +
+        t = (np.sqrt(flight_state[3] ** 2 +
+                     2 * self.g * (foot_pos_z0 - stepping_stone.height)) +
              flight_state[3]) / self.g
         foot_pos_x = flight_state[0] + self.l0 * sin_theta +\
             flight_state[2] * t
         return t if foot_pos_x >= stepping_stone.left and\
             foot_pos_x <= stepping_stone.right else None
+
+    def apex_to_touchdown_gradient(self, apex_pos_x, apex_height, apex_vel_x,
+                                   leg_angle):
+        """
+        Computes the gradient of the pre-touchdown state x_pre_td w.r.t the
+        apex state (x position, height above ground at touchdown, and x
+        velocity), also the gradient of x_pre_td w.r.t the leg angle.
+        The math is explained in doc/linear_slip.tex.
+        @param apex_pos_x The horizontal position of the robot at apex.
+        @param apex_height The height of the robot at apex above the ground at
+        touch down.
+        @param apex_vel_x The horizontal velocity of the robot at apex.
+        @param leg_angle The angle of the leg at touch down.
+        @return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle), dx_pre_td_dx_apex
+        is ∂ x⁻_TD / ∂ x_apex, where x_apex = (apex_pos_x, apex_height,
+        apex_vel_x). dx_pre_td_dleg_angle is ∂x⁻_TD / ∂θ.
+        """
+
+        """
+        We first need to compute ∂x(t) / ∂x_apex evaluated at t = t_touchdown.
+        d(∂x(t) / ∂x_apex)/dt = ∂f/∂x * ∂x(t)/∂x_apex
+        If we view this as an ODE on the matrix ∂x(t)/∂x_apex, then we will
+        integrate this ODE to t_touchdown.
+        """
+        def gradient_dynamics(t, y):
+            # ∂f/∂x = [0 I]
+            #         [0 0]
+            y_reshape = y.reshape((4, 3))
+            ydot_reshape = np.zeros((4, 3))
+            ydot_reshape[0:2, :] = y_reshape[2:4, :]
+            return ydot_reshape.reshape((12,))
+
+        t_touchdown = self.time_to_touchdown(
+                np.array([apex_pos_x, apex_height, apex_vel_x, 0]),
+                SteppingStone(-np.inf, np.inf, 0), leg_angle)
+        dx_dx_apex_initial = np.zeros((4, 3))
+        dx_dx_apex_initial[0:3, :] = np.eye(3)
+        dx_dx_apex_initial = dx_dx_apex_initial.reshape((12,))
+        ode_sol = solve_ivp(gradient_dynamics,
+                            (0, t_touchdown), dx_dx_apex_initial)
+        # dx_dx_apex_touchdown is ∂x(t) / ∂x_apex evaluated at t = t_touchdown
+        dx_dx_apex_touchdown = ode_sol.y[:, -1].reshape((4, 3))
+
+        sin_theta = np.sin(leg_angle)
+        cos_theta = np.cos(leg_angle)
+        # Now we need to compute the gradient of t_touchdown (t_td)  w.r.t the
+        # apex state. If we denote the touchdown guard function as g_td, then
+        # ∂t_TD/∂x_apex = -(∂g_TD/∂x f(x_pre_td))⁻¹∂g_TD/∂x
+        #                 * dx_dx_apex_touchdown
+        x_pre_td = np.array([apex_pos_x + apex_vel_x * t_touchdown,
+                             self.l0 * cos_theta,
+                             apex_vel_x,
+                             -self.g * t_touchdown])
+        dg_TD_dx = np.array([0, 1, 0, 0])
+        xdot_pre_td = self.flight_dynamics(x_pre_td)
+        dt_TD_dg_TD = 1.0 / (dg_TD_dx.dot(xdot_pre_td))
+        dt_TD_dx_apex = -dt_TD_dg_TD * dg_TD_dx.dot(dx_dx_apex_touchdown)
+        dx_pre_td_dx_apex = dx_dx_apex_touchdown +\
+            xdot_pre_td.reshape((4, 1)).dot(dt_TD_dx_apex.reshape((1, 3)))
+
+        dg_TD_dleg_angle = self.l0 * sin_theta
+        dx_pre_td_dleg_angle = xdot_pre_td * -dt_TD_dg_TD * dg_TD_dleg_angle
+        return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle)
