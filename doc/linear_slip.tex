@@ -1,0 +1,88 @@
+\documentclass{article}
+\usepackage{amsmath, amsfonts}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\begin{document}
+\section{Spring Loaded Inverted Pendulum Dynamics}
+For a \textit{spring loaded inverted pendulum} (SLIP) model, it has two modes, the flight phase and the stance phase. Its equation of motion is
+\begin{itemize}
+	\item Flight phase, state being $\mathbf{x}_{fl} = [x, z, \dot{x}, \dot{z}]^T$.
+		\begin{align}
+			\frac{d}{dt}
+			\begin{bmatrix} x\\z\\\dot{x}\\\dot{z} \end{bmatrix} = f_{fl}(\mathbf{x}_{fl})
+			=\begin{bmatrix}\dot{x}\\\dot{z}\\0\\-g\end{bmatrix}
+		\end{align}
+	\item Stance phase, state being $\mathbf{x}_{st}=[r, \theta, \dot{r}, \dot{\theta}, x_{foot}]^T$.
+		\begin{align}
+			\frac{d}{dt}\begin{bmatrix}r\\\theta\\\dot{r}\\\dot{\theta}\\\dot{x}_{foot}\end{bmatrix} = f_{st}(\mathbf{x}_{st})
+			=\begin{bmatrix}\dot{r}\\\dot{\theta}\\k(l_0-r)/m - g\cos\theta+r\dot{\theta}^2\\g/r\sin\theta - 2\dot{r}\dot{\theta}/r\\0\end{bmatrix}
+		\end{align}
+	\item touch down guard
+		\begin{align}
+			g_{TD}(\mathbf{x}, \mathbf{u}) = y -l_0\cos\theta \ge 0
+		\end{align}
+	\item lift off guard
+		\begin{align}
+			g_{LO}(\mathbf{x}) = l_0 - r \ge 0
+		\end{align}
+	\item touch down transition maps a pre impact state $\mathbf{x}_{TD}^-$ to a post-impact state $\mathbf{x}_{TD}^+$
+		\begin{align}
+			\mathbf{x}_{TD}^+ = \Delta_{TD}(\mathbf{x}_{TD}^-, \mathbf{u}) = \begin{bmatrix} l_0\\\theta\\ -\dot{x}\sin\theta+\dot{y}\cos\theta\\(-\dot{x}\cos\theta-\dot{y}\sin\theta)/l_0\\x+l_0\sin\theta\end{bmatrix}
+		\end{align}
+	\item lift off transition maps a pre-lift-off state $\mathbf{x}_{LO}^-$ to a post-lift-off state $\mathbf{x}_{LO}^+$
+		\begin{align}
+			\mathbf{x}_{LO}^+ = \Delta_{LO}(\mathbf{x}_{LO}^-) = \begin{bmatrix}x_{foot} - l_0\sin\theta\\ l_0\cos\theta\\-l_0\cos\theta\dot{\theta}-\dot{r}\sin\theta \\ -l_0\sin\theta\dot{\theta}+\dot{r}\cos\theta\end{bmatrix}
+		\end{align}
+\end{itemize}
+
+\section{Return map}
+We will build the apex-to-apex Poincar\'e return map. We denote $\mathbf{x}_{apex}[n]$ as the n'th state at the apex of the flight phase, and the apex map as $\mathbf{x}_{apex}[n+1] = \phi(\mathbf{x}_{apex}[n], \mathbf{u}[n])$. This return map is nonlinear, and we will linearize this return map around a nominal apex state $\mathbf{x}^*_{apex}$ and leg angle $\mathbf{u}^*$ to get a linear dynamic model. We will then build the linearized model at many linearization points, and approximate the nonlinear return map as hybrid linear systems.
+
+In order to linearize the return map, we will use the following lemma
+\begin{lemma}
+	\label{lemma:gradient_x0}
+	For a dynamical system $\dot{\mathbf{x}} = f(\mathbf{x})$ with initial state $\mathbf{x}_0$, at a fixed time $T$, the gradient of $\partial{\mathbf{x}(t)}/\partial \mathbf{x}_0$ can be computed through integrating the following ODE on the matrix $\partial\mathbf{x}/\partial\mathbf{x}_0$
+	\begin{align}
+		\frac{d}{dt}\frac{\partial\mathbf{x}}{\partial \mathbf{x}_0} = \frac{\partial f}{\partial\mathbf{x}}\frac{\partial \mathbf{x}}{\partial \mathbf{x}_0}
+	\end{align}
+	with the initial condition $\partial \mathbf{x}(0)/\partial\mathbf{x}_0 = I$.
+\end{lemma}
+\subsection{Linearization of return map}
+In order to compute $\frac{\partial\phi}{\partial{\mathbf{x}}_{apex}}$ and $\frac{\partial\phi}{\partial \mathbf{u}}$, we would first compute the gradient of the pre-touch-down state. The pre-touchdown state $\mathbf{x}_{TD}^-$ is computed as
+\begin{align}
+	\mathbf{x}_{TD}^- = \int_0^{t_{TD}} f_{fl}(\mathbf{x}_{fl}) d\tau
+\end{align}
+Using Lemma \ref{lemma:gradient_x0}, we know
+\begin{align}
+	\frac{\mathbf{x}_{TD}^-}{\partial \mathbf{x}_{apex}} = \underbrace{I + \int_0^{t_{TD}} \frac{\partial f_{fl}}{\partial \mathbf{x}}\frac{\partial \mathbf{x}}{\partial \mathbf{x}_{apex}} d\tau}_{\left.\frac{\partial \mathbf{x}(t)}{\partial x_{apex}}\right|_{t=t_{TD}}} + f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}
+\end{align}
+Note that we have the term $f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ because the touch down time $t_{TD}$ is also a function of the initial apex state (and the control).
+
+To compute the term $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$, we notice that
+\begin{align}
+	\dot{g}_{TD} = \frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)
+\end{align}
+and 
+\begin{align}
+	\frac{\partial g_{TD}}{\partial \mathbf{x}_{apex}} = \frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t = t_{TD}}
+\end{align}
+With the above two equations, we can compute $\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}}$ as
+\begin{align}
+	\frac{\partial t_{TD}}{\partial \mathbf{x}_{apex}} =& \frac{\partial t_{TD}}{\partial g_{TD}}\frac{\partial g_{TD}}{\partial \mathbf{x}_{apex}}\\
+	=&\left(\frac{\partial{g}_{TD}}{\partial \mathbf{x}}f_{fl}(\mathbf{x}_{TD}^-)\right)^{-1}\frac{\partial g_{TD}}{\partial \mathbf{x}}\left.\frac{\partial \mathbf{x}(t)}{\partial \mathbf{x}_{apex}}\right|_{t = t_{TD}}
+\end{align}
+
+Similarly, we compute the gradient w.r.t $\mathbf{u}$ as
+\begin{align}
+	\frac{\partial \mathbf{x}_{TD}^-}{\partial \mathbf{u}} =& f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial \mathbf{u}}\\
+	=&f_{fl}(\mathbf{x}_{TD}^-)\frac{\partial t_{TD}}{\partial g_{TD}}\frac{\partial g_{TD}}{\partial \mathbf{u}}\\
+	=&f_{fl}(\mathbf{x}_{TD}^-)
+\end{align}
+
+We can then compute the gradient of the post-touch-down state $\mathbf{x}_{TD}^+$ w.r.t the initial apex state using chain rule as
+\begin{align}
+	\frac{\partial \mathbf{x}_{TD}^+}{\partial \mathbf{x}_{apex}} = \frac{\partial \Delta_{TD}}{\partial x}\frac{\partial \mathbf{x}_{TD}^-}{\partial \mathbf{x}_{apex}}\\
+	\frac{\partial \mathbf{x}_{TD}^+}{\partial \mathbf{u}} = \frac{\partial \Delta_{TD}}{\partial x}\frac{\partial \mathbf{x}_{TD}^-}{\partial \mathbf{u}} + \frac{\partial \Delta_{TD}}{\partial \mathbf{u}}
+\end{align}
+
+\end{document}
