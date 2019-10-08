@@ -235,7 +235,6 @@ class ModelBounds:
             mul_prob_obj = cp.Minimize(
                 (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
                 q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k)
-            mul_prob_obj = cp.Minimize(0.)
             mul_prob = cp.Problem(mul_prob_obj,mul_prob_con)
             mul_prob.solve(solver=cp.GUROBI, verbose=False)
             lambda1_val = lambda1.value
