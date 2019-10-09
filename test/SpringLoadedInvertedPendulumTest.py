@@ -153,48 +153,57 @@ class SlipTest(unittest.TestCase):
     def test_apex_to_touchdown_gradient(self):
         def test_fun(apex_pos_x, apex_height, apex_vel_x, leg_angle):
             """
-            The pre touchdown state can be computed from apex state in the
-            closed form as
-            [x + xdot * sqrt(2*(z-l0*cos_theta)/g),
-             l0 * cos_theta,
-             xdot,
-             -g * sqrt(2*(z-l0*cos_theta)/g)]
-            we can compute the gradient of the pre touchdown state w.r.t the
-            apex state in the closed form.
+            The math is explained in doc/linear_slip.tex.
+            We first need to compute ∂x(t) / ∂x_apex evaluated at
+            t = t_touchdown. We know
+            d(∂x(t) / ∂x_apex)/dt = ∂f/∂x * ∂x(t)/∂x_apex
+            If we view this as an ODE on the matrix ∂x(t)/∂x_apex, then we will
+            integrate this ODE to t_touchdown.
             """
+            def gradient_dynamics(t, y):
+                # ∂f/∂x = [0 I]
+                #         [0 0]
+                y_reshape = y.reshape((4, 3))
+                ydot_reshape = np.zeros((4, 3))
+                ydot_reshape[0:2, :] = y_reshape[2:4, :]
+                return ydot_reshape.reshape((12,))
+
+            t_touchdown = self.dut.time_to_touchdown(
+                    np.array([apex_pos_x, apex_height, apex_vel_x, 0]),
+                    SpringLoadedInvertedPendulum.
+                    SteppingStone(-np.inf, np.inf, 0), leg_angle)
+            dx_dx_apex_initial = np.zeros((4, 3))
+            dx_dx_apex_initial[0:3, :] = np.eye(3)
+            dx_dx_apex_initial = dx_dx_apex_initial.reshape((12,))
+            ode_sol = solve_ivp(gradient_dynamics,
+                                (0, t_touchdown), dx_dx_apex_initial)
+            # dx_dx_apex_touchdown is ∂x(t) / ∂x_apex evaluated at
+            # t = t_touchdown
+            dx_dx_apex_touchdown = ode_sol.y[:, -1].reshape((4, 3))
+
             sin_theta = np.sin(leg_angle)
             cos_theta = np.cos(leg_angle)
-            dx_pre_td_dx_apex_expected = np.zeros((4, 3))
-            dx_pre_td_dleg_angle_expected = np.zeros(4)
+            # Now we need to compute the gradient of t_touchdown (t_td)  w.r.t
+            # the apex state. If we denote the touchdown guard function as
+            # g_td, then
+            # ∂t_TD/∂x_apex = -(∂g_TD/∂x f(x_pre_td))⁻¹∂g_TD/∂x
+            #                 * dx_dx_apex_touchdown
+            x_pre_td = np.array([apex_pos_x + apex_vel_x * t_touchdown,
+                                 self.dut.l0 * cos_theta,
+                                 apex_vel_x,
+                                 -self.dut.g * t_touchdown])
+            dg_TD_dx = np.array([0, 1, 0, 0])
+            xdot_pre_td = self.dut.flight_dynamics(x_pre_td)
+            dt_TD_dg_TD = 1.0 / (dg_TD_dx.dot(xdot_pre_td))
+            dt_TD_dx_apex = -dt_TD_dg_TD * dg_TD_dx.dot(dx_dx_apex_touchdown)
+            dx_pre_td_dx_apex = dx_dx_apex_touchdown +\
+                xdot_pre_td.reshape((4, 1)).dot(dt_TD_dx_apex.reshape((1, 3)))
 
-            dx_pre_td_dx_apex_expected[0, 0] = 1
-            dt_touchdown_dapex_height = np.sqrt(2 / self.dut.g)\
-                * 0.5 / np.sqrt(apex_height - self.dut.l0 * cos_theta)
-            dx_pre_td_dx_apex_expected[0, 1] = apex_vel_x\
-                * dt_touchdown_dapex_height
-            ground = SpringLoadedInvertedPendulum.SteppingStone(-np.inf,
-                                                                np.inf, 0)
-            t_touchdown =\
-                self.dut.time_to_touchdown(np.array([apex_pos_x, apex_height,
-                                                     apex_vel_x, 0]),
-                                           ground, leg_angle)
-            assert(t_touchdown is not None)
-            dx_pre_td_dx_apex_expected[0, 2] = t_touchdown
+            dg_TD_dleg_angle = self.dut.l0 * sin_theta
+            dx_pre_td_dleg_angle = xdot_pre_td * -dt_TD_dg_TD\
+                * dg_TD_dleg_angle
 
-            dx_pre_td_dx_apex_expected[2, 2] = 1.
-            dx_pre_td_dx_apex_expected[3, 1] = -self.dut.g\
-                * dt_touchdown_dapex_height
-
-            dt_touchdown_dleg_angle = np.sqrt(2/self.dut.g)\
-                * self.dut.l0 * sin_theta\
-                / (2 * np.sqrt(apex_height - self.dut.l0 * cos_theta))
-            dx_pre_td_dleg_angle_expected[0] = apex_vel_x\
-                * dt_touchdown_dleg_angle
-            dx_pre_td_dleg_angle_expected[1] = -self.dut.l0 * sin_theta
-            dx_pre_td_dleg_angle_expected[3] = -self.dut.g\
-                * dt_touchdown_dleg_angle
-
-            (dx_pre_td_dx_apex, dx_pre_td_dleg_angle) =\
+            (dx_pre_td_dx_apex_expected, dx_pre_td_dleg_angle_expected) =\
                 self.dut.apex_to_touchdown_gradient(apex_pos_x, apex_height,
                                                     apex_vel_x, leg_angle)
 
