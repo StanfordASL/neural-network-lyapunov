@@ -263,6 +263,53 @@ class SlipTest(unittest.TestCase):
         test_fun(np.array([self.dut.l0, np.pi / 6, -0.2, -1.5, 0]))
         test_fun(np.array([self.dut.l0, -np.pi / 7, -0.2, -1.5, 0]))
 
+    def test_liftoff_to_apex_gradient(self):
+        def test_fun(post_liftoff_state):
+            def liftoff_to_apex_map(x0):
+                def apex(t, x): return self.dut.apex_guard(x)
+                apex.terminal = True
+                apex.direction = -1
+                ode_sol = solve_ivp(lambda t, x: self.dut.flight_dynamics(x),
+                                    (0, 100), x0, events=apex)
+                assert(len(ode_sol.t_events) > 0)
+                return ode_sol.y[:3, -1]
+            grad_numerical = utils.\
+                compute_numerical_gradient(liftoff_to_apex_map,
+                                           post_liftoff_state)
+            grad = self.dut.liftoff_to_apex_gradient(post_liftoff_state)
+            self.assertTrue(utils.compare_numpy_matrices(grad, grad_numerical,
+                                                         1, 1e-5))
+
+        test_fun(np.array([1, 0.7, 0.5, 0.6]))
+        test_fun(np.array([2, 0.4, 0.1, 0.3]))
+        test_fun(np.array([3, 0.4, -0.1, 0.3]))
+
+    def test_touchdown_transition_gradient(self):
+        def test_fun(pre_touchdown_state, leg_angle):
+            x_eval = np.empty(5)
+            x_eval[0:4] = pre_touchdown_state
+            x_eval[4] = leg_angle
+            grad_numerical = utils.\
+                compute_numerical_gradient(
+                    lambda x: self.dut.touchdown_transition(x[:4], x[4]),
+                    x_eval)
+            (grad_pre_touchdown_state, grad_leg_angle) =\
+                self.dut.touchdown_transition_gradient(pre_touchdown_state,
+                                                       leg_angle)
+            self.assertTrue(utils.\
+                compare_numpy_matrices(grad_numerical[:,:4],
+                                       grad_pre_touchdown_state, 1, 1e-5))
+            self.assertTrue(utils.\
+                compare_numpy_matrices(grad_numerical[:,4],
+                                       grad_leg_angle.squeeze(), 1, 1e-5))
+
+        test_fun(np.array([1, self.dut.l0 * np.cos(np.pi / 6), 0.5, -0.3]),
+                 np.pi / 6)
+        test_fun(np.array([2, self.dut.l0 * np.cos(-np.pi / 6), 0.5, -0.3]),
+                 -np.pi / 6)
+        test_fun(np.array([2, self.dut.l0 * np.cos(-np.pi / 6), -0.5, -0.3]),
+                 -np.pi / 6)
+
 
 if __name__ == "__main__":
     unittest.main()

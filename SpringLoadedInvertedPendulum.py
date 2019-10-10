@@ -404,3 +404,64 @@ class SLIP:
         dt_lo_dx0 = -1.0 / (dg_lo_dx.dot(xdot_pre_lo))\
             * dg_lo_dx.reshape((1, 5)).dot(dx_dx_post_td_lo)
         return dx_dx_post_td_lo + xdot_pre_lo.reshape((5, 1)).dot(dt_lo_dx0)
+
+    def liftoff_to_apex_gradient(self, post_liftoff_state):
+        """
+        Given the state right after lifting off the ground, compute the
+        gradient of the next apex state w.r.t the post liftoff state. The apex
+        state is (apex_pos_x, apex_height, apex_vel_x) where apex_height is the
+        height of SLIP at apex above the current ground height at lifting off.
+        @param post_liftoff_state [x z ẋ ż]. Notice that z is the height of the
+        robot above the current ground height.
+        @return dx_apex_dx_post_liftoff The gradient of the next apex state
+        w.r.t the post liftoff state.
+        """
+
+        """
+        The next apex state can be computed from the post liftoff state in the
+        closed form as
+        [x + ẋ*ż/g,
+         z + ż²/(2*g),
+         ẋ]
+        """
+        grad = np.zeros((3, 4))
+        grad[0, 0] = 1.
+        grad[0, 2] = post_liftoff_state[3] / self.g
+        grad[0, 3] = post_liftoff_state[2] / self.g
+        grad[1, 1] = 1
+        grad[1, 3] = post_liftoff_state[3] / self.g
+        grad[2, 2] = 1
+        return grad
+
+    def touchdown_transition_gradient(self, pre_touchdown_state, leg_angle):
+        """
+        Compute the gradient of the touchdown transition function w.r.t the pre
+        touchdown state and the leg angle.
+        @param pre_touchdown_state The state just before touchdown.
+        @return (grad_pre_touchdown_state, grad_leg_angle)
+        grad_pre_touchdown_state is the gradient of the post touchdown state
+        w.r.t the pre touchdown state. grad_leg_angle is the gradient w.r.t
+        the leg angle.
+        """
+
+        """
+        The touchdown transition map is
+        [l₀, θ, -ẋsinθ+ẏcosθ, (-ẋcosθ-ẏsinθ)/l₀, x+l₀sinθ]
+        """
+
+        sin_theta = np.sin(leg_angle)
+        cos_theta = np.cos(leg_angle)
+        grad_pre_touchdown_state = np.zeros((5, 4))
+        grad_pre_touchdown_state[2, 2] = -sin_theta
+        grad_pre_touchdown_state[2, 3] = cos_theta
+        grad_pre_touchdown_state[3, 2] = -cos_theta / self.l0
+        grad_pre_touchdown_state[3, 3] = -sin_theta / self.l0
+        grad_pre_touchdown_state[4, 0] = 1
+        grad_leg_angle = np.zeros((5, 1))
+        grad_leg_angle[1, 0] = 1
+        grad_leg_angle[2, 0] = -pre_touchdown_state[2] * cos_theta\
+            - pre_touchdown_state[3] * sin_theta
+        grad_leg_angle[3, 0] = (pre_touchdown_state[2] * sin_theta\
+            - pre_touchdown_state[3] * cos_theta) / self.l0
+        grad_leg_angle[4, 0] = self.l0 * cos_theta
+        return (grad_pre_touchdown_state, grad_leg_angle)
