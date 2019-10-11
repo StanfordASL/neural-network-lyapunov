@@ -78,7 +78,7 @@ class SlipTest(unittest.TestCase):
         pos_x = 0
         apex_height = 1
         vel_x = 3
-        (next_pos_x, next_apex_height, next_vel_x) =\
+        (next_pos_x, next_apex_height, next_vel_x, t_next_apex) =\
             self.dut.apex_map(pos_x, apex_height, vel_x, np.pi / 6)
         self.assertAlmostEqual(
             self.dut.flight_phase_energy(np.array([pos_x,
@@ -88,9 +88,9 @@ class SlipTest(unittest.TestCase):
             self.dut.flight_phase_energy(np.array([next_pos_x,
                                                    next_apex_height,
                                                    next_vel_x, 0])), 2)
-        (next_pos_x_shift, _, _) = self.dut.apex_map(pos_x + 1,
-                                                     apex_height,
-                                                     vel_x, np.pi / 6)
+        (next_pos_x_shift, _, _, _) = self.dut.apex_map(pos_x + 1,
+                                                        apex_height,
+                                                        vel_x, np.pi / 6)
         self.assertAlmostEqual(next_pos_x + 1, next_pos_x_shift, 5)
 
         def check_failure_step(bad_pos_x, bad_apex_height, bad_vel_x,
@@ -98,7 +98,8 @@ class SlipTest(unittest.TestCase):
             """
             For some apex state, the robot can not reach the next apex.
             """
-            (bad_next_pos_x, bad_next_apex_height, bad_next_vel_x) =\
+            (bad_next_pos_x, bad_next_apex_height, bad_next_vel_x,
+             bad_t_next_apex) =\
                 self.dut.apex_map(bad_pos_x, bad_apex_height, bad_vel_x,
                                   bad_leg_angle)
             self.assertIsNone(bad_next_pos_x)
@@ -148,7 +149,7 @@ class SlipTest(unittest.TestCase):
                  SteppingStone(1, 10, 1), np.pi / 3)
 
     def test_apex_to_touchdown_gradient(self):
-        def test_fun(apex_pos_x, apex_height, apex_vel_x, leg_angle):
+        def test_fun(apex_state, leg_angle):
             """
             The math is explained in doc/linear_slip.tex.
             We first need to compute ∂x(t) / ∂x_apex evaluated at
@@ -164,19 +165,23 @@ class SlipTest(unittest.TestCase):
                 ydot_reshape = np.zeros((4, 3))
                 ydot_reshape[0:2, :] = y_reshape[2:4, :]
                 return ydot_reshape.reshape((12,))
+            x_apex = np.zeros(4)
+            x_apex[0:3] = apex_state
 
             t_touchdown = self.dut.time_to_touchdown(
-                    np.array([apex_pos_x, apex_height, apex_vel_x, 0]),
+                    x_apex,
                     SpringLoadedInvertedPendulum.
                     SteppingStone(-np.inf, np.inf, 0), leg_angle)
             (dx_pre_td_dx_apex_expected, dx_pre_td_dleg_angle_expected,
-                x_pre_td_expected) =\
-                self.dut.apex_to_touchdown_gradient(apex_pos_x, apex_height,
-                                                    apex_vel_x, leg_angle)
+                x_pre_td_expected, dt_td_dx_apex, dt_td_dleg_angle, t_td) =\
+                self.dut.apex_to_touchdown_gradient(apex_state, leg_angle)
+            self.assertEqual(t_touchdown, t_td)
             if (t_touchdown is None):
                 self.assertIsNone(dx_pre_td_dx_apex_expected)
                 self.assertIsNone(dx_pre_td_dleg_angle_expected)
                 self.assertIsNone(x_pre_td_expected)
+                self.assertIsNone(dt_td_dx_apex)
+                self.assertIsNone(dt_td_dleg_angle)
                 return
             dx_dx_apex_initial = np.zeros((4, 3))
             dx_dx_apex_initial[0:3, :] = np.eye(3)
@@ -189,6 +194,8 @@ class SlipTest(unittest.TestCase):
 
             sin_theta = np.sin(leg_angle)
             cos_theta = np.cos(leg_angle)
+            apex_pos_x = apex_state[0]
+            apex_vel_x = apex_state[2]
             # Now we need to compute the gradient of t_touchdown (t_td)  w.r.t
             # the apex state. If we denote the touchdown guard function as
             # g_td, then
@@ -208,25 +215,29 @@ class SlipTest(unittest.TestCase):
             dg_TD_dleg_angle = self.dut.l0 * sin_theta
             dx_pre_td_dleg_angle = xdot_pre_td * -dt_TD_dg_TD\
                 * dg_TD_dleg_angle
-
+            dt_TD_dleg_angle = -1.0 / (dg_TD_dx.dot(xdot_pre_td))\
+                * dg_TD_dleg_angle
 
             self.assertTrue(utils.compare_numpy_matrices(x_pre_td,
                                                          x_pre_td_expected,
                                                          1E-12, 1E-12))
-
-            self.assertTrue(utils.
-                            compare_numpy_matrices(dx_pre_td_dx_apex,
-                                                   dx_pre_td_dx_apex_expected,
-                                                   1e-7, 1e-7))
             self.assertTrue(
-                    utils.compare_numpy_matrices(dx_pre_td_dleg_angle,
-                                                 dx_pre_td_dleg_angle_expected,
-                                                 1e-7, 1e-7))
+                utils.compare_numpy_matrices(dx_pre_td_dx_apex,
+                                             dx_pre_td_dx_apex_expected,
+                                             1e-7, 1e-7))
+            self.assertTrue(
+                utils.compare_numpy_matrices(dx_pre_td_dleg_angle,
+                                             dx_pre_td_dleg_angle_expected,
+                                             1e-7, 1e-7))
+            self.assertTrue(
+                utils.compare_numpy_matrices(dt_td_dx_apex, dt_TD_dx_apex,
+                                             1e-7, 13-7))
+            self.assertAlmostEqual(dt_td_dleg_angle, dt_TD_dleg_angle, 6)
 
-        test_fun(1, 1.5, 0.4, np.pi / 5)
-        test_fun(1, 2, 0.8, np.pi / 5)
-        test_fun(1, 1, 0.8, np.pi / 3)
-        test_fun(1, 0.5, 0.8, np.pi / 3)
+        test_fun(np.array([1, 1.5, 0.4]), np.pi / 5)
+        test_fun(np.array([1, 2, 0.8]), np.pi / 5)
+        test_fun(np.array([1, 1, 0.8]), np.pi / 3)
+        test_fun(np.array([1, 0.5, 0.8]), np.pi / 3)
 
     def test_stance_dynamics_gradient(self):
         def test_fun(x):
@@ -256,20 +267,29 @@ class SlipTest(unittest.TestCase):
                                     events=[liftoff, hitground1, hitground2],
                                     rtol=1e-12)
                 if len(ode_sol.t_events[0]) > 0:
-                    return ode_sol.y[:, -1]
+                    res = np.zeros(6)
+                    res[:5] = ode_sol.y[:, -1]
+                    res[5] = ode_sol.t_events[0][0]
+                    return res
                 else:
                     raise Exception("Cannot lift off")
 
             grad_numerical = utils.\
                 compute_numerical_gradient(touchdown_to_liftoff_map,
                                            post_touchdown_state, dx=1e-9)
-            (grad, x_pre_lo) =\
+            (dx_pre_lo_dx0, x_pre_lo, dt_lo_dx0, t_liftoff) =\
                 self.dut.touchdown_to_liftoff_gradient(post_touchdown_state)
-            self.assertTrue(utils.compare_numpy_matrices(grad, grad_numerical,
-                                                         1, 1e-5))
+            self.assertTrue(
+                utils.compare_numpy_matrices(dx_pre_lo_dx0,
+                                             grad_numerical[0:5, :], 1, 1e-5))
+            self.assertTrue(
+                utils.compare_numpy_matrices(
+                    dt_lo_dx0, grad_numerical[5, :].squeeze(), 1e-5, 1e-5))
+            touchdown_to_lift_res =\
+                touchdown_to_liftoff_map(post_touchdown_state)
             self.assertTrue(utils.compare_numpy_matrices(
-                touchdown_to_liftoff_map(post_touchdown_state).squeeze(),
-                x_pre_lo, 1e-5, 1e-5))
+                touchdown_to_lift_res[0:5].squeeze(), x_pre_lo, 1e-5, 1e-5))
+            self.assertAlmostEqual(t_liftoff, touchdown_to_lift_res[5], 5)
 
         test_fun(np.array([self.dut.l0, np.pi / 5, -0.1, -0.5, 0]))
         test_fun(np.array([self.dut.l0, np.pi / 6, -0.2, -1.5, 0]))
@@ -284,17 +304,27 @@ class SlipTest(unittest.TestCase):
                 ode_sol = solve_ivp(lambda t, x: self.dut.flight_dynamics(x),
                                     (0, 100), x0, events=apex)
                 assert(len(ode_sol.t_events) > 0)
-                return ode_sol.y[:3, -1]
+                res = np.empty(4)
+                res[:3] = ode_sol.y[:3, -1]
+                res[3] = ode_sol.t_events[0]
+                return res
             grad_numerical = utils.\
                 compute_numerical_gradient(liftoff_to_apex_map,
                                            post_liftoff_state)
-            (grad, x_apex) =\
+            (dx_apex_dx_post_liftoff, x_apex,
+             dt_apex_dx_post_liftoff, t_apex) =\
                 self.dut.liftoff_to_apex_gradient(post_liftoff_state)
+            liftoff_to_apex_res = liftoff_to_apex_map(post_liftoff_state)
             self.assertTrue(utils.compare_numpy_matrices(
-                x_apex, liftoff_to_apex_map(post_liftoff_state).squeeze(),
-                1e-10, 1e-10))
-            self.assertTrue(utils.compare_numpy_matrices(grad, grad_numerical,
-                                                         1, 1e-5))
+                x_apex, liftoff_to_apex_res[:3], 1e-10, 1e-10))
+            self.assertAlmostEqual(t_apex, liftoff_to_apex_res[3], 5)
+            self.assertTrue(
+                utils.compare_numpy_matrices(
+                    dx_apex_dx_post_liftoff, grad_numerical[:3, :], 1, 1e-5))
+            self.assertTrue(
+                utils.compare_numpy_matrices(
+                    dt_apex_dx_post_liftoff, grad_numerical[3, :].squeeze(),
+                    1e-2, 1e-5))
 
         test_fun(np.array([1, 0.7, 0.5, 0.6]))
         test_fun(np.array([2, 0.4, 0.1, 0.3]))
@@ -342,21 +372,27 @@ class SlipTest(unittest.TestCase):
         test_fun(np.array([self.dut.l0, np.pi / 5, 0.5, 0.1, 1]))
 
     def test_apex_to_apex_gradient(self):
-        def test_fun(apex_pos_x, apex_height, apex_vel_x, leg_angle):
-            next_apex_pos_x, next_apex_height, next_apex_vel_x =\
+        def test_fun(apex_state, leg_angle):
+            apex_pos_x = apex_state[0]
+            apex_height = apex_state[1]
+            apex_vel_x = apex_state[2]
+            next_apex_pos_x, next_apex_height, next_apex_vel_x, next_apex_t =\
                 self.dut.apex_map(apex_pos_x, apex_height, apex_vel_x,
                                   leg_angle)
-            (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex) =\
-                self.dut.apex_to_apex_gradient(apex_pos_x, apex_height,
-                                               apex_vel_x, leg_angle)
+            (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex,
+             dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex) =\
+                self.dut.apex_to_apex_gradient(apex_state, leg_angle)
             if (next_apex_pos_x is None):
                 self.assertIsNone(x_next_apex)
                 self.assertIsNone(dx_next_apex_dx_apex)
                 self.assertIsNone(dx_next_apex_dleg_angle)
+                self.assertIsNone(dt_next_apex_dx_apex)
+                self.assertIsNone(dt_next_apex_dleg_angle)
+                self.assertIsNone(t_next_apex)
             else:
                 def apex_map(x):
-                    x_next = np.empty(3)
-                    (x_next[0], x_next[1], x_next[2]) =\
+                    x_next = np.empty(4)
+                    (x_next[0], x_next[1], x_next[2], x_next[3]) =\
                         self.dut.apex_map(x[0], x[1], x[2], x[3])
                     return x_next
                 grad_numerical =\
@@ -367,18 +403,26 @@ class SlipTest(unittest.TestCase):
                     x_next_apex, np.array([next_apex_pos_x, next_apex_height,
                                            next_apex_vel_x]), 1E-5, 1E-5))
                 self.assertTrue(utils.compare_numpy_matrices(
-                    grad_numerical[:, :3], dx_next_apex_dx_apex, 1, 1E-5))
+                    grad_numerical[:3, :3], dx_next_apex_dx_apex, 1, 1E-5))
                 self.assertTrue(utils.compare_numpy_matrices(
-                    grad_numerical[:, 3], dx_next_apex_dleg_angle.squeeze(), 1e-2,
-                    1E-5))
+                    grad_numerical[:3, 3], dx_next_apex_dleg_angle.squeeze(),
+                    1e-2, 1E-5))
+                # Now check the time and its gradient
+                self.assertTrue(
+                    utils.compare_numpy_matrices(
+                        grad_numerical[3, :3].squeeze(), dt_next_apex_dx_apex,
+                        1e-3, 1E-5))
+                self.assertAlmostEqual(
+                    grad_numerical[3, 3], dt_next_apex_dleg_angle, 5)
+                self.assertAlmostEqual(t_next_apex, next_apex_t, 5)
 
-        test_fun(0, 0.5, 1.8, np.pi/6)
-        test_fun(0, 1.5, 1.8, np.pi/6)
-        test_fun(0, 1.6, 2.1, np.pi/7)
-        test_fun(0, 1.6, 0.9, np.pi/7)
-        test_fun(0, 1.6, -2.1, -np.pi/7)
-        test_fun(0, 1.6, -2.1, np.pi/7)
-        test_fun(0, 1.6, 2.1, np.pi/3)
+        test_fun(np.array([0, 0.5, 1.8]), np.pi/6)
+        test_fun(np.array([0, 1.5, 1.8]), np.pi/6)
+        test_fun(np.array([0, 1.6, 2.1]), np.pi/7)
+        test_fun(np.array([0, 1.6, 0.9]), np.pi/7)
+        test_fun(np.array([0, 1.6, -2.1]), -np.pi/7)
+        test_fun(np.array([0, 1.6, -2.1]), np.pi/7)
+        test_fun(np.array([0, 1.6, 2.1]), np.pi/3)
 
 
 if __name__ == "__main__":
