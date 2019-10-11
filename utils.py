@@ -90,3 +90,13 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up, dtype=torch.float64):
     rhs = torch.tensor([[0], [0], [0], [-x_lo]], dtype=dtype)
     return (A_x, A_y, A_alpha, rhs)
 
+def compare_numpy_matrices(actual, desired, rtol, atol):
+    try:
+        np.testing.assert_allclose(actual, desired, rtol=rtol, atol=atol)
+        res = True
+    except AssertionError as err:
+        res = False
+        print(err)
+    return res
+
+

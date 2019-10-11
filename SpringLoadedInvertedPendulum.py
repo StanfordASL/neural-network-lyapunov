@@ -3,6 +3,20 @@ from scipy.integrate import solve_ivp
 from utils import check_shape_and_type
 
 
+class SteppingStone:
+    """
+    A stepping stone in 2D is a flat region with a given height. Namely within
+    the range x ∈ [self.left, self.right], the height of the terrain is
+    self.height
+    """
+
+    def __init__(self, left, right, height):
+        assert(left < right)
+        self.left = left
+        self.right = right
+        self.height = height
+
+
 class SLIP:
     """
     Defines the dynamics of the spring loaded inverted pendulum.
@@ -26,7 +40,7 @@ class SLIP:
         """
         In the flight phase, the state is [x;y;xdot;ydot], the dynamics is
         state_dot = [xdot;ydot;0;-g]
-        @param state A 4 x 1 column vector. The state of the robot in the
+        @param state A lenght 4 numpy array. The state of the robot in the
         flight phase.
         @return state_dot The time derivative of the state.
         """
@@ -247,3 +261,80 @@ class SLIP:
             x_step_start = self.liftoff_transition(sol_step_stance.y[:, -1])
             t_step_start = sol_step_stance.t[-1]
         return sol
+
+    def time_to_touchdown(self, flight_state, stepping_stone, leg_angle):
+        """
+        For a flight state, computes the time to next touchdown on a given
+        stepping stone. Returns None if the robot won't touch down on that
+        stepping stone.
+        @param flight_state [x;z;ẋ;ż] The state in the flight phase.
+        @param stepping_stone A SteppingStone object.
+        @param leg angle We assume that the leg angle (between leg and the
+        vertical line is a constant).
+        @return t The time to next touch down on that stepping stone. Returns
+        None if the robot won't touch down on that stepping stone.
+        """
+        cos_theta = np.cos(leg_angle)
+        sin_theta = np.sin(leg_angle)
+        foot_pos_z0 = flight_state[1] - self.l0 * cos_theta
+        if (stepping_stone.height > foot_pos_z0):
+            return None
+
+        t = (np.sqrt(flight_state[3] ** 2 +
+                     2 * self.g * (foot_pos_z0 - stepping_stone.height)) +
+             flight_state[3]) / self.g
+        foot_pos_x = flight_state[0] + self.l0 * sin_theta +\
+            flight_state[2] * t
+        return t if foot_pos_x >= stepping_stone.left and\
+            foot_pos_x <= stepping_stone.right else None
+
+    def apex_to_touchdown_gradient(self, apex_pos_x, apex_height, apex_vel_x,
+                                   leg_angle):
+        """
+        Computes the gradient of the pre-touchdown state x_pre_td w.r.t the
+        apex state (x position, height above ground at touchdown, and x
+        velocity), also the gradient of x_pre_td w.r.t the leg angle.
+        The pre touchdown state can be computed from apex state in the
+        closed form as
+        [x + xdot * sqrt(2*(z-l0*cos_theta)/g),
+         l0 * cos_theta,
+         xdot,
+         -g * sqrt(2*(z-l0*cos_theta)/g)]
+        we can compute the gradient of the pre touchdown state w.r.t the
+        apex state and the leg angle in the closed form.
+        @param apex_pos_x The horizontal position of the robot at apex.
+        @param apex_height The height of the robot at apex above the ground at
+        touch down.
+        @param apex_vel_x The horizontal velocity of the robot at apex.
+        @param leg_angle The angle of the leg at touch down.
+        @return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle), dx_pre_td_dx_apex
+        is ∂ x⁻_TD / ∂ x_apex, where x_apex = (apex_pos_x, apex_height,
+        apex_vel_x). dx_pre_td_dleg_angle is ∂x⁻_TD / ∂θ.
+        """
+        sin_theta = np.sin(leg_angle)
+        cos_theta = np.cos(leg_angle)
+        dx_pre_td_dx_apex = np.zeros((4, 3))
+        dx_pre_td_dleg_angle = np.zeros(4)
+
+        dx_pre_td_dx_apex[0, 0] = 1
+        dt_touchdown_dapex_height = np.sqrt(2 / self.g)\
+            * 0.5 / np.sqrt(apex_height - self.l0 * cos_theta)
+        dx_pre_td_dx_apex[0, 1] = apex_vel_x * dt_touchdown_dapex_height
+        ground = SteppingStone(-np.inf, np.inf, 0)
+        t_touchdown =\
+            self.time_to_touchdown(np.array([apex_pos_x, apex_height,
+                                                 apex_vel_x, 0]),
+                                       ground, leg_angle)
+        assert(t_touchdown is not None)
+        dx_pre_td_dx_apex[0, 2] = t_touchdown
+
+        dx_pre_td_dx_apex[2, 2] = 1.
+        dx_pre_td_dx_apex[3, 1] = -self.g * dt_touchdown_dapex_height
+
+        dt_touchdown_dleg_angle = np.sqrt(2/self.g) * self.l0 * sin_theta\
+            / (2 * np.sqrt(apex_height - self.l0 * cos_theta))
+        dx_pre_td_dleg_angle[0] = apex_vel_x * dt_touchdown_dleg_angle
+        dx_pre_td_dleg_angle[1] = -self.l0 * sin_theta
+        dx_pre_td_dleg_angle[3] = -self.g * dt_touchdown_dleg_angle
+
+        return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle)
