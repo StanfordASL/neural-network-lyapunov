@@ -1,7 +1,5 @@
-import sys
-sys.path.append("..")
 import DoubleIntegrator
-import ControlLyapunov
+from context import ControlLyapunov
 import torch.nn as nn
 import torch
 import numpy as np

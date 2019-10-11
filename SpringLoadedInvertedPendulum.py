@@ -171,7 +171,7 @@ class SLIP:
         pre_impact_state = np.array([pos_x + vel_x * t_touchdown,
                                      self.l0*cos_theta,
                                      vel_x,
-                                     self.g * t_touchdown])
+                                     -self.g * t_touchdown])
         post_impact_state = self.touchdown_transition(pre_impact_state,
                                                       leg_angle)
 
@@ -197,7 +197,7 @@ class SLIP:
         if post_liftoff_state[3] < 0:
             # The vertical velocity is negative.
             return (None, None, None)
-        t_to_apex = -post_liftoff_state[3]/self.g
+        t_to_apex = post_liftoff_state[3]/self.g
         next_pos_x = post_liftoff_state[0] + post_liftoff_state[2] * t_to_apex
         next_apex_height = post_liftoff_state[1] + self.g / 2 * t_to_apex ** 2
         return (next_pos_x, next_apex_height, post_liftoff_state[2])
@@ -307,12 +307,26 @@ class SLIP:
         touch down.
         @param apex_vel_x The horizontal velocity of the robot at apex.
         @param leg_angle The angle of the leg at touch down.
-        @return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle), dx_pre_td_dx_apex
-        is ∂ x⁻_TD / ∂ x_apex, where x_apex = (apex_pos_x, apex_height,
-        apex_vel_x). dx_pre_td_dleg_angle is ∂x⁻_TD / ∂θ.
+        @return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td),
+        dx_pre_td_dx_apex is ∂ x⁻_TD / ∂ x_apex, where
+        x_apex = (apex_pos_x, apex_height, apex_vel_x).
+        dx_pre_td_dleg_angle is ∂x⁻_TD / ∂θ.
+        x_pre_td is the state just before touchdown.
         """
         sin_theta = np.sin(leg_angle)
         cos_theta = np.cos(leg_angle)
+        ground = SteppingStone(-np.inf, np.inf, 0)
+        t_touchdown =\
+            self.time_to_touchdown(np.array([apex_pos_x, apex_height,
+                                             apex_vel_x, 0]),
+                                   ground, leg_angle)
+        if (t_touchdown is None):
+            return None, None, None
+        x_pre_td = np.zeros(4)
+        x_pre_td[0] = apex_pos_x + apex_vel_x * t_touchdown
+        x_pre_td[1] = self.l0 * cos_theta
+        x_pre_td[2] = apex_vel_x
+        x_pre_td[3] = -self.g * t_touchdown
         dx_pre_td_dx_apex = np.zeros((4, 3))
         dx_pre_td_dleg_angle = np.zeros(4)
 
@@ -320,12 +334,6 @@ class SLIP:
         dt_touchdown_dapex_height = np.sqrt(2 / self.g)\
             * 0.5 / np.sqrt(apex_height - self.l0 * cos_theta)
         dx_pre_td_dx_apex[0, 1] = apex_vel_x * dt_touchdown_dapex_height
-        ground = SteppingStone(-np.inf, np.inf, 0)
-        t_touchdown =\
-            self.time_to_touchdown(np.array([apex_pos_x, apex_height,
-                                             apex_vel_x, 0]),
-                                   ground, leg_angle)
-        assert(t_touchdown is not None)
         dx_pre_td_dx_apex[0, 2] = t_touchdown
 
         dx_pre_td_dx_apex[2, 2] = 1.
@@ -337,7 +345,7 @@ class SLIP:
         dx_pre_td_dleg_angle[1] = -self.l0 * sin_theta
         dx_pre_td_dleg_angle[3] = -self.g * dt_touchdown_dleg_angle
 
-        return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle)
+        return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td)
 
     def stance_dynamics_gradient(self, x):
         """
@@ -367,8 +375,10 @@ class SLIP:
         from the post-touchdown state to the pre-liftoff state.
         @param post_touchdown_state [r,θ,ṙ,θ_dot,x_foot] right after touch
         down.
-        @return dx_pre_liftoff_dx_post_touchdown The gradient of the
-        pre-liftoff state w.r.t the post-touchdown state.
+        @return (dx_pre_liftoff_dx_post_touchdown, pre_liftoff_state)
+        dx_pre_liftoff_dx_post_touchdown is the gradient of the
+        pre-liftoff state w.r.t the post-touchdown state. pre_liftoff_state
+        is the state just prior to lift off.
         """
 
         """
@@ -390,20 +400,29 @@ class SLIP:
         def liftoff(t, x): return self.liftoff_guard(x)
         liftoff.terminal = True
         liftoff.direction = 1
+        def hitground1(t, x): return np.pi / 2 + x[1]
+        hitground1.terminal = True
+        hitground1.direction = -1
+        def hitground2(t, x): return x[1] - np.pi / 2
+        hitground2.terminal = True
+        hitground2.direction = 1
 
         y0 = np.zeros(30)
         y0[:5] = post_touchdown_state
         y0[5:] = np.eye(5).reshape((25,))
-        ode_sol = solve_ivp(gradient_dynamics, (0, 100), y0, events=liftoff,
+        ode_sol = solve_ivp(gradient_dynamics, (0, 100), y0,
+                            events=[liftoff, hitground1, hitground2],
                             rtol=1e-8)
-        assert(len(ode_sol.t_events) > 0)
+        if len(ode_sol.t_events[0]) == 0:
+            return None, None
         x_pre_lo = ode_sol.y[:5, -1].reshape((5,))
         dx_dx_post_td_lo = ode_sol.y[5:, -1].reshape((5, 5))
         xdot_pre_lo = self.stance_dynamics(x_pre_lo)
         dg_lo_dx = np.array([1, 0, 0, 0, 0])
         dt_lo_dx0 = -1.0 / (dg_lo_dx.dot(xdot_pre_lo))\
             * dg_lo_dx.reshape((1, 5)).dot(dx_dx_post_td_lo)
-        return dx_dx_post_td_lo + xdot_pre_lo.reshape((5, 1)).dot(dt_lo_dx0)
+        return (dx_dx_post_td_lo + xdot_pre_lo.reshape((5, 1)).dot(dt_lo_dx0),
+                x_pre_lo)
 
     def liftoff_to_apex_gradient(self, post_liftoff_state):
         """
@@ -411,10 +430,12 @@ class SLIP:
         gradient of the next apex state w.r.t the post liftoff state. The apex
         state is (apex_pos_x, apex_height, apex_vel_x) where apex_height is the
         height of SLIP at apex above the current ground height at lifting off.
-        @param post_liftoff_state [x z ẋ ż]. Notice that z is the height of the
-        robot above the current ground height.
-        @return dx_apex_dx_post_liftoff The gradient of the next apex state
-        w.r.t the post liftoff state.
+        @param post_liftoff_state [x z ẋ ż]. Notice that z is the height of
+        the robot above the current ground height.
+        @return (dx_apex_dx_post_liftoff, x_apex)
+        x_apex is the apex state (horizontal position, vertical height,
+        horizontal velocity). dx_apex-dx_post_liftoff is the gradient of the
+        next apex state w.r.t the post liftoff state.
         """
 
         """
@@ -424,6 +445,14 @@ class SLIP:
          z + ż²/(2*g),
          ẋ]
         """
+        if post_liftoff_state[3] < 0:
+            return None, None
+        x_apex = np.zeros(3)
+        x_apex[0] = post_liftoff_state[0] +\
+            post_liftoff_state[2] * post_liftoff_state[3] / self.g
+        x_apex[1] = post_liftoff_state[1] +\
+            post_liftoff_state[3] ** 2 / (2 * self.g)
+        x_apex[2] = post_liftoff_state[2]
         grad = np.zeros((3, 4))
         grad[0, 0] = 1.
         grad[0, 2] = post_liftoff_state[3] / self.g
@@ -431,7 +460,7 @@ class SLIP:
         grad[1, 1] = 1
         grad[1, 3] = post_liftoff_state[3] / self.g
         grad[2, 2] = 1
-        return grad
+        return (grad, x_apex)
 
     def touchdown_transition_gradient(self, pre_touchdown_state, leg_angle):
         """
@@ -461,7 +490,86 @@ class SLIP:
         grad_leg_angle[1, 0] = 1
         grad_leg_angle[2, 0] = -pre_touchdown_state[2] * cos_theta\
             - pre_touchdown_state[3] * sin_theta
-        grad_leg_angle[3, 0] = (pre_touchdown_state[2] * sin_theta\
-            - pre_touchdown_state[3] * cos_theta) / self.l0
+        grad_leg_angle[3, 0] = (pre_touchdown_state[2] * sin_theta
+                                - pre_touchdown_state[3] * cos_theta) / self.l0
         grad_leg_angle[4, 0] = self.l0 * cos_theta
         return (grad_pre_touchdown_state, grad_leg_angle)
+
+    def liftoff_transition_gradient(self, pre_liftoff_state):
+        """
+        Compute the gradient of the lifoff transition function w.r.t the pre
+        liftoff state.
+        @param pre_liftoff_state The SLIP state just prior to lifting off
+        @return grad The gradient of the post liftoff state w.r.t the pre
+        liftoff state.
+        """
+
+        """
+        The post liftoff state can be computed from pre liftoff state as
+        [x_foot - l₀*sinθ,
+         l₀*cosθ,
+         -l₀*cosθθ_dot-ṙsinθ,
+         -l₀*sinθθ_dot +ṙcosθ]
+        """
+        grad = np.zeros((4, 5))
+        sin_theta = np.sin(pre_liftoff_state[1])
+        cos_theta = np.cos(pre_liftoff_state[1])
+        grad[0, 1] = -self.l0 * cos_theta
+        grad[0, 4] = 1.
+        grad[1, 1] = -self.l0 * sin_theta
+        grad[2, 1] = self.l0 * sin_theta * pre_liftoff_state[3]\
+            - pre_liftoff_state[2] * cos_theta
+        grad[2, 2] = -sin_theta
+        grad[2, 3] = -self.l0 * cos_theta
+        grad[3, 1] = -self.l0 * cos_theta * pre_liftoff_state[3]\
+            - pre_liftoff_state[2] * sin_theta
+        grad[3, 2] = cos_theta
+        grad[3, 3] = -self.l0 * sin_theta
+        return grad
+
+    def apex_to_apex_gradient(self, apex_pos_x, apex_height, apex_vel_x,
+                              leg_angle):
+        """
+        Compute the next apex state, together with the gradient of the next
+        apex state w.r.t the current apex state and the leg angle.
+        @param apex_pos_x The horizontal position of the robot at apex.
+        @param apex_height The height of the robot at apex above the ground to
+        be stepped on in the coming step.
+        @param apex_vel_x The horizontal velocity of the robot at apex.
+        @param leg_angle The angle of the leg at touchdown.
+        @param (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex).
+        x_next_apex The next apex state (horizontal position, vertical height
+        above the ground touched in this step, horizontal velocity).
+        dx_next_apex_dx_apex is the gradient of the next apex state w.r.t the
+        current apex state.
+        dx_next_apex_dleg_angle is the gradient of the next apex state w.r.t
+        the leg angle.
+        """
+        (dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td) =\
+            self.apex_to_touchdown_gradient(apex_pos_x, apex_height,
+                                            apex_vel_x, leg_angle)
+        if (dx_pre_td_dx_apex is None):
+            return None, None, None
+        dx_post_td_dx_pre_td, dx_post_td_dleg_angle =\
+            self.touchdown_transition_gradient(x_pre_td, leg_angle)
+        dx_post_td_dleg_angle += dx_post_td_dx_pre_td.dot(
+            dx_pre_td_dleg_angle.reshape((4, 1)))
+        x_post_td = self.touchdown_transition(x_pre_td, leg_angle)
+        dx_pre_liftoff_dx_post_td, x_pre_liftoff =\
+            self.touchdown_to_liftoff_gradient(x_post_td)
+        if (dx_pre_liftoff_dx_post_td is None):
+            return None, None, None
+        dx_post_liftoff_dx_pre_liftoff =\
+            self.liftoff_transition_gradient(x_pre_liftoff)
+        x_post_liftoff = self.liftoff_transition(x_pre_liftoff)
+        (dx_next_apex_dx_post_liftoff, x_next_apex) =\
+            self.liftoff_to_apex_gradient(x_post_liftoff)
+        if (x_next_apex is None):
+            return None, None, None
+        dx_next_apex_dx_post_td = dx_next_apex_dx_post_liftoff.dot(
+            dx_post_liftoff_dx_pre_liftoff.dot(dx_pre_liftoff_dx_post_td))
+        dx_next_apex_dx_apex = dx_next_apex_dx_post_td.dot(
+            dx_post_td_dx_pre_td.dot(dx_pre_td_dx_apex))
+        dx_next_apex_dleg_angle = dx_next_apex_dx_post_td.dot(
+            dx_post_td_dleg_angle)
+        return (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex)

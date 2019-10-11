@@ -1,9 +1,7 @@
-import sys
-sys.path.append("..")
-import ValueToOptimization
-import ReLUToOptimization
-import BallPaddleSystem
-import ModelBounds
+from context import ValueToOptimization
+from context import ReLUToOptimization
+from context import BallPaddleSystem
+from context import ModelBounds
 
 import unittest
 import numpy as np

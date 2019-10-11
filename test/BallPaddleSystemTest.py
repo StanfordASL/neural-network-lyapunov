@@ -1,6 +1,4 @@
-import sys
-sys.path.append("..")
-import BallPaddleSystem
+from context import BallPaddleSystem
 
 import unittest
 import numpy as np

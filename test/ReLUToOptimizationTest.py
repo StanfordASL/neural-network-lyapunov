@@ -1,6 +1,4 @@
-import sys
-sys.path.append("..")
-import ReLUToOptimization
+from context import ReLUToOptimization
 import unittest
 import numpy as np
 import torch
