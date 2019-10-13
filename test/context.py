@@ -8,6 +8,7 @@ import ControlLyapunov
 import HybridLinearSystem
 import ModelBounds
 import ReLUToOptimization
+import slip_hybrid_linear_system
 import SpringLoadedInvertedPendulum
 import utils
 import ValueToOptimization
