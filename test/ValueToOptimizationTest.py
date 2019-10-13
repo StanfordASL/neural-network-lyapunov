@@ -1,7 +1,5 @@
-import sys
-sys.path.append("..")
-import ValueToOptimization
-import BallPaddleSystem
+from context import ValueToOptimization
+from context import BallPaddleSystem
 
 import unittest
 import numpy as np

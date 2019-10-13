@@ -1,6 +1,4 @@
-import sys
-sys.path.append("..")
-import ControlLyapunov
+from context import ControlLyapunov
 
 import unittest
 import numpy as np

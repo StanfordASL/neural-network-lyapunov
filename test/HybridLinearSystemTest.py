@@ -1,8 +1,6 @@
-import sys
-sys.path.append("..")
 import torch
 import unittest
-import HybridLinearSystem
+from context import HybridLinearSystem
 
 
 class HybridLinearSystemTest(unittest.TestCase):

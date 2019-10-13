@@ -1,6 +1,4 @@
-import sys
-sys.path.append("..")
-import utils
+from context import utils
 import torch
 import unittest
 import numpy as np

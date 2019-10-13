@@ -1,11 +1,8 @@
-import sys
-sys.path.append("..")
-
 import unittest
 import numpy as np
 import matplotlib.pyplot as plt
 
-import SpringLoadedInvertedPendulum
+from context import SpringLoadedInvertedPendulum
 
 
 class SlipSimulationTest(unittest.TestCase):
