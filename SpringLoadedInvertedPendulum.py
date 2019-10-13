@@ -323,8 +323,8 @@ class SLIP:
         ground = SteppingStone(-np.inf, np.inf, 0)
         t_touchdown =\
             self.time_to_touchdown(np.array([apex_pos_x, apex_height,
-                                                 apex_vel_x, 0]),
-                                       ground, leg_angle)
+                                             apex_vel_x, 0]),
+                                   ground, leg_angle)
         assert(t_touchdown is not None)
         dx_pre_td_dx_apex[0, 2] = t_touchdown
 
@@ -338,3 +338,69 @@ class SLIP:
         dx_pre_td_dleg_angle[3] = -self.g * dt_touchdown_dleg_angle
 
         return (dx_pre_td_dx_apex, dx_pre_td_dleg_angle)
+
+    def stance_dynamics_gradient(self, x):
+        """
+        Compute the gradient of the stance dynamics function w.r.t the state.
+        @param x The state in the stance phase.
+        @return dxdot_dx The gradient of the dynamics w.r.t the state.
+        """
+        sin_theta = np.sin(x[1])
+        cos_theta = np.cos(x[1])
+        xdot_gradient = np.zeros((5, 5))
+        xdot_gradient[0, 2] = 1
+        xdot_gradient[1, 3] = 1
+        xdot_gradient[2, 0] = -self.k / self.mass + x[3] ** 2
+        xdot_gradient[2, 1] = self.g * sin_theta
+        xdot_gradient[2, 3] = 2 * x[0] * x[3]
+        xdot_gradient[3, 0] = -(self.g * sin_theta - 2 * x[2] * x[3])\
+            / (x[0] ** 2)
+        xdot_gradient[3, 1] = self.g / x[0] * cos_theta
+        xdot_gradient[3, 2] = -2 * x[3] / x[0]
+        xdot_gradient[3, 3] = -2 * x[2] / x[0]
+        return xdot_gradient
+
+    def touchdown_to_liftoff_gradient(self, post_touchdown_state):
+        """
+        The math is explained in doc/linear_slip.tex
+        Given a state right after touchdown, compute the gradient of the map
+        from the post-touchdown state to the pre-liftoff state.
+        @param post_touchdown_state [r,θ,ṙ,θ_dot,x_foot] right after touch
+        down.
+        @return dx_pre_liftoff_dx_post_touchdown The gradient of the
+        pre-liftoff state w.r.t the post-touchdown state.
+        """
+
+        """
+        If I use x₀ to denote the post-touchdown state, then we first need to
+        evaluate ∂x(t) / ∂x₀ evaluated at the moment of lift off. We know
+        d(∂x(t) / ∂x₀)/dt = ∂f/∂x * ∂x(t)/∂x₀
+        which can be viewed as an ODE on the matrix ∂x(t)/∂x₀. We will
+        integrate this ODE to t_liftoff
+        """
+        def gradient_dynamics(t, y):
+            state = y[0:5]
+            state_dot = self.stance_dynamics(state)
+            dx_dx0 = y[5:].reshape((5, 5))
+            dxdot_dx = self.stance_dynamics_gradient(state)
+            dxdot_dx0 = dxdot_dx.dot(dx_dx0)
+            ydot = np.concatenate((state_dot, dxdot_dx0.reshape((25,))))
+            return ydot
+
+        def liftoff(t, x): return self.liftoff_guard(x)
+        liftoff.terminal = True
+        liftoff.direction = 1
+
+        y0 = np.zeros(30)
+        y0[:5] = post_touchdown_state
+        y0[5:] = np.eye(5).reshape((25,))
+        ode_sol = solve_ivp(gradient_dynamics, (0, 100), y0, events=liftoff,
+                            rtol=1e-8)
+        assert(len(ode_sol.t_events) > 0)
+        x_pre_lo = ode_sol.y[:5, -1].reshape((5,))
+        dx_dx_post_td_lo = ode_sol.y[5:, -1].reshape((5, 5))
+        xdot_pre_lo = self.stance_dynamics(x_pre_lo)
+        dg_lo_dx = np.array([1, 0, 0, 0, 0])
+        dt_lo_dx0 = -1.0 / (dg_lo_dx.dot(xdot_pre_lo))\
+            * dg_lo_dx.reshape((1, 5)).dot(dx_dx_post_td_lo)
+        return dx_dx_post_td_lo + xdot_pre_lo.reshape((5, 1)).dot(dt_lo_dx0)

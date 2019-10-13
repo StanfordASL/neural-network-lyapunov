@@ -220,6 +220,49 @@ class SlipTest(unittest.TestCase):
         test_fun(1, 2, 0.8, np.pi / 5)
         test_fun(1, 1, 0.8, np.pi / 3)
 
+    def test_stance_dynamics_gradient(self):
+        def test_fun(x):
+            grad = self.dut.stance_dynamics_gradient(x)
+            grad_numerical = utils.\
+                compute_numerical_gradient(self.dut.stance_dynamics, x)
+            self.assertTrue(utils.compare_numpy_matrices(grad, grad_numerical,
+                                                         1e-7, 1e-7))
+        test_fun(np.array([1, np.pi / 5, -0.1, -0.5, 0]))
+        test_fun(np.array([0.5, -np.pi / 5, -0.1, -0.5, 1]))
+        test_fun(np.array([0.5, -np.pi / 4, 0.2, 0.3, 1]))
+
+    def test_touchdown_to_liftoff_gradient(self):
+        def test_fun(post_touchdown_state):
+            def touchdown_to_liftoff_map(x0):
+                def liftoff(t, x): return self.dut.liftoff_guard(x)
+                liftoff.terminal = True
+                liftoff.direction = 1
+                def hitground1(t, x): return np.pi / 2 + x[1]
+                hitground1.terminal = True
+                hitground1.direction = -1
+                def hitground2(t, x): return x[1] - np.pi / 2
+                hitground2.terminal = True
+                hitground2.direction = 1
+                ode_sol = solve_ivp(lambda t, x: self.dut.stance_dynamics(x),
+                                    (0, np.inf), x0,
+                                    events=[liftoff, hitground1, hitground2],
+                                    rtol=1e-12)
+                if len(ode_sol.t_events[0]) > 0:
+                    return ode_sol.y[:, -1]
+                else:
+                    raise Exception("Cannot lift off")
+
+            grad_numerical = utils.\
+                compute_numerical_gradient(touchdown_to_liftoff_map,
+                                           post_touchdown_state, dx=1e-9)
+            grad = self.dut.touchdown_to_liftoff_gradient(post_touchdown_state)
+            self.assertTrue(utils.compare_numpy_matrices(grad, grad_numerical,
+                                                         1, 1e-5))
+
+        test_fun(np.array([self.dut.l0, np.pi / 5, -0.1, -0.5, 0]))
+        test_fun(np.array([self.dut.l0, np.pi / 6, -0.2, -1.5, 0]))
+        test_fun(np.array([self.dut.l0, -np.pi / 7, -0.2, -1.5, 0]))
+
 
 if __name__ == "__main__":
     unittest.main()
