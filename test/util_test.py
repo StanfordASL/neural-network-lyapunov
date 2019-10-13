@@ -86,5 +86,36 @@ class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
         test_fun(-100, 1)
 
 
+class test_compute_numerical_gradient(unittest.TestCase):
+
+    def test_linear_fun(self):
+        A = np.array([[1., 2.], [3., 4.]])
+        b = np.array([[3.], [4.]])
+        def linear_fun(x): return A.dot(x) + b
+
+        grad = utils.compute_numerical_gradient(linear_fun, np.array([[4.],
+                                                                      [10.]]))
+        self.assertTrue(utils.compare_numpy_matrices(grad, A, 1e-7, 1e-7))
+
+    def test_quadratic_fun(self):
+        Q = np.array([[1., 3.], [2., 4.]])
+        p = np.array([[2.], [3.]])
+        def quadratic_fun(x): return 0.5 * x.T.dot(Q.dot(x)) + p.T.dot(x) + 1
+        x = np.array([[10.], [-2.]])
+        grad = utils.compute_numerical_gradient(quadratic_fun, x)
+        self.assertTrue(
+                utils.compare_numpy_matrices(grad,
+                                             (0.5 * (Q + Q.T).dot(x) + p).T,
+                                             1e-7, 1e-7))
+
+    def test_vector_fun(self):
+        def fun(x): return np.array([np.sin(x[0]), np.cos(x[1])])
+        x = np.array([10., 5.])
+        grad = utils.compute_numerical_gradient(fun, x)
+        grad_expected = np.array([[np.cos(x[0]), 0], [0, -np.sin(x[1])]])
+        self.assertTrue(utils.compare_numpy_matrices(grad, grad_expected,
+                                                     1e-7, 1e-7))
+
+
 if __name__ == "__main__":
     unittest.main()

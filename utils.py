@@ -58,7 +58,9 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     rhs = torch.tensor([[0], [0], [x_up], [-x_lo]], dtype=dtype)
     return (A_x, A_s, A_alpha, rhs)
 
-def replace_relu_with_mixed_integer_constraint(x_lo, x_up, dtype=torch.float64):
+
+def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
+                                               dtype=torch.float64):
     """
     For a ReLU activation unit y = max(0, x), we can replace this function with
     mixed-integer linear constraint on x, y and β, where β is the binary
@@ -66,8 +68,8 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up, dtype=torch.float64):
 
     When the bound of x is [xₗₒ, xᵤₚ], and xₗₒ < 0 <  xᵤₚ, we use the "convex
     hull" trick to impose the constraint y = max(0, x) as mixed-integer linear
-    constraints. Consider the point (x, y, β). The feasible region of this point
-    are two line segment (x, 0, 0) for xₗₒ <= x < 0 and (x, x, 1) for
+    constraints. Consider the point (x, y, β). The feasible region of this
+    point are two line segment (x, 0, 0) for xₗₒ <= x < 0 and (x, x, 1) for
     0 <= x <= xᵤₚ. The convex hull of these two line segments is a tetrahedron,
     described by linear inequality constraints
     y ≥ 0
@@ -90,6 +92,7 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up, dtype=torch.float64):
     rhs = torch.tensor([[0], [0], [0], [-x_lo]], dtype=dtype)
     return (A_x, A_y, A_alpha, rhs)
 
+
 def compare_numpy_matrices(actual, desired, rtol, atol):
     try:
         np.testing.assert_allclose(actual, desired, rtol=rtol, atol=atol)
@@ -100,3 +103,17 @@ def compare_numpy_matrices(actual, desired, rtol, atol):
     return res
 
 
+def compute_numerical_gradient(fun, x, dx=1e-7):
+    grad = None
+    for i in range(x.size):
+        x_plus = x.copy()
+        x_plus[i] += dx
+        x_minus = x.copy()
+        x_minus[i] -= dx
+        y_plus = fun(x_plus)
+        y_minus = fun(x_minus)
+        if (grad is None):
+            grad = np.zeros((y_plus.size, x.size))
+        grad[:, i:i+1] = (y_plus - y_minus).reshape((y_plus.size, 1))\
+            / (2 * dx)
+    return grad
