@@ -127,7 +127,7 @@ class ModelBounds:
 
         return(Q1,Q2,q1,q2,k,G1,G2,h,A1,A2,b)
         
-    def lower_bound(self, model, x_lo, x_up, activation_pattern):
+    def lower_bound(self, model, x_lo, x_up, activation_pattern, s_val, alpha_val):
         """
         1) seperate the value constraints that don't depend on x
         2) compute the P that corresponds to the activation path
@@ -205,20 +205,21 @@ class ModelBounds:
         num_lambda2 = q.shape[0]
         num_nu = A2_x.shape[0]
         
-        s_val = np.random.rand(num_s)
-        alpha_val = np.round(np.random.rand(num_alpha))
+        # s_val = np.random.rand(num_s)
+        # alpha_val = np.round(np.random.rand(num_alpha))
         lambda1_val = np.random.rand(num_lambda1)
         lambda2_val = np.random.rand(num_lambda2)
         nu_val = np.random.rand(num_nu)
 
         s = cp.Variable(num_s)
-        alpha = cp.Variable(num_alpha, boolean=True)
+        alpha = cp.Variable(num_alpha, boolean=False)
         lambda1 = cp.Variable(num_lambda1)
         lambda2 = cp.Variable(num_lambda2)
         nu = cp.Variable(num_nu)
+        t = cp.Variable(1)
 
         mul_prob_con = [
-            A1_x.T@nu + G1_x.T@lambda1 + P.T@lambda2 + a.T == 0.,
+            A1_x.T@nu + G1_x.T@lambda1 + P.T@lambda2 + a == 0.,
             lambda1 >= 0.,
             lambda2 >= 0.,
         ]
@@ -229,18 +230,33 @@ class ModelBounds:
         ]
 
         epsilon = np.Inf
-        max_iter = 10
+        max_iter = 2
+        backoff = 1.
         for iter in range(max_iter):
-            # solve for the multipliers: lambda1, lambda2, nu
+            # solve for multipliers
             mul_prob_obj = cp.Minimize(
                 (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
                 q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k)
             mul_prob = cp.Problem(mul_prob_obj,mul_prob_con)
             mul_prob.solve(solver=cp.GUROBI, verbose=False)
+            
+            print(mul_prob_obj.value)
+            print([c.value() for c in mul_prob_con])
+            
+            # backoff multipliers
+            mul_prob_obj_value = mul_prob_obj.value
+            mul_prob_obj_backoff = cp.Minimize(0.)
+            mul_prob_con_backoff = mul_prob_con + [(h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
+            q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k <= mul_prob_obj_value + backoff*np.abs(mul_prob_obj_value)]
+            mul_prob_backoff = cp.Problem(mul_prob_obj_backoff,mul_prob_con_backoff)
+            mul_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
             lambda1_val = lambda1.value
             lambda2_val = lambda2.value
             nu_val = nu.value
-        
+            
+            print(mul_prob_obj.value)
+            print([c.value() for c in mul_prob_con])
+
             # solve for the value variables
             val_prob_obj = cp.Minimize(
                 .5*cp.quad_form(s,Q1) + .5*cp.quad_form(alpha,Q2) +
@@ -251,32 +267,52 @@ class ModelBounds:
             )
             val_prob = cp.Problem(val_prob_obj, val_prob_con)
             val_prob.solve(solver=cp.GUROBI, verbose=False)
+
+            print(val_prob_obj.value)            
+            print([c.value() for c in val_prob_con])
+            
+            # backoff value variables 
+            val_prob_obj_value = val_prob_obj.value
+            val_prob_obj_backoff = cp.Minimize(0.)
+            Q1_inv = np.linalg.inv(Q1)
+            Q2_inv = np.linalg.inv(Q2)
+            m1 = -.5*(c1 - lambda1_val.T@G2_x - nu_val.T@A2_x)
+            m2 = -.5*(c2 - lambda1_val.T@G3_x - nu_val.T@A3_x)
+            z = val_prob_obj_value + backoff*np.abs(val_prob_obj_value) - h_x.T@lambda1_val - q.T@lambda2_val - b_x.T@nu_val + k + 2.*m1.T@Q1_inv@m1 + 2.*m2.T@Q2_inv@m2
+            L1 = np.linalg.cholesky(.5*Q1)
+            L2 = np.linalg.cholesky(.5*Q2)
+            soc_con = [cp.SOC(t, cp.hstack((L1@(s - 2.*Q1_inv@m1),L2@(alpha - 2.*Q2_inv@m2)))), t == np.sqrt(z)]
+            val_prob_con_backoff = val_prob_con + soc_con
+            val_prob_backoff = cp.Problem(val_prob_obj_backoff, val_prob_con_backoff)
+            val_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
             s_val = s.value
             alpha_val = alpha.value
-        
+            
+            print(val_prob_obj.value)
+            print([c.value() for c in val_prob_con])
+                        
             # compute epsilon
             epsilon_ = (.5*s_val.T@Q1@s_val + .5*alpha_val.T@Q2@alpha_val +
                 c1.T@s_val + c2.T@alpha_val +
                 (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1_val +
                 q.T@lambda2_val +
                 (b_x - A2_x@s_val - A3_x@alpha_val).T@nu_val - k)
-                    
+            
             # check for convergence
             if np.abs(epsilon_ - epsilon) <= 1e-6:
                 epsilon = epsilon_
                 break
-                
+            
             epsilon = epsilon_
             
-        # con = mul_prob_con + val_prob_con
-        # obj = cp.Minimize(.5*cp.quad_form(s,Q1) + .5*cp.quad_form(alpha,Q2) +
-        #         c1.T@s + c2.T@alpha +
-        #         (h_x - G2_x@s - G3_x@alpha).T@lambda1 +
-        #         q.T@lambda2 +
-        #         (b_x - A2_x@s - A3_x@alpha).T@nu - k)
-        # 
-        # prob = cp.Problem(obj, con)
-        # prob.solve(solver=cp.CPLEX, verbose=True)
-        # epsilon = obj.value
+            print("iter %i: %f" % (iter+1, epsilon))
+            
+            # x = cp.Variable(3)
+            # obj = cp.Minimize(0)
+            # con = [A1_x@x + A2_x@s_val + A3_x@alpha_val == b_x,
+            #        G1_x@x + G2_x@s_val + G3_x@alpha_val <= h_x,
+            #        P@x <= q.squeeze()]
+            # prob = cp.Problem(obj,con)
+            # prob.solve(solver=cp.GUROBI, verbose=True)
         
         return(-epsilon[0])
