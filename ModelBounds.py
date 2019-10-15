@@ -205,18 +205,17 @@ class ModelBounds:
         num_lambda2 = q.shape[0]
         num_nu = A2_x.shape[0]
         
-        # s_val = np.random.rand(num_s)
-        # alpha_val = np.round(np.random.rand(num_alpha))
         lambda1_val = np.random.rand(num_lambda1)
         lambda2_val = np.random.rand(num_lambda2)
         nu_val = np.random.rand(num_nu)
 
         s = cp.Variable(num_s)
-        alpha = cp.Variable(num_alpha, boolean=False)
+        alpha = cp.Variable(num_alpha, boolean=True)
         lambda1 = cp.Variable(num_lambda1)
         lambda2 = cp.Variable(num_lambda2)
         nu = cp.Variable(num_nu)
         t = cp.Variable(1)
+        x = cp.Variable(3)
 
         mul_prob_con = [
             A1_x.T@nu + G1_x.T@lambda1 + P.T@lambda2 + a == 0.,
@@ -227,92 +226,96 @@ class ModelBounds:
         val_prob_con = [
             A2@s + A3@alpha == b,
             G2@s + G3@alpha <= h,
+            A1_x@x + A2_x@s + A3_x@alpha == b_x,
+            G1_x@x + G2_x@s + G3_x@alpha <= h_x,
+            P@x <= q.squeeze(),
         ]
 
         epsilon = np.Inf
-        max_iter = 2
-        backoff = 1.
+        max_iter = 10
+        backoff = 0.1
         for iter in range(max_iter):
             # solve for multipliers
             mul_prob_obj = cp.Minimize(
                 (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
-                q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k)
+                q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu)
             mul_prob = cp.Problem(mul_prob_obj,mul_prob_con)
             mul_prob.solve(solver=cp.GUROBI, verbose=False)
-            
-            print(mul_prob_obj.value)
-            print([c.value() for c in mul_prob_con])
-            
-            # backoff multipliers
-            mul_prob_obj_value = mul_prob_obj.value
-            mul_prob_obj_backoff = cp.Minimize(0.)
-            mul_prob_con_backoff = mul_prob_con + [(h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
-            q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu - k <= mul_prob_obj_value + backoff*np.abs(mul_prob_obj_value)]
-            mul_prob_backoff = cp.Problem(mul_prob_obj_backoff,mul_prob_con_backoff)
-            mul_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
             lambda1_val = lambda1.value
             lambda2_val = lambda2.value
             nu_val = nu.value
+
+            epsilon_ = (.5*s_val.T@Q1@s_val + .5*alpha_val.T@Q2@alpha_val +
+                c1.T@s_val + c2.T@alpha_val +
+                (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1_val +
+                q.T@lambda2_val +
+                (b_x - A2_x@s_val - A3_x@alpha_val).T@nu_val - k)
+            print(epsilon_)
             
-            print(mul_prob_obj.value)
-            print([c.value() for c in mul_prob_con])
+            # xp = cp.Variable(3)
+            # input_prob_obj = cp.Maximize(-a.T@xp)
+            # input_prob_con = [A1_x@xp + A2_x@s_val + A3_x@alpha_val == b_x.squeeze(),
+            #                   G1_x@xp + G2_x@s_val + G3_x@alpha_val <= h_x.squeeze(),
+            #                   P@xp <= q.squeeze()]
+            # input_prob = cp.Problem(input_prob_obj,input_prob_con)
+            # input_prob.solve(solver=cp.GUROBI, verbose=False)
+            # print(input_prob_obj.value)
+            
+            # # backoff multipliers
+            # mul_prob_obj_value = mul_prob_obj.value
+            # mul_prob_obj_backoff = cp.Minimize(0.)
+            # mul_prob_con_backoff = mul_prob_con + [(h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1 + 
+            # q.T@lambda2 + (b_x - A2_x@s_val - A3_x@alpha_val).T@nu <= mul_prob_obj_value + backoff*np.abs(mul_prob_obj_value)]
+            # mul_prob_backoff = cp.Problem(mul_prob_obj_backoff,mul_prob_con_backoff)
+            # mul_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
+            # lambda1_val = lambda1.value
+            # lambda2_val = lambda2.value
+            # nu_val = nu.value
 
             # solve for the value variables
             val_prob_obj = cp.Minimize(
                 .5*cp.quad_form(s,Q1) + .5*cp.quad_form(alpha,Q2) +
                 c1.T@s + c2.T@alpha +
                 (h_x - G2_x@s - G3_x@alpha).T@lambda1_val +
-                q.T@lambda2_val +
-                (b_x - A2_x@s - A3_x@alpha).T@nu_val - k
+                (b_x - A2_x@s - A3_x@alpha).T@nu_val
             )
             val_prob = cp.Problem(val_prob_obj, val_prob_con)
             val_prob.solve(solver=cp.GUROBI, verbose=False)
-
-            print(val_prob_obj.value)            
-            print([c.value() for c in val_prob_con])
-            
-            # backoff value variables 
-            val_prob_obj_value = val_prob_obj.value
-            val_prob_obj_backoff = cp.Minimize(0.)
-            Q1_inv = np.linalg.inv(Q1)
-            Q2_inv = np.linalg.inv(Q2)
-            m1 = -.5*(c1 - lambda1_val.T@G2_x - nu_val.T@A2_x)
-            m2 = -.5*(c2 - lambda1_val.T@G3_x - nu_val.T@A3_x)
-            z = val_prob_obj_value + backoff*np.abs(val_prob_obj_value) - h_x.T@lambda1_val - q.T@lambda2_val - b_x.T@nu_val + k + 2.*m1.T@Q1_inv@m1 + 2.*m2.T@Q2_inv@m2
-            L1 = np.linalg.cholesky(.5*Q1)
-            L2 = np.linalg.cholesky(.5*Q2)
-            soc_con = [cp.SOC(t, cp.hstack((L1@(s - 2.*Q1_inv@m1),L2@(alpha - 2.*Q2_inv@m2)))), t == np.sqrt(z)]
-            val_prob_con_backoff = val_prob_con + soc_con
-            val_prob_backoff = cp.Problem(val_prob_obj_backoff, val_prob_con_backoff)
-            val_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
             s_val = s.value
-            alpha_val = alpha.value
-            
-            print(val_prob_obj.value)
-            print([c.value() for c in val_prob_con])
-                        
+            alpha_val = np.maximum(0.,alpha.value)
+                                                                        
             # compute epsilon
             epsilon_ = (.5*s_val.T@Q1@s_val + .5*alpha_val.T@Q2@alpha_val +
                 c1.T@s_val + c2.T@alpha_val +
                 (h_x - G2_x@s_val - G3_x@alpha_val).T@lambda1_val +
                 q.T@lambda2_val +
                 (b_x - A2_x@s_val - A3_x@alpha_val).T@nu_val - k)
+            print(epsilon_)
+
+            print("iter %i: %f" % (iter+1, epsilon_))
             
-            # check for convergence
-            if np.abs(epsilon_ - epsilon) <= 1e-6:
-                epsilon = epsilon_
-                break
-            
+            delta = np.abs(epsilon_ - epsilon)
             epsilon = epsilon_
-            
-            print("iter %i: %f" % (iter+1, epsilon))
-            
-            # x = cp.Variable(3)
-            # obj = cp.Minimize(0)
-            # con = [A1_x@x + A2_x@s_val + A3_x@alpha_val == b_x,
-            #        G1_x@x + G2_x@s_val + G3_x@alpha_val <= h_x,
-            #        P@x <= q.squeeze()]
-            # prob = cp.Problem(obj,con)
-            # prob.solve(solver=cp.GUROBI, verbose=True)
+
+            # check for convergence
+            if delta <= 1e-6:
+                break
+                
+            # # backoff value variables 
+            # val_prob_obj_value = val_prob_obj.value
+            # val_prob_obj_backoff = cp.Minimize(0.)
+            # Q1_inv = np.linalg.inv(Q1)
+            # Q2_inv = np.linalg.inv(Q2)
+            # m1 = -.5*(c1 - lambda1_val.T@G2_x - nu_val.T@A2_x)
+            # m2 = -.5*(c2 - lambda1_val.T@G3_x - nu_val.T@A3_x)
+            # z = val_prob_obj_value + backoff*np.abs(val_prob_obj_value) - h_x.T@lambda1_val - b_x.T@nu_val + 2.*m1.T@Q1_inv@m1 + 2.*m2.T@Q2_inv@m2
+            # L1 = np.linalg.cholesky(.5*Q1)
+            # L2 = np.linalg.cholesky(.5*Q2)
+            # soc_con = [cp.SOC(t, cp.hstack((L1@(s - 2.*Q1_inv@m1),L2@(alpha - 2.*Q2_inv@m2)))), t == np.sqrt(z)]
+            # val_prob_con_backoff = val_prob_con + soc_con
+            # val_prob_backoff = cp.Problem(val_prob_obj_backoff, val_prob_con_backoff)
+            # val_prob_backoff.solve(solver=cp.GUROBI, verbose=False)
+            # s_val = s.value
+            # alpha_val = alpha.value
         
-        return(-epsilon[0])
+        return(epsilon[0])

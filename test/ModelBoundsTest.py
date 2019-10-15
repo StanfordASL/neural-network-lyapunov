@@ -30,7 +30,7 @@ class ModelBoundsTests(unittest.TestCase):
         self.linear3 = nn.Linear(4, 1)
         self.linear3.weight.data = torch.tensor(
             [[4, 5, 6, 7]], dtype=self.dtype)
-        self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        self.linear3.bias.data = torch.tensor([-3000], dtype=self.dtype)
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                    nn.ReLU(),                                   
                                    self.linear3)
@@ -153,23 +153,17 @@ class ModelBoundsTests(unittest.TestCase):
     def test_lower_bound(self):
         sys = BallPaddleSystem.BallPaddleSystem(dt=.05)
     
-        # Q = torch.ones(3,3,dtype=sys.dtype)*0.1
         Q = torch.eye(3,dtype=sys.dtype)*0.1
         q = torch.ones(3,dtype=sys.dtype)*0.1
-        # R = torch.ones(1,1,dtype=sys.dtype)*2.
         R = torch.eye(1,dtype=sys.dtype)*2.
         r = torch.ones(1,dtype=sys.dtype)*0.1
-        # Z = torch.ones(1,1,dtype=sys.dtype)*0.01
         Z = torch.eye(1,dtype=sys.dtype)*0.01
         z = torch.ones(1,dtype=sys.dtype)*0.1
     
-        # Qt = torch.ones(3,3,dtype=sys.dtype)*0.1
         Qt = torch.eye(3,dtype=sys.dtype)*0.1
         qt = torch.ones(3,dtype=sys.dtype)*0.1
-        # Rt = torch.ones(1,1,dtype=sys.dtype)*2.
         Rt = torch.eye(1,dtype=sys.dtype)*2.
         rt = torch.ones(1,dtype=sys.dtype)*0.1
-        # Zt = torch.ones(1,1,dtype=sys.dtype)*0.01
         Zt = torch.eye(1,dtype=sys.dtype)*0.01
         zt = torch.ones(1,dtype=sys.dtype)*0.1
     
@@ -231,29 +225,45 @@ class ModelBoundsTests(unittest.TestCase):
             
         _,s_,alpha_ = value_fun_wrapper(x0)
         epsilon = mb.lower_bound(self.model, x_lo, x_up, activation_pattern, s_, np.maximum(0.,alpha_))
+        print("epsilon: %f" % epsilon)
+        
+        checked_samples = 0
+        sampled_epsilon = -np.Inf
+        for i in range(100):
+            # x0_sub = x0 + .25*(torch.rand(3, dtype=sys.dtype)*2.-1.)*(x_up - x_lo)
+            x0_sub = torch.rand(3, dtype=sys.dtype)*(x_up - x_lo) + x_lo
+            x0_sub = torch.max(torch.min(x0_sub,x_up),x_lo)
+            # x0_sub = x0
 
-        # print("epsilon: %f" % epsilon)
-        # 
-        # checked_sampled = 0
-        # for i in range(100):
-        #     x0_sub = x0 + .25*torch.rand(3, dtype=sys.dtype)*(x_up - x_lo)
-        #     x0_sub = torch.max(torch.min(x0_sub,x_up),x_lo)
-        #     activation_pattern_sub = ReLUToOptimization.ComputeReLUActivationPattern(self.model, x0_sub)
-        #     if activation_pattern_sub != activation_pattern:
-        #         continue
-        #     value_sub = None
-        #     try:
-        #         value_sub,_,_ = value_fun_wrapper(x0_sub)
-        #     except:
-        #         pass
-        #     if type(value_sub) != type(None):
-        #         z_nn_sub = self.model(x0_sub).item()
-        #         epsilon_sub = z_nn_sub - value_sub
-        #         print("sampled epsilon %f" % epsilon_sub)
-        #         self.assertLessEqual(epsilon_sub, epsilon)
-        #         checked_sampled += 1
-        # 
-        # self.assertLessEqual(5, checked_sampled)
+            activation_pattern_sub = ReLUToOptimization.ComputeReLUActivationPattern(self.model, x0_sub)
+            if activation_pattern_sub != activation_pattern:
+                continue
+            
+            value_sub = None
+            try:
+                value_sub,_,_ = value_fun_wrapper(x0_sub)
+            except:
+                pass
+                
+            if type(value_sub) != type(None):
+                z_nn_sub = self.model(x0_sub).item()
+                epsilon_sub = value_sub - z_nn_sub
+                print("(%i) sampled epsilon %f" % (i, epsilon_sub))
+                
+                # sampled_epsilon = np.maximum(sampled_epsilon, epsilon_sub)
+                
+                # if (epsilon_sub > epsilon):
+                #     print("oh oh... ")
+                #     print(x0_sub)
+                
+                # self.assertLessEqual(epsilon, epsilon_sub)
+                # checked_samples += 1
+        
+        # self.assertLessEqual(5, checked_samples)
+        
+        # print("sampled %i points" % checked_samples)
+        # print("largest sampled epsilon %f" % sampled_epsilon)
+        # print("computed epsilon %f" % epsilon)    
     
     
 if __name__ == '__main__':
