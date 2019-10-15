@@ -148,6 +148,21 @@ class SlipTest(unittest.TestCase):
         test_fun(np.array([0.1, 3, 0.5, 1]), SpringLoadedInvertedPendulum.
                  SteppingStone(1, 10, 1), np.pi / 3)
 
+    def test_can_touch_stepping_stone(self):
+        flight_state = np.array([0.1, 2, 2, 0])
+        leg_angle = np.pi / 5
+        t = self.dut.time_to_touchdown(
+            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+                -np.inf, np.inf, 0.1), leg_angle)
+        pos_x_touchdown = flight_state[0] + flight_state[2] * t\
+            + self.dut.l0 * np.sin(leg_angle)
+        self.assertTrue(self.dut.can_touch_stepping_stone(
+            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+                pos_x_touchdown - 0.1, pos_x_touchdown + 0.1, 0.1), leg_angle))
+        self.assertFalse(self.dut.can_touch_stepping_stone(
+            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+                pos_x_touchdown + 0.1, pos_x_touchdown + 0.2, 0.1), leg_angle))
+
     def test_apex_to_touchdown_gradient(self):
         def test_fun(apex_state, leg_angle):
             """
@@ -380,7 +395,9 @@ class SlipTest(unittest.TestCase):
                 self.dut.apex_map(apex_pos_x, apex_height, apex_vel_x,
                                   leg_angle)
             (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex,
-             dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex) =\
+             dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex,
+             _, _, _,
+             _, _, _) =\
                 self.dut.apex_to_apex_gradient(apex_state, leg_angle)
             if (next_apex_pos_x is None):
                 self.assertIsNone(x_next_apex)

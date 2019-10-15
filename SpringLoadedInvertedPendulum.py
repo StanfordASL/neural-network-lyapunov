@@ -158,7 +158,7 @@ class SLIP:
         If SLIP cannot reach next apex height (for example, if the current
         apex height is below 0, or during the stance phase, the mass touches
         the ground before the spring length increases to l0), then returns
-        (None, None, None)
+        (None, None, None, None)
         """
         cos_theta = np.cos(leg_angle)
         if (apex_height - self.l0 * cos_theta < 0):
@@ -289,6 +289,15 @@ class SLIP:
             flight_state[2] * t
         return t if foot_pos_x >= stepping_stone.left and\
             foot_pos_x <= stepping_stone.right else None
+
+    def can_touch_stepping_stone(self, flight_state, stepping_stone,
+                                 leg_angle):
+        """
+        Returns true if the robot can touch down on a stepping stone with the
+        given leg angle. False otherwise.
+        """
+        return self.time_to_touchdown(flight_state, stepping_stone, leg_angle)\
+            is not None
 
     def apex_to_touchdown_gradient(self, apex_state, leg_angle):
         """
@@ -560,7 +569,9 @@ class SLIP:
         @param apex_vel_x The horizontal velocity of the robot at apex.
         @param leg_angle The angle of the leg at touchdown.
         @param (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex,
-                dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex).
+                dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex,
+                dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td,
+                dx_post_lo_dx_apex, dx_post_lo_dleg_angle, x_post_lo).
         x_next_apex The next apex state (horizontal position, vertical height
         above the ground touched in this step, horizontal velocity).
         dx_next_apex_dx_apex is the gradient of the next apex state w.r.t the
@@ -572,13 +583,22 @@ class SLIP:
         apex state.
         dt_next_apex_dleg_angle is the gradient of t_next_apex w.r.t the leg
         angle.
+        x_pre_td is the state just before touch down.
+        dx_pre_td_dx_apex is the gradient of x_pre_td w.r.t the current apex
+        state.
+        dx_pre_td_dleg_angle is the gradient of x_pre_td w.r.t the leg angle
+        x_post_lo if the state just after lifting off.
+        dx_post_lo_dx_apex is the gradient of x_post_lo w.r.t the current apex
+        state.
+        dx_post_lo_dleg_angle is the gradient of x_post_lo w.r.t the leg angle.
         """
         assert(apex_state.shape == (3,))
         (dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td,
          dt_td_dx_apex, dt_td_dleg_angle, t_td) =\
             self.apex_to_touchdown_gradient(apex_state, leg_angle)
         if (dx_pre_td_dx_apex is None):
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None,\
+                None, None
         dx_post_td_dx_pre_td, dx_post_td_dleg_angle =\
             self.touchdown_transition_gradient(x_pre_td, leg_angle)
         dx_post_td_dleg_angle += dx_post_td_dx_pre_td.dot(
@@ -587,7 +607,8 @@ class SLIP:
         dx_pre_lo_dx_post_td, x_pre_lo, dt_lo_dx_post_td, t_lo =\
             self.touchdown_to_liftoff_gradient(x_post_td)
         if (dx_pre_lo_dx_post_td is None):
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None,\
+                None, None
         dx_post_lo_dx_pre_lo =\
             self.liftoff_transition_gradient(x_pre_lo)
         x_post_lo = self.liftoff_transition(x_pre_lo)
@@ -595,7 +616,8 @@ class SLIP:
          dt_next_apex_dx_post_lo, t_lo_to_apex) =\
             self.liftoff_to_apex_gradient(x_post_lo)
         if (x_next_apex is None):
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None,\
+                None, None
         dx_next_apex_dx_post_td = dx_next_apex_dx_post_lo.dot(
             dx_post_lo_dx_pre_lo.dot(dx_pre_lo_dx_post_td))
         dx_next_apex_dx_apex = dx_next_apex_dx_post_td.dot(
@@ -617,4 +639,6 @@ class SLIP:
             dx_post_td_dleg_angle) + dt_next_apex_dx_post_lo.dot(
                 dx_post_lo_dleg_angle))[0]
         return (dx_next_apex_dx_apex, dx_next_apex_dleg_angle, x_next_apex,
-                dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex)
+                dt_next_apex_dx_apex, dt_next_apex_dleg_angle, t_next_apex,
+                dx_pre_td_dx_apex, dx_pre_td_dleg_angle, x_pre_td,
+                dx_post_lo_dx_apex, dx_post_lo_dleg_angle, x_post_lo)
