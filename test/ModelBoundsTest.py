@@ -225,46 +225,45 @@ class ModelBoundsTests(unittest.TestCase):
             
         _,s_,alpha_ = value_fun_wrapper(x0)
         epsilon = mb.lower_bound(self.model, x_lo, x_up, activation_pattern, s_, np.maximum(0.,alpha_))
-        print("epsilon: %f" % epsilon)
+        # print("epsilon: %f" % epsilon)
         
-        checked_samples = 0
-        sampled_epsilon = -np.Inf
-        for i in range(100):
-            # x0_sub = x0 + .25*(torch.rand(3, dtype=sys.dtype)*2.-1.)*(x_up - x_lo)
-            x0_sub = torch.rand(3, dtype=sys.dtype)*(x_up - x_lo) + x_lo
-            x0_sub = torch.max(torch.min(x0_sub,x_up),x_lo)
-            # x0_sub = x0
-
-            activation_pattern_sub = ReLUToOptimization.ComputeReLUActivationPattern(self.model, x0_sub)
-            if activation_pattern_sub != activation_pattern:
-                continue
-            
-            value_sub = None
-            try:
-                value_sub,_,_ = value_fun_wrapper(x0_sub)
-            except:
-                pass
-                
-            if type(value_sub) != type(None):
-                z_nn_sub = self.model(x0_sub).item()
-                epsilon_sub = value_sub - z_nn_sub
-                print("(%i) sampled epsilon %f" % (i, epsilon_sub))
-                
-                # sampled_epsilon = np.maximum(sampled_epsilon, epsilon_sub)
-                
-                # if (epsilon_sub > epsilon):
-                #     print("oh oh... ")
-                #     print(x0_sub)
-                
-                # self.assertLessEqual(epsilon, epsilon_sub)
-                # checked_samples += 1
+        # checked_samples = 0
+        # sampled_epsilon = -np.Inf
+        # for i in range(10):
+        #     # x0_sub = x0 + .25*(torch.rand(3, dtype=sys.dtype)*2.-1.)*(x_up - x_lo)
+        #     x0_sub = torch.rand(3, dtype=sys.dtype)*(x_up - x_lo) + x_lo
+        #     x0_sub = torch.max(torch.min(x0_sub,x_up),x_lo)
+        #     # x0_sub = x0
+        # 
+        #     activation_pattern_sub = ReLUToOptimization.ComputeReLUActivationPattern(self.model, x0_sub)
+        #     if activation_pattern_sub != activation_pattern:
+        #         continue
+        # 
+        #     value_sub = None
+        #     try:
+        #         value_sub,_,_ = value_fun_wrapper(x0_sub)
+        #     except:
+        #         pass
+        # 
+        #     if type(value_sub) != type(None):
+        #         z_nn_sub = self.model(x0_sub).item()
+        #         epsilon_sub = value_sub - z_nn_sub
+        #         print("(%i) sampled epsilon %f" % (i, epsilon_sub))
+        # 
+        #         sampled_epsilon = np.maximum(sampled_epsilon, epsilon_sub)
+        # 
+        #         if (epsilon_sub > epsilon):
+        #             print("oh oh... ")
+        #             print(x0_sub)
+        # 
+        #         self.assertLessEqual(epsilon, epsilon_sub)
+        #         checked_samples += 1
         
         # self.assertLessEqual(5, checked_samples)
         
         # print("sampled %i points" % checked_samples)
         # print("largest sampled epsilon %f" % sampled_epsilon)
-        # print("computed epsilon %f" % epsilon)    
-    
+        # print("computed epsilon %f" % epsilon)      
     
 if __name__ == '__main__':
     unittest.main()
