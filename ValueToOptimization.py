@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 import torch
+from utils import torch_to_numpy
+import cvxpy as cp
 
 
 class ValueFunction:
 
-    def __init__(self, sys):
+    def __init__(self, sys, N):
         """
         Class to store the a value function that can be expressed as a
         Mixed-integer quadratic program.
@@ -13,6 +15,7 @@ class ValueFunction:
         """
         self.sys = sys
         self.dtype = sys.dtype
+        self.N = N
         
         self.Q = None
         self.R = None
@@ -96,7 +99,7 @@ class ValueFunction:
         if type(xN) != type(None):
             self.xN = xN.type(self.dtype)
 
-    def traj_opt_constraint(self, N):
+    def traj_opt_constraint(self):
         """
         Generates a trajectory optimization problem corresponding to the set constraints
         and objectives
@@ -124,7 +127,8 @@ class ValueFunction:
         # TODO: this needs to be rewritten with HybridLinearSystem api
         Ain1_dyn, Ain2_dyn, Ain3_dyn, Ain4_dyn, Ain5_dyn, rhs_in_dyn = self.sys.get_dyn_in()
         Aeq1_dyn, Aeq2_dyn, Aeq3_dyn, Aeq4_dyn, Aeq5_dyn, rhs_eq_dyn = self.sys.get_dyn_eq()
-        
+
+        N = self.N        
         xdim = Ain1_dyn.shape[1]
         udim = Ain2_dyn.shape[1]
         sdim = (xdim+udim)*N - xdim
@@ -240,3 +244,38 @@ class ValueFunction:
             rhs_eq = torch.cat((rhs_eq,self.xN))
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2, q3)
+            
+    def get_value_function(self):
+        """
+        return a function that can be evaluated to get the optimal cost-to-go
+        for a given initial state. Uses cvxpy in order to solve the cost-to-go
+        
+        @return V(x0) a function that takes x0, the initial state as a tensor
+        and return the associated optimal cost-to-go as a scalar
+        """
+        traj_opt = self.traj_opt_constraint()
+        (Ain1, Ain2, Ain3, rhs_in, 
+        Aeq1, Aeq2, Aeq3, rhs_eq, 
+        Q2, Q3, q2, q3) = torch_to_numpy(traj_opt)
+        
+        s = cp.Variable(Ain2.shape[1])
+        alpha = cp.Variable(Ain3.shape[1],boolean=True)
+        
+        obj = cp.Minimize(.5*cp.quad_form(s,Q2) + .5*cp.quad_form(alpha,Q3) + q2.T@s + q3.T@alpha)    
+
+        def V(x0):
+            if type(x0) == torch.Tensor:
+                x0 = x0.detach().numpy().squeeze()
+            
+            con = [
+                Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
+                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
+            ]        
+            
+            prob = cp.Problem(obj,con)
+            prob.solve(solver=cp.GUROBI, verbose=False)
+            
+            return(obj.value,s.value,alpha.value)
+        
+        return V
+        

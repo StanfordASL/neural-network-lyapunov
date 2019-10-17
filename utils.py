@@ -131,8 +131,11 @@ def torch_to_numpy(torch_array_list, squeeze=True):
     """
     numpy_array_list = []
     for A in torch_array_list:
-        numpy_array_list.append(A.detach().numpy())
-    if squeeze:
-        for i in range(len(numpy_array_list)):
-            numpy_array_list[i] = numpy_array_list[i].squeeze()
+        if type(A) == torch.Tensor:
+            if squeeze:
+                numpy_array_list.append(A.detach().numpy().squeeze())
+            else:
+                numpy_array_list.append(A.detach().numpy())
+        else:
+            numpy_array_list.append(A)
     return numpy_array_list
