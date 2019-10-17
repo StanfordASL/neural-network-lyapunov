@@ -81,7 +81,7 @@ class ValueFunction:
         x_lo ≤ x[n] ≤ x_up
         u_lo ≤ u[n] ≤ u_up
         x[0] == x0
-        x[N] == xs
+        x[N] == xN
         """
         if type(x_lo) != type(None):
             self.x_lo = x_lo.type(self.dtype)
@@ -108,7 +108,7 @@ class ValueFunction:
         x_lo ≤ x[n] ≤ x_up
         u_lo ≤ u[n] ≤ u_up
         x[0] == x0
-        x[N] == xs
+        x[N] == xN
         α[N] ∈ {0,1}
                 
         the problem is returned in our standard MIQP form so that it can easily be passed to verification functions.
