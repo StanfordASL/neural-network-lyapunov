@@ -96,3 +96,30 @@ class BallPaddleSystem:
         @return Ain1, Ain2, Ain3, Ain4, Ain5, rhs_in_dyn The coefficients as torch Tensor of self.dtype
         """
         return(self.Ain1, self.Ain2, self.Ain3, self.Ain4, self.Ain5, self.rhs_in)
+        
+    def get_simple_trajopt_cost(self):
+        """
+        Returns a set of tensors that represent the a simple cost for a trajectory
+        optimization problem. This is useful to write tests for example
+        
+        @return Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt
+        where
+        min ∑(.5 xᵀ[n] Q x[n] + .5 uᵀ[n] R u[n] + .5 αᵀ[n] Z α[n] + qᵀx[n] + rᵀu[n] + zᵀα[n])
+                + .5 xᵀ[N] Qt x[N] + .5 uᵀ[N] Rt u[N] + .5 αᵀ[N] Zt α[N] + qtᵀx[N] + rtᵀu[N] + ztᵀα[N]
+        """
+        
+        Q = torch.eye(3,dtype=self.dtype)*0.1
+        q = torch.ones(3,dtype=self.dtype)*0.2
+        R = torch.eye(1,dtype=self.dtype)*3.
+        r = torch.ones(1,dtype=self.dtype)*0.4
+        Z = torch.eye(1,dtype=self.dtype)*0.5
+        z = torch.ones(1,dtype=self.dtype)*0.6
+    
+        Qt = torch.eye(3,dtype=self.dtype)*0.7
+        qt = torch.ones(3,dtype=self.dtype)*0.8
+        Rt = torch.eye(1,dtype=self.dtype)*9.
+        rt = torch.ones(1,dtype=self.dtype)*0.11
+        Zt = torch.eye(1,dtype=self.dtype)*0.12
+        zt = torch.ones(1,dtype=self.dtype)*0.13
+        
+        return(Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)
