@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 import torch
+from utils import torch_to_numpy
+import cvxpy as cp
 
 
 class ValueFunction:
 
-    def __init__(self, sys):
+    def __init__(self, sys, N):
         """
         Class to store the a value function that can be expressed as a
         Mixed-integer quadratic program.
@@ -13,6 +15,7 @@ class ValueFunction:
         """
         self.sys = sys
         self.dtype = sys.dtype
+        self.N = N
         
         self.Q = None
         self.R = None
@@ -115,7 +118,7 @@ class ValueFunction:
         if type(alphatraj) != type(None):
             self.alphatraj = alphatraj.type(self.dtype)
 
-    def traj_opt_constraint(self, N):
+    def traj_opt_constraint(self):
         """
         Generates a trajectory optimization problem corresponding to the set constraints
         and objectives
@@ -139,6 +142,7 @@ class ValueFunction:
              
         @return Ain1, Ain2, Ain3, rhs_eq, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2, q3, c
         """
+        N = self.N
         if type(self.xtraj) != type(None):
             assert(self.xtraj.shape[1] == N-1)
         if type(self.utraj) != type(None):
@@ -262,21 +266,44 @@ class ValueFunction:
         # state and input constraints
         # x_lo ≤ x[n] ≤ x_up
         # u_lo ≤ u[n] ≤ u_up
-        if type(self.x_lo) == type(None):
-            self.x_lo = torch.ones(xdim,dtype=self.dtype) * -float("Inf")
-        if type(self.x_up) == type(None):
-            self.x_up = torch.ones(xdim,dtype=self.dtype) * float("Inf")
-        if type(self.u_lo) == type(None):
-            self.u_lo = torch.ones(udim,dtype=self.dtype) * -float("Inf")
-        if type(self.u_up) == type(None):
-            self.u_up = torch.ones(udim,dtype=self.dtype) * float("Inf")
-        Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
-        rhs_up = torch.cat((self.x_up,self.u_up)).repeat(N)
-        Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
-        rhs_lo = -torch.cat((self.x_lo,self.u_lo)).repeat(N)
+        if type(self.x_up) != type(None) and type(self.u_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            rhs_up = torch.cat((self.x_up,self.u_up)).repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*(xdim+udim),alphadim,dtype=self.dtype)),0)
+        elif type(self.x_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Aup = Aup[torch.cat((torch.ones(xdim),torch.zeros(udim))).repeat(N).type(torch.bool),:]
+            rhs_up = self.x_up.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*xdim,alphadim,dtype=self.dtype)),0)
+        elif type(self.u_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Aup = Aup[torch.cat((torch.zeros(xdim),torch.ones(udim))).repeat(N).type(torch.bool),:]
+            rhs_up = self.u_up.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*udim,alphadim,dtype=self.dtype)),0)
+        else:
+            Aup = torch.zeros(0,N*(xdim+udim),dtype=self.dtype)
+            rhs_up = torch.zeros(0,dtype=self.dtype)
+            
+        if type(self.x_lo) != type(None) and type(self.u_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            rhs_lo = -torch.cat((self.x_lo,self.u_lo)).repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*(xdim+udim),alphadim,dtype=self.dtype)),0)
+        elif type(self.x_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Alo = Alo[torch.cat((torch.ones(xdim),torch.zeros(udim))).repeat(N).type(torch.bool),:]
+            rhs_lo = -self.x_lo.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*xdim,alphadim,dtype=self.dtype)),0)
+        elif type(self.u_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Alo = Alo[torch.cat((torch.zeros(xdim),torch.ones(udim))).repeat(N).type(torch.bool),:]
+            rhs_lo = -self.u_lo.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*udim,alphadim,dtype=self.dtype)),0)
+        else:
+            Alo = torch.zeros(0,N*(xdim+udim),dtype=self.dtype)
+            rhs_lo = torch.zeros(0,dtype=self.dtype)
+        
         Ain1 = torch.cat((Ain1,Aup[:,:xdim],Alo[:,:xdim]),0)
         Ain2 = torch.cat((Ain2,Aup[:,xdim:],Alo[:,xdim:]),0)
-        Ain3 = torch.cat((Ain3,torch.zeros(2*N*(xdim+udim),alphadim,dtype=self.dtype)),0)
         rhs_in = torch.cat((rhs_in,rhs_up,rhs_lo))
         
         # initial state constraints
@@ -297,3 +324,37 @@ class ValueFunction:
             rhs_eq = torch.cat((rhs_eq,self.xN))
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2, q3, c)
+            
+    def get_value_function(self):
+        """
+        return a function that can be evaluated to get the optimal cost-to-go
+        for a given initial state. Uses cvxpy in order to solve the cost-to-go
+        
+        @return V a function handle that takes x0, the initial state as a tensor
+        and returns the associated optimal cost-to-go as a scalar
+        """
+        traj_opt = self.traj_opt_constraint()
+        (Ain1, Ain2, Ain3, rhs_in, 
+        Aeq1, Aeq2, Aeq3, rhs_eq, 
+        Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+        
+        s = cp.Variable(Ain2.shape[1])
+        alpha = cp.Variable(Ain3.shape[1],boolean=True)
+        
+        obj = cp.Minimize(.5*cp.quad_form(s,Q2) + .5*cp.quad_form(alpha,Q3) + q2.T@s + q3.T@alpha + c)
+
+        def V(x0):
+            if type(x0) == torch.Tensor:
+                x0 = x0.detach().numpy().squeeze()
+            
+            con = [
+                Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
+                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
+            ]        
+            
+            prob = cp.Problem(obj,con)
+            prob.solve(solver=cp.GUROBI, verbose=False)
+            
+            return(obj.value,s.value,alpha.value)
+        
+        return V

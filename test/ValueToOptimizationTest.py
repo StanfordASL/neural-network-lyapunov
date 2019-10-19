@@ -11,8 +11,9 @@ from utils import torch_to_numpy
 
 class ValueToOptimizationTest(unittest.TestCase):
     def test_trajopt_x0xN(self):
+        N = 20
         sys = BallPaddleSystem.BallPaddleSystem(dt=.01)
-        vf = ValueToOptimization.ValueFunction(sys)
+        vf = ValueToOptimization.ValueFunction(sys, N)
         
         [Q,R,Z,q,r,z,Qt,Rt,Zt,qt,rt,zt] = sys.get_simple_trajopt_cost()
         vf.set_cost(Q=Q,R=R,Z=Z,q=q,r=r,z=z)
@@ -22,8 +23,7 @@ class ValueToOptimizationTest(unittest.TestCase):
         xN = torch.Tensor([0.,.075,0.])
         vf.set_constraints(x0=x0,xN=xN)
 
-        N = 20
-        traj_opt = vf.traj_opt_constraint(N)
+        traj_opt = vf.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in, 
         Aeq1, Aeq2, Aeq3, rhs_eq, 
         Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
@@ -57,8 +57,9 @@ class ValueToOptimizationTest(unittest.TestCase):
             self.assertAlmostEqual(xtraj[i,-1],xN[i])
 
     def test_trajopt_obj(self):
+        N = 3
         sys = BallPaddleSystem.BallPaddleSystem(dt=.01)
-        vf = ValueToOptimization.ValueFunction(sys)
+        vf = ValueToOptimization.ValueFunction(sys, N)
         
         [Q,R,Z,q,r,z,Qt,Rt,Zt,qt,rt,zt] = sys.get_simple_trajopt_cost()
         vf.set_cost(Q=Q,R=R,Z=Z,q=q,r=r,z=z)
@@ -68,10 +69,9 @@ class ValueToOptimizationTest(unittest.TestCase):
         xN = torch.Tensor([0.,.075,0.])
         vf.set_constraints(x0=x0,xN=xN)
 
-        N = 3
         (Ain1, Ain2, Ain3, rhs_in, 
         Aeq1, Aeq2, Aeq3, rhs_eq, 
-        Q2, Q3, q2, q3, c) = vf.traj_opt_constraint(N)
+        Q2, Q3, q2, q3, c) = vf.traj_opt_constraint()
         
         x = torch.rand(3,N-1).type(sys.dtype)
         u0 = torch.rand(1).type(sys.dtype)
@@ -105,11 +105,52 @@ class ValueToOptimizationTest(unittest.TestCase):
 
         self.assertAlmostEqual(obj_exp.item(), obj.item())
         
-    def test_trajopt_obj_trajsetpoint(self):
+    def test_trajopt_lim(self):
+        N = 20
         sys = BallPaddleSystem.BallPaddleSystem(dt=.01)
-        vf = ValueToOptimization.ValueFunction(sys)
+        vf = ValueToOptimization.ValueFunction(sys, N)
+                
+        vf.set_cost(q=torch.ones(3),r=-torch.ones(1))
 
+        x_lo = torch.rand(3)
+        u_up = torch.rand(1)
+        vf.set_constraints(x_lo=x_lo,u_up=u_up)
+
+        traj_opt = vf.traj_opt_constraint()
+        (Ain1, Ain2, Ain3, rhs_in, 
+        Aeq1, Aeq2, Aeq3, rhs_eq, 
+        Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+    
+        x = cp.Variable(Ain1.shape[1])
+        s = cp.Variable(Ain2.shape[1])
+        z = cp.Variable(Ain3.shape[1],boolean=True)
+
+        obj = cp.Minimize(.5*cp.quad_form(s,Q2) + .5*cp.quad_form(z,Q3) + q2.T@s + q3.T@z + c)    
+        con = [
+            Ain1@x + Ain2@s + Ain3@z <= rhs_in,
+            Aeq1@x + Aeq2@s + Aeq3@z == rhs_eq,
+        ]
+        
+        prob = cp.Problem(obj,con)
+        prob.solve(solver=cp.GUROBI, verbose=False)
+    
+        traj = np.hstack((x.value,s.value))
+        traj = np.reshape(traj,(-1,4)).T
+    
+        xtraj = traj[:3,:]
+        utraj = traj[3:,:]
+    
+        for i in range(N):
+            for j in range(3):
+                self.assertLessEqual(x_lo[j],xtraj[j,i])
+            for j in range(1):
+                self.assertLessEqual(utraj[j,i],u_up[j])
+
+    def test_trajopt_obj_trajsetpoint(self):
         N = 5
+        sys = BallPaddleSystem.BallPaddleSystem(dt=.01)
+        vf = ValueToOptimization.ValueFunction(sys, N)
+
         [Q,R,Z,q,r,z,Qt,Rt,Zt,qt,rt,zt] = sys.get_simple_trajopt_cost()
         utraj0 = torch.rand(1,1).type(sys.dtype)
         utraj = torch.rand(1,N-1).type(sys.dtype)
@@ -126,7 +167,7 @@ class ValueToOptimizationTest(unittest.TestCase):
 
         (Ain1, Ain2, Ain3, rhs_in, 
         Aeq1, Aeq2, Aeq3, rhs_eq, 
-        Q2, Q3, q2, q3, c) = vf.traj_opt_constraint(N)
+        Q2, Q3, q2, q3, c) = vf.traj_opt_constraint()
                
         x = torch.rand(3,N-1).type(sys.dtype)
         u0 = torch.rand(1).type(sys.dtype)
