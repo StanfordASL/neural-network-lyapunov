@@ -19,7 +19,8 @@ class ModelBounds:
         cost-to-go.
         
         @param model The ReLU neural network to be verified
-        @param Refer to the parameters of ValueFunction.traj_opt_x0xN
+        @param valu_fun An instance of ValueFunction that corresponds 
+        to the value function to be verified
         """
         self.model = model
         self.value_fun = value_fun        

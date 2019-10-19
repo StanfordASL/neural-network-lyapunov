@@ -209,21 +209,44 @@ class ValueFunction:
         # state and input constraints
         # x_lo ≤ x[n] ≤ x_up
         # u_lo ≤ u[n] ≤ u_up
-        if type(self.x_lo) == type(None):
-            self.x_lo = torch.ones(xdim,dtype=self.dtype) * -float("Inf")
-        if type(self.x_up) == type(None):
-            self.x_up = torch.ones(xdim,dtype=self.dtype) * float("Inf")
-        if type(self.u_lo) == type(None):
-            self.u_lo = torch.ones(udim,dtype=self.dtype) * -float("Inf")
-        if type(self.u_up) == type(None):
-            self.u_up = torch.ones(udim,dtype=self.dtype) * float("Inf")
-        Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
-        rhs_up = torch.cat((self.x_up,self.u_up)).repeat(N)
-        Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
-        rhs_lo = -torch.cat((self.x_lo,self.u_lo)).repeat(N)
+        if type(self.x_up) != type(None) and type(self.u_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            rhs_up = torch.cat((self.x_up,self.u_up)).repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*(xdim+udim),alphadim,dtype=self.dtype)),0)
+        elif type(self.x_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Aup = Aup[torch.cat((torch.ones(xdim),torch.zeros(udim))).repeat(N).type(torch.bool),:]
+            rhs_up = self.x_up.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*xdim,alphadim,dtype=self.dtype)),0)
+        elif type(self.u_up) != type(None):
+            Aup = torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Aup = Aup[torch.cat((torch.zeros(xdim),torch.ones(udim))).repeat(N).type(torch.bool),:]
+            rhs_up = self.u_up.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*udim,alphadim,dtype=self.dtype)),0)
+        else:
+            Aup = torch.zeros(0,N*(xdim+udim),dtype=self.dtype)
+            rhs_up = torch.zeros(0,dtype=self.dtype)
+            
+        if type(self.x_lo) != type(None) and type(self.u_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            rhs_lo = -torch.cat((self.x_lo,self.u_lo)).repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*(xdim+udim),alphadim,dtype=self.dtype)),0)
+        elif type(self.x_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Alo = Alo[torch.cat((torch.ones(xdim),torch.zeros(udim))).repeat(N).type(torch.bool),:]
+            rhs_lo = -self.x_lo.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*xdim,alphadim,dtype=self.dtype)),0)
+        elif type(self.u_lo) != type(None):
+            Alo = -torch.eye(N*(xdim+udim),N*(xdim+udim),dtype=self.dtype)
+            Alo = Alo[torch.cat((torch.zeros(xdim),torch.ones(udim))).repeat(N).type(torch.bool),:]
+            rhs_lo = -self.u_lo.repeat(N)
+            Ain3 = torch.cat((Ain3,torch.zeros(N*udim,alphadim,dtype=self.dtype)),0)
+        else:
+            Alo = torch.zeros(0,N*(xdim+udim),dtype=self.dtype)
+            rhs_lo = torch.zeros(0,dtype=self.dtype)
+        
         Ain1 = torch.cat((Ain1,Aup[:,:xdim],Alo[:,:xdim]),0)
         Ain2 = torch.cat((Ain2,Aup[:,xdim:],Alo[:,xdim:]),0)
-        Ain3 = torch.cat((Ain3,torch.zeros(2*N*(xdim+udim),alphadim,dtype=self.dtype)),0)
         rhs_in = torch.cat((rhs_in,rhs_up,rhs_lo))
         
         # initial state constraints
@@ -250,7 +273,7 @@ class ValueFunction:
         return a function that can be evaluated to get the optimal cost-to-go
         for a given initial state. Uses cvxpy in order to solve the cost-to-go
         
-        @return V(x0) a function that takes x0, the initial state as a tensor
+        @return V a function handle that takes x0, the initial state as a tensor
         and return the associated optimal cost-to-go as a scalar
         """
         traj_opt = self.traj_opt_constraint()
