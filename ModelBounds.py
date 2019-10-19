@@ -55,7 +55,7 @@ class ModelBounds:
         a_out, b_out, z_lo, z_up) = self.relu_opt.output_constraint(model, x_lo, x_up)
         (Ain1, Ain2, Ain3, rhs_in, 
         Aeq1, Aeq2, Aeq3, rhs_eq, 
-        Q2_val, Q3_val, q2_val, q3_val) = self.traj_opt
+        Q2_val, Q3_val, q2_val, q3_val, c) = self.traj_opt
 
         # x size equal in both program
         assert(Pin1.shape[1] == Ain1.shape[1])
@@ -128,6 +128,6 @@ class ModelBounds:
         q2 = torch.zeros(num_gamma, dtype=self.dtype)
         q2[alpha_index_s:alpha_index_e] = q3_val
 
-        k = -b_out
+        k = c - b_out
 
         return(Q1,Q2,q1,q2,k,G1,G2,h,A1,A2,b)
