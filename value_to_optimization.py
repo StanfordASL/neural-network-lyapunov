@@ -406,3 +406,36 @@ class ValueFunction:
             return(obj.value, s.value, alpha.value)
 
         return V
+
+    def get_sample_grid(self, x_lo, x_up, dims):
+        """
+        generates a uniformly sampled grid of optimal cost-to-go samples for this value function
+        
+        @param x_lo the lower bound of the sample grid as a tensor
+        @param x_up the upper bound of the sample grid as a tensor
+        @param dims the dimensions of the grid as a list of integers (of same dimension as x_lo and x_up)
+        
+        @return x_samples a tensor with each row corresponding to an x sample
+        @return v_samples a tensor with each row corresponding to the value associated with the matching row in x_samples
+        """
+        assert(len(x_lo) == len(x_up))
+        assert(len(x_lo) == len(dims))
+        
+        dim_samples = []
+        for i in range(len(x_lo)):
+            dim_samples.append(torch.linspace(x_lo[i],x_up[i],dims[i]).type(self.dtype))
+        grid = torch.meshgrid(dim_samples)
+        x_samples_all = torch.cat([g.reshape(-1,1) for g in grid],axis=1)
+                
+        x_samples = torch.zeros((0,len(x_lo)),dtype=self.dtype)
+        y_samples = torch.zeros((0,1),dtype=self.dtype)
+        
+        V = self.get_value_function()
+        for i in range(x_samples_all.shape[0]):
+            x = x_samples_all[i,:]
+            v = V(x)
+            if type(v[0]) != type(None):
+                x_samples = torch.cat((x_samples,x.unsqueeze(0)),axis=0)
+                y_samples = torch.cat((y_samples,torch.Tensor([[v[0]]]).type(self.dtype)),axis=0)
+                
+        return(x_samples,y_samples)
