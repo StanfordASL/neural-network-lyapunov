@@ -107,13 +107,19 @@ class ReLUFreePattern:
                     self.num_relu_units,
                     self.num_relu_units + layer.weight.data.shape[0])))
                 self.num_relu_units += layer.weight.data.shape[0]
+                self.last_layer_is_relu = False
                 if layer_count == 0:
                     self.x_size = layer.weight.data.shape[1]
                 layer_count += 1
+            elif (isinstance(layer, nn.ReLU)):
+                self.last_layer_is_relu = True
+            else:
+                raise Exception("Only accept linear or relu layer")
 
-        # The last linear layer is not connected to a ReLU layer.
-        self.num_relu_units -= len(self.relu_unit_index[-1])
-        self.relu_unit_index = self.relu_unit_index[:-1]
+        if not self.last_layer_is_relu:
+            # The last linear layer is not connected to a ReLU layer.
+            self.num_relu_units -= len(self.relu_unit_index[-1])
+            self.relu_unit_index = self.relu_unit_index[:-1]
 
     def output_constraint(self, model, x_lo, x_up):
         """
@@ -302,7 +308,9 @@ class ReLUFreePattern:
                             eq_constraint_count += 1
 
                 else:
-                    # output layer.
+                    # This is for the output layer when the output layer
+                    # doesn't have a ReLU unit.
+                    assert(not self.last_layer_is_relu)
                     a_out = torch.zeros((self.num_relu_units, 1),
                                         dtype=self.dtype)
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
@@ -323,6 +331,10 @@ class ReLUFreePattern:
                         torch.tensor(0., dtype=self.dtype))
 
                 layer_count += 1
+        if self.last_layer_is_relu:
+            a_out = torch.zeros((self.num_relu_units, 1), dtype=self.dtype)
+            a_out[-1] = 1
+            b_out = 0
         Ain1 = Ain1[:ineq_constraint_count]
         Ain2 = Ain2[:ineq_constraint_count]
         Ain3 = Ain3[:ineq_constraint_count]
@@ -404,8 +416,13 @@ class ReLUFreePattern:
         written as
         ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... *
                       diag(β₀) * W₀
-        This is a multilinear function of β, and we will introduce new binary
-        variable α to represent the product of β.
+        if the output is not connected to a ReLU unit. If the output is
+        connected to a ReLU unit, then we multiply then
+        β = [β₀; β₁; ...; βₙ₋₁; βₙ], and the gradient is
+        ∂ReLU(x)/∂x = βₙ * wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ... *
+                      diag(β₀) * W₀
+        In either case, the gradient is a multilinear function of β, and we
+        will introduce new binary variable α to represent the product of β.
         We define α[i₀][i₁]...[iₙ₋₁]=β₀[i₀]*β₁[i₁]*...*βₙ₋₁[iₙ₋₁] and the
         gradient ∂ReLU(x)/∂x could be written as a linear function of α.
         To impose the constraint that α is the product of β, we introduce the
@@ -498,6 +515,21 @@ class ReLUFreePattern:
 
             elif (isinstance(layer, nn.ReLU)):
                 layer_count += 1
+
+        if self.last_layer_is_relu:
+            # Now append 0 to the end of the beta index (the last layer has
+            # only one ReLU unit, so its index is always 0).
+            queue_size = layer_linear_unit_gradients.qsize()
+            last_layer_linear_unit_gradient_count = 0
+            while (last_layer_linear_unit_gradient_count < queue_size):
+                last_layer_linear_unit_gradient =\
+                    layer_linear_unit_gradients.get()
+                last_layer_linear_unit_gradient_count += 1
+                linear_unit_gradient = LinearUnitGradient(
+                    last_layer_linear_unit_gradient.
+                    activated_relu_indices + (0,),
+                    last_layer_linear_unit_gradient.gradient)
+                layer_linear_unit_gradients.put(linear_unit_gradient)
 
         # Now loop through layer_linear_unit_gradients, fill in the matrix M,
         # and add the linear equality constraint B1 * α + B2 * β ≤ d
