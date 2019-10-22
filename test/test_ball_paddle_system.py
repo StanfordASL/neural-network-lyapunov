@@ -79,9 +79,7 @@ class BallPaddleSystemSim(unittest.TestCase):
         rhs_in = rhs_in.detach().numpy()
 
         g = sys.g
-        M = sys.M
         dt = sys.dt
-        cr = sys.cr
 
         # free falling
         zp, zb, zbdot, u, zpp, zbp, zbdotp, up, a = [0., 1., 0., 0.,
@@ -140,11 +138,6 @@ class BallPaddleSystemSim(unittest.TestCase):
         Ain4 = Ain4.detach().numpy()
         Ain5 = Ain5.detach().numpy()
         rhs_in = rhs_in.detach().numpy()
-
-        g = sys.g
-        M = sys.M
-        dt = sys.dt
-        cr = sys.cr
 
         N = 50
         x = cp.Variable((3, N))
