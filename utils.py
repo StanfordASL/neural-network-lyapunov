@@ -114,7 +114,7 @@ def compute_numerical_gradient(fun, x, dx=1e-7):
         y_minus = fun(x_minus)
         if (grad is None):
             grad = np.zeros((y_plus.size, x.size))
-        grad[:, i:i+1] = (y_plus - y_minus).reshape((y_plus.size, 1))\
+        grad[:, i:i + 1] = (y_plus - y_minus).reshape((y_plus.size, 1))\
             / (2 * dx)
     return grad
 
@@ -131,7 +131,7 @@ def torch_to_numpy(torch_array_list, squeeze=True):
     """
     numpy_array_list = []
     for A in torch_array_list:
-        if type(A) == torch.Tensor:
+        if isinstance(A, torch.Tensor):
             if squeeze:
                 numpy_array_list.append(A.detach().numpy().squeeze())
             else:
@@ -139,3 +139,36 @@ def torch_to_numpy(torch_array_list, squeeze=True):
         else:
             numpy_array_list.append(A)
     return numpy_array_list
+
+
+def train_model(model, inputs, labels, batch_size=100, num_epoch=1000):
+    """
+    trains a pytorch model with an L2 loss function using the
+    Adam training algorithm
+
+    @param model the pytorch model to train
+    @param input the training data
+    @param label the label corresponding to the training data
+    @param num_epoch the number of epochs
+    """
+    loss_fn = torch.nn.MSELoss(reduction="sum")
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    device = next(model.parameters()).device
+
+    data_set = torch.utils.data.TensorDataset(inputs, labels)
+    data_loader = torch.utils.data.DataLoader(
+        data_set, batch_size=batch_size, shuffle=True)
+
+    for epoch in range(num_epoch):
+        for batch_data, batch_label in data_loader:
+            batch_data, batch_label = batch_data.to(
+                device), batch_label.to(device)
+            y_pred = model(batch_data)
+            loss = loss_fn(y_pred, batch_label) / batch_size
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            # if epoch % 10 == 0:
+            #     print(loss)
+
+    return model
