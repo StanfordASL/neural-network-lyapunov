@@ -1,11 +1,11 @@
-import DoubleIntegrator
-from context import ControlLyapunov
+import double_integrator
+from context import control_lyapunov
 import torch.nn as nn
 import torch
 import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import axes3d
+from mpl_toolkits.mplot3d import Axes3D # noqa
 
 """
 This file exercise whole control lyapunov workflow on a toy double integrator
@@ -39,7 +39,7 @@ def generate_cost_to_go_mesh(num_samples, x_lo, x_up):
     x_samples = np.vstack((np.reshape(pos_mesh, -1), np.reshape(vel_mesh, -1)))
     Q = torch.tensor([[1, 0], [0, 10]], dtype=torch.float64)
     R = torch.tensor(2, dtype=torch.float64)
-    (K, P) = DoubleIntegrator.double_integrator_lqr(Q, R)
+    (K, P) = double_integrator.double_integrator_lqr(Q, R)
 
     cost_samples = (np.sum((P.numpy().dot(x_samples))
                            * x_samples, axis=0)).reshape(1, -1)
@@ -78,9 +78,9 @@ def relu_training(num_samples, x_lo, x_up):
 
 def verify_control_lyapunov(model, x_lo, x_up):
     dtype = torch.float64
-    verifier = ControlLyapunov.ControlLyapunovFreeActivationPattern(
+    verifier = control_lyapunov.ControlLyapunovFreeActivationPattern(
         model, dtype)
-    (A_dyn, B_dyn) = DoubleIntegrator.double_integrator_dynamics(dtype)
+    (A_dyn, B_dyn) = double_integrator.double_integrator_dynamics(dtype)
     d_dyn = torch.tensor([[0], [0]], dtype=dtype)
     u_vertices = torch.tensor([[-10, 10]], dtype=dtype)
 

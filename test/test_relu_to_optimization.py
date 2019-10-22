@@ -1,4 +1,4 @@
-from context import ReLUToOptimization
+from context import relu_to_optimization
 import unittest
 import numpy as np
 import torch
@@ -30,7 +30,7 @@ class TestReLU(unittest.TestCase):
 
     def test_compute_relu_activation_pattern(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
-        activation_pattern = ReLUToOptimization.ComputeReLUActivationPattern(
+        activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
             self.model, x)
         self.assertEqual(len(activation_pattern), 2)
         self.assertEqual(len(activation_pattern[0]), 3)
@@ -45,9 +45,9 @@ class TestReLU(unittest.TestCase):
 
     def test_relu_given_activation_pattern(self):
         def test_relu_given_activation_pattern_util(self, x):
-            activation_pattern = ReLUToOptimization.\
+            activation_pattern = relu_to_optimization.\
                 ComputeReLUActivationPattern(self.model, x)
-            (g, h, P, q) = ReLUToOptimization.ReLUGivenActivationPattern(
+            (g, h, P, q) = relu_to_optimization.ReLUGivenActivationPattern(
                 self.model, 2, activation_pattern, self.dtype)
             output_expected = self.model.forward(x)
             output = g.T @ x.reshape((2, 1)) + h
@@ -64,8 +64,8 @@ class TestReLU(unittest.TestCase):
             self, torch.tensor([-3, -4], dtype=self.dtype))
 
     def test_relu_free_pattern_constructor(self):
-        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model,
-                                                               self.dtype)
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model,
+                                                                 self.dtype)
         self.assertEqual(len(relu_free_pattern.relu_unit_index), 2)
         self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
         self.assertListEqual(
@@ -73,8 +73,8 @@ class TestReLU(unittest.TestCase):
         self.assertEqual(relu_free_pattern.num_relu_units, 7)
 
     def test_relu_free_pattern_output_constraint(self):
-        relu_free_pattern = ReLUToOptimization.ReLUFreePattern(self.model,
-                                                               self.dtype)
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model,
+                                                                 self.dtype)
         x_lo = torch.tensor([-1, -2], dtype=self.dtype)
         x_up = torch.tensor([2, 3], dtype=self.dtype)
         (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
@@ -180,7 +180,7 @@ class TestReLU(unittest.TestCase):
         test_input_x(torch.tensor([1.5, -0.8], dtype=self.dtype))
 
     def test_compute_alpha_index(self):
-        relu_free_pattern = ReLUToOptimization.\
+        relu_free_pattern = relu_to_optimization.\
             ReLUFreePattern(self.model, self.dtype)
         self.assertEqual(relu_free_pattern.compute_alpha_index((0, 0)), 0)
         self.assertEqual(relu_free_pattern.compute_alpha_index((0, 1)), 1)
@@ -196,7 +196,7 @@ class TestReLU(unittest.TestCase):
         self.assertEqual(relu_free_pattern.compute_alpha_index((2, 3)), 11)
 
     def test_output_gradient(self):
-        relu_free_pattern = ReLUToOptimization.\
+        relu_free_pattern = relu_to_optimization.\
             ReLUFreePattern(self.model, self.dtype)
         (M, B1, B2, d) = relu_free_pattern.output_gradient(self.model)
         num_alpha = 12
@@ -215,7 +215,7 @@ class TestReLU(unittest.TestCase):
             for i1 in range(4):
                 activation_pattern[1] = [False, False, False, False]
                 activation_pattern[1][i1] = True
-                (g, _, _, _) = ReLUToOptimization.ReLUGivenActivationPattern(
+                (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
                     self.model, 2, activation_pattern, self.dtype)
                 alpha_index = relu_free_pattern.compute_alpha_index((i0, i1))
                 self.assertTrue(

@@ -3,7 +3,7 @@ import cvxpy as cp
 import numpy as np
 import torch
 
-import ReLUToOptimization
+import relu_to_optimization
 
 
 class ControlLyapunovFixedActivationPattern:
@@ -82,7 +82,7 @@ class ControlLyapunovFreeActivationPattern:
         """
         self.model = model
         self.dtype = dtype
-        self.relu_free_pattern = ReLUToOptimization.\
+        self.relu_free_pattern = relu_to_optimization.\
             ReLUFreePattern(self.model, self.dtype)
 
     def generate_program_verify_continuous_affine_system(self, A_dyn, B_dyn,

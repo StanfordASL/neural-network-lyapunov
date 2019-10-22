@@ -1,4 +1,4 @@
-from context import ControlLyapunov
+from context import control_lyapunov
 
 import unittest
 import numpy as np
@@ -17,7 +17,7 @@ class TestControlLyapunovFixedActivationPattern(unittest.TestCase):
         B = np.array([2, 3]).reshape((2, 1))
         d = np.array([3, 4]).reshape(2, 1)
         u_vertices = np.array([-1, 1]).reshape((1, 2))
-        dut = ControlLyapunov.ControlLyapunovFixedActivationPattern(
+        dut = control_lyapunov.ControlLyapunovFixedActivationPattern(
             g, P, q, A, B, d, u_vertices)
         prob = dut.construct_program()
         prob.solve()
@@ -48,7 +48,7 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                    nn.ReLU(),
                                    self.linear3)
-        self.dut = ControlLyapunov.ControlLyapunovFreeActivationPattern(
+        self.dut = control_lyapunov.ControlLyapunovFreeActivationPattern(
             self.model, self.dtype)
 
     def test_generate_program_verify_continuous_affine_system(self):
