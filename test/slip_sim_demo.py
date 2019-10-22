@@ -1,8 +1,7 @@
 import unittest
 import numpy as np
-import matplotlib.pyplot as plt
 
-from context import SpringLoadedInvertedPendulum
+from context import spring_loaded_inverted_pendulum
 
 
 class SlipSimulationTest(unittest.TestCase):
@@ -12,7 +11,7 @@ class SlipSimulationTest(unittest.TestCase):
         gravity = 9.81
         dimensionless_spring_constant = 10.7
         k = dimensionless_spring_constant * mass * gravity / l0
-        self.dut = SpringLoadedInvertedPendulum.SLIP(mass, l0, k, gravity)
+        self.dut = spring_loaded_inverted_pendulum.SLIP(mass, l0, k, gravity)
 
     def test_sim(self):
         x0 = np.array([0, 1, 3., 0])

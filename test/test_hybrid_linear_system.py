@@ -1,6 +1,6 @@
 import torch
 import unittest
-from context import HybridLinearSystem
+from context import hybrid_linear_system
 
 
 class HybridLinearSystemTest(unittest.TestCase):
@@ -8,14 +8,14 @@ class HybridLinearSystemTest(unittest.TestCase):
         pass
 
     def test_constructor(self):
-        dut = HybridLinearSystem.HybridLinearSystem(3, 2, torch.float64)
+        dut = hybrid_linear_system.HybridLinearSystem(3, 2, torch.float64)
         self.assertEqual(dut.x_dim, 3)
         self.assertEqual(dut.u_dim, 2)
         self.assertEqual(dut.dtype, torch.float64)
         self.assertEqual(dut.num_modes, 0)
 
     def test_add_mode(self):
-        dut = HybridLinearSystem.HybridLinearSystem(2, 1, torch.float64)
+        dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
         A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
         B0 = torch.tensor([[2], [3]], dtype=dut.dtype)
         c0 = torch.tensor([[-1], [2]], dtype=dut.dtype)
@@ -26,7 +26,7 @@ class HybridLinearSystemTest(unittest.TestCase):
         self.assertEqual(dut.num_modes, 1)
 
     def test_mixed_integer_constraints(self):
-        dut = HybridLinearSystem.HybridLinearSystem(2, 1, torch.float64)
+        dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
         A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
         B0 = torch.tensor([[2], [3]], dtype=dut.dtype)
         c0 = torch.tensor([[-1], [2]], dtype=dut.dtype)

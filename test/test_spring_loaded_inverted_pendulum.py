@@ -1,5 +1,5 @@
 from context import utils
-from context import SpringLoadedInvertedPendulum
+from context import spring_loaded_inverted_pendulum
 from scipy.integrate import solve_ivp
 import numpy as np
 import unittest
@@ -13,7 +13,7 @@ class SlipTest(unittest.TestCase):
         gravity = 9.81
         dimensionless_spring_constant = 10.7
         k = dimensionless_spring_constant * mass * gravity / l0
-        self.dut = SpringLoadedInvertedPendulum.SLIP(mass, l0, k, gravity)
+        self.dut = spring_loaded_inverted_pendulum.SLIP(mass, l0, k, gravity)
 
     def test_touchdown_transition(self):
         def test_fun(pre_state):
@@ -141,26 +141,26 @@ class SlipTest(unittest.TestCase):
                     self.assertFalse(foot_pos_x <= stepping_stone.right and
                                      foot_pos_x >= stepping_stone.left)
 
-        test_fun(np.array([0.1, 3, 0.5, 1]), SpringLoadedInvertedPendulum.
+        test_fun(np.array([0.1, 3, 0.5, 1]), spring_loaded_inverted_pendulum.
                  SteppingStone(-np.inf, np.inf, 0), np.pi / 3)
-        test_fun(np.array([0.1, 3, 0.5, 1]), SpringLoadedInvertedPendulum.
+        test_fun(np.array([0.1, 3, 0.5, 1]), spring_loaded_inverted_pendulum.
                  SteppingStone(0, 1, 0), np.pi / 3)
-        test_fun(np.array([0.1, 3, 0.5, 1]), SpringLoadedInvertedPendulum.
+        test_fun(np.array([0.1, 3, 0.5, 1]), spring_loaded_inverted_pendulum.
                  SteppingStone(1, 10, 1), np.pi / 3)
 
     def test_can_touch_stepping_stone(self):
         flight_state = np.array([0.1, 2, 2, 0])
         leg_angle = np.pi / 5
         t = self.dut.time_to_touchdown(
-            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+            flight_state, spring_loaded_inverted_pendulum.SteppingStone(
                 -np.inf, np.inf, 0.1), leg_angle)
         pos_x_touchdown = flight_state[0] + flight_state[2] * t\
             + self.dut.l0 * np.sin(leg_angle)
         self.assertTrue(self.dut.can_touch_stepping_stone(
-            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+            flight_state, spring_loaded_inverted_pendulum.SteppingStone(
                 pos_x_touchdown - 0.1, pos_x_touchdown + 0.1, 0.1), leg_angle))
         self.assertFalse(self.dut.can_touch_stepping_stone(
-            flight_state, SpringLoadedInvertedPendulum.SteppingStone(
+            flight_state, spring_loaded_inverted_pendulum.SteppingStone(
                 pos_x_touchdown + 0.1, pos_x_touchdown + 0.2, 0.1), leg_angle))
 
     def test_apex_to_touchdown_gradient(self):
@@ -185,7 +185,7 @@ class SlipTest(unittest.TestCase):
 
             t_touchdown = self.dut.time_to_touchdown(
                     x_apex,
-                    SpringLoadedInvertedPendulum.
+                    spring_loaded_inverted_pendulum.
                     SteppingStone(-np.inf, np.inf, 0), leg_angle)
             (dx_pre_td_dx_apex_expected, dx_pre_td_dleg_angle_expected,
                 x_pre_td_expected, dt_td_dx_apex, dt_td_dleg_angle, t_td) =\

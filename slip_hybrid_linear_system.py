@@ -1,4 +1,4 @@
-import SpringLoadedInvertedPendulum
+import spring_loaded_inverted_pendulum
 
 import numpy as np
 
@@ -9,7 +9,7 @@ class SlipHybridLinearSystem:
     """
 
     def __init__(self, mass, l0, k, g):
-        self.slip = SpringLoadedInvertedPendulum.SLIP(mass, l0, k, g)
+        self.slip = spring_loaded_inverted_pendulum.SLIP(mass, l0, k, g)
         self.stepping_stones = []
 
     def add_stepping_stone(self, left, right, height):
@@ -20,7 +20,7 @@ class SlipHybridLinearSystem:
         @param height The height of the stepping stone.
         """
         self.stepping_stones.append(
-            SpringLoadedInvertedPendulum.SteppingStone(left, right, height))
+            spring_loaded_inverted_pendulum.SteppingStone(left, right, height))
 
     def apex_map_linear_approximation(self, apex_state, stepping_stone,
                                       leg_angle):
