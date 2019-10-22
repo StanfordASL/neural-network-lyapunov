@@ -133,7 +133,7 @@ class TestReLU(unittest.TestCase):
 
     def test_relu_free_pattern_constructor2(self):
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model2,
-                                                               self.dtype)
+                                                                 self.dtype)
         self.assertFalse(relu_free_pattern.last_layer_is_relu)
         self.assertEqual(len(relu_free_pattern.relu_unit_index), 2)
         self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
@@ -141,11 +141,10 @@ class TestReLU(unittest.TestCase):
             relu_free_pattern.relu_unit_index[1], [3, 4, 5, 6])
         self.assertEqual(relu_free_pattern.num_relu_units, 7)
 
-
     def test_relu_free_pattern_output_constraint(self):
         def test_model(model):
-            relu_free_pattern = relu_to_optimization.ReLUFreePattern(model,
-                                                                   self.dtype)
+            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+                model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
             (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
