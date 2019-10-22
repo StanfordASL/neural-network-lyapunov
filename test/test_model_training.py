@@ -1,8 +1,7 @@
-from context import ValueToOptimization
-from context import BallPaddleSystem
+from context import value_to_optimization
+from context import ball_paddle_system
 
 import unittest
-import numpy as np
 import torch
 import torch.nn as nn
 from utils import train_model
@@ -29,31 +28,32 @@ class ModelTrainingTest(unittest.TestCase):
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                    nn.ReLU(),
                                    self.linear3)
-                                   
+
     def test_model_training(self):
-        sys = BallPaddleSystem.BallPaddleSystem(dt=.01)
-        
-        vf = ValueToOptimization.ValueFunction(sys, 10)
-        Q = torch.ones(3,3)*0.1
+        sys = ball_paddle_system.BallPaddleSystem(dt=.01)
+
+        vf = value_to_optimization.ValueFunction(sys, 10)
+        Q = torch.ones(3, 3)*0.1
         q = torch.ones(3)*0.1
-        R = torch.ones(1,1)*2.
+        R = torch.ones(1, 1)*2.
         r = torch.ones(1)*0.1
-        vf.set_cost(Q=Q,R=R,q=q,r=r)
-        vf.set_terminal_cost(Qt=Q,Rt=R,qt=q,rt=r)
-        xN = torch.Tensor([0.,.075,0.]).type(sys.dtype)
+        vf.set_cost(Q=Q, R=R, q=q, r=r)
+        vf.set_terminal_cost(Qt=Q, Rt=R, qt=q, rt=r)
+        xN = torch.Tensor([0., .075, 0.]).type(sys.dtype)
         vf.set_constraints(xN=xN)
-        
-        x_lo = torch.Tensor([0.,0.,-10.]).type(sys.dtype)
-        x_up = torch.Tensor([.5,1.,10.]).type(sys.dtype)
-        dims = [3,3,3]
+
+        x_lo = torch.Tensor([0., 0., -10.]).type(sys.dtype)
+        x_up = torch.Tensor([.5, 1., 10.]).type(sys.dtype)
+        dims = [3, 3, 3]
         x_samples, v_samples = vf.get_sample_grid(x_lo, x_up, dims)
 
         # check loss pre training
         res = self.model(x_samples) - v_samples
         loss_before = (res.t() @ res).item()
-        
-        train_model(self.model, x_samples, v_samples, num_epoch=1000, batch_size=10)
-        
+
+        train_model(self.model, x_samples, v_samples,
+                    num_epoch=1000, batch_size=10)
+
         res = self.model(x_samples) - v_samples
         loss_after = (res.t() @ res).item()
 
