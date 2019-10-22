@@ -85,7 +85,8 @@ class ModelBoundsUpperBound(unittest.TestCase):
             value_sub = None
             try:
                 value_sub, _, _ = V(x0_sub)
-            except:
+            except AttributeError:
+                # for some reason the solver didn't return anything
                 pass
             if value_sub is not None:
                 z_nn_sub = self.model(x0_sub).item()

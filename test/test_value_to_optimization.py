@@ -46,7 +46,6 @@ class ValueToOptimizationTest(unittest.TestCase):
         traj = np.reshape(traj, (-1, 4)).T
 
         xtraj = traj[:3, :]
-        utraj = traj[3:, :]
 
         # plt.plot(xtraj[1,:])
         # plt.plot(xtraj[0,:])
