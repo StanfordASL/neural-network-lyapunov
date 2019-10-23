@@ -47,11 +47,11 @@ class HybridLinearSystem:
         """
         check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
         check_shape_and_type(Bi, (self.x_dim, self.u_dim), self.dtype)
-        check_shape_and_type(ci, (self.x_dim, 1), self.dtype)
+        check_shape_and_type(ci, (self.x_dim,), self.dtype)
         num_constraint = Pi.shape[0]
         check_shape_and_type(Pi, (num_constraint, self.x_dim + self.u_dim),
                              self.dtype)
-        check_shape_and_type(qi, (num_constraint, 1), self.dtype)
+        check_shape_and_type(qi, (num_constraint,), self.dtype)
         self.A.append(Ai)
         self.B.append(Bi)
         self.c.append(ci)
@@ -87,15 +87,15 @@ class HybridLinearSystem:
               2. We do not impose the constraint that one and only one mode
                  is active. The user should impose this constraint separately.
         """
-        check_shape_and_type(x_lo, (self.x_dim, 1), self.dtype)
-        check_shape_and_type(x_up, (self.x_dim, 1), self.dtype)
-        check_shape_and_type(u_up, (self.u_dim, 1), self.dtype)
-        check_shape_and_type(u_lo, (self.u_dim, 1), self.dtype)
+        check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
+        check_shape_and_type(x_up, (self.x_dim,), self.dtype)
+        check_shape_and_type(u_up, (self.u_dim,), self.dtype)
+        check_shape_and_type(u_lo, (self.u_dim,), self.dtype)
         assert(torch.all(x_lo <= x_up))
         assert(torch.all(u_lo <= u_up))
         Aeq_slack = torch.cat((torch.cat(self.A, dim=1),
                                torch.cat(self.B, dim=1)), dim=1)
-        Aeq_alpha = torch.cat(self.c, dim=1)
+        Aeq_alpha = torch.cat([c.reshape((-1, 1)) for c in self.c], dim=1)
 
         num_slack = (self.x_dim + self.u_dim) * self.num_modes
         num_ineq = np.sum(np.array([Pi.shape[0]
@@ -104,7 +104,7 @@ class HybridLinearSystem:
         Ain_u = torch.zeros(num_ineq, self.u_dim, dtype=self.dtype)
         Ain_slack = torch.zeros(num_ineq, num_slack, dtype=self.dtype)
         Ain_alpha = torch.zeros(num_ineq, self.num_modes, dtype=self.dtype)
-        rhs_in = torch.zeros(num_ineq, 1, dtype=self.dtype)
+        rhs_in = torch.zeros(num_ineq, dtype=self.dtype)
 
         ineq_count = 0
 
@@ -119,21 +119,19 @@ class HybridLinearSystem:
             return self.num_modes * self.x_dim + i * self.u_dim + j
         for i in range(self.num_modes):
             for j in range(self.x_dim):
-                (Ain_x[ineq_count: ineq_count + 4, j:j+1],
-                 Ain_slack[ineq_count: ineq_count +
-                           4, s_index(i, j):s_index(i, j) + 1],
-                 Ain_alpha[ineq_count:ineq_count + 4, i:i+1],
-                 rhs_in[ineq_count:ineq_count + 4, 0:1]) =\
-                    replace_binary_continuous_product(x_lo[j][0], x_up[j][0],
+                (Ain_x[ineq_count: ineq_count + 4, j],
+                 Ain_slack[ineq_count: ineq_count + 4, s_index(i, j)],
+                 Ain_alpha[ineq_count:ineq_count + 4, i],
+                 rhs_in[ineq_count:ineq_count + 4]) =\
+                    replace_binary_continuous_product(x_lo[j], x_up[j],
                                                       self.dtype)
                 ineq_count += 4
             for j in range(self.u_dim):
-                (Ain_u[ineq_count: ineq_count + 4, j:j+1],
-                 Ain_slack[ineq_count:ineq_count+4,
-                           t_index(i, j):t_index(i, j)+1],
-                 Ain_alpha[ineq_count:ineq_count+4, i:i+1],
-                 rhs_in[ineq_count:ineq_count+4, 0:1]) =\
-                    replace_binary_continuous_product(u_lo[j][0], u_up[j][0],
+                (Ain_u[ineq_count: ineq_count + 4, j],
+                 Ain_slack[ineq_count:ineq_count+4, t_index(i, j)],
+                 Ain_alpha[ineq_count:ineq_count+4, i],
+                 rhs_in[ineq_count:ineq_count+4]) =\
+                    replace_binary_continuous_product(u_lo[j], u_up[j],
                                                       self.dtype)
                 ineq_count += 4
 
@@ -148,7 +146,7 @@ class HybridLinearSystem:
                       self.num_modes * self.x_dim + (i+1) * self.u_dim] =\
                 self.P[i][:, self.x_dim:self.x_dim + self.u_dim].clone()
             Ain_alpha[ineq_count: ineq_count +
-                      self.P[i].shape[0], i:i+1] = -self.q[i]
+                      self.P[i].shape[0], i] = -self.q[i]
             ineq_count += self.P[i].shape[0]
 
         return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,

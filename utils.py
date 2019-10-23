@@ -48,14 +48,14 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     Aₓ*x + Aₛ*s + A_alpha*α ≤ rhs
     @param x_lo The lower bound of x.
     @param x_up The upper bound of x.
-    @param (A_x, A_s, A_alpha, rhs) A_x, A_s, A_alpha, rhs are all 4 x 1 column
-    vectors.
+    @param (A_x, A_s, A_alpha, rhs) A_x, A_s, A_alpha, rhs are all arrays of
+    length 4.
     """
     assert(x_lo <= x_up)
-    A_x = torch.tensor([[0], [0], [1], [-1]], dtype=dtype)
-    A_s = torch.tensor([[-1], [1], [-1], [1]], dtype=dtype)
-    A_alpha = torch.tensor([[x_lo], [-x_up], [x_up], [-x_lo]], dtype=dtype)
-    rhs = torch.tensor([[0], [0], [x_up], [-x_lo]], dtype=dtype)
+    A_x = torch.tensor([0, 0, 1, -1], dtype=dtype)
+    A_s = torch.tensor([-1, 1, -1, 1], dtype=dtype)
+    A_alpha = torch.tensor([x_lo, -x_up, x_up, -x_lo], dtype=dtype)
+    rhs = torch.tensor([0, 0, x_up, -x_lo], dtype=dtype)
     return (A_x, A_s, A_alpha, rhs)
 
 
