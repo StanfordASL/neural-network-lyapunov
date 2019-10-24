@@ -1,6 +1,7 @@
 from IPython.display import clear_output
 import numpy as np
 import torch
+import cvxpy as cp
 
 
 def update_progress(progress):
@@ -172,3 +173,39 @@ def train_model(model, inputs, labels, batch_size=100, num_epoch=1000):
             #     print(loss)
 
     return model
+
+
+def is_polyhedron_bounded(P):
+    """
+    Returns true if the polyhedron P*x<=q is bounded.
+    Assuming that P*x<=q is non-empty, then P*x <= q being bounded is
+    equivalent to 0 being the only solution to P*x<=0.
+    Equivalently I can check the following conditions:
+    For all i = 1, ..., n where n is the number of columns in P, both
+    min 0
+    s.t P * x <= 0
+        x[i] = 1
+    and
+    min 0
+    s.t P * x <= 0
+        x[i] = -1
+    are infeasible.
+    """
+    assert(isinstance(P, torch.Tensor))
+    P_np = P.detach().numpy()
+    x_bar = cp.Variable(P.shape[1])
+    objective = cp.Maximize(0)
+    con1 = P_np @ x_bar <= np.zeros(P.shape[0])
+    for i in range(P.shape[1]):
+        prob = cp.Problem(objective, [con1, x_bar[i] == 1.])
+        prob.solve()
+        if (prob.status != 'infeasible'):
+            return False
+        prob = cp.Problem(objective, [con1, x_bar[i] == -1.])
+        prob.solve()
+        if (prob.status != 'infeasible'):
+            return False
+    return True
+    
+
+
