@@ -1,7 +1,11 @@
 import torch
 import numpy as np
 
-from utils import check_shape_and_type, replace_binary_continuous_product
+from utils import (
+    check_shape_and_type,
+    replace_binary_continuous_product,
+    is_polyhedron_bounded,
+)
 
 
 class HybridLinearSystem:
@@ -33,7 +37,7 @@ class HybridLinearSystem:
         self.q = []
         self.num_modes = 0
 
-    def add_mode(self, Ai, Bi, ci, Pi, qi):
+    def add_mode(self, Ai, Bi, ci, Pi, qi, check_polyhedron_bounded=False):
         """
         Add a new mode
         x[n+1] = Aᵢ*x[n] + Bᵢ*u[n] + cᵢ
@@ -43,6 +47,8 @@ class HybridLinearSystem:
         @param ci A x_dim * 1 torch column vector.
         @param Pi A num_constraint * (x_dim + u_dim) torch matrix.
         @param qi A num_constraint * 1 torch column vector.
+        @param sanity_check_flag Set to True if you want to check that the
+        polytope Pᵢ * [x[n]; u[n]] <= qᵢ is bounded. Default to False.
         @note that the polytope Pᵢ * [x[n]; u[n]] <= qᵢ has to be bounded.
         """
         check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
@@ -52,6 +58,8 @@ class HybridLinearSystem:
         check_shape_and_type(Pi, (num_constraint, self.x_dim + self.u_dim),
                              self.dtype)
         check_shape_and_type(qi, (num_constraint,), self.dtype)
+        if (check_polyhedron_bounded):
+            assert(is_polyhedron_bounded(Pi))
         self.A.append(Ai)
         self.B.append(Bi)
         self.c.append(ci)

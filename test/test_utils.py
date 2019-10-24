@@ -115,5 +115,25 @@ class test_compute_numerical_gradient(unittest.TestCase):
                                                      1e-7, 1e-7))
 
 
+class TestIsPolyhedronBounded(unittest.TestCase):
+    def test1(self):
+        self.assertTrue(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0], [-1, 0], [0, 1.], [0, -1.]])))
+        self.assertTrue(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0], [0, 1], [-1, -1.]])))
+        self.assertTrue(utils.is_polyhedron_bounded(
+            torch.tensor([[1., 1], [0, 1], [-1, -1], [2, -1]])))
+        self.assertFalse(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0], [0, 1]])))
+        self.assertFalse(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0], [-1, 0]])))
+        self.assertFalse(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0], [-1, 0], [0, 1.]])))
+        self.assertTrue(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0, 0.], [0, 1, 0], [0, 0, 1], [-1, -1, -1]])))
+        self.assertFalse(utils.is_polyhedron_bounded(
+            torch.tensor([[1, 0, 0.], [0, 1, 0], [0, 0, 1]])))
+
+
 if __name__ == "__main__":
     unittest.main()

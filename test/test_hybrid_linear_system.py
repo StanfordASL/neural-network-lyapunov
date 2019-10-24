@@ -22,7 +22,7 @@ class HybridLinearSystemTest(unittest.TestCase):
         P0 = torch.cat((torch.eye(3, dtype=dut.dtype),
                         -torch.eye(3, dtype=dut.dtype)), dim=0)
         q0 = torch.tensor([1, 2, 3, 1, 2, 3], dtype=dut.dtype)
-        dut.add_mode(A0, B0, c0, P0, q0)
+        dut.add_mode(A0, B0, c0, P0, q0, True)
         self.assertEqual(dut.num_modes, 1)
 
     def test_mixed_integer_constraints(self):
@@ -33,7 +33,7 @@ class HybridLinearSystemTest(unittest.TestCase):
         P0 = torch.cat((torch.eye(3, dtype=dut.dtype),
                         -torch.eye(3, dtype=dut.dtype)), dim=0)
         q0 = torch.tensor([1, 2, 3, 1, 2, 3], dtype=dut.dtype)
-        dut.add_mode(A0, B0, c0, P0, q0)
+        dut.add_mode(A0, B0, c0, P0, q0, True)
         A1 = torch.tensor([[3, 2], [-2, 1]], dtype=dut.dtype)
         B1 = torch.tensor([[-2], [4]], dtype=dut.dtype)
         c1 = torch.tensor([3, -2], dtype=dut.dtype)
