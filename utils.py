@@ -206,6 +206,3 @@ def is_polyhedron_bounded(P):
         if (prob.status != 'infeasible'):
             return False
     return True
-    
-
-
