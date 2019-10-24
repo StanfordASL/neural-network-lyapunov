@@ -37,7 +37,7 @@ class HybridLinearSystem:
         self.q = []
         self.num_modes = 0
 
-    def add_mode(self, Ai, Bi, ci, Pi, qi, sanity_check_flag=False):
+    def add_mode(self, Ai, Bi, ci, Pi, qi, check_polyhedron_bounded=False):
         """
         Add a new mode
         x[n+1] = Aᵢ*x[n] + Bᵢ*u[n] + cᵢ
@@ -58,7 +58,7 @@ class HybridLinearSystem:
         check_shape_and_type(Pi, (num_constraint, self.x_dim + self.u_dim),
                              self.dtype)
         check_shape_and_type(qi, (num_constraint,), self.dtype)
-        if (sanity_check_flag):
+        if (check_polyhedron_bounded):
             assert(is_polyhedron_bounded(Pi))
         self.A.append(Ai)
         self.B.append(Bi)
