@@ -1,6 +1,8 @@
 import torch
+import numpy as np
 import unittest
 from context import hybrid_linear_system
+import cvxpy as cp
 
 
 class HybridLinearSystemTest(unittest.TestCase):
@@ -118,6 +120,87 @@ class HybridLinearSystemTest(unittest.TestCase):
 
         for mode in range(dut.num_modes):
             test_ineq(mode)
+
+
+class AutonomousHybridLinearSystemTest(unittest.TestCase):
+    def test_constructor(self):
+        dut = hybrid_linear_system.AutonomousHybridLinearSystem(
+            3, torch.float64)
+        self.assertEqual(dut.x_dim, 3)
+        self.assertEqual(dut.dtype, torch.float64)
+        self.assertEqual(dut.num_modes, 0)
+
+    def test_add_mode(self):
+        dut = hybrid_linear_system.AutonomousHybridLinearSystem(
+            2, torch.float64)
+        A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
+        g0 = torch.tensor([-1, 2], dtype=dut.dtype)
+        P0 = torch.tensor(
+            [[1, 1], [-1, -1], [1, -1], [-1, 1]], dtype=dut.dtype)
+        q0 = torch.tensor([2, 2, 3, 3], dtype=dut.dtype)
+        dut.add_mode(A0, g0, P0, q0, True)
+        self.assertEqual(dut.num_modes, 1)
+
+    def test_mixed_integer_constraints(self):
+        dut = hybrid_linear_system.AutonomousHybridLinearSystem(
+            2, torch.float64)
+        A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
+        g0 = torch.tensor([-1, 2], dtype=dut.dtype)
+        P0 = torch.tensor(
+            [[1, 1], [-1, -1], [1, -1], [-1, 1]], dtype=dut.dtype)
+        q0 = torch.tensor([1, 1, 1, 1], dtype=dut.dtype)
+        dut.add_mode(A0, g0, P0, q0)
+
+        A1 = torch.tensor([[2, 3], [4, 5]], dtype=dut.dtype)
+        g1 = torch.tensor([0.1, 0.4], dtype=dut.dtype)
+        P1 = P0.clone()
+        q1 = torch.tensor([3, -1, 3, -1], dtype=dut.dtype)
+        dut.add_mode(A1, g1, P1, q1)
+
+        def test_mode(mode):
+            # We want to generate a random state in the admissible region of
+            # the given mode.
+            is_in_mode = False
+            (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in) =\
+                dut.mixed_integer_constraints(
+                torch.tensor([-1, -1], dtype=dut.dtype),
+                torch.tensor([4, 1], dtype=dut.dtype))
+            while not is_in_mode:
+                x_sample = torch.from_numpy(np.random.uniform(-4, 4, (2,)))
+                if torch.all(dut.P[mode] @ x_sample <= dut.q[mode]):
+                    is_in_mode = True
+            # Now first check the expected x, s, gamma satisfy the constraint.
+            xdot_expected = dut.A[mode] @ x_sample + dut.g[mode]
+            s = torch.zeros(dut.x_dim * dut.num_modes, dtype=dut.dtype)
+            s[mode * dut.x_dim: (mode+1) * dut.x_dim] = x_sample
+            gamma = torch.zeros(dut.num_modes, dtype=dut.dtype)
+            gamma[mode] = 1
+            np.testing.assert_allclose(
+                Aeq_s @ s + Aeq_gamma @ gamma, xdot_expected)
+            np.testing.assert_array_less(
+                (Ain_x @ x_sample + Ain_s @ s +
+                 Ain_gamma @ gamma).detach().numpy(),
+                (rhs_in + 1E-14).detach().numpy())
+            # Now solve the problem with the given constraints, the only
+            # solution should be gamma and s
+            gamma_var = cp.Variable(dut.num_modes, boolean=True)
+            s_var = cp.Variable(dut.num_modes * dut.x_dim)
+            objective = cp.Maximize(0)
+            prob = cp.Problem(
+                objective,
+                [(Ain_x @ x_sample).detach().numpy() +
+                 Ain_s.detach().numpy() @ s_var +
+                 Ain_gamma.detach().numpy() @ gamma_var <=
+                 rhs_in.detach().numpy(), cp.sum(gamma_var) == 1])
+            prob.solve()
+            self.assertEqual(prob.status, 'optimal')
+            np.testing.assert_allclose(gamma.detach().numpy(), gamma_var.value)
+            np.testing.assert_allclose(s.detach().numpy(), s_var.value)
+
+        test_mode(0)
+        test_mode(0)
+        test_mode(1)
+        test_mode(1)
 
 
 if __name__ == "__main__":
