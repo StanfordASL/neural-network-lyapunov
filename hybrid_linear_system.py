@@ -47,8 +47,8 @@ class HybridLinearSystem:
         @param ci A x_dim * 1 torch column vector.
         @param Pi A num_constraint * (x_dim + u_dim) torch matrix.
         @param qi A num_constraint * 1 torch column vector.
-        @param sanity_check_flag Set to True if you want to check that the
-        polytope Pᵢ * [x[n]; u[n]] <= qᵢ is bounded. Default to False.
+        @param check_polyhedron_bounded Set to True if you want to check that
+        the polytope Pᵢ * [x[n]; u[n]] <= qᵢ is bounded. Default to False.
         @note that the polytope Pᵢ * [x[n]; u[n]] <= qᵢ has to be bounded.
         """
         check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
@@ -159,3 +159,124 @@ class HybridLinearSystem:
 
         return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,
                 rhs_in)
+
+
+class AutonomousHybridLinearSystem:
+    """
+    This system models the autonomous hybrid linear system (switch linear
+    system)
+    ẋ = Aᵢx+gᵢ
+    if Pᵢx ≤ qᵢ
+    i = 1, ..., K
+    Namely there are K different modes, each mode constraints the state to be
+    within a polytope. Inside each mode, the continuous time dynamics is
+    affine.
+    Note that the polyhedron Pᵢx ≤ qᵢ has to be bounded.
+    """
+
+    def __init__(self, x_dim, dtype):
+        """
+        @param x_dim The dimension of x.
+        @param dtype The torch datatype of A, g, P, q.
+        """
+        self.dtype = dtype
+
+        self.x_dim = x_dim
+        self.A = []
+        self.g = []
+        self.P = []
+        self.q = []
+        self.num_modes = 0
+
+    def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
+        """
+        Add a new mode
+        ẋ = Aᵢx+gᵢ
+        if Pᵢx ≤ qᵢ
+        @param Ai A x_dim * x_dim torch matrix.
+        @param gi A x_dim torch array.
+        @param Pi A num_constraint * x_dim torch matrix.
+        @param qi A num_constraint torch array.
+        @param check_polyhedron_bounded Set to True if you want to check that
+        the polyhedron Pᵢ * x[n] <= qᵢ is bounded. Default to False.
+        @note that the polyhedron Pᵢ * x[n] <= qᵢ has to be bounded.
+        """
+        check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
+        check_shape_and_type(gi, (self.x_dim,), self.dtype)
+        num_constraint = Pi.shape[0]
+        check_shape_and_type(Pi, (num_constraint, self.x_dim), self.dtype)
+        check_shape_and_type(qi, (num_constraint,), self.dtype)
+        if (check_polyhedron_bounded):
+            assert(is_polyhedron_bounded(Pi))
+        self.A.append(Ai)
+        self.g.append(gi)
+        self.P.append(Pi)
+        self.q.append(qi)
+        self.num_modes += 1
+
+    def mixed_integer_constraints(self, x_lo, x_up):
+        """
+        We can rewrite the hybrid dynamics as mixed integer linear constraints.
+        We denote γᵢ = 1 if the system is in mode i.
+        ẋ = ∑ᵢ γᵢAᵢx+γᵢgᵢ         (1)
+        Pᵢγᵢx ≤ qᵢγᵢ              (2)
+        Note that there we still have the product γᵢ*x[n]. To get rid of the
+        product, we introduce slack variable s, defined as sᵢ = γᵢ*x. The
+        condition sᵢ = γᵢ*x, can be enforced through linear constraints, @see
+        replace_binary_continuous_product() function.
+        The condition (1) and (2) can be written as the mixed-integer linear
+        constraints
+        ẋ = Aeq_s * s + Aeq_gamma * γ
+        Ain_x*x + Ain_s * s + Ain_gamma * γ ≤ rhs_in
+        where s = [s₁;s₂;...s_K], γ = [γ₁;γ₂;...;γ_K].
+        @param x_lo The lower bound of x, a column vector.
+        @param x_up The upper bound of x, a column vector
+        @return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
+        @note 1. This function doesn't require the polytope
+                 Pᵢ * x[n] <= qᵢ to be mutually exclusive.
+              2. We do not impose the constraint that one and only one mode
+                 is active. The user should impose this constraint separately.
+        """
+        check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
+        check_shape_and_type(x_up, (self.x_dim,), self.dtype)
+        assert(torch.all(x_lo <= x_up))
+        Aeq_s = torch.cat(self.A, dim=1)
+        Aeq_gamma = torch.cat([g.reshape((-1, 1)) for g in self.g], dim=1)
+
+        num_s = self.x_dim * self.num_modes
+        num_ineq = np.sum(np.array([Pi.shape[0]
+                                    for Pi in self.P])) + num_s * 4
+        Ain_x = torch.zeros(num_ineq, self.x_dim, dtype=self.dtype)
+        Ain_s = torch.zeros(num_ineq, num_s, dtype=self.dtype)
+        Ain_gamma = torch.zeros(num_ineq, self.num_modes, dtype=self.dtype)
+        rhs_in = torch.zeros(num_ineq, dtype=self.dtype)
+
+        ineq_count = 0
+
+        # We first add the constraint sᵢ = γᵢ*x.
+
+        def s_index(i, j):
+            # The index of sᵢ[j] in the slack variable.
+            return i * self.x_dim + j
+
+        for i in range(self.num_modes):
+            for j in range(self.x_dim):
+                (Ain_x[ineq_count: ineq_count + 4, j],
+                 Ain_s[ineq_count: ineq_count + 4, s_index(i, j)],
+                 Ain_gamma[ineq_count:ineq_count + 4, i],
+                 rhs_in[ineq_count:ineq_count + 4]) =\
+                    replace_binary_continuous_product(x_lo[j], x_up[j],
+                                                      self.dtype)
+                ineq_count += 4
+
+        # Add the constraint Pᵢγᵢx ≤ qᵢγᵢ
+        # Namely Pᵢ * s ≤ qᵢγᵢ
+        for i in range(self.num_modes):
+            Ain_s[ineq_count: ineq_count+self.P[i].shape[0],
+                  i*self.x_dim: (i+1) * self.x_dim] =\
+                self.P[i][:, :self.x_dim].clone()
+            Ain_gamma[ineq_count: ineq_count +
+                      self.P[i].shape[0], i] = -self.q[i]
+            ineq_count += self.P[i].shape[0]
+
+        return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
