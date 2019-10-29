@@ -222,18 +222,18 @@ def get_simple_trajopt_cost(x_dim, u_dim, alpha_dim, dtype):
             + qtᵀx[N] + rtᵀu[N] + ztᵀα[N]
     """
 
-    Q = torch.eye(x_dim, dtype=dtype)*0.1
-    q = torch.ones(x_dim, dtype=dtype)*0.2
-    R = torch.eye(u_dim, dtype=dtype)*1.3
-    r = torch.ones(u_dim, dtype=dtype)*0.4
-    Z = torch.eye(alpha_dim, dtype=dtype)*0.5
-    z = torch.ones(alpha_dim, dtype=dtype)*0.6
+    Q = torch.eye(x_dim, dtype=dtype) * 0.1
+    q = torch.ones(x_dim, dtype=dtype) * 0.2
+    R = torch.eye(u_dim, dtype=dtype) * 1.3
+    r = torch.ones(u_dim, dtype=dtype) * 0.4
+    Z = torch.eye(alpha_dim, dtype=dtype) * 0.5
+    z = torch.ones(alpha_dim, dtype=dtype) * 0.6
 
-    Qt = torch.eye(x_dim, dtype=dtype)*0.7
-    qt = torch.ones(x_dim, dtype=dtype)*0.8
-    Rt = torch.eye(u_dim, dtype=dtype)*1.9
-    rt = torch.ones(u_dim, dtype=dtype)*0.11
-    Zt = torch.eye(alpha_dim, dtype=dtype)*0.12
-    zt = torch.ones(alpha_dim, dtype=dtype)*0.13
+    Qt = torch.eye(x_dim, dtype=dtype) * 0.7
+    qt = torch.ones(x_dim, dtype=dtype) * 0.8
+    Rt = torch.eye(u_dim, dtype=dtype) * 1.9
+    rt = torch.ones(u_dim, dtype=dtype) * 0.11
+    Zt = torch.eye(alpha_dim, dtype=dtype) * 0.12
+    zt = torch.ones(alpha_dim, dtype=dtype) * 0.13
 
     return(Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)

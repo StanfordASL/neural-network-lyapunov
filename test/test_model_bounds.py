@@ -1,6 +1,6 @@
 from context import value_to_optimization
 from context import model_bounds
-from context import ball_paddle_hybrid_linear_system
+from context import ball_paddle_hybrid_linear_system as bphls
 
 import numpy as np
 import unittest
@@ -20,7 +20,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
             np.random.rand(10), dtype=self.dtype)
         self.linear2 = nn.Linear(10, 10)
         self.linear2.weight.data = torch.tensor(
-            np.random.rand(10,10),
+            np.random.rand(10, 10),
             dtype=self.dtype)
         self.linear2.bias.data = torch.tensor(
             np.random.rand(10), dtype=self.dtype)
@@ -36,25 +36,29 @@ class ModelBoundsUpperBound(unittest.TestCase):
         dtype = torch.float64
         dt = .01
         N = 10
-        x_lo = torch.Tensor([-1.,-1.,0.,-np.pi/2,-1e6,-1e6,-1e6]).type(dtype)
-        x_up = torch.Tensor([1.,10.,2.,np.pi/2,1e6,1e6,1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e7,-1e7]).type(dtype)
-        u_up = torch.Tensor([1e7,1e7]).type(dtype)
-        sys = ball_paddle_hybrid_linear_system.get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up)
-        vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
-        
-        Q = torch.ones(sys.x_dim, sys.x_dim)*0.1
-        q = torch.ones(sys.x_dim)*0.1
-        R = torch.ones(sys.u_dim, sys.u_dim)*2.
-        r = torch.ones(sys.u_dim)*0.1
+        x_lo = torch.Tensor(
+            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+        x_up = torch.Tensor(
+            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-1e7, -1e7]).type(dtype)
+        u_up = torch.Tensor([1e7, 1e7]).type(dtype)
+        sys = bphls.get_ball_paddle_hybrid_linear_system(
+            dtype, dt, x_lo, x_up, u_lo, u_up)
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
+
+        Q = torch.ones(sys.x_dim, sys.x_dim) * 0.1
+        q = torch.ones(sys.x_dim) * 0.1
+        R = torch.ones(sys.u_dim, sys.u_dim) * 2.
+        r = torch.ones(sys.u_dim) * 0.1
         vf.set_cost(Q=Q, R=R, q=q, r=r)
         vf.set_terminal_cost(Qt=Q, Rt=R, qt=q, rt=r)
         xN = torch.Tensor([np.nan, .5, 0., np.nan, np.nan, 0., np.nan])
         vf.set_constraints(xN=xN)
 
         mb = model_bounds.ModelBounds(self.model, vf)
-        x0_lo = torch.Tensor([0.,0.,0.,0.,0.,0.,0.]).type(dtype)
-        x0_up = torch.Tensor([0.,2.,.1,0.,0.,0.,0.]).type(dtype)
+        x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0., 0.]).type(dtype)
+        x0_up = torch.Tensor([0., 2., .1, 0., 0., 0., 0.]).type(dtype)
         bound_opt = mb.upper_bound_opt(self.model, x0_lo, x0_up)
         Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b = torch_to_numpy(bound_opt)
 
@@ -63,7 +67,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
         y = cp.Variable(num_y)
         gamma = cp.Variable(num_gamma, boolean=True)
 
-        obj = cp.Minimize(.5*cp.quad_form(y, Q1) + .5 *
+        obj = cp.Minimize(.5 * cp.quad_form(y, Q1) + .5 *
                           cp.quad_form(gamma, Q2) + q1@y + q2@gamma + k)
         con = [
             A1@y + A2@gamma == b,
@@ -75,15 +79,16 @@ class ModelBoundsUpperBound(unittest.TestCase):
         epsilon = obj.value
 
         V = vf.get_value_function()
-        
+
         x0 = torch.Tensor(y.value[:sys.x_dim]).type(sys.dtype)
         value, _, _ = V(x0)
         z_nn = self.model(x0).item()
-        
-        self.assertTrue(np.abs( (epsilon - (value - z_nn)) / epsilon ) <= .01)
-                
+
+        self.assertTrue(np.abs((epsilon - (value - z_nn)) / epsilon) <= .01)
+
         for i in range(20):
-            x0_sub = x0 + .1*torch.rand(sys.x_dim, dtype=sys.dtype)*(x0_up-x0_lo)           
+            x0_sub = x0 + .1 * \
+                torch.rand(sys.x_dim, dtype=sys.dtype) * (x0_up - x0_lo)
             x0_sub = torch.max(torch.min(x0_sub, x0_up), x0_lo)
             value_sub = None
             try:

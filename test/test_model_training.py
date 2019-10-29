@@ -1,5 +1,5 @@
 from context import value_to_optimization
-from context import ball_paddle_hybrid_linear_system
+from context import ball_paddle_hybrid_linear_system as bphls
 
 import numpy as np
 import unittest
@@ -18,7 +18,7 @@ class ModelTrainingTest(unittest.TestCase):
             np.random.rand(10), dtype=self.dtype)
         self.linear2 = nn.Linear(10, 10)
         self.linear2.weight.data = torch.tensor(
-            np.random.rand(10,10),
+            np.random.rand(10, 10),
             dtype=self.dtype)
         self.linear2.bias.data = torch.tensor(
             np.random.rand(10), dtype=self.dtype)
@@ -34,37 +34,41 @@ class ModelTrainingTest(unittest.TestCase):
         dtype = torch.float64
         dt = .01
         N = 10
-        x_lo = torch.Tensor([-1.,-1.,0.,-np.pi/2,-1e6,-1e6,-1e6]).type(dtype)
-        x_up = torch.Tensor([1.,10.,2.,np.pi/2,1e6,1e6,1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e7,-1e7]).type(dtype)
-        u_up = torch.Tensor([1e7,1e7]).type(dtype)
-        sys = ball_paddle_hybrid_linear_system.get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up)
-        vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
+        x_lo = torch.Tensor(
+            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+        x_up = torch.Tensor(
+            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-1e7, -1e7]).type(dtype)
+        u_up = torch.Tensor([1e7, 1e7]).type(dtype)
+        sys = bphls.get_ball_paddle_hybrid_linear_system(
+            dtype, dt, x_lo, x_up, u_lo, u_up)
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
 
-        Q = torch.ones(sys.x_dim, sys.x_dim)*0.1
-        q = torch.ones(sys.x_dim)*0.1
-        R = torch.ones(sys.u_dim, sys.u_dim)*2.
-        r = torch.ones(sys.u_dim)*0.1
+        Q = torch.ones(sys.x_dim, sys.x_dim) * 0.1
+        q = torch.ones(sys.x_dim) * 0.1
+        R = torch.ones(sys.u_dim, sys.u_dim) * 2.
+        r = torch.ones(sys.u_dim) * 0.1
         vf.set_cost(Q=Q, R=R, q=q, r=r)
         vf.set_terminal_cost(Qt=Q, Rt=R, qt=q, rt=r)
         xN = torch.Tensor([np.nan, .5, 0., np.nan, np.nan, 0., np.nan])
         vf.set_constraints(xN=xN)
 
-        x0_lo = torch.Tensor([0.,0.,0.,0.,0.,0.,0.]).type(dtype)
-        x0_up = torch.Tensor([0.,2.,.1,0.,0.,0.,0.]).type(dtype)
+        x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0., 0.]).type(dtype)
+        x0_up = torch.Tensor([0., 2., .1, 0., 0., 0., 0.]).type(dtype)
         num_breaks = [1, 3, 3, 1, 1, 3, 1]
         x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
 
         # check loss pre training
         res = self.model(x_samples) - v_samples
         loss_before = (res.t() @ res).item()
-        
+
         train_model(self.model, x_samples, v_samples,
                     num_epoch=1000, batch_size=10)
-        
+
         res = self.model(x_samples) - v_samples
         loss_after = (res.t() @ res).item()
-        
+
         self.assertLess(loss_after, loss_before)
 
 
