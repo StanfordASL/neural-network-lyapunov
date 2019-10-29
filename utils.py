@@ -206,3 +206,34 @@ def is_polyhedron_bounded(P):
         if (prob.status != 'infeasible'):
             return False
     return True
+
+
+def get_simple_trajopt_cost(x_dim, u_dim, alpha_dim, dtype):
+    """
+    Returns a set of tensors that represent the a simple cost for a
+    trajectory optimization problem. This is useful to write tests for
+    example
+
+    @return Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt
+    where
+    min ∑(.5 xᵀ[n] Q x[n] + .5 uᵀ[n] R u[n] + .5 αᵀ[n] Z α[n] + qᵀx[n]
+          + rᵀu[n] + zᵀα[n])
+            + .5 xᵀ[N] Qt x[N] + .5 uᵀ[N] Rt u[N] + .5 αᵀ[N] Zt α[N]
+            + qtᵀx[N] + rtᵀu[N] + ztᵀα[N]
+    """
+
+    Q = torch.eye(x_dim, dtype=dtype)*0.1
+    q = torch.ones(x_dim, dtype=dtype)*0.2
+    R = torch.eye(u_dim, dtype=dtype)*1.3
+    r = torch.ones(u_dim, dtype=dtype)*0.4
+    Z = torch.eye(alpha_dim, dtype=dtype)*0.5
+    z = torch.ones(alpha_dim, dtype=dtype)*0.6
+
+    Qt = torch.eye(x_dim, dtype=dtype)*0.7
+    qt = torch.ones(x_dim, dtype=dtype)*0.8
+    Rt = torch.eye(u_dim, dtype=dtype)*1.9
+    rt = torch.ones(u_dim, dtype=dtype)*0.11
+    Zt = torch.eye(alpha_dim, dtype=dtype)*0.12
+    zt = torch.ones(alpha_dim, dtype=dtype)*0.13
+
+    return(Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)
