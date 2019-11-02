@@ -1,4 +1,5 @@
-import spring_loaded_inverted_pendulum
+import robust_value_approx.spring_loaded_inverted_pendulum as\
+    spring_loaded_inverted_pendulum
 
 import numpy as np
 

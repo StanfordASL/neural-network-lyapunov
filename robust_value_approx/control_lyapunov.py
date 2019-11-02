@@ -3,7 +3,7 @@ import cvxpy as cp
 import numpy as np
 import torch
 
-import relu_to_optimization
+import robust_value_approx.relu_to_optimization as relu_to_optimization
 
 
 class ControlLyapunovFixedActivationPattern:

@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import solve_ivp
-from utils import check_shape_and_type
+from robust_value_approx.utils import check_shape_and_type
 
 
 class SteppingStone:

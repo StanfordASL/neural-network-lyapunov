@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-import utils
+import robust_value_approx.utils as utils
 
 
 def ComputeReLUActivationPattern(model_relu, x):

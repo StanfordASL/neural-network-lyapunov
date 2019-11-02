@@ -1,4 +1,4 @@
-from context import ball_paddle_system
+import robust_value_approx.ball_paddle_system as ball_paddle_system
 
 import unittest
 import numpy as np
