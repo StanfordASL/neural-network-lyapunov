@@ -454,7 +454,9 @@ class ReLUFreePattern:
         We will write these linear constraints as
         B1 * α + B2 * β ≤ d
 
-        @param model A ReLU network
+        @param model A ReLU network. This network must have the same structure
+        as the network in the class constructor (but the weights can be
+        different).
         @return (M, B1, B2, d) M, B1, B2 are matrices, d is a column vector.
         """
 
@@ -561,3 +563,119 @@ class ReLUFreePattern:
             ineq_constraint_count += num_layers + 1
 
         return (M, B1, B2, d)
+
+    def output_gradient_times_vector(self, model, vector_lower, vector_upper):
+        """
+        We want to compute the gradient of the network ∂ReLU(x)/∂x times a
+        vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
+        mixed-integer linear constraints.
+        We notice that
+        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ...
+                      * diag(β₀) * W₀
+        So we introduce slack variable z, such that
+        z₀ = y
+        zᵢ₊₁ = diag(βᵢ)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
+        The constraint (1) can be replaced by mixed-integer linear constraint
+        on zᵢ and βᵢ.
+        If the ReLU network has a ReLU unit for the output layer, then
+        ∂ReLU(x)/∂x * y = zₙ₊₁
+        otherwise
+        ∂ReLU(x)/∂x * y = wₙᵀzₙ
+
+        We write ∂ReLU(x)/∂x * y as
+        aₒᵤₜᵀz
+        with the additional constraint
+        A_y * y + A_z * z + A_beta * β ≤ rhs
+        where z = [z₁; z₂;...;zₙ]
+        Note that we do NOT require that β is the right activation pattern for
+        the input x. This constraint should be imposed in output() function.
+        @param model A ReLU network. This network must have the same structure
+        as the network in the class constructor (but the weights can be
+        different).
+        @param vector_lower The lower bound of the vector y.
+        @param vector_upper The upper bound of the vector y.
+        @return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) z_lo and z_up are
+        the propagated bounds on z, based on the bounds on y.
+        """
+        utils.check_shape_and_type(vector_lower, (self.x_size,), self.dtype)
+        utils.check_shape_and_type(vector_upper, (self.x_size,), self.dtype)
+        A_y = torch.zeros((4 * self.num_relu_units, self.x_size),
+                          dtype=self.dtype)
+        A_z = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
+                          dtype=self.dtype)
+        A_beta = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
+                             dtype=self.dtype)
+        rhs = torch.zeros(4 * self.num_relu_units, dtype=self.dtype)
+        z_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
+        z_up = torch.empty(self.num_relu_units, dtype=self.dtype)
+        layer_count = 0
+        zi_lo = vector_lower
+        zi_up = vector_upper
+        ineq_count = 0
+        a_out = torch.zeros(self.num_relu_units, dtype=self.dtype)
+        if self.last_layer_is_relu:
+            a_out[self.relu_unit_index[-1]] = 1
+        for layer in model:
+            if (isinstance(layer, nn.Linear)):
+                if layer_count == len(self.relu_unit_index) and not\
+                        self.last_layer_is_relu:
+                    # If this is the last linear layer, and this linear layer
+                    # is the output layer, then we set a_out. Otherwise, we
+                    # append inequality constraints.
+                    a_out[self.relu_unit_index[layer_count - 1]] =\
+                        layer.weight.data[0]
+                else:
+                    # First compute the range of (Wᵢ*zᵢ)(j)
+                    Wizi_lo = torch.zeros(layer.weight.shape[0],
+                                          dtype=self.dtype)
+                    Wizi_up = torch.zeros(layer.weight.shape[0],
+                                          dtype=self.dtype)
+
+                    # Now impose the constraint zᵢ₊₁ = diag(βᵢ)*Wᵢ*zᵢ
+                    # We do this by replacing zᵢ₊₁(j) = βᵢ(j)*(Wᵢ*zᵢ)(j) with
+                    # mixed-integer linear constraints.
+                    for j in range(layer.weight.shape[0]):
+                        for k in range(layer.weight.data.shape[1]):
+                            if layer.weight.data[j][k] > 0:
+                                Wizi_lo[j] += layer.weight.data[j][k] *\
+                                    zi_lo[k]
+                                Wizi_up[j] += layer.weight.data[j][k] *\
+                                    zi_up[k]
+                            else:
+                                Wizi_lo[j] += layer.weight.data[j][k] *\
+                                    zi_up[k]
+                                Wizi_up[j] += layer.weight.data[j][k] *\
+                                    zi_lo[k]
+                        (A_pre, A_z_next, A_beta_i, rhs_i) =\
+                            utils.replace_binary_continuous_product(
+                                Wizi_lo[j], Wizi_up[j], dtype=self.dtype)
+                        if layer_count == 0:
+                            A_y[ineq_count:ineq_count+4] =\
+                                A_pre.reshape((-1, 1)) @\
+                                layer.weight.data[j].reshape((1, -1))
+                        else:
+                            A_z[ineq_count:ineq_count+4,
+                                self.relu_unit_index[layer_count - 1]] =\
+                                A_pre.reshape((-1, 1)) @\
+                                layer.weight.data[j].reshape((1, -1))
+                        A_z[ineq_count:ineq_count+4,
+                            self.relu_unit_index[layer_count][j]] =\
+                            A_z_next.squeeze()
+                        A_beta[ineq_count:ineq_count+4,
+                               self.relu_unit_index[layer_count][j]] =\
+                            A_beta_i.squeeze()
+                        rhs[ineq_count:ineq_count+4] = rhs_i
+                        ineq_count += 4
+            elif(isinstance(layer, nn.ReLU)):
+                zi_lo = torch.min(
+                    torch.zeros(len(self.relu_unit_index[layer_count]),
+                                dtype=self.dtype),
+                    Wizi_lo)
+                zi_up = torch.max(
+                    torch.zeros(len(self.relu_unit_index[layer_count]),
+                                dtype=self.dtype),
+                    Wizi_up)
+                z_lo[self.relu_unit_index[layer_count]] = zi_lo
+                z_up[self.relu_unit_index[layer_count]] = zi_up
+                layer_count += 1
+        return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up)
