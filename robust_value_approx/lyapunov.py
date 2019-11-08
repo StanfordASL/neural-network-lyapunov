@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import cvxpy as cp
+import gurobipy
 import numpy as np
 import torch
 
@@ -47,30 +47,22 @@ class LyapunovDiscreteTimeHybridSystem:
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(relu_model)
 
-        continuous_variable_count = 0
-        binary_variable_count = 0
+        milp = gurobipy.Model()
 
-        def add_continuous_var(num_var):
-            var_indices = range(continuous_variable_count,
-                                continuous_variable_count + num_var)
-            continuous_variable_count += num_var
-            return var_indices
+        # x is the variable x[n]
+        x = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x[n]")
+        # x_next is the variable x[n+1]
+        x_next = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
+        # s is the slack variable to convert hybrid linear system to
+        # mixed-integer linear constraint.
+        s = milp.addVars(
+            self.system.x_dim * self.system.num_modes,
+            lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS, name="s")
+        # gamma is the binary variable determining the hybrid mode of x[n]
+        gamma = milp.addVars(
+            self.system.num_modes, vtype=gurobipy.GRB.BINARY, name="gamma")
 
-        def add_binary_var(num_var):
-            var_indices = range(binary_variable_count,
-                                binary_variable_count + num_var)
-            binary_variable_count += num_var
-            return var_indices
-
-        # xn_index is the index of x[n] in r
-        xn_index = add_continuous_var(self.system.x_dim)
-        # beta_xn_index is the index of beta (the activation variables) for
-        # x[n] being the network input.
-        beta_xn_index = add_binary_var(relu_free_pattern.num_relu_units)
-        # s_index is the index of s (the slack variables for the hybrid
-        # system) for x[n]
-        s_index = add_continuous_var(
-            self.system.x_dim * self.system.num_modes)
-        # gamma_index is the index of the binary variables for the hybrid mode
-        # of x[n]
-        gamma_index = add_binary_var(self.system.num_modes)
