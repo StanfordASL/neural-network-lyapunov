@@ -15,6 +15,11 @@ class HybridLinearSystem:
     x[n+1] = Aᵢ*x[n] + Bᵢ*u[n] + cᵢ
     if Pᵢ * [x[n]; u[n]] <= qᵢ
     i = 1, ..., K.
+    in discrete time, or 
+    ẋ = Aᵢx + Bᵢu + cᵢ
+    if Pᵢ * [x;y] ≤ qᵢ
+    i = 1, ..., K.
+    in continuous time.
     Namely there are K different modes, each mode constrains the state/control
     of the dynamical system to be within a polytope. Inside each mode, the
     discrete time dynamics is affine.
