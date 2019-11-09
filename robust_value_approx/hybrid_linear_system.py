@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+import robust_value_approx.utils as utils
 from robust_value_approx.utils import (
     check_shape_and_type,
     replace_binary_continuous_product,
@@ -186,6 +187,12 @@ class AutonomousHybridLinearSystem:
         self.g = []
         self.P = []
         self.q = []
+        # self.x_lo[i] stores the lower bound of x in mode i (inferred from
+        # Pᵢx ≤ qᵢ)
+        self.x_lo = []
+        # self.x_up[i] stores the upper bound of x in mode i (inferred from
+        # Pᵢx ≤ qᵢ)
+        self.x_up = []
         self.num_modes = 0
 
     def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
@@ -212,9 +219,15 @@ class AutonomousHybridLinearSystem:
         self.g.append(gi)
         self.P.append(Pi)
         self.q.append(qi)
+        x_lo = np.empty(self.x_dim)
+        x_up = np.empty(self.x_dim)
+        for j in range(self.x_dim):
+            (x_lo[j], x_up[j]) = utils.compute_bounds_from_polytope(Pi, qi, j)
+        self.x_lo.append(x_lo)
+        self.x_up.append(x_up)
         self.num_modes += 1
 
-    def mixed_integer_constraints(self, x_lo, x_up):
+    def mixed_integer_constraints(self, x_lo=None, x_up=None):
         """
         We can rewrite the hybrid dynamics as mixed integer linear constraints.
         We denote γᵢ = 1 if the system is in mode i.
@@ -229,17 +242,38 @@ class AutonomousHybridLinearSystem:
         ẋ = Aeq_s * s + Aeq_gamma * γ
         Ain_x*x + Ain_s * s + Ain_gamma * γ ≤ rhs_in
         where s = [s₁;s₂;...s_K], γ = [γ₁;γ₂;...;γ_K].
-        @param x_lo The lower bound of x, a column vector.
-        @param x_up The upper bound of x, a column vector
+        @param x_lo The lower bound of x, a column vector. If you set this to
+        None, then we will use the lower bound inferred from the polytopic
+        constraint exists i, Pᵢx ≤ qᵢ
+        @param x_up The upper bound of x, a column vector. If you set this to
+        None, then we will use the upper bound inferred from the polytopic
+        constraint exists i, Pᵢx ≤ qᵢ
         @return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
         @note 1. This function doesn't require the polytope
                  Pᵢ * x[n] <= qᵢ to be mutually exclusive.
               2. We do not impose the constraint that one and only one mode
                  is active. The user should impose this constraint separately.
         """
-        check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
-        check_shape_and_type(x_up, (self.x_dim,), self.dtype)
-        assert(torch.all(x_lo <= x_up))
+        if isinstance(x_lo, torch.Tensor):
+            check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
+            x_lo_np = x_lo.detach().numpy()
+        elif isinstance(x_lo, np.ndarray):
+            x_lo_np = x_lo
+        if isinstance(x_up, torch.Tensor):
+            check_shape_and_type(x_up, (self.x_dim,), self.dtype)
+            x_up_np = x_up.detach().numpy()
+        elif isinstance(x_up, np.ndarray):
+            x_up_np = x_up
+        if x_lo is not None and x_up is not None:
+            assert(np.all(x_lo_np, x_up_np))
+        # Find the minimum of x for all modes.
+        x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
+        # Find the maximum of x for all modes.
+        x_up_all = np.amax(np.stack(self.x_up, axis=1), axis=1)
+        if x_lo is not None:
+            x_lo_all = np.maximum(x_lo_all, x_lo_np)
+        if x_up is not None:
+            x_up_all = np.minimum(x_up_all, x_up_np)
         Aeq_s = torch.cat(self.A, dim=1)
         Aeq_gamma = torch.cat([g.reshape((-1, 1)) for g in self.g], dim=1)
 
@@ -265,7 +299,7 @@ class AutonomousHybridLinearSystem:
                  Ain_s[ineq_count: ineq_count + 4, s_index(i, j)],
                  Ain_gamma[ineq_count:ineq_count + 4, i],
                  rhs_in[ineq_count:ineq_count + 4]) =\
-                    replace_binary_continuous_product(x_lo[j], x_up[j],
+                    replace_binary_continuous_product(x_lo_all[j], x_up_all[j],
                                                       self.dtype)
                 ineq_count += 4
 
