@@ -1,5 +1,5 @@
 import torch
-import hybrid_linear_system
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 
 
 def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up):
