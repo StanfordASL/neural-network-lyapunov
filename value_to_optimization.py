@@ -6,16 +6,24 @@ import cvxpy as cp
 
 class ValueFunction:
 
-    def __init__(self, sys, N):
+    def __init__(self, sys, N, x_lo, x_up, u_lo, u_up):
         """
         Class to store the a value function that can be expressed as a
         Mixed-integer quadratic program.
 
-        @param sys: The dynamical system used by the value function
+        @param sys: The hybrid linear system used by the value function
+        @param N: the number of knot points in the trajectory optimization
+        x_lo ≤ x[n] ≤ x_up
+        u_lo ≤ u[n] ≤ u_up
         """
         self.sys = sys
         self.dtype = sys.dtype
         self.N = N
+
+        self.x_lo = x_lo.type(self.dtype)
+        self.x_up = x_up.type(self.dtype)
+        self.u_lo = u_lo.type(self.dtype)
+        self.u_up = u_up.type(self.dtype)
 
         self.Q = None
         self.R = None
@@ -30,10 +38,6 @@ class ValueFunction:
         self.rt = None
         self.zt = None
 
-        self.x_lo = None
-        self.x_up = None
-        self.u_lo = None
-        self.u_up = None
         self.x0 = None
         self.xN = None
 
@@ -89,25 +93,14 @@ class ValueFunction:
         if zt is not None:
             self.zt = zt.type(self.dtype)
 
-    def set_constraints(self, x_lo=None, x_up=None, u_lo=None, u_up=None,
-                        x0=None, xN=None):
+    def set_constraints(self, x0=None, xN=None):
         """
         Sets the constraints for the optimization (imposed on every state
         along the trajectory)
 
-        x_lo ≤ x[n] ≤ x_up
-        u_lo ≤ u[n] ≤ u_up
         x[0] == x0
         x[N] == xN
         """
-        if x_lo is not None:
-            self.x_lo = x_lo.type(self.dtype)
-        if x_up is not None:
-            self.x_up = x_up.type(self.dtype)
-        if u_lo is not None:
-            self.u_lo = u_lo.type(self.dtype)
-        if u_up is not None:
-            self.u_up = u_up.type(self.dtype)
         if x0 is not None:
             self.x0 = x0.type(self.dtype)
         if xN is not None:
@@ -145,15 +138,12 @@ class ValueFunction:
               .5 (u[N]-utraj[N])ᵀ Rt (u[N]-utraj[N]) +
               .5 (α[N]-αtraj[N])ᵀ Zt (α[N]-αtraj[N]) +
               qtᵀ(x[N]-xtraj[N]) + rtᵀ(u[N]-utraj[N]) + ztᵀ(α[N]-αtraj[N])
-        Ain1 x[n] + Ain2 u[n] + Ain3 x[n+1] + Ain4 u[n+1] + Ain5 α[n] ≤
-        rhs_in_dyn
-        Aeq1 x[n] + Aeq2 u[n] + Aeq3 x[n+1] + Aeq4 u[n+1] + Aeq5 α[n] =
-        rhs_eq_dyn
+        x[n+1] = Aᵢ*x[n] + Bᵢ*u[n] + cᵢ
+                if Pᵢ * [x[n]; u[n]] <= qᵢ
         x_lo ≤ x[n] ≤ x_up
         u_lo ≤ u[n] ≤ u_up
         x[0] == x0
         x[N] == xN
-        α[N] ∈ {0,1}
 
         the problem is returned in our standard MIQP form so that it can
         easily be passed to verification functions.
@@ -175,53 +165,90 @@ class ValueFunction:
         if self.alphatraj is not None:
             assert(self.alphatraj.shape[1] == N)
 
-        # TODO: this needs to be rewritten with HybridLinearSystem api
-        Ain1_dyn, Ain2_dyn, Ain3_dyn, Ain4_dyn, Ain5_dyn, rhs_in_dyn =\
-            self.sys.get_dyn_in()
-        Aeq1_dyn, Aeq2_dyn, Aeq3_dyn, Aeq4_dyn, Aeq5_dyn, rhs_eq_dyn =\
-            self.sys.get_dyn_eq()
+        (Aeq_slack,
+         Aeq_alpha,
+         Ain_x,
+         Ain_u,
+         Ain_slack,
+         Ain_alpha,
+         rhs_in_dyn) = self.sys.mixed_integer_constraints(self.x_lo,
+                                                          self.x_up,
+                                                          self.u_lo,
+                                                          self.u_up)
 
-        xdim = Ain1_dyn.shape[1]
-        udim = Ain2_dyn.shape[1]
-        sdim = (xdim + udim) * N - xdim
-        adim = Ain5_dyn.shape[1]
+        xdim = Ain_x.shape[1]
+        udim = Ain_u.shape[1]
+        slackdim = Ain_slack.shape[1]
+        adim = Ain_alpha.shape[1]
+        sdim = (xdim + udim + slackdim) * N - xdim
         alphadim = adim * N
 
         # dynamics inequality constraints
         num_in_dyn = rhs_in_dyn.shape[0]
-        s_in_dyn = torch.cat((Ain1_dyn, Ain2_dyn, Ain3_dyn, Ain4_dyn), 1)
-        Ain = torch.zeros((N - 1) * num_in_dyn, N *
-                          (xdim + udim), dtype=self.dtype)
-        Ain3 = torch.zeros((N - 1) * num_in_dyn, alphadim, dtype=self.dtype)
-        rhs_in = torch.zeros((N - 1) * num_in_dyn, dtype=self.dtype)
-        for i in range(N - 1):
-            Ain[i * num_in_dyn: (i + 1) * num_in_dyn,
-                i * (xdim + udim):i * (xdim + udim) +
-                2 * (xdim + udim)] = s_in_dyn
+        s_in_dyn = torch.cat((Ain_x, Ain_u, Ain_slack), 1)
+        Ain = torch.zeros(N * num_in_dyn, N *
+                          (xdim + udim + slackdim), dtype=self.dtype)
+        Ain3 = torch.zeros(N * num_in_dyn, alphadim, dtype=self.dtype)
+        rhs_in = torch.zeros(N * num_in_dyn, dtype=self.dtype)
+        for i in range(N):
+            Ain[i *
+                num_in_dyn: (i +
+                             1) *
+                num_in_dyn, i *
+                (xdim +
+                 udim +
+                 slackdim): (i +
+                             1) *
+                (xdim +
+                 udim +
+                 slackdim)] = s_in_dyn
             Ain3[i * num_in_dyn:(i + 1) * num_in_dyn, i *
-                 adim:(i + 1) * adim] = Ain5_dyn
+                 adim:(i + 1) * adim] = Ain_alpha
             rhs_in[i * num_in_dyn:(i + 1) * num_in_dyn] = rhs_in_dyn.squeeze()
         Ain1 = Ain[:, :xdim]
         Ain2 = Ain[:, xdim:]
 
         # dynamics equality constraints
-        num_eq_dyn = rhs_eq_dyn.shape[0]
-        s_eq_dyn = torch.cat((Aeq1_dyn, Aeq2_dyn, Aeq3_dyn, Aeq4_dyn), 1)
+        num_eq_dyn = xdim
+        s_eq_dyn = torch.cat((torch.zeros(num_eq_dyn, xdim +
+                                          udim, dtype=self.dtype), Aeq_slack, -
+                              torch.eye(xdim, dtype=self.dtype)), 1)
         Aeq = torch.zeros((N - 1) * num_eq_dyn, N *
-                          (xdim + udim), dtype=self.dtype)
+                          (xdim + udim + slackdim), dtype=self.dtype)
         Aeq3 = torch.zeros((N - 1) * num_eq_dyn, alphadim, dtype=self.dtype)
         rhs_eq = torch.zeros((N - 1) * num_eq_dyn, dtype=self.dtype)
         for i in range(N - 1):
-            Aeq[i * num_eq_dyn:(i + 1) * num_eq_dyn,
-                i * (xdim + udim):i * (xdim + udim) +
-                2 * (xdim + udim)] = s_eq_dyn
+            Aeq[i *
+                num_eq_dyn:(i +
+                            1) *
+                num_eq_dyn, i *
+                (xdim +
+                 udim +
+                 slackdim):(i +
+                            1) *
+                (xdim +
+                 udim +
+                 slackdim) +
+                xdim] = s_eq_dyn
             Aeq3[i * num_eq_dyn:(i + 1) * num_eq_dyn, i *
-                 adim:(i + 1) * adim] = Aeq5_dyn
-            rhs_eq[i * num_eq_dyn:(i + 1) * num_eq_dyn] = rhs_eq_dyn.squeeze()
-        Aeq1 = Aeq[:, 0:xdim]
+                 adim:(i + 1) * adim] = Aeq_alpha
+        Aeq1 = Aeq[:, :xdim]
         Aeq2 = Aeq[:, xdim:]
 
+        # one mode at a time
+        Aeq1 = torch.cat((Aeq1, torch.zeros(N, xdim, dtype=self.dtype)), 0)
+        Aeq2 = torch.cat((Aeq2, torch.zeros(N, sdim, dtype=self.dtype)), 0)
+        Aeq_mode = torch.zeros(N, alphadim, dtype=self.dtype)
+        for i in range(N):
+            Aeq_mode[i, i * adim:(i + 1) * adim] = torch.ones(1,
+                                                              adim,
+                                                              dtype=self.dtype)
+        Aeq3 = torch.cat((Aeq3, Aeq_mode), 0)
+        rhs_eq = torch.cat((rhs_eq, torch.ones(N, dtype=self.dtype)), 0)
+
         # costs
+        # slack = [s_1,s_2,...,t_1,t_2,...] where s_i = alpha_i * x_i[n] so the
+        # cost on the slack variables is implicit in the costs of alpha and s
         Q2 = torch.zeros(sdim, sdim, dtype=self.dtype)
         q2 = torch.zeros(sdim, dtype=self.dtype)
         Q3 = torch.zeros(alphadim, alphadim, dtype=self.dtype)
@@ -237,10 +264,10 @@ class ValueFunction:
             if self.utraj is not None:
                 c -= self.r.T@self.utraj[:, 0]
         for i in range(N - 2):
-            Qi = udim + i * (xdim + udim)
-            Qip = udim + i * (xdim + udim) + xdim
-            Ri = udim + xdim + i * (xdim + udim)
-            Rip = udim + xdim + i * (xdim + udim) + udim
+            Qi = udim + slackdim + i * (xdim + udim + slackdim)
+            Qip = udim + slackdim + i * (xdim + udim + slackdim) + xdim
+            Ri = udim + slackdim + i * (xdim + udim + slackdim) + xdim
+            Rip = udim + slackdim + i * (xdim + udim + slackdim) + xdim + udim
             if self.Q is not None:
                 Q2[Qi:Qip, Qi:Qip] += self.Q
                 if self.xtraj is not None:
@@ -274,21 +301,24 @@ class ValueFunction:
                     c -= self.z.T@self.alphatraj[:, i]
 
         if self.Qt is not None:
-            Q2[-(xdim + udim):-udim, -(xdim + udim):-udim] += self.Qt
+            Q2[-(xdim + udim + slackdim):-(udim + slackdim), -
+               (xdim + udim + slackdim):-(udim + slackdim)] += self.Qt
             if self.xtraj is not None:
-                q2[-(xdim + udim):-udim] -= self.xtraj[:, -1].T@self.Qt
+                q2[-(xdim + udim + slackdim):-(udim + slackdim)
+                   ] -= self.xtraj[:, -1].T@self.Qt
                 c += .5 * self.xtraj[:, -1].T@self.Qt@self.xtraj[:, -1]
         if self.Rt is not None:
-            Q2[-udim:, -udim:] += self.Rt
+            Q2[-(udim + slackdim):-slackdim, -
+               (udim + slackdim):-slackdim] += self.Rt
             if self.utraj is not None:
-                q2[-udim:] -= self.utraj[:, -1].T@self.Rt
+                q2[-(udim + slackdim):-slackdim] -= self.utraj[:, -1].T@self.Rt
                 c += .5 * self.utraj[:, -1].T@self.Rt@self.utraj[:, -1]
         if self.qt is not None:
-            q2[-(xdim + udim):-udim] += self.qt
+            q2[-(xdim + udim + slackdim):-(udim + slackdim)] += self.qt
             if self.xtraj is not None:
                 c -= self.qt.T@self.xtraj[:, -1]
         if self.rt is not None:
-            q2[-udim:] += self.rt
+            q2[-(udim + slackdim):-slackdim] += self.rt
             if self.utraj is not None:
                 c -= self.rt.T@self.utraj[:, -1]
         if self.Zt is not None:
@@ -305,59 +335,25 @@ class ValueFunction:
         # state and input constraints
         # x_lo ≤ x[n] ≤ x_up
         # u_lo ≤ u[n] ≤ u_up
-        if self.x_up is not None and self.u_up is not None:
-            Aup = torch.eye(N * (xdim + udim), N *
-                            (xdim + udim), dtype=self.dtype)
-            rhs_up = torch.cat((self.x_up, self.u_up)).repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * (xdim + udim), alphadim,
-                                   dtype=self.dtype)), 0)
-        elif self.x_up is not None:
-            Aup = torch.eye(N * (xdim + udim), N *
-                            (xdim + udim), dtype=self.dtype)
-            Aup = Aup[torch.cat((torch.ones(xdim), torch.zeros(udim))).repeat(
-                N).type(torch.bool), :]
-            rhs_up = self.x_up.repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * xdim, alphadim, dtype=self.dtype)), 0)
-        elif self.u_up is not None:
-            Aup = torch.eye(N * (xdim + udim), N *
-                            (xdim + udim), dtype=self.dtype)
-            Aup = Aup[torch.cat((torch.zeros(xdim), torch.ones(udim))).repeat(
-                N).type(torch.bool), :]
-            rhs_up = self.u_up.repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * udim, alphadim, dtype=self.dtype)), 0)
-        else:
-            Aup = torch.zeros(0, N * (xdim + udim), dtype=self.dtype)
-            rhs_up = torch.zeros(0, dtype=self.dtype)
+        # constraints have to be there otherwise couldn't write dynamics as
+        # hybrid linear
+        Aup = torch.eye(N * (xdim + udim + slackdim), N *
+                        (xdim + udim + slackdim), dtype=self.dtype)
+        Aup = Aup[torch.cat(
+            (torch.ones(xdim + udim),
+                torch.zeros(slackdim))).repeat(N).type(torch.bool), :]
+        rhs_up = torch.cat((self.x_up, self.u_up)).repeat(N)
+        Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
+                         alphadim, dtype=self.dtype)), 0)
 
-        if self.x_lo is not None and self.u_lo is not None:
-            Alo = -torch.eye(N * (xdim + udim), N *
-                             (xdim + udim), dtype=self.dtype)
-            rhs_lo = -torch.cat((self.x_lo, self.u_lo)).repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * (xdim + udim), alphadim,
-                                   dtype=self.dtype)), 0)
-        elif self.x_lo is not None:
-            Alo = -torch.eye(N * (xdim + udim), N *
-                             (xdim + udim), dtype=self.dtype)
-            Alo = Alo[torch.cat((torch.ones(xdim), torch.zeros(udim))).repeat(
-                N).type(torch.bool), :]
-            rhs_lo = -self.x_lo.repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * xdim, alphadim, dtype=self.dtype)), 0)
-        elif self.u_lo is not None:
-            Alo = -torch.eye(N * (xdim + udim), N *
-                             (xdim + udim), dtype=self.dtype)
-            Alo = Alo[torch.cat((torch.zeros(xdim), torch.ones(udim))).repeat(
-                N).type(torch.bool), :]
-            rhs_lo = -self.u_lo.repeat(N)
-            Ain3 = torch.cat(
-                (Ain3, torch.zeros(N * udim, alphadim, dtype=self.dtype)), 0)
-        else:
-            Alo = torch.zeros(0, N * (xdim + udim), dtype=self.dtype)
-            rhs_lo = torch.zeros(0, dtype=self.dtype)
+        Alo = -torch.eye(N * (xdim + udim + slackdim), N *
+                         (xdim + udim + slackdim), dtype=self.dtype)
+        Alo = Alo[torch.cat((torch.ones(xdim + udim),
+                            torch.zeros(slackdim))).repeat(N).type(
+                            torch.bool), :]
+        rhs_lo = -torch.cat((self.x_lo, self.u_lo)).repeat(N)
+        Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
+                         alphadim, dtype=self.dtype)), 0)
 
         Ain1 = torch.cat((Ain1, Aup[:, :xdim], Alo[:, :xdim]), 0)
         Ain2 = torch.cat((Ain2, Aup[:, xdim:], Alo[:, xdim:]), 0)
@@ -366,25 +362,26 @@ class ValueFunction:
         # initial state constraints
         # x[0] == x0
         if self.x0 is not None:
-            Aeq1 = torch.cat((Aeq1, torch.eye(xdim, dtype=self.dtype)), 0)
-            Aeq2 = torch.cat(
-                (Aeq2, torch.zeros(xdim, sdim, dtype=self.dtype)), 0)
-            Aeq3 = torch.cat(
-                (Aeq3, torch.zeros(xdim, alphadim, dtype=self.dtype)), 0)
-            rhs_eq = torch.cat((rhs_eq, self.x0))
+            Ax01 = torch.eye(xdim, dtype=self.dtype)
+            Ax02 = torch.zeros(xdim, sdim, dtype=self.dtype)
+            Ax03 = torch.zeros(xdim, alphadim, dtype=self.dtype)
+            Aeq1 = torch.cat((Aeq1, Ax01[~torch.isnan(self.x0), :]), 0)
+            Aeq2 = torch.cat((Aeq2, Ax02[~torch.isnan(self.x0), :]), 0)
+            Aeq3 = torch.cat((Aeq3, Ax03[~torch.isnan(self.x0), :]), 0)
+            rhs_eq = torch.cat((rhs_eq, self.x0[~torch.isnan(self.x0)]))
 
         # final state constraint
         # x[N] == xN
         if self.xN is not None:
-            Aeq1 = torch.cat(
-                (Aeq1, torch.zeros(xdim, xdim, dtype=self.dtype)), 0)
-            Aeq2 = torch.cat(
-                (Aeq2, torch.zeros(xdim, sdim, dtype=self.dtype)), 0)
-            Aeq2[-xdim:, -udim - xdim:-
-                 udim] = torch.eye(xdim, dtype=self.dtype)
-            Aeq3 = torch.cat(
-                (Aeq3, torch.zeros(xdim, alphadim, dtype=self.dtype)), 0)
-            rhs_eq = torch.cat((rhs_eq, self.xN))
+            AxN1 = torch.zeros(xdim, xdim, dtype=self.dtype)
+            AxN2 = torch.zeros(xdim, sdim, dtype=self.dtype)
+            AxN2[:, -(xdim + udim + slackdim):-(udim + slackdim)
+                 ] = torch.eye(xdim, dtype=self.dtype)
+            AxN3 = torch.zeros(xdim, alphadim, dtype=self.dtype)
+            Aeq1 = torch.cat((Aeq1, AxN1[~torch.isnan(self.xN), :]), 0)
+            Aeq2 = torch.cat((Aeq2, AxN2[~torch.isnan(self.xN), :]), 0)
+            Aeq3 = torch.cat((Aeq3, AxN3[~torch.isnan(self.xN), :]), 0)
+            rhs_eq = torch.cat((rhs_eq, self.xN[~torch.isnan(self.xN)]))
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2,
                q3, c)

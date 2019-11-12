@@ -150,7 +150,7 @@ class TestReLU(unittest.TestCase):
             (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
                 z_lo, z_up) = relu_free_pattern.output_constraint(
                 model, x_lo, x_up)
-            print("z_lo:{}\nz_up:{}".format(z_lo, z_up))
+            # print("z_lo:{}\nz_up:{}".format(z_lo, z_up))
             num_z_lo_positive = np.sum([z_lo_i >= 0 for z_lo_i in z_lo])
             num_z_up_negative = np.sum([z_up_i <= 0 for z_up_i in z_up])
             num_ineq = (relu_free_pattern.num_relu_units -

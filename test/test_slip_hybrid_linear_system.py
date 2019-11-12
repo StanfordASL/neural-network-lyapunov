@@ -55,7 +55,7 @@ class SpringHybridLinearSystemTest(unittest.TestCase):
                 self.assertIsNone(P)
                 self.assertIsNone(q)
             elif(A is not None):
-                print("A is not None")
+                # print("A is not None")
                 # First check if the constant terms in the linear approximation
                 # are correct.
                 self.assertTrue(

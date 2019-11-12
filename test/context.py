@@ -13,3 +13,4 @@ import slip_hybrid_linear_system # noqa
 import spring_loaded_inverted_pendulum # noqa
 import utils # noqa
 import value_to_optimization # noqa
+import ball_paddle_hybrid_linear_system # noqa
