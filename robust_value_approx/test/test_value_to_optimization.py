@@ -1,11 +1,11 @@
-from context import value_to_optimization
-from context import ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.value_to_optimization as value_to_optimization
+import robust_value_approx.ball_paddle_hybrid_linear_system as bphls 
+from robust_value_approx.utils import torch_to_numpy, get_simple_trajopt_cost
 
 import unittest
 import numpy as np
 import cvxpy as cp
 import torch
-from utils import torch_to_numpy, get_simple_trajopt_cost
 
 
 class ValueToOptimizationTest(unittest.TestCase):

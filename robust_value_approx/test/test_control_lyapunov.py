@@ -1,4 +1,4 @@
-from context import control_lyapunov
+import robust_value_approx.control_lyapunov as control_lyapunov
 
 import unittest
 import numpy as np

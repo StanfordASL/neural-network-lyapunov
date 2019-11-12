@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# config environment
+config/setup_environments.sh
+
 # Distribution / packaging
 .Python
 build/

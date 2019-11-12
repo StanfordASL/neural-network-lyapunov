@@ -1,16 +1,14 @@
-from context import value_to_optimization
-from context import model_bounds
-from context import ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.value_to_optimization as value_to_optimization
+import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
+from robust_value_approx.utils import train_model
 
 import numpy as np
 import unittest
-import cvxpy as cp
 import torch
 import torch.nn as nn
-from utils import torch_to_numpy
 
 
-class ModelBoundsUpperBound(unittest.TestCase):
+class ModelTrainingTest(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.linear1 = nn.Linear(6, 10)
@@ -32,7 +30,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
                                    nn.ReLU(),
                                    self.linear3)
 
-    def test_upper_bound(self):
+    def test_model_training(self):
         dtype = torch.float64
         dt = .01
         N = 10
@@ -56,50 +54,22 @@ class ModelBoundsUpperBound(unittest.TestCase):
         xN = torch.Tensor([np.nan, .5, 0., np.nan, 0., np.nan])
         vf.set_constraints(xN=xN)
 
-        mb = model_bounds.ModelBounds(self.model, vf)
         x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0.]).type(dtype)
         x0_up = torch.Tensor([0., 2., .1, 0., 0., 0.]).type(dtype)
-        bound_opt = mb.upper_bound_opt(self.model, x0_lo, x0_up)
-        Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b = torch_to_numpy(bound_opt)
+        num_breaks = [1, 3, 3, 1, 3, 1]
+        x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
 
-        num_y = Q1.shape[0]
-        num_gamma = Q2.shape[0]
-        y = cp.Variable(num_y)
-        gamma = cp.Variable(num_gamma, boolean=True)
+        # check loss pre training
+        res = self.model(x_samples) - v_samples
+        loss_before = (res.t() @ res).item()
 
-        obj = cp.Minimize(.5 * cp.quad_form(y, Q1) + .5 *
-                          cp.quad_form(gamma, Q2) + q1@y + q2@gamma + k)
-        con = [
-            A1@y + A2@gamma == b,
-            G1@y + G2@gamma <= h,
-        ]
+        train_model(self.model, x_samples, v_samples,
+                    num_epoch=1000, batch_size=10)
 
-        prob = cp.Problem(obj, con)
-        prob.solve(solver=cp.GUROBI, verbose=False)
-        epsilon = obj.value
+        res = self.model(x_samples) - v_samples
+        loss_after = (res.t() @ res).item()
 
-        V = vf.get_value_function()
-
-        x0 = torch.Tensor(y.value[:sys.x_dim]).type(sys.dtype)
-        value, _, _ = V(x0)
-        z_nn = self.model(x0).item()
-
-        self.assertTrue(np.abs((epsilon - (value - z_nn)) / epsilon) <= .01)
-
-        for i in range(20):
-            x0_sub = x0 + .1 * \
-                torch.rand(sys.x_dim, dtype=sys.dtype) * (x0_up - x0_lo)
-            x0_sub = torch.max(torch.min(x0_sub, x0_up), x0_lo)
-            value_sub = None
-            try:
-                value_sub, _, _ = V(x0_sub)
-            except AttributeError:
-                # for some reason the solver didn't return anything
-                pass
-            if value_sub is not None:
-                z_nn_sub = self.model(x0_sub).item()
-                epsilon_sub = value_sub - z_nn_sub
-                self.assertGreaterEqual(epsilon_sub, epsilon)
+        self.assertLess(loss_after, loss_before)
 
 
 if __name__ == '__main__':

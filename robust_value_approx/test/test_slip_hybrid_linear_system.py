@@ -1,5 +1,5 @@
-from context import slip_hybrid_linear_system as slip_hybrid
-from context import utils
+import robust_value_approx.slip_hybrid_linear_system as slip_hybrid
+import robust_value_approx.utils as utils
 
 import unittest
 import numpy as np

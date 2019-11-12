@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from utils import (
+from robust_value_approx.utils import (
     check_shape_and_type,
     replace_binary_continuous_product,
     is_polyhedron_bounded,

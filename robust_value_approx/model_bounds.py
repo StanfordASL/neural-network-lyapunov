@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import relu_to_optimization
+import robust_value_approx.relu_to_optimization as relu_to_optimization
 
 import torch
 

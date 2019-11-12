@@ -1,5 +1,6 @@
-from context import utils
-from context import spring_loaded_inverted_pendulum
+import robust_value_approx.utils as utils
+import robust_value_approx.spring_loaded_inverted_pendulum as\
+    spring_loaded_inverted_pendulum
 from scipy.integrate import solve_ivp
 import numpy as np
 import unittest

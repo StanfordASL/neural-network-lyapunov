@@ -1,10 +1,10 @@
-from context import ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 
 import unittest
 import numpy as np
 import torch
 import cvxpy as cp
-from utils import torch_to_numpy
+from robust_value_approx.utils import torch_to_numpy
 
 
 class BallPaddleHybridLinearSystemTest(unittest.TestCase):
@@ -57,7 +57,7 @@ class BallPaddleHybridLinearSystemTest(unittest.TestCase):
                 Ain_alpha@alpha <= rhs_in,
                 cp.sum(alpha) == 1.]
             prob = cp.Problem(obj, con)
-            prob.solve(solver=cp.CPLEX, verbose=False)
+            prob.solve(solver=cp.GUROBI, verbose=False)
             xn = Aeq_slack@slack.value + Aeq_alpha@alpha.value
             x0 = xn
             ball_traj.append(xn[1])

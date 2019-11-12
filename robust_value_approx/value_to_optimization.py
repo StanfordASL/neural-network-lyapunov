@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
-from utils import torch_to_numpy
+from robust_value_approx.utils import torch_to_numpy
 import cvxpy as cp
 
 

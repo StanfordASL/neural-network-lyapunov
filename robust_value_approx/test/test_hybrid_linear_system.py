@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import unittest
-from context import hybrid_linear_system
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import cvxpy as cp
 
 
