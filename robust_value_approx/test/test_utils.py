@@ -135,5 +135,25 @@ class TestIsPolyhedronBounded(unittest.TestCase):
             torch.tensor([[1, 0, 0.], [0, 1, 0], [0, 0, 1]])))
 
 
+class TestComputeBoundsFromPolytope(unittest.TestCase):
+    def test1(self):
+        P = np.array([[1., 1.], [0, -1], [-1, 1]])
+        q = np.array([2, 3., 1.5])
+
+        self.assertEqual(utils.compute_bounds_from_polytope(P, q, 0),
+                         (-4.5, 5))
+        self.assertEqual(utils.compute_bounds_from_polytope(P, q, 1),
+                         (-3, 1.75))
+
+    def test2(self):
+        P = np.array([[1., 1.], [0, -1]])
+        q = np.array([2, 3.])
+
+        self.assertEqual(utils.compute_bounds_from_polytope(P, q, 0),
+                         (-np.inf, 5))
+        self.assertEqual(utils.compute_bounds_from_polytope(P, q, 1),
+                         (-3, np.inf))
+
+
 if __name__ == "__main__":
     unittest.main()

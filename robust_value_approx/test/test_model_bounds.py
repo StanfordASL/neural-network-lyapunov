@@ -1,5 +1,5 @@
 import robust_value_approx.value_to_optimization as value_to_optimization
-import robust_value_approx.ball_paddle_hybrid_linear_system as bphls 
+import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 import robust_value_approx.model_bounds as model_bounds
 from robust_value_approx.utils import torch_to_numpy
 

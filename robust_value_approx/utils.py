@@ -237,3 +237,39 @@ def get_simple_trajopt_cost(x_dim, u_dim, alpha_dim, dtype):
     zt = torch.ones(alpha_dim, dtype=dtype) * 0.13
 
     return(Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)
+
+
+def compute_bounds_from_polytope(P, q, i):
+    """
+    Compute the bounds on x(j) subject to the polytopic constraint P * x <= q.
+    We obtain these bounds by solving the following two LPs
+    max x(j)
+    s.t P * x <= q
+    and
+    min x(j)
+    s.t P * x <= q
+    @param P The constraint of the polytope.
+    @param q The rhs constraint of the polytope
+    @param i We want to find the bounds of x(i) subject to P * x <= q.
+    @return (xi_lo, xi_up) xi_lo is the lower bound of x(i), xi_up is the upper
+    bound of x(i)
+    """
+    if isinstance(P, torch.Tensor):
+        P_np = P.detach().numpy()
+    elif(isinstance(P, np.ndarray)):
+        P_np = P
+    else:
+        raise Exception("Unknown P")
+    if isinstance(q, torch.Tensor):
+        q_np = q.detach().numpy()
+    elif(isinstance(q, np.ndarray)):
+        q_np = q
+    else:
+        raise Exception("Unknown q")
+    x = cp.Variable(P.shape[1])
+    con = [P_np @ x <= q_np]
+    prob = cp.Problem(cp.Maximize(x[i]), con)
+    xi_up = prob.solve()
+    prob = cp.Problem(cp.Minimize(x[i]), con)
+    xi_lo = prob.solve()
+    return (xi_lo, xi_up)

@@ -140,6 +140,11 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         q0 = torch.tensor([2, 2, 3, 3], dtype=dut.dtype)
         dut.add_mode(A0, g0, P0, q0, True)
         self.assertEqual(dut.num_modes, 1)
+        self.assertEqual(len(dut.x_lo), 1)
+        self.assertEqual(len(dut.x_up), 1)
+        np.testing.assert_array_almost_equal(dut.x_lo[0],
+                                             np.array([-2.5, -2.5]))
+        np.testing.assert_array_almost_equal(dut.x_up[0], np.array([2.5, 2.5]))
 
     def test_mixed_integer_constraints(self):
         dut = hybrid_linear_system.AutonomousHybridLinearSystem(
@@ -157,14 +162,13 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         q1 = torch.tensor([3, -1, 3, -1], dtype=dut.dtype)
         dut.add_mode(A1, g1, P1, q1)
 
-        def test_mode(mode):
+        def test_mode(mode, x_lo, x_up):
             # We want to generate a random state in the admissible region of
             # the given mode.
             is_in_mode = False
             (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in) =\
                 dut.mixed_integer_constraints(
-                torch.tensor([-1, -1], dtype=dut.dtype),
-                torch.tensor([4, 1], dtype=dut.dtype))
+                    None, torch.tensor([4, 1], dtype=dut.dtype))
             while not is_in_mode:
                 x_sample = torch.from_numpy(np.random.uniform(-4, 4, (2,)))
                 if torch.all(dut.P[mode] @ x_sample <= dut.q[mode]):
@@ -197,10 +201,14 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             np.testing.assert_allclose(gamma.detach().numpy(), gamma_var.value)
             np.testing.assert_allclose(s.detach().numpy(), s_var.value)
 
-        test_mode(0)
-        test_mode(0)
-        test_mode(1)
-        test_mode(1)
+        for mode in [0, 1]:
+            test_mode(mode, torch.tensor([-1, -1], dtype=dut.dtype),
+                      torch.tensor([4, 1], dtype=dut.dtype))
+            test_mode(mode, torch.tensor([-2, -2], dtype=dut.dtype),
+                      torch.tensor([5, 2], dtype=dut.dtype))
+            test_mode(mode, torch.tensor([-1, -1], dtype=dut.dtype), None)
+            test_mode(mode, None, torch.tensor([-1, -1], dtype=dut.dtype))
+            test_mode(mode, None, None)
 
 
 if __name__ == "__main__":
