@@ -4,11 +4,11 @@ import hybrid_linear_system
 
 def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up):
     """
-    x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
-    u = [paddletheta_dot, paddlevy_dot]
+    x = [ballx, bally, paddley, ballvx, ballvy, paddlevy]
+    u = [paddletheta, paddlevy_dot]
     """
     g = -9.81
-    x_dim = 7
+    x_dim = 6
     u_dim = 2
 
     assert(len(x_lo) == x_dim)
@@ -29,23 +29,21 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up):
     hls = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
 
     # free falling mode
-    A = torch.Tensor([[1., 0., 0., 0., dt, 0., 0.],
-                      [0., 1., 0., 0., 0., dt, 0.],
-                      [0., 0., 1., 0., 0., 0., dt],
-                      [0., 0., 0., 1., 0., 0., 0.],
-                      [0., 0., 0., 0., 1., 0., 0.],
-                      [0., 0., 0., 0., 0., 1., 0.],
-                      [0., 0., 0., 0., 0., 0., 1.]]).type(dtype)
+    A = torch.Tensor([[1., 0., 0., dt, 0., 0.],
+                      [0., 1., 0., 0., dt, 0.],
+                      [0., 0., 1., 0., 0., dt],
+                      [0., 0., 0., 1., 0., 0.],
+                      [0., 0., 0., 0., 1., 0.],
+                      [0., 0., 0., 0., 0., 1.]]).type(dtype)
     B = torch.Tensor([[0., 0.],
                       [0., 0.],
                       [0., 0.],
-                      [dt, 0.],
                       [0., 0.],
                       [0., 0.],
                       [0., dt]]).type(dtype)
-    c = torch.Tensor([0., 0., 0., 0., 0., g, 0.]).type(dtype)
+    c = torch.Tensor([0., 0., 0., 0., g, 0.]).type(dtype)
     # bally > paddley + collision_eps
-    P = torch.Tensor([[0., -1., 1., 0., 0., -dt, dt, 0., 0.]]).type(dtype)
+    P = torch.Tensor([[0., -1., 1., 0., -dt, dt, 0., 0.]]).type(dtype)
     q = torch.Tensor([-collision_eps]).type(dtype)
     hls.add_mode(
         A, B, c, torch.cat(
@@ -53,23 +51,21 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up):
             (q, q_lim), dim=0))
 
     # colliding with the paddle
-    A = torch.Tensor([[1., 0., 0., 0., dt, 0., 0.],
-                      [0., 0., 1., 0., 0., 0., dt],
-                      [0., 0., 1., 0., 0., 0., dt],
-                      [0., 0., 0., 1., 0., 0., 0.],
-                      [0., 0., 0., 0., 1., 0., 0.],
-                      [0., 0., 0., 0., 0., -cr, 1. + cr],
-                      [0., 0., 0., 0., 0., 0., 1.]]).type(dtype)
+    A = torch.Tensor([[1., 0., 0., dt, 0., 0.],
+                      [0., 0., 1., 0., 0., dt],
+                      [0., 0., 1., 0., 0., dt],
+                      [0., 0., 0., 1., 0., 0.],
+                      [0., 0., 0., 0., -cr, 1. + cr],
+                      [0., 0., 0., 0., 0., 1.]]).type(dtype)
     B = torch.Tensor([[0., 0.],
                       [0., 0.],
                       [0., 0.],
-                      [dt, 0.],
                       [0., 0.],
                       [0., dt],
                       [0., dt]]).type(dtype)
-    c = torch.Tensor([0., collision_eps, 0., 0., 0., 0., 0.]).type(dtype)
+    c = torch.Tensor([0., collision_eps, 0., 0., 0., 0.]).type(dtype)
     # bally <= paddley + collision_eps
-    P = torch.Tensor([[0., 1., -1., 0., 0., dt, -dt, 0., 0.]]).type(dtype)
+    P = torch.Tensor([[0., 1., -1., 0., dt, -dt, 0., 0.]]).type(dtype)
     q = torch.Tensor([collision_eps]).type(dtype)
     hls.add_mode(
         A, B, c, torch.cat(

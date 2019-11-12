@@ -16,13 +16,13 @@ class BallPaddleHybridLinearSystemTest(unittest.TestCase):
         self.dtype = torch.float64
         self.dt = .0025
         self.x_lo = torch.Tensor(
-            [-1., 0., 0., -np.pi / 2,
+            [-1., 0., 0.,
              -1000., -1000., -1000.]).type(self.dtype)
         self.x_up = torch.Tensor(
-            [1000., 2000., 1., np.pi / 2,
+            [1000., 2000., 1.,
              10000., 10000., 10000.]).type(self.dtype)
-        self.u_lo = torch.Tensor([-1000., -1000.]).type(self.dtype)
-        self.u_up = torch.Tensor([1000., 1000.]).type(self.dtype)
+        self.u_lo = torch.Tensor([-np.pi / 2, -1000.]).type(self.dtype)
+        self.u_up = torch.Tensor([np.pi / 2, 1000.]).type(self.dtype)
         self.sys = bphls.get_ball_paddle_hybrid_linear_system(
             self.dtype, self.dt, self.x_lo, self.x_up, self.u_lo, self.u_up)
 
@@ -43,7 +43,7 @@ class BallPaddleHybridLinearSystemTest(unittest.TestCase):
         slack = cp.Variable(num_slack)
         alpha = cp.Variable(num_alpha, boolean=True)
 
-        x0 = np.array([0., 1., .5, 0., 0., 0., 5.])
+        x0 = np.array([0., 1., .5, 0., 0., 5.])
         u0 = np.array([0., 0.])
 
         obj = cp.Minimize(0.)

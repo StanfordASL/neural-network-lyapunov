@@ -13,9 +13,9 @@ from utils import torch_to_numpy
 class ModelBoundsUpperBound(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
-        self.linear1 = nn.Linear(7, 10)
+        self.linear1 = nn.Linear(6, 10)
         self.linear1.weight.data = torch.tensor(
-            np.random.rand(10, 7), dtype=self.dtype)
+            np.random.rand(10, 6), dtype=self.dtype)
         self.linear1.bias.data = torch.tensor(
             np.random.rand(10), dtype=self.dtype)
         self.linear2 = nn.Linear(10, 10)
@@ -37,11 +37,11 @@ class ModelBoundsUpperBound(unittest.TestCase):
         dt = .01
         N = 10
         x_lo = torch.Tensor(
-            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e7, -1e7]).type(dtype)
-        u_up = torch.Tensor([1e7, 1e7]).type(dtype)
+            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e7]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e7]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
         vf = value_to_optimization.ValueFunction(
@@ -53,12 +53,12 @@ class ModelBoundsUpperBound(unittest.TestCase):
         r = torch.ones(sys.u_dim) * 0.1
         vf.set_cost(Q=Q, R=R, q=q, r=r)
         vf.set_terminal_cost(Qt=Q, Rt=R, qt=q, rt=r)
-        xN = torch.Tensor([np.nan, .5, 0., np.nan, np.nan, 0., np.nan])
+        xN = torch.Tensor([np.nan, .5, 0., np.nan, 0., np.nan])
         vf.set_constraints(xN=xN)
 
         mb = model_bounds.ModelBounds(self.model, vf)
-        x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0., 0.]).type(dtype)
-        x0_up = torch.Tensor([0., 2., .1, 0., 0., 0., 0.]).type(dtype)
+        x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0.]).type(dtype)
+        x0_up = torch.Tensor([0., 2., .1, 0., 0., 0.]).type(dtype)
         bound_opt = mb.upper_bound_opt(self.model, x0_lo, x0_up)
         Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b = torch_to_numpy(bound_opt)
 

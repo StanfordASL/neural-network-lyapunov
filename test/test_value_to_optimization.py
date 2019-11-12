@@ -17,11 +17,11 @@ class ValueToOptimizationTest(unittest.TestCase):
         dtype = torch.float64
         dt = .001
         x_lo = torch.Tensor(
-            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e5, -1e5]).type(dtype)
-        u_up = torch.Tensor([1e5, 1e5]).type(dtype)
+            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e5]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
 
@@ -34,8 +34,8 @@ class ValueToOptimizationTest(unittest.TestCase):
         vf.set_terminal_cost(Qt=Qt, Rt=Rt, Zt=Zt, qt=qt, rt=rt, zt=zt)
 
         # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
-        x0 = torch.Tensor([0., .25, 0., 0., 0., 0., 0.])
-        xN = torch.Tensor([np.nan, .6, 0., np.nan, np.nan, 0., np.nan])
+        x0 = torch.Tensor([0., .25, 0., 0., 0., 0.])
+        xN = torch.Tensor([np.nan, .6, 0., np.nan, 0., np.nan])
         vf.set_constraints(x0=x0, xN=xN)
 
         traj_opt = vf.traj_opt_constraint()
@@ -70,11 +70,11 @@ class ValueToOptimizationTest(unittest.TestCase):
         dt = .01
         N = 5
         x_lo = torch.Tensor(
-            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e5, -1e5]).type(dtype)
-        u_up = torch.Tensor([1e5, 1e5]).type(dtype)
+            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e5]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
         vf = value_to_optimization.ValueFunction(
@@ -133,11 +133,11 @@ class ValueToOptimizationTest(unittest.TestCase):
         dt = .01
         N = 20
         x_lo = torch.Tensor(
-            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e5, -1e5]).type(dtype)
-        u_up = torch.Tensor([1e5, 1e5]).type(dtype)
+            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e5]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
 
@@ -184,11 +184,11 @@ class ValueToOptimizationTest(unittest.TestCase):
         dt = .01
         N = 5
         x_lo = torch.Tensor(
-            [-1., -1., 0., -np.pi / 2, -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., np.pi / 2, 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-1e5, -1e5]).type(dtype)
-        u_up = torch.Tensor([1e5, 1e5]).type(dtype)
+            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e5]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
         vf = value_to_optimization.ValueFunction(
