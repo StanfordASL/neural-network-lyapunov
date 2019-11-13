@@ -254,6 +254,19 @@ class TestReLU(unittest.TestCase):
             test_input_x(torch.tensor([-0.15, -0.2], dtype=self.dtype))
             test_input_x(torch.tensor([1.1, -0.22], dtype=self.dtype))
             test_input_x(torch.tensor([1.5, -0.8], dtype=self.dtype))
+            # randomized test
+            torch.manual_seed(0)
+            np.random.seed(0)
+            for _ in range(30):
+                found_x = False
+                while (not found_x):
+                    x_random = torch.tensor(
+                        [np.random.normal(0, 1), np.random.normal(0, 1)]).\
+                        type(self.dtype)
+                    if (torch.all(x_random >= x_lo) and
+                            torch.all(x_random <= x_up)):
+                        found_x = True
+                test_input_x(x_random)
 
         test_model(self.model1)
         test_model(self.model2)
@@ -357,6 +370,118 @@ class TestReLU(unittest.TestCase):
 
         test_model(self.model1)
         test_model(self.model2)
+
+    def test_output_gradient_times_vector(self):
+        def test_model(model, x, y, y_lo, y_up):
+            assert(x.shape == (2, ))
+            assert(y.shape == (2, ))
+            assert(y_lo.shape == (2, ))
+            assert(y_up.shape == (2, ))
+            assert(torch.all(y <= y_up) and torch.all(y >= y_lo))
+            activation_pattern =\
+                relu_to_optimization.ComputeReLUActivationPattern(model, x)
+            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+                model, self.dtype)
+            beta = torch.empty((relu_free_pattern.num_relu_units,),
+                               dtype=self.dtype)
+            for layer in range(len(relu_free_pattern.relu_unit_index)):
+                for index, beta_index in enumerate(
+                        relu_free_pattern.relu_unit_index[layer]):
+                    beta[beta_index] = 1. if activation_pattern[layer][index]\
+                        else 0.
+            (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+                model, 2, activation_pattern, self.dtype)
+            output_expected = g.squeeze() @ y
+            (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) =\
+                relu_free_pattern.output_gradient_times_vector(
+                    model, y_lo, y_up)
+
+            # Now compute z manually
+            z_expected = torch.empty((relu_free_pattern.num_relu_units),
+                                     dtype=self.dtype)
+            z_pre = y
+            layer_count = 0
+            for layer in model:
+                if (isinstance(layer, nn.Linear)):
+                    z_cur = layer.weight.data @ z_pre
+                elif (isinstance(layer, nn.ReLU)):
+                    z_cur = \
+                        beta[relu_free_pattern.relu_unit_index[layer_count]] *\
+                        z_cur
+                    z_expected[relu_free_pattern.relu_unit_index[layer_count]]\
+                        = z_cur
+                    z_pre = z_cur
+                    layer_count += 1
+            # Now check that z_expected is within the bound.
+            np.testing.assert_array_less(z_expected.detach().numpy(),
+                                         z_up.detach().numpy() + 1E-10)
+            np.testing.assert_array_less(z_lo.detach().numpy() - 1E-10,
+                                         z_expected.detach().numpy())
+            # Check that the output equals to a_out.dot(z_expected)
+            self.assertAlmostEqual((a_out @ z_expected).item(),
+                                   output_expected.item())
+            # Check that y, z, beta satisfies the constraint
+            lhs = A_y @ y + A_z @ z_expected + A_beta @ beta
+            np.testing.assert_array_less(lhs.detach().numpy(),
+                                         rhs.detach().numpy() + 1E-10)
+
+            # Now solve an optimization problem satisfying the constraint, and
+            # fix y and beta. The only z that satisfies the constraint should
+            # be z_expected.
+            z_var = cp.Variable(relu_free_pattern.num_relu_units)
+            objective = cp.Minimize(0.)
+            con = [A_z.detach().numpy() @ z_var <=
+                   (rhs - A_y @y - A_beta @ beta).detach().numpy()]
+            prob = cp.Problem(objective, con)
+            prob.solve(solver=cp.GUROBI)
+            np.testing.assert_array_almost_equal(
+                z_var.value, z_expected.detach().numpy())
+
+        # Check for different models and inputs.
+        test_model(self.model1, torch.tensor([2., 3.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 0.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        test_model(self.model1, torch.tensor([2.,  -1.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 0.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        test_model(self.model1, torch.tensor([-2.,  -1.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 1.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        test_model(self.model2, torch.tensor([2., 3.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 0.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        test_model(self.model2, torch.tensor([2.,  -1.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 0.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        test_model(self.model2, torch.tensor([-2.,  -1.], dtype=self.dtype),
+                   torch.tensor([1., 2.], dtype=self.dtype),
+                   torch.tensor([-1., 1.], dtype=self.dtype),
+                   torch.tensor([2., 3.], dtype=self.dtype))
+        # randomized test.
+        torch.manual_seed(0)
+        np.random.seed(0)
+        for _ in range(30):
+            found_y_bound = False
+            while (not found_y_bound):
+                y_lo = torch.tensor([-1 + np.random.normal(0, 1),
+                                     1. + np.random.normal(0, 1)],
+                                    dtype=self.dtype)
+                y_up = torch.tensor([2 + np.random.normal(0, 1),
+                                     3. + np.random.normal(0, 1)],
+                                    dtype=self.dtype)
+                if torch.all(y_up > y_lo):
+                    found_y_bound = True
+            y = torch.tensor([np.random.uniform(y_lo[0], y_up[0]),
+                              np.random.uniform(y_lo[1], y_up[1])],
+                             dtype=self.dtype)
+            x = torch.from_numpy(np.random.normal(0, 1, (2,))).type(self.dtype)
+            test_model(self.model1, x, y, y_lo, y_up)
+            test_model(self.model2, x, y, y_lo, y_up)
 
 
 if __name__ == "__main__":
