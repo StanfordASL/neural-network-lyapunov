@@ -89,7 +89,8 @@ class HybridLinearSystem:
         self.u_up.append(u_up)
         self.num_modes += 1
 
-    def mixed_integer_constraints(self, x_lo, x_up, u_lo, u_up):
+    def mixed_integer_constraints(
+            self, x_lo=None, x_up=None, u_lo=None, u_up=None):
         """
         We can rewrite the hybrid dynamics as mixed integer linear constraints.
         We denote αᵢ = 1 if the system is in mode i.
