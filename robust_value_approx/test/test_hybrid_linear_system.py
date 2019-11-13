@@ -57,8 +57,6 @@ class HybridLinearSystemTest(unittest.TestCase):
         x_up = torch.tensor([10, 8], dtype=dut.dtype)
         u_lo = torch.tensor([-5], dtype=dut.dtype)
         u_up = torch.tensor([10], dtype=dut.dtype)
-        (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha, rhs_in) =\
-            dut.mixed_integer_constraints(x_lo, x_up, u_lo, u_up)
 
         def generate_xu(mode, expect_in_mode):
             # @param expect_in_mode. Do you want to generate x/u in that mode?
@@ -79,7 +77,9 @@ class HybridLinearSystemTest(unittest.TestCase):
                     is_in_mode = False
             return (x, u)
 
-        def test_mode(mode):
+        def test_mode(mode, x_lo, x_up, u_lo, u_up):
+            (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha, rhs_in)\
+                = dut.mixed_integer_constraints(x_lo, x_up, u_lo, u_up)
             (x, u) = generate_xu(mode, True)
             # First find x and u in this mode.
             x_next = dut.A[mode] @ x + dut.B[mode] @ u + dut.c[mode]
@@ -99,14 +99,26 @@ class HybridLinearSystemTest(unittest.TestCase):
             self.assertTrue(torch.all(lhs_in <= rhs_in + 1E-12))
 
         for mode in range(dut.num_modes):
-            test_mode(mode)
-            test_mode(mode)
-            test_mode(mode)
+            test_mode(mode, x_lo, x_up, u_lo, u_up)
+            test_mode(mode, x_lo, x_up, u_lo, u_up)
+            test_mode(mode, x_lo, x_up, u_lo, u_up)
+            test_mode(mode, None, x_up, u_lo, u_up)
+            test_mode(mode, x_lo, None, u_lo, u_up)
+            test_mode(mode, x_lo, x_up, None, u_up)
+            test_mode(mode, x_lo, x_up, u_lo, None)
+            test_mode(mode, x_lo, x_up, None, None)
+            test_mode(mode, None, x_up, u_lo, None)
+            test_mode(mode, x_lo, None, u_lo, None)
+            test_mode(mode, x_lo, None, None, u_up)
+            test_mode(mode, None, None, u_lo, None)
+            test_mode(mode, None, None, None, None)
 
-        def test_ineq(mode):
+        def test_ineq(mode, x_lo, x_up, u_lo, u_up):
             # Randomly sample x and u. If x and u are not in that mode, then
             # there should be no slack variables such that the inequality
             # constraints are satisfied.
+            (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha, rhs_in)\
+                = dut.mixed_integer_constraints(x_lo, x_up, u_lo, u_up)
             (x, u) = generate_xu(mode, False)
             alpha = torch.zeros(dut.num_modes, 1, dtype=dut.dtype)
             alpha[mode] = 1
@@ -119,7 +131,19 @@ class HybridLinearSystemTest(unittest.TestCase):
             self.assertFalse(torch.all(lhs < rhs_in + 1E-12))
 
         for mode in range(dut.num_modes):
-            test_ineq(mode)
+            test_ineq(mode, x_lo, x_up, u_lo, u_up)
+            test_ineq(mode, x_lo, x_up, u_lo, u_up)
+            test_ineq(mode, x_lo, x_up, u_lo, u_up)
+            test_ineq(mode, None, x_up, u_lo, u_up)
+            test_ineq(mode, x_lo, None, u_lo, u_up)
+            test_ineq(mode, x_lo, x_up, None, u_up)
+            test_ineq(mode, x_lo, x_up, u_lo, None)
+            test_ineq(mode, x_lo, x_up, None, None)
+            test_ineq(mode, None, x_up, u_lo, None)
+            test_ineq(mode, x_lo, None, u_lo, None)
+            test_ineq(mode, x_lo, None, None, u_up)
+            test_ineq(mode, None, None, u_lo, None)
+            test_ineq(mode, None, None, None, None)
 
 
 class AutonomousHybridLinearSystemTest(unittest.TestCase):

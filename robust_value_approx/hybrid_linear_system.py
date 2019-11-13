@@ -36,6 +36,14 @@ class HybridLinearSystem:
         self.c = []
         self.P = []
         self.q = []
+        # self.x_lo[i] (self.u_lo[i]) stores the lower bound of x (u) in mode i
+        # (inferred from Pᵢ[x; u] ≤ qᵢ)
+        self.x_lo = []
+        self.u_lo = []
+        # self.x_up[i] (self.u_up[i]) stores the upper bound of x (u) in mode i
+        # (inferred from Pᵢ[x; u] ≤ qᵢ)
+        self.x_up = []
+        self.u_up = []
         self.num_modes = 0
 
     def add_mode(self, Ai, Bi, ci, Pi, qi, check_polyhedron_bounded=False):
@@ -66,6 +74,19 @@ class HybridLinearSystem:
         self.c.append(ci)
         self.P.append(Pi)
         self.q.append(qi)
+        x_lo = np.empty(self.x_dim)
+        x_up = np.empty(self.x_dim)
+        u_lo = np.empty(self.u_dim)
+        u_up = np.empty(self.u_dim)
+        for j in range(self.x_dim):
+            (x_lo[j], x_up[j]) = utils.compute_bounds_from_polytope(Pi, qi, j)
+        for j in range(self.u_dim):
+            (u_lo[j], u_up[j]) = utils.compute_bounds_from_polytope(
+                Pi, qi, self.x_dim + j)
+        self.x_lo.append(x_lo)
+        self.x_up.append(x_up)
+        self.u_lo.append(u_lo)
+        self.u_up.append(u_up)
         self.num_modes += 1
 
     def mixed_integer_constraints(self, x_lo, x_up, u_lo, u_up):
@@ -85,10 +106,18 @@ class HybridLinearSystem:
         Ain_x*x[n] + Ain_u*u[n] + Ain_slack * slack + Ain_alpha*α ≤ rhs_in
         where slack = [s₁[n];s₂[n];...s_K[n];t₁[n];t₂[n];...;t_K[n]]
         α = [α₁;α₂;...;α_K].
-        @param x_lo The lower bound of x[n], a column vector.
-        @param x_up The upper bound of x[n], a column vector
-        @param u_lo The lower bound of u[n], a column vector.
-        @param u_up The upper bound of u[n], a column vector
+        @param x_lo The lower bound of x[n], a column vector. If x_lo = None,
+        then we will use the lower bounds on x inferred from
+        Pᵢ * [x[n]; u[n]] <= qᵢ
+        @param x_up The upper bound of x[n], a column vector. If x_up = None,
+        then we will use the upper bounds on x inferred from
+        Pᵢ * [x[n]; u[n]] <= qᵢ
+        @param u_lo The lower bound of u[n], a column vector. If u_lo = None,
+        then we will use the lower bounds on u inferred from
+        Pᵢ * [x[n]; u[n]] <= qᵢ
+        @param u_up The upper bound of u[n], a column vector. If u_up = None,
+        then we will use the upper bounds on u inferred from
+        Pᵢ * [x[n]; u[n]] <= qᵢ
         @return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,
         rhs_in)
         @note 1. This function doesn't require the polytope
@@ -96,12 +125,31 @@ class HybridLinearSystem:
               2. We do not impose the constraint that one and only one mode
                  is active. The user should impose this constraint separately.
         """
-        check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
-        check_shape_and_type(x_up, (self.x_dim,), self.dtype)
-        check_shape_and_type(u_up, (self.u_dim,), self.dtype)
-        check_shape_and_type(u_lo, (self.u_dim,), self.dtype)
-        assert(torch.all(x_lo <= x_up))
-        assert(torch.all(u_lo <= u_up))
+        def check_and_to_numpy(array, shape, dtype):
+            if (isinstance(array, torch.Tensor)):
+                check_shape_and_type(array, shape, dtype)
+                return array.detach().numpy()
+            elif (isinstance(array, np.ndarray)):
+                assert(array.shape == shape)
+                return array
+        x_lo_np = check_and_to_numpy(x_lo, (self.x_dim,), self.dtype)
+        x_up_np = check_and_to_numpy(x_up, (self.x_dim,), self.dtype)
+        u_lo_np = check_and_to_numpy(u_lo, (self.u_dim,), self.dtype)
+        u_up_np = check_and_to_numpy(u_up, (self.u_dim,), self.dtype)
+        x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
+        x_up_all = np.amax(np.stack(self.x_up, axis=1), axis=1)
+        u_lo_all = np.amin(np.stack(self.u_lo, axis=1), axis=1)
+        u_up_all = np.amax(np.stack(self.u_up, axis=1), axis=1)
+        if x_lo is not None:
+            x_lo_all = np.maximum(x_lo_all, x_lo_np)
+        if x_up is not None:
+            x_up_all = np.minimum(x_up_all, x_up_np)
+        if u_lo is not None:
+            u_lo_all = np.maximum(u_lo_all, u_lo_np)
+        if u_up is not None:
+            u_up_all = np.minimum(u_up_all, u_up_np)
+        assert(np.all(x_lo_all <= x_up_all))
+        assert(np.all(u_lo_all <= u_up_all))
         Aeq_slack = torch.cat((torch.cat(self.A, dim=1),
                                torch.cat(self.B, dim=1)), dim=1)
         Aeq_alpha = torch.cat([c.reshape((-1, 1)) for c in self.c], dim=1)
@@ -132,7 +180,7 @@ class HybridLinearSystem:
                  Ain_slack[ineq_count: ineq_count + 4, s_index(i, j)],
                  Ain_alpha[ineq_count:ineq_count + 4, i],
                  rhs_in[ineq_count:ineq_count + 4]) =\
-                    replace_binary_continuous_product(x_lo[j], x_up[j],
+                    replace_binary_continuous_product(x_lo_all[j], x_up_all[j],
                                                       self.dtype)
                 ineq_count += 4
             for j in range(self.u_dim):
@@ -140,7 +188,7 @@ class HybridLinearSystem:
                  Ain_slack[ineq_count:ineq_count+4, t_index(i, j)],
                  Ain_alpha[ineq_count:ineq_count+4, i],
                  rhs_in[ineq_count:ineq_count+4]) =\
-                    replace_binary_continuous_product(u_lo[j], u_up[j],
+                    replace_binary_continuous_product(u_lo_all[j], u_up_all[j],
                                                       self.dtype)
                 ineq_count += 4
 
@@ -265,7 +313,7 @@ class AutonomousHybridLinearSystem:
         elif isinstance(x_up, np.ndarray):
             x_up_np = x_up
         if x_lo is not None and x_up is not None:
-            assert(np.all(x_lo_np, x_up_np))
+            assert(np.all(x_lo_np <= x_up_np))
         # Find the minimum of x for all modes.
         x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
         # Find the maximum of x for all modes.
