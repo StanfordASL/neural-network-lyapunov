@@ -142,7 +142,8 @@ def torch_to_numpy(torch_array_list, squeeze=True):
     return numpy_array_list
 
 
-def train_model(model, inputs, labels, batch_size=100, num_epoch=1000):
+def train_model(model, inputs, labels, batch_size=100,
+                num_epoch=1000, learning_rate=1e-3):
     """
     trains a pytorch model with an L2 loss function using the
     Adam training algorithm
@@ -153,7 +154,7 @@ def train_model(model, inputs, labels, batch_size=100, num_epoch=1000):
     @param num_epoch the number of epochs
     """
     loss_fn = torch.nn.MSELoss(reduction="sum")
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     device = next(model.parameters()).device
 
     data_set = torch.utils.data.TensorDataset(inputs, labels)
