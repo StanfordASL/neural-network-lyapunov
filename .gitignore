@@ -129,3 +129,6 @@ dmypy.json
 
 # solvers
 gurobi.log
+
+# Pytorch tensors
+*.pt
