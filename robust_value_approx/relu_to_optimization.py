@@ -311,11 +311,11 @@ class ReLUFreePattern:
                     # This is for the output layer when the output layer
                     # doesn't have a ReLU unit.
                     assert(not self.last_layer_is_relu)
-                    a_out = torch.zeros((self.num_relu_units, 1),
+                    a_out = torch.zeros((self.num_relu_units,),
                                         dtype=self.dtype)
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
-                        a_out[self.relu_unit_index[layer_count - 1][k]
-                              ][0] = layer.weight.data[0][k]
+                        a_out[self.relu_unit_index[layer_count - 1][k]] =\
+                            layer.weight.data[0][k]
                     b_out = layer.bias.item()
 
             elif (isinstance(layer, nn.ReLU)):
@@ -332,7 +332,7 @@ class ReLUFreePattern:
 
                 layer_count += 1
         if self.last_layer_is_relu:
-            a_out = torch.zeros((self.num_relu_units, 1), dtype=self.dtype)
+            a_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
             a_out[-1] = 1
             b_out = 0
         Ain1 = Ain1[:ineq_constraint_count]

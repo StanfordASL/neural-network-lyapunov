@@ -15,7 +15,7 @@ class HybridLinearSystem:
     x[n+1] = Aᵢ*x[n] + Bᵢ*u[n] + cᵢ
     if Pᵢ * [x[n]; u[n]] <= qᵢ
     i = 1, ..., K.
-    in discrete time, or 
+    in discrete time, or
     ẋ = Aᵢx + Bᵢu + cᵢ
     if Pᵢ * [x;y] ≤ qᵢ
     i = 1, ..., K.
@@ -247,6 +247,10 @@ class AutonomousHybridLinearSystem:
         # self.x_up[i] stores the upper bound of x in mode i (inferred from
         # Pᵢx ≤ qᵢ)
         self.x_up = []
+        # x_lo_all[i] is the lower bound of x across all modes.
+        self.x_lo_all = np.full((x_dim,), np.inf)
+        # x_up_all[i] is the upper bound of x across all modes.
+        self.x_up_all = np.full((x_dim,), -np.inf)
         self.num_modes = 0
 
     def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
@@ -279,6 +283,8 @@ class AutonomousHybridLinearSystem:
             (x_lo[j], x_up[j]) = utils.compute_bounds_from_polytope(Pi, qi, j)
         self.x_lo.append(x_lo)
         self.x_up.append(x_up)
+        self.x_lo_all = np.minimum(self.x_lo_all, x_lo)
+        self.x_up_all = np.maximum(self.x_up_all, x_up)
         self.num_modes += 1
 
     def mixed_integer_constraints(self, x_lo=None, x_up=None):
@@ -320,14 +326,14 @@ class AutonomousHybridLinearSystem:
             x_up_np = x_up
         if x_lo is not None and x_up is not None:
             assert(np.all(x_lo_np <= x_up_np))
-        # Find the minimum of x for all modes.
-        x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
-        # Find the maximum of x for all modes.
-        x_up_all = np.amax(np.stack(self.x_up, axis=1), axis=1)
         if x_lo is not None:
-            x_lo_all = np.maximum(x_lo_all, x_lo_np)
+            x_lo_all = np.maximum(self.x_lo_all, x_lo_np)
+        else:
+            x_lo_all = self.x_lo_all
         if x_up is not None:
-            x_up_all = np.minimum(x_up_all, x_up_np)
+            x_up_all = np.minimum(self.x_up_all, x_up_np)
+        else:
+            x_up_all = self.x_up_all
         Aeq_s = torch.cat(self.A, dim=1)
         Aeq_gamma = torch.cat([g.reshape((-1, 1)) for g in self.g], dim=1)
 
