@@ -2,6 +2,7 @@ from IPython.display import clear_output
 import numpy as np
 import torch
 import cvxpy as cp
+import gurobipy
 
 
 def update_progress(progress):
@@ -273,3 +274,59 @@ def compute_bounds_from_polytope(P, q, i):
     prob = cp.Problem(cp.Minimize(x[i]), con)
     xi_lo = prob.solve()
     return (xi_lo, xi_up)
+
+
+def linear_program_cost(c, d, A_in, b_in, A_eq, b_eq):
+    """
+    For a linear programming problem
+    max cᵀx + d
+    s.t A_in * x <= b_in
+        A_eq * x = b_eq
+    We can write its optimal cost as a function of c, d, A_in, b_in, A_eq, b_eq
+    cost(c, d, A_in, b_in, A_eq, b_eq).
+    Notice at the optimal, we can select the active rows of the linear
+    constraints as A_act * x = b_act, hence the cost is
+    cᵀ * A_act⁻¹ * b_act + d
+    @return The optimal cost as a function of the input.
+    """
+    x_dim = A_in.shape[1]
+    check_shape_and_type(c, (x_dim, ), torch.float64)
+    check_shape_and_type(d, (), torch.float64)
+    num_in = A_in.shape[0]
+    check_shape_and_type(A_in, (num_in, x_dim), torch.float64)
+    check_shape_and_type(b_in, (num_in,), torch.float64)
+    num_eq = A_eq.shape[0]
+    check_shape_and_type(A_eq, (num_eq, x_dim), torch.float64)
+    check_shape_and_type(b_eq, (num_eq,), torch.float64)
+
+    model = gurobipy.Model()
+    x_vars = model.addVars(x_dim, lb=-np.inf, vtype=gurobipy.GRB.CONTINUOUS)
+    x = [x_vars[i] for i in range(x_dim)]
+
+    for i in range(num_in):
+        model.addLConstr(
+            gurobipy.LinExpr(A_in[i].tolist(), x),
+            sense=gurobipy.GRB.LESS_EQUAL, rhs=b_in[i])
+    for i in range(num_eq):
+        model.addLConstr(
+            gurobipy.LinExpr(A_eq[i].tolist(), x),
+            sense=gurobipy.GRB.EQUAL, rhs=b_eq[i])
+    model.setObjective(gurobipy.LinExpr(c, x) + d, gurobipy.GRB.MAXIMIZE)
+    model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+    model.optimize()
+    if (model.status != gurobipy.GRB.Status.OPTIMAL):
+        return None
+    # Now pick the active constraint
+    x_sol = np.array([var.x for var in x])
+    lhs_in = A_in.detach().numpy() @ x_sol
+    active_in_flag = b_in.detach().numpy() - lhs_in < 1e-5
+    num_act = np.sum(active_in_flag) + num_eq
+    A_act = torch.empty((num_act, x_dim), dtype=torch.float64)
+    b_act = torch.empty((num_act,), dtype=torch.float64)
+    A_act[:num_eq, :] = A_eq
+    b_act[:num_eq] = b_eq
+    active_in_indices = np.nonzero(active_in_flag)
+    for i in range(num_act - num_eq):
+        A_act[i + num_eq] = A_in[active_in_indices[i]]
+        b_act[i + num_eq] = b_in[active_in_indices[i]]
+    return c @ torch.inverse(A_act) @ b_act + d

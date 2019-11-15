@@ -2,6 +2,7 @@ import robust_value_approx.utils as utils
 import torch
 import unittest
 import numpy as np
+import gurobipy
 
 
 class test_replace_binary_continuous_product(unittest.TestCase):
@@ -153,6 +154,59 @@ class TestComputeBoundsFromPolytope(unittest.TestCase):
                          (-np.inf, 5))
         self.assertEqual(utils.compute_bounds_from_polytope(P, q, 1),
                          (-3, np.inf))
+
+
+class TestLinearProgramCost(unittest.TestCase):
+    def test(self):
+        def test_fun(c, d, A_in, b_in, A_eq, b_eq):
+            cost = utils.linear_program_cost(c, d, A_in, b_in, A_eq, b_eq)
+            x_dim = A_in.shape[1]
+            num_in = A_in.shape[0]
+            num_eq = A_eq.shape[0]
+            model = gurobipy.Model()
+            x_vars = model.addVars(x_dim, lb=-np.inf,
+                                   vtype=gurobipy.GRB.CONTINUOUS)
+            x = [x_vars[i] for i in range(x_dim)]
+
+            for i in range(num_in):
+                model.addLConstr(
+                    gurobipy.LinExpr(A_in[i].tolist(), x),
+                    sense=gurobipy.GRB.LESS_EQUAL, rhs=b_in[i])
+            for i in range(num_eq):
+                model.addLConstr(
+                    gurobipy.LinExpr(A_eq[i].tolist(), x),
+                    sense=gurobipy.GRB.EQUAL, rhs=b_eq[i])
+            model.setObjective(gurobipy.LinExpr(c, x) + d,
+                               gurobipy.GRB.MAXIMIZE)
+            model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            model.optimize()
+            if (model.status != gurobipy.GRB.Status.OPTIMAL):
+                self.assertIsNone(cost)
+            else:
+                self.assertAlmostEqual(cost, model.objVal)
+
+        dtype = torch.float64
+        test_fun(
+            torch.tensor([1, 2], dtype=dtype),
+            torch.tensor(2, dtype=dtype),
+            -torch.eye(2, dtype=dtype),
+            torch.tensor([0, 0], dtype=dtype),
+            torch.tensor([[1, 1]], dtype=dtype),
+            torch.tensor([1], dtype=dtype))
+        test_fun(
+            torch.tensor([1, 2], dtype=dtype),
+            torch.tensor(2, dtype=dtype),
+            -torch.eye(2, dtype=dtype),
+            torch.tensor([0, 0], dtype=dtype),
+            torch.tensor([[1, 1]], dtype=dtype),
+            torch.tensor([-1], dtype=dtype))
+        test_fun(
+            torch.tensor([1, 2, 3], dtype=dtype),
+            torch.tensor(2, dtype=dtype),
+            -torch.tensor([[1, 3, 5], [2, 1, -2]], dtype=dtype),
+            torch.tensor([5, 2], dtype=dtype),
+            torch.tensor([[1, 2, 5]], dtype=dtype),
+            torch.tensor([1], dtype=dtype))
 
 
 if __name__ == "__main__":
