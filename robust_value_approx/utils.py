@@ -331,3 +331,53 @@ def linear_program_cost(c, d, A_in, b_in, A_eq, b_eq):
         A_act[i + num_eq] = A_in[active_in_indices[i]]
         b_act[i + num_eq] = b_in[active_in_indices[i]]
     return c @ torch.inverse(A_act) @ b_act + d
+
+
+def gurobi_milp_to_standard_form(milp):
+    """
+    For an MILP in stored in a gurobi model, we extract the model to a standard
+    form
+        max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
+        s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
+            Aeq_r * r + Aeq_zeta * ζ = rhs_eq
+    where r contains all the continuous variables, and ζ contains all the
+    binary variables.
+    @param milp A gurobi model instance, has to be an MILP.
+    @return r, zeta, c_r, c_zeta, c_constant, Ain_r, Ain_zeta, rhs_in, Aeq_r,
+    Aeq_zeta, rhs_eq
+    """
+    assert(isinstance(milp, gurobipy.Model))
+    assert(milp.getAttr(gurobipy.GRB.Attr.NumSOS) == 0)
+    assert(milp.getAttr(gurobipy.GRB.Attr.NumQConstrs) == 0)
+    assert(milp.getAttr(gurobipy.GRB.Attr.NumGenConstrs) == 0)
+    assert(milp.getAttr(gurobipy.GRB.Attr.NumPWLObjVars) == 0)
+    num_bin_vars = milp.getAttr(gurobipy.GRB.Attr.NumBinVars)
+    assert(milp.getAttr(gurobipy.GRB.Attr.NumIntVars) == num_bin_vars)
+    assert(milp.getAttr(gurobipy.GRB.Attr.IsMIP))
+    assert(not milp.getAttr(gurobipy.GRB.Attr.IsQP))
+    assert(not milp.getAttr(gurobipy.GRB.Attr.IsQCP))
+    assert(not milp.getAttr(gurobipy.GRB.Attr.IsMultiObj))
+    num_cont_vars = milp.getAttr(gurobipy.GRB.Attr.NumVars) - num_bin_vars
+
+    # Load all variables
+    r = [None] * num_cont_vars
+    zeta = [None] * num_bin_vars
+    bin_var_count = 0
+    cont_var_count = 0
+    num_cont_var_bounds = 0
+    for var in milp.getVars():
+        if (var.vtype == gurobipy.GRB.CONTINUOUS):
+            r[cont_var_count] = var
+            cont_var_count += 1
+            if var.lb != -gurobipy.GRB.INFINITY:
+                num_cont_var_bounds += 1
+            if var.ub != gurobipy.GRB.INFINITY:
+                num_cont_var_bounds += 1
+        elif (var.vtype == gurobipy.GRB.BINARY):
+            zeta[bin_var_count] = var
+            bin_var_count += 1
+        else:
+            raise Exception("Only allow continuous or binary variables.")
+
+    # Parse all constraints into standard form
+

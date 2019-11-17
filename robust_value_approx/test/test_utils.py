@@ -209,5 +209,22 @@ class TestLinearProgramCost(unittest.TestCase):
             torch.tensor([1], dtype=dtype))
 
 
+def generate_milp1():
+    milp = gurobipy.Model()
+    x = milp.addVars(2, lb=0)
+    b = milp.addVars(1, lb=0, vtype=gurobipy.GRB.BINARY)
+    milp.addLConstr(x[0] + x[1] + b[0] == 2)
+    milp.setObjective(x[0] + 2 * x[1])
+    milp.update()
+    return milp
+
+class TestGurobiMILPToStandardForm(unittest.TestCase):
+    def test(self):
+        def test_fun(milp):
+            utils.gurobi_milp_to_standard_form(milp)
+
+        test_fun(generate_milp1())
+
+
 if __name__ == "__main__":
     unittest.main()
