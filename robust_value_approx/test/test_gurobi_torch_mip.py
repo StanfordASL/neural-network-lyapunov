@@ -181,5 +181,42 @@ class TestGurobiTorchMIP(unittest.TestCase):
                          torch.tensor(3, dtype=torch.float64)])
 
 
+class TestGurobiTorchMILP(unittest.TestCase):
+    def test_setObjective(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x = dut.addVars(2, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
+        alpha = dut.addVars(3, vtype=gurobipy.GRB.BINARY)
+        y = dut.addVars(4, vtype=gurobipy.GRB.CONTINUOUS)
+        beta = dut.addVars(1, vtype=gurobipy.GRB.BINARY)
+        dut.setObjective([torch.tensor([1, 2], dtype=dtype),
+                          torch.tensor([2, 0.5], dtype=dtype),
+                          torch.tensor([0.5], dtype=dtype),
+                          torch.tensor([2.5], dtype=dtype)],
+                         [x, [alpha[0], alpha[2]], beta, [y[2]]],
+                         constant=3., sense=gurobipy.GRB.MINIMIZE)
+        self.assertTrue(
+            torch.all(dut.c_r == torch.tensor([1, 2, 0, 0, 2.5, 0],
+                                              dtype=dtype)))
+        self.assertTrue(
+            torch.all(dut.c_zeta == torch.tensor([2, 0, 0.5, 0.5],
+                                                 dtype=dtype)))
+        self.assertTrue(dut.c_constant == torch.tensor(3, dtype=dtype))
+
+        dut.setObjective([torch.tensor([1, 2], dtype=dtype),
+                          torch.tensor([2, 0.5], dtype=dtype),
+                          torch.tensor([0.5], dtype=dtype),
+                          torch.tensor([2.5], dtype=dtype)],
+                         [x, [alpha[0], alpha[2]], beta, [y[2]]],
+                         constant=3., sense=gurobipy.GRB.MAXIMIZE)
+        self.assertTrue(
+            torch.all(dut.c_r == -torch.tensor([1, 2, 0, 0, 2.5, 0],
+                                               dtype=dtype)))
+        self.assertTrue(
+            torch.all(dut.c_zeta == -torch.tensor([2, 0, 0.5, 0.5],
+                                                  dtype=dtype)))
+        self.assertTrue(dut.c_constant == torch.tensor(-3, dtype=dtype))
+
+
 if __name__ == "__main__":
     unittest.main()

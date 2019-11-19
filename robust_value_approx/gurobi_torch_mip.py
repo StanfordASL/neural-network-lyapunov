@@ -134,6 +134,7 @@ class GurobiTorchMIP:
                     if r_used_flag[r_index]:
                         raise Exception("addLConstr: variable " + var[i].name
                                         + " is duplicated.")
+                    r_used_flag[r_index] = True
                     if sense == gurobipy.GRB.EQUAL:
                         new_Aeq_r_row[num_cont_vars] = len(self.rhs_eq)
                         new_Aeq_r_col[num_cont_vars] = r_index
@@ -149,6 +150,7 @@ class GurobiTorchMIP:
                     if zeta_used_flag[zeta_index]:
                         raise Exception("addLConstr: variable " + var[i].name
                                         + " is duplicated.")
+                    zeta_used_flag[zeta_index] = True
                     if sense == gurobipy.GRB.EQUAL:
                         new_Aeq_zeta_row[num_bin_vars] = len(self.rhs_eq)
                         new_Aeq_zeta_col[num_bin_vars] = zeta_index
@@ -185,3 +187,70 @@ class GurobiTorchMIP:
                                -rhs)
 
         return constr
+
+
+class GurobiTorchMILP(GurobiTorchMIP):
+    """
+    This class is a subclass of GurobiTorchMIP. It only allows linear cost. The
+    MILP is in this form
+    min cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
+    s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
+        Aeq_r * r + Aeq_zeta * ζ = rhs_eq
+    """
+
+    def __init__(self, dtype):
+        GurobiTorchMIP.__init__(self, dtype)
+        self.c_r = None
+        self.c_zeta = None
+        self.c_constant = None
+
+    def setObjective(self, coeffs, variables, constant, sense):
+        """
+        Set the linear objective.
+        The objective is ∑ᵢ coeffs[i]ᵀ * variables[i] + constant
+        @param coeffs A list of 1D pytorch tensors. coeffs[i] are the
+        coefficients for variables[i]
+        @param variables A list of lists. variables[i] is a list of gurobi
+        variables. Note that the variables cannot overlap.
+        @param sense GRB.MAXIMIZE or GRB.MINIMIZE
+        """
+        # r_used_flag[i] records if r[i] has appeared in @p variables.
+        assert(isinstance(coeffs, list))
+        assert(isinstance(variables, list))
+        assert(len(coeffs) == len(variables))
+        assert(sense == gurobipy.GRB.MAXIMIZE or
+               sense == gurobipy.GRB.MINIMIZE)
+        r_used_flag = [False] * len(self.r)
+        zeta_used_flag = [False] * len(self.zeta)
+        self.c_r = torch.zeros((len(self.r),), dtype=self.dtype)
+        self.c_zeta = torch.zeros((len(self.zeta),), dtype=self.dtype)
+        for coeff, var in zip(coeffs, variables):
+            assert(isinstance(coeff, torch.Tensor))
+            for i in range(len(var)):
+                if var[i] in self.r_indices.keys():
+                    r_index = self.r_indices[var[i]]
+                    if r_used_flag[r_index]:
+                        raise Exception("setObjective: variable " + var[i].name
+                                        + " is duplicated.")
+                    r_used_flag[r_index] = True
+                    self.c_r[r_index] = coeff[i] if\
+                        sense == gurobipy.GRB.MINIMIZE else -coeff[i]
+                elif var[i] in self.zeta_indices.keys():
+                    zeta_index = self.zeta_indices[var[i]]
+                    if zeta_used_flag[zeta_index]:
+                        raise Exception("setObjective: variable " + var[i].name
+                                        + " is duplicated.")
+                    zeta_used_flag[zeta_index] = True
+                    self.c_zeta[zeta_index] = coeff[i] if\
+                        sense == gurobipy.GRB.MINIMIZE else -coeff[i]
+        if isinstance(constant, float):
+            self.c_constant = torch.tensor(constant, dtype=self.dtype) if\
+                sense == gurobipy.GRB.MINIMIZE else\
+                torch.tensor(-constant, dtype=self.dtype)
+        elif isinstance(constant, torch.Tensor):
+            assert(len(constant.shape) == 0)
+            self.c_constant = constant if sense == gurobipy.GRB.MINIMIZE else\
+                -constant
+        else:
+            raise Exception("setObjective: constant must be either a float" +
+                            " or a torch tensor.")
