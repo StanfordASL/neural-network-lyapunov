@@ -45,8 +45,8 @@ class LyapunovDiscreteTimeHybridSystem:
         layer to be a ReLU activation layer, so as to guarantee the Lyapunov
         function to be non-negative.
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
-        TODO(hongkai.dai): return Ain_r, Ain_zeta, Aeq_r, Aeq_zeta, rhs_in,
-        rhs_eq, r, zeta instead
+        The decision variables of the MILP are
+        (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
         """
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
@@ -104,8 +104,8 @@ class LyapunovDiscreteTimeHybridSystem:
          a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
              relu_model, torch.from_numpy(self.system.x_lo_all),
              torch.from_numpy(self.system.x_up_all))
-        z = addVars(Ain_z.shape[1], lb=0, vtype=gurobipy.GRB.CONTINUOUS,
-                    name="z[n]")
+        z = addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+                    vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
         beta = addVars(Ain_beta.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
                        name="beta[n]")
 
@@ -127,8 +127,8 @@ class LyapunovDiscreteTimeHybridSystem:
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
-        z_next = addVars(Ain_z.shape[1], lb=0, vtype=gurobipy.GRB.CONTINUOUS,
-                         name="z[n+1]")
+        z_next = addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS, name="z[n+1]")
         beta_next = addVars(Ain_beta.shape[1], lb=0.,
                             vtype=gurobipy.GRB.BINARY, name="beta[n+1]")
         milp.update()
