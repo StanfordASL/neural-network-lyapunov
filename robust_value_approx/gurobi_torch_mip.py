@@ -188,6 +188,52 @@ class GurobiTorchMIP:
 
         return constr
 
+    def get_active_constraints(self, active_ineq_row_indices, zeta_sol):
+        """
+        Pick out the active constraints on the continuous variables as
+        A_act * r = b_act
+        @param active_ineq_row_indices A set of indices for the active
+        inequality constraints.
+        @param zeta_sol The solution to the binary variables. A torch array of
+        0/1.
+        @return (A_act, b_act)
+        """
+        assert(isinstance(active_ineq_row_indices, set))
+        assert(isinstance(zeta_sol, torch.Tensor))
+        A_act = torch.zeros(
+            (len(self.rhs_eq) + len(active_ineq_row_indices), len(self.r)),
+            dtype=self.dtype)
+        b_act = torch.zeros(
+            (len(self.rhs_eq) + len(active_ineq_row_indices),),
+            dtype=self.dtype)
+        # First fill in the equality constraints
+        # The equality constraints are Aeq_r * r + Aeq_zeta * zeta_sol = beq,
+        # equivalent to Aeq_r * r = beq - Aeq_zeta * zeta_sol
+        for row, col, val in zip(self.Aeq_r_row, self.Aeq_r_col,
+                                 self.Aeq_r_val):
+            A_act[row, col] = val
+        for i in range(len(self.rhs_eq)):
+            b_act[i] = self.rhs_eq[i]
+        for row, col, val in zip(self.Aeq_zeta_row, self.Aeq_zeta_col,
+                                 self.Aeq_zeta_val):
+            b_act[row] -= val * zeta_sol[col]
+
+        # Now fill in the active inequality constraints
+        Ain_r = torch.zeros((len(self.rhs_in), len(self.r)), dtype=self.dtype)
+        Ain_zeta = torch.zeros((len(self.rhs_in), len(self.zeta)),
+                               dtype=self.dtype)
+        for row, col, val in zip(self.Ain_r_row, self.Ain_r_col,
+                                 self.Ain_r_val):
+            Ain_r[row, col] = val
+        for row, col, val in zip(self.Ain_zeta_row, self.Ain_zeta_col,
+                                 self.Ain_zeta_val):
+            Ain_zeta[row, col] = val
+        for (i, row) in enumerate(active_ineq_row_indices):
+            A_act[len(self.rhs_eq) + i] = Ain_r[row]
+            b_act[len(self.rhs_eq) + i] = self.rhs_in[row] -\
+                Ain_zeta[row] @ zeta_sol
+        return (A_act, b_act)
+
 
 class GurobiTorchMILP(GurobiTorchMIP):
     """

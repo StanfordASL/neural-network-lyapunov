@@ -180,6 +180,55 @@ class TestGurobiTorchMIP(unittest.TestCase):
             dut.rhs_eq, [torch.tensor(2, dtype=torch.float64),
                          torch.tensor(3, dtype=torch.float64)])
 
+    def test_get_active_constraints(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        # The constraints are
+        # x[i] >= 0
+        # alpha[0] + alpha[1] = 1
+        # x[0] + x[1] + x[2] = 1
+        # x[0] + x[1] <= alpha[0]
+        # x[1] + x[2] <= alpha[1]
+        x = dut.addVars(3, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
+        alpha = dut.addVars(2, vtype=gurobipy.GRB.BINARY)
+        dut.addLConstr(
+            [torch.ones(2, dtype=dtype, requires_grad=True)], [alpha],
+            sense=gurobipy.GRB.EQUAL,
+            rhs=torch.tensor(1, dtype=dtype, requires_grad=True))
+        dut.addLConstr([torch.ones(3, dtype=dtype, requires_grad=True)], [x],
+                       sense=gurobipy.GRB.EQUAL,
+                       rhs=torch.tensor(1, dtype=dtype, requires_grad=True))
+        dut.addLConstr(
+            [torch.ones(2, dtype=dtype, requires_grad=True),
+             torch.tensor([-1], dtype=dtype, requires_grad=True)],
+            [x[:2], [alpha[0]]], sense=gurobipy.GRB.LESS_EQUAL,
+            rhs=torch.tensor(0, dtype=dtype, requires_grad=True))
+        dut.addLConstr(
+            [torch.ones(2, dtype=dtype, requires_grad=True),
+             torch.tensor([-1], dtype=dtype, requires_grad=True)],
+            [x[1:], [alpha[1]]], sense=gurobipy.GRB.LESS_EQUAL,
+            rhs=torch.tensor(0, dtype=dtype, requires_grad=True))
+
+        (A_act, b_act) = dut.get_active_constraints(
+            {2, 3}, torch.tensor([1, 0], dtype=dtype))
+        self.assertTrue(
+            torch.all(
+                A_act == torch.tensor([[0, 0, 0], [1, 1, 1], [0, 0, -1],
+                                       [1, 1, 0]], dtype=dtype,
+                                      requires_grad=True)))
+        self.assertTrue(torch.all(b_act == torch.tensor(
+            [0, 1, 0, 1], dtype=dtype, requires_grad=True)))
+
+        (A_act, b_act) = dut.get_active_constraints(
+            {0, 1, 4}, torch.tensor([0, 1], dtype=dtype))
+        self.assertTrue(
+            torch.all(
+                A_act == torch.tensor([[0, 0, 0], [1, 1, 1], [-1, 0, 0],
+                                       [0, -1, 0], [0, 1, 1]], dtype=dtype,
+                                      requires_grad=True)))
+        self.assertTrue(torch.all(b_act == torch.tensor(
+            [0, 1, 0, 0, 1], dtype=dtype, requires_grad=True)))
+
 
 class TestGurobiTorchMILP(unittest.TestCase):
     def test_setObjective(self):
