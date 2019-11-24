@@ -304,10 +304,21 @@ class TestGurobiTorchMILP(unittest.TestCase):
         self.assertAlmostEqual(
             dut.compute_objective_from_mip_data(
                 {1, 2, 3, 4}, torch.tensor([1, 0], dtype=dtype)).item(), 2.)
+        # First solve the MILP default pool search mode.
         dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         dut.gurobi_model.optimize()
         self.assertAlmostEqual(
             dut.compute_objective_from_mip_data_and_solution().item(), 2.)
+        # Now solve MILP with pool search mode = 2
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions, 2)
+        dut.gurobi_model.optimize()
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution().item(), 2.)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(0).item(), 2.)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(1).item(), 1.)
 
         # If the objective is min x[0] + 2x[1], then the active constraints
         # are x[0] >= 0, x[1] >= 0, x[0] + x[1] <= alpha[0],
@@ -318,10 +329,20 @@ class TestGurobiTorchMILP(unittest.TestCase):
         self.assertAlmostEqual(
             dut.compute_objective_from_mip_data(
                 {0, 1, 3, 4}, torch.tensor([0, 1], dtype=dtype)).item(), 0.)
-        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+        # First solve the MILP default pool search mode.
         dut.gurobi_model.optimize()
         self.assertAlmostEqual(
             dut.compute_objective_from_mip_data_and_solution().item(), 0.)
+        # Now solve MILP with pool search mode = 2
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions, 2)
+        dut.gurobi_model.optimize()
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution().item(), 0.)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(0).item(), 0.)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(1).item(), 1.)
 
 
 if __name__ == "__main__":

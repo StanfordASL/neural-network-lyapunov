@@ -334,17 +334,28 @@ class GurobiTorchMILP(GurobiTorchMIP):
             + self.c_zeta @ zeta_sol + self.c_constant
 
     def compute_objective_from_mip_data_and_solution(
-            self, active_constraint_tolerance=1e-6):
+            self, solution_number=0, active_constraint_tolerance=1e-6):
         """
         Suppose the MILP is solved to optimality. We then retrieve the active
-        constraints from the solution, together with the binary variable
-        solutions. We can then compute the objective as a function of MIP
-        constraint/objective data, by using compute_objective_from_mip_data()
-        function.
+        constraints from the (suboptimal) solution, together with the binary
+        variable solutions. We can then compute the objective as a function of
+        MIP constraint/objective data, by using
+        compute_objective_from_mip_data() function.
+        @param solution_number The index of the suboptimal solution. Should be
+        in the range of [0, gurobi_model.solCount). Setting solution_number to
+        0 means the optimal solution.
+        @param active_constraint_tolerance If the constraint violation is less
+        than this tolerance at the solution, then we think this constraint is
+        active at the solution.
         """
+        assert(solution_number >= 0 and
+               solution_number < self.gurobi_model.solCount)
         assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        r_sol = torch.tensor([var.x for var in self.r], dtype=self.dtype)
-        zeta_sol = torch.tensor([var.x for var in self.zeta], dtype=self.dtype)
+        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
+                                   solution_number)
+        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
+        zeta_sol = torch.tensor([var.xn for var in self.zeta],
+                                dtype=self.dtype)
         (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
         with torch.no_grad():
             lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
