@@ -89,18 +89,18 @@ class test_compute_numerical_gradient(unittest.TestCase):
 
     def test_linear_fun(self):
         A = np.array([[1., 2.], [3., 4.]])
-        b = np.array([[3.], [4.]])
+        b = np.array([3., 4.])
         def linear_fun(x): return A.dot(x) + b
 
-        grad = utils.compute_numerical_gradient(linear_fun, np.array([[4.],
-                                                                      [10.]]))
+        grad = utils.compute_numerical_gradient(linear_fun, np.array([4.,
+                                                                      10.]))
         self.assertTrue(utils.compare_numpy_matrices(grad, A, 1e-7, 1e-7))
 
     def test_quadratic_fun(self):
         Q = np.array([[1., 3.], [2., 4.]])
-        p = np.array([[2.], [3.]])
+        p = np.array([2., 3.])
         def quadratic_fun(x): return 0.5 * x.T.dot(Q.dot(x)) + p.T.dot(x) + 1
-        x = np.array([[10.], [-2.]])
+        x = np.array([10., -2.])
         grad = utils.compute_numerical_gradient(quadratic_fun, x)
         self.assertTrue(
                 utils.compare_numpy_matrices(grad,
