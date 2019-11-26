@@ -1,7 +1,9 @@
 import gurobipy
 import torch
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
+import robust_value_approx.utils as utils
 import unittest
+import numpy as np
 
 
 def setup_milp1():
@@ -343,6 +345,49 @@ class TestGurobiTorchMILP(unittest.TestCase):
             dut.compute_objective_from_mip_data_and_solution(0).item(), 0.)
         self.assertAlmostEqual(
             dut.compute_objective_from_mip_data_and_solution(1).item(), 1.)
+
+    def test_objective_gradient(self):
+        """
+        Test if we can compute the gradient of the MIP objective w.r.t the
+        constraint/cost data, by using pytorch autograd.
+        """
+        dtype = torch.float64
+
+        def compute_milp_example_cost(a_numpy, autograd_flag):
+            a = torch.from_numpy(a_numpy).type(dtype)
+            if autograd_flag:
+                a.requires_grad = True
+            dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+            x = dut.addVars(3, lb=0., vtype=gurobipy.GRB.CONTINUOUS)
+            alpha = dut.addVars(2, vtype=gurobipy.GRB.BINARY)
+            dut.addLConstr(
+                [torch.stack((a[0] * a[1], a[1] + a[2], 3 * a[2]))],
+                [x], sense=gurobipy.GRB.LESS_EQUAL, rhs=a[0] + 2 * a[2] * a[1])
+            dut.addLConstr(
+                [torch.stack((torch.tensor(2., dtype=dtype), a[1]**2,
+                 torch.tensor(0.5, dtype=dtype))),
+                 torch.tensor([1., 1.], dtype=dtype)], [x, alpha],
+                sense=gurobipy.GRB.EQUAL, rhs=2 * a[0] + 1)
+            dut.setObjective(
+                [torch.stack((a[0] + a[1], a[0], a[2])),
+                 torch.stack((a[1], torch.tensor(3, dtype=dtype)))],
+                [x, alpha], a[0] * a[1],
+                sense=gurobipy.GRB.MAXIMIZE)
+            dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            dut.gurobi_model.optimize()
+            objective = dut.compute_objective_from_mip_data_and_solution(0)
+            if autograd_flag:
+                objective.backward()
+                return (objective, a.grad)
+            else:
+                return objective.item()
+
+        (_, grad) = compute_milp_example_cost(np.array([1., 2., 3.]), True)
+        grad_numerical = utils.compute_numerical_gradient(
+            lambda a: compute_milp_example_cost(a, False),
+            np.array([1., 2., 3.]))
+        np.testing.assert_array_almost_equal(
+            grad.detach().numpy(), grad_numerical)
 
 
 if __name__ == "__main__":
