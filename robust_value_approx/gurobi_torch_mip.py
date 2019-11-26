@@ -1,5 +1,6 @@
 import gurobipy
 import torch
+import numpy as np
 
 
 class GurobiTorchMIP:
@@ -91,7 +92,11 @@ class GurobiTorchMIP:
         @param name The name of the constraint.
         @return new constraint object.
         """
-        assert(isinstance(rhs, torch.Tensor))
+        if isinstance(rhs, torch.Tensor):
+            rhs_tensor = rhs
+        else:
+            assert(isinstance(rhs, float))
+            rhs_tensor = torch.tensor(rhs, dtype=self.dtype)
         expr = 0
         assert(isinstance(coeffs, list))
         assert(len(coeffs) == len(variables))
@@ -100,8 +105,8 @@ class GurobiTorchMIP:
             assert(isinstance(coeff, torch.Tensor))
             expr += gurobipy.LinExpr(coeff.tolist(), var)
             num_vars += len(var)
-        constr = self.gurobi_model.addLConstr(expr, sense=sense, rhs=rhs,
-                                              name=name)
+        constr = self.gurobi_model.addLConstr(
+            expr, sense=sense, rhs=rhs_tensor, name=name)
         # r_used_flag[i] records if r[i] has appeared in @p variables.
         r_used_flag = [False] * len(self.r)
         zeta_used_flag = [False] * len(self.zeta)
@@ -173,7 +178,7 @@ class GurobiTorchMIP:
                 self.Aeq_zeta_row.extend(new_Aeq_zeta_row[:num_bin_vars])
                 self.Aeq_zeta_col.extend(new_Aeq_zeta_col[:num_bin_vars])
                 self.Aeq_zeta_val.extend(new_Aeq_zeta_val[:num_bin_vars])
-            self.rhs_eq.append(rhs)
+            self.rhs_eq.append(rhs_tensor)
         else:
             if num_cont_vars > 0:
                 self.Ain_r_row.extend(new_Ain_r_row[:num_cont_vars])
@@ -183,8 +188,8 @@ class GurobiTorchMIP:
                 self.Ain_zeta_row.extend(new_Ain_zeta_row[:num_bin_vars])
                 self.Ain_zeta_col.extend(new_Ain_zeta_col[:num_bin_vars])
                 self.Ain_zeta_val.extend(new_Ain_zeta_val[:num_bin_vars])
-            self.rhs_in.append(rhs if sense == gurobipy.GRB.LESS_EQUAL else
-                               -rhs)
+            self.rhs_in.append(rhs_tensor if sense == gurobipy.GRB.LESS_EQUAL
+                               else -rhs_tensor)
 
         return constr
 
@@ -219,27 +224,35 @@ class GurobiTorchMIP:
             b_act[row] -= val * zeta_sol[col]
 
         # Now fill in the active inequality constraints
-        Ain_r = torch.zeros((len(self.rhs_in), len(self.r)), dtype=self.dtype)
-        Ain_zeta = torch.zeros((len(self.rhs_in), len(self.zeta)),
-                               dtype=self.dtype)
-        for row, col, val in zip(self.Ain_r_row, self.Ain_r_col,
-                                 self.Ain_r_val):
-            Ain_r[row, col] = val
-        for row, col, val in zip(self.Ain_zeta_row, self.Ain_zeta_col,
-                                 self.Ain_zeta_val):
-            Ain_zeta[row, col] = val
+        (Ain_r, Ain_zeta, _) = self.get_inequality_constraints()
         for (i, row) in enumerate(active_ineq_row_indices):
             A_act[len(self.rhs_eq) + i] = Ain_r[row]
             b_act[len(self.rhs_eq) + i] = self.rhs_in[row] -\
                 Ain_zeta[row] @ zeta_sol
         return (A_act, b_act)
 
+    def get_inequality_constraints(self):
+        """
+        Return the matrices Ain_r, Ain_zeta, rhs_in as torch tensors.
+        """
+        Ain_r = torch.zeros((len(self.rhs_in), len(self.r)), dtype=self.dtype)
+        Ain_zeta = torch.zeros((len(self.rhs_in), len(self.zeta)),
+                               dtype=self.dtype)
+        rhs_in = torch.tensor(self.rhs_in)
+        for row, col, val in zip(self.Ain_r_row, self.Ain_r_col,
+                                 self.Ain_r_val):
+            Ain_r[row, col] = val
+        for row, col, val in zip(self.Ain_zeta_row, self.Ain_zeta_col,
+                                 self.Ain_zeta_val):
+            Ain_zeta[row, col] = val
+        return (Ain_r, Ain_zeta, rhs_in)
+
 
 class GurobiTorchMILP(GurobiTorchMIP):
     """
     This class is a subclass of GurobiTorchMIP. It only allows linear cost. The
     MILP is in this form
-    min cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
+    min/max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
     s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
         Aeq_r * r + Aeq_zeta * ζ = rhs_eq
     """
@@ -249,6 +262,8 @@ class GurobiTorchMILP(GurobiTorchMIP):
         self.c_r = None
         self.c_zeta = None
         self.c_constant = None
+        # Whether the objective is minimization or maximization.
+        self.sense = None
 
     def setObjective(self, coeffs, variables, constant, sense):
         """
@@ -266,6 +281,7 @@ class GurobiTorchMILP(GurobiTorchMIP):
         assert(len(coeffs) == len(variables))
         assert(sense == gurobipy.GRB.MAXIMIZE or
                sense == gurobipy.GRB.MINIMIZE)
+        self.sense = sense
         r_used_flag = [False] * len(self.r)
         zeta_used_flag = [False] * len(self.zeta)
         self.c_r = torch.zeros((len(self.r),), dtype=self.dtype)
@@ -279,24 +295,73 @@ class GurobiTorchMILP(GurobiTorchMIP):
                         raise Exception("setObjective: variable " + var[i].name
                                         + " is duplicated.")
                     r_used_flag[r_index] = True
-                    self.c_r[r_index] = coeff[i] if\
-                        sense == gurobipy.GRB.MINIMIZE else -coeff[i]
+                    self.c_r[r_index] = coeff[i]
                 elif var[i] in self.zeta_indices.keys():
                     zeta_index = self.zeta_indices[var[i]]
                     if zeta_used_flag[zeta_index]:
                         raise Exception("setObjective: variable " + var[i].name
                                         + " is duplicated.")
                     zeta_used_flag[zeta_index] = True
-                    self.c_zeta[zeta_index] = coeff[i] if\
-                        sense == gurobipy.GRB.MINIMIZE else -coeff[i]
+                    self.c_zeta[zeta_index] = coeff[i]
         if isinstance(constant, float):
-            self.c_constant = torch.tensor(constant, dtype=self.dtype) if\
-                sense == gurobipy.GRB.MINIMIZE else\
-                torch.tensor(-constant, dtype=self.dtype)
+            self.c_constant = torch.tensor(constant, dtype=self.dtype)
         elif isinstance(constant, torch.Tensor):
             assert(len(constant.shape) == 0)
-            self.c_constant = constant if sense == gurobipy.GRB.MINIMIZE else\
-                -constant
+            self.c_constant = constant
         else:
             raise Exception("setObjective: constant must be either a float" +
                             " or a torch tensor.")
+        self.gurobi_model.setObjective(
+            gurobipy.LinExpr(self.c_r, self.r) +
+            gurobipy.LinExpr(self.c_zeta, self.zeta) + self.c_constant,
+            sense=sense)
+
+    def compute_objective_from_mip_data(
+            self, active_ineq_row_indices, zeta_sol):
+        """
+        Given the active inequality constraints and the value for binary
+        variables, compute the objective as a function of the MIP constraint
+        / objective data.
+        cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
+        where A_act, b_act are computed from get_active_constraints
+        @return objective cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
+        """
+        (A_act, b_act) = self.get_active_constraints(
+            active_ineq_row_indices, zeta_sol)
+        # Now compute A_act⁻¹ * b_act. A_act may not be invertible, so we
+        # use its pseudo-inverse (A_actᵀ * A_act)⁻¹ * A_actᵀ * b_act
+        return self.c_r @ torch.inverse(A_act.T @ A_act) @ (A_act.T) @ b_act\
+            + self.c_zeta @ zeta_sol + self.c_constant
+
+    def compute_objective_from_mip_data_and_solution(
+            self, solution_number=0, active_constraint_tolerance=1e-6):
+        """
+        Suppose the MILP is solved to optimality. We then retrieve the active
+        constraints from the (suboptimal) solution, together with the binary
+        variable solutions. We can then compute the objective as a function of
+        MIP constraint/objective data, by using
+        compute_objective_from_mip_data() function.
+        @param solution_number The index of the suboptimal solution. Should be
+        in the range of [0, gurobi_model.solCount). Setting solution_number to
+        0 means the optimal solution.
+        @param active_constraint_tolerance If the constraint violation is less
+        than this tolerance at the solution, then we think this constraint is
+        active at the solution.
+        """
+        assert(solution_number >= 0 and
+               solution_number < self.gurobi_model.solCount)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
+                                   solution_number)
+        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
+        zeta_sol = torch.tensor([var.xn for var in self.zeta],
+                                dtype=self.dtype)
+        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+        with torch.no_grad():
+            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
+        active_ineq_row_indices = np.arange(len(self.rhs_in))
+        active_ineq_row_indices = set(active_ineq_row_indices[
+            np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
+            active_constraint_tolerance])
+        return self.compute_objective_from_mip_data(
+            active_ineq_row_indices, zeta_sol)
