@@ -2,17 +2,21 @@ import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 import robust_value_approx.model_bounds as model_bounds
 from robust_value_approx.utils import torch_to_numpy
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import double_integrator
 
 import numpy as np
 import unittest
 import cvxpy as cp
 import torch
 import torch.nn as nn
+import cplex
 
 
 class ModelBoundsUpperBound(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
+
         self.linear1 = nn.Linear(6, 10)
         self.linear1.weight.data = torch.tensor(
             np.random.rand(10, 6), dtype=self.dtype)
@@ -28,12 +32,37 @@ class ModelBoundsUpperBound(unittest.TestCase):
         self.linear3.weight.data = torch.tensor(
             np.random.rand(1, 10), dtype=self.dtype)
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
-        self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
-                                   nn.ReLU(),
-                                   self.linear3)
+        self.ball_paddle_model = nn.Sequential(self.linear1,
+                                               nn.ReLU(),
+                                               self.linear2,
+                                               nn.ReLU(),
+                                               self.linear3)
+
+        # self.linear1 = nn.Linear(2, 10)
+        # self.linear1.weight.data = torch.tensor(
+        #     np.random.rand(10, 2), dtype=self.dtype)
+        # self.linear1.bias.data = torch.tensor(
+        #     np.random.rand(10), dtype=self.dtype)
+        # self.linear2 = nn.Linear(10, 10)
+        # self.linear2.weight.data = torch.tensor(
+        #     np.random.rand(10, 10),
+        #     dtype=self.dtype)
+        # self.linear2.bias.data = torch.tensor(
+        #     np.random.rand(10), dtype=self.dtype)
+        # self.linear3 = nn.Linear(10, 1)
+        # self.linear3.weight.data = torch.tensor(
+        #     np.random.rand(1, 10), dtype=self.dtype)
+        # self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        # self.double_integrator_model = nn.Sequential(self.linear1,
+        #                                              nn.ReLU(),
+        #                                              self.linear2,
+        #                                              nn.ReLU(),
+        #                                              self.linear3,
+        #                                              nn.ReLU())
+        self.double_integrator_model = torch.load("double_integrator_model.pt")
 
     def test_upper_bound(self):
-        dtype = torch.float64
+        dtype = self.dtype
         dt = .01
         N = 10
         x_lo = torch.Tensor(
@@ -56,10 +85,10 @@ class ModelBoundsUpperBound(unittest.TestCase):
         xN = torch.Tensor([np.nan, .5, 0., np.nan, 0., np.nan])
         vf.set_constraints(xN=xN)
 
-        mb = model_bounds.ModelBounds(self.model, vf)
+        mb = model_bounds.ModelBounds(self.ball_paddle_model, vf)
         x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0.]).type(dtype)
         x0_up = torch.Tensor([0., 2., .1, 0., 0., 0.]).type(dtype)
-        bound_opt = mb.upper_bound_opt(self.model, x0_lo, x0_up)
+        bound_opt = mb.upper_bound_opt(self.ball_paddle_model, x0_lo, x0_up)
         Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b = torch_to_numpy(bound_opt)
 
         num_y = Q1.shape[0]
@@ -82,7 +111,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
 
         x0 = torch.Tensor(y.value[:sys.x_dim]).type(sys.dtype)
         value, _, _ = V(x0)
-        z_nn = self.model(x0).item()
+        z_nn = self.ball_paddle_model(x0).item()
 
         self.assertTrue(np.abs((epsilon - (value - z_nn)) / epsilon) <= .01)
 
@@ -97,9 +126,88 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 # for some reason the solver didn't return anything
                 pass
             if value_sub is not None:
-                z_nn_sub = self.model(x0_sub).item()
+                z_nn_sub = self.ball_paddle_model(x0_sub).item()
                 epsilon_sub = value_sub - z_nn_sub
                 self.assertGreaterEqual(epsilon_sub, epsilon)
+
+    def test_lower_bound(self):
+        dtype = torch.float64
+        (A, B) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A.shape[1]
+        u_dim = B.shape[1]
+        sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
+
+        c = torch.zeros(x_dim, dtype=dtype)
+        x_lo = -1. * torch.ones(x_dim, dtype=dtype)
+        x_up = 1. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up = 1. * torch.ones(u_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
+        sys.add_mode(A, B, c, P, q)
+
+        # value function
+        N = 5
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
+        Q = torch.eye(sys.x_dim)
+        R = torch.eye(sys.u_dim)
+        vf.set_cost(Q=Q)
+        vf.set_cost(R=R)
+        vf.set_terminal_cost(Qt=Q)
+        vf.set_terminal_cost(Rt=R)
+        xN = torch.Tensor([1., 1.])
+        vf.set_constraints(xN=xN)
+
+        mb = model_bounds.ModelBounds(self.double_integrator_model, vf)
+        x0_lo = x_lo
+        x0_up = x_up
+        bound_opt = mb.lower_bound_opt(
+            self.double_integrator_model, x0_lo, x0_up)
+        Q, q, k, G, h, A, b, intv = torch_to_numpy(bound_opt)
+
+        num_var = Q.shape[0]
+
+        p = cplex.Cplex()
+        p.set_problem_name("lower bound")
+        p.objective.set_sense(p.objective.sense.minimize)
+
+        p.linear_constraints.add(rhs=np.concatenate(
+            (b, h)), senses="E" * A.shape[0] + "L" * G.shape[0])
+
+        lb = -1e3 * np.ones(num_var)
+        ub = 1e3 * np.ones(num_var)
+        lb[intv] = 0
+        ub[intv] = 1
+
+        var_types = np.array(['C'] * num_var)
+        var_types[intv] = 'I'
+        var_types_arg = ''.join(var_types)
+
+        Cons = np.vstack((A, G))
+        rows_i = [*range(Cons.shape[0])]
+        cols = [[rows_i, Cons[:, ci]] for ci in range(Cons.shape[1])]
+
+        Q_rows_i = [*range(Q.shape[0])]
+        qmat = [[Q_rows_i, Q[:, ci]] for ci in range(Q.shape[1])]
+
+        p.variables.add(obj=q, lb=lb, ub=ub, types=var_types_arg, columns=cols)
+        p.objective.set_quadratic(qmat)
+
+        target = p.parameters.optimalitytarget.values
+        p.parameters.optimalitytarget.set(target.optimal_global)
+        p.parameters.mip.limits.strongit = 1e7
+        p.parameters.barrier.limits.iteration = 1e7
+
+        p.solve()
+
+        status = p.solution.get_status()
+        print(p.solution.status[status])
+
+        import pdb
+        pdb.set_trace()
+        # DONT FORGET TO ADD k
 
 
 if __name__ == '__main__':
