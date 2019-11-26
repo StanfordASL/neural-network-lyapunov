@@ -169,45 +169,49 @@ class ModelBoundsUpperBound(unittest.TestCase):
 
         num_var = Q.shape[0]
 
-        p = cplex.Cplex()
-        p.set_problem_name("lower bound")
-        p.objective.set_sense(p.objective.sense.minimize)
-
-        p.linear_constraints.add(rhs=np.concatenate(
-            (b, h)), senses="E" * A.shape[0] + "L" * G.shape[0])
-
-        lb = -1e3 * np.ones(num_var)
-        ub = 1e3 * np.ones(num_var)
-        lb[intv] = 0
-        ub[intv] = 1
-
-        var_types = np.array(['C'] * num_var)
-        var_types[intv] = 'I'
-        var_types_arg = ''.join(var_types)
-
-        Cons = np.vstack((A, G))
-        rows_i = [*range(Cons.shape[0])]
-        cols = [[rows_i, Cons[:, ci]] for ci in range(Cons.shape[1])]
-
-        Q_rows_i = [*range(Q.shape[0])]
-        qmat = [[Q_rows_i, Q[:, ci]] for ci in range(Q.shape[1])]
-
-        p.variables.add(obj=q, lb=lb, ub=ub, types=var_types_arg, columns=cols)
-        p.objective.set_quadratic(qmat)
-
-        target = p.parameters.optimalitytarget.values
-        p.parameters.optimalitytarget.set(target.optimal_global)
-        p.parameters.mip.limits.strongit = 1e7
-        p.parameters.barrier.limits.iteration = 1e7
-
-        p.solve()
-
-        status = p.solution.get_status()
-        print(p.solution.status[status])
-
-        import pdb
-        pdb.set_trace()
-        # DONT FORGET TO ADD k
+        # # CPLEX
+        # lb = -1e5 * np.ones(num_var)
+        # ub = 1e5 * np.ones(num_var)
+        # lb[intv] = 0
+        # ub[intv] = 1
+        # 
+        # var_types = np.array(['C'] * num_var)
+        # var_types[intv] = 'I'
+        # var_types_arg = ''.join(var_types)
+        # 
+        # Cons = np.vstack((A, G))
+        # rows_i = [*range(Cons.shape[0])]
+        # cols = [[rows_i, Cons[:, ci]] for ci in range(Cons.shape[1])]
+        # 
+        # Q_rows_i = [*range(Q.shape[0])]
+        # qmat = [[Q_rows_i, Q[:, ci]] for ci in range(Q.shape[1])]
+        # 
+        # p = cplex.Cplex()
+        # p.set_problem_name("Lower bound")
+        # 
+        # p.linear_constraints.add(rhs=np.concatenate(
+        #     (b, h)), senses="E" * A.shape[0] + "L" * G.shape[0])
+        # 
+        # p.variables.add(obj=q, lb=lb, ub=ub, types=var_types_arg, columns=cols)
+        # 
+        # p.objective.set_sense(p.objective.sense.minimize)
+        # p.objective.set_quadratic(qmat)
+        # 
+        # target = p.parameters.optimalitytarget.values
+        # p.parameters.optimalitytarget.set(target.optimal_global)
+        # p.parameters.mip.limits.nodes.set(3000)
+        # 
+        # p.solve()
+        # 
+        # status = p.solution.get_status()
+        # print(p.solution.status[status])
+        # epsilon = -(p.solution.get_objective_value() + k)
+        # print(epsilon)
+        
+        # GUROBI
+        m = Model("Lower bound")
+        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
+        gamma = m.addVar(vtype=GRB.BINARY, name="gamma")
 
 
 if __name__ == '__main__':
