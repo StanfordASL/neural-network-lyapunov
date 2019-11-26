@@ -105,19 +105,53 @@ def compare_numpy_matrices(actual, desired, rtol, atol):
     return res
 
 
-def compute_numerical_gradient(fun, x, dx=1e-7):
-    grad = None
-    for i in range(x.size):
-        x_plus = x.copy()
-        x_plus[i] += dx
-        x_minus = x.copy()
-        x_minus[i] -= dx
-        y_plus = fun(x_plus)
-        y_minus = fun(x_minus)
-        if (grad is None):
-            grad = np.zeros((y_plus.size, x.size))
-        grad[:, i:i + 1] = (y_plus - y_minus).reshape((y_plus.size, 1))\
-            / (2 * dx)
+def compute_numerical_gradient(fun, *args, **kwargs):
+    """
+    Compute the gradient of a function through numerical differentiation.
+    @param fun The function whose gradient is evaluated. fun must takes in
+    @p *argv, and returns a numpy array.
+    @param *args The input to function @p fun.
+    @param *kargs The options. The supported options are
+                  dx  The perturbation of each input. Must be a scalar.
+    @return The gradient of fun w.r.t each argument in *args. If @p fun takes
+    multiple inputs (for example, fun(x, y)), then the return is a
+    list of the same length as *argv, grad[i] is the gradient of fun w.r.t
+    argv[i]. Namely grad[0] is ∂f/∂x, and grad[1] is ∂f/∂y. If @p fun only
+    takes a single input (for example, fun(x)), then grad is a numpy
+    array/matrix, namely it is ∂f/∂x.
+    """
+    dx = kwargs["dx"] if "dx" in kwargs else 1e-7
+    assert(isinstance(dx, float))
+    grad = [None] * len(args)
+    perturbed_args = [np.copy(arg) for arg in args]
+    fun_type_checked = False
+    for arg_index, perturbed_arg in enumerate(perturbed_args):
+        assert(isinstance(perturbed_arg, np.ndarray))
+        assert(len(perturbed_arg.shape) == 1)
+        for i in range(np.size(perturbed_arg)):
+            val = perturbed_arg[i]
+            perturbed_arg[i] += dx
+            fun_plus = fun(*perturbed_args)
+            if not fun_type_checked:
+                assert(isinstance(fun_plus, np.ndarray) or
+                       isinstance(fun_plus, float))
+                if (isinstance(fun_plus, np.ndarray)):
+                    assert(len(fun_plus.shape) == 1)
+            perturbed_arg[i] -= 2 * dx
+            fun_minus = fun(*perturbed_args)
+            perturbed_arg[i] = val
+            if (grad[arg_index] is None):
+                grad[arg_index] =\
+                    np.empty((np.size(fun_plus), np.size(perturbed_arg)))\
+                    if isinstance(fun_plus, np.ndarray)\
+                    else np.empty(np.size(perturbed_arg))
+            if (isinstance(fun_plus, np.ndarray)):
+                grad[arg_index][:, i] = (fun_plus - fun_minus) / (2 * dx)
+            else:
+                grad[arg_index][i] = (fun_plus - fun_minus) / (2 * dx)
+
+    if (len(args) == 1):
+        return grad[0]
     return grad
 
 
