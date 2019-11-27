@@ -61,12 +61,12 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             dut.lyapunov_as_milp(relu1)
         # First solve this MILP. The solution has to satisfy that
         # x_next = Ai * x + g_i where i is the active mode inferred from gamma.
-        milp.setParam(gurobipy.GRB.Param.OutputFlag, 0)
-        milp.optimize()
-        if (milp.status == gurobipy.GRB.Status.INFEASIBLE):
-            milp.computeIIS()
-            milp.write("milp.ilp")
-        self.assertEqual(milp.status, gurobipy.GRB.Status.OPTIMAL)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+        milp.gurobi_model.optimize()
+        if (milp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE):
+            milp.gurobi_model.computeIIS()
+            milp.gurobi_model.write("milp.ilp")
+        self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
         x_sol = np.array([var.x for var in x])
         x_next_sol = np.array([var.x for var in x_next])
         gamma_sol = np.array([var.x for var in gamma])
@@ -84,7 +84,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     self.system1.g[mode].detach().numpy(),
                     x_next_sol, decimal=5)
         self.assertAlmostEqual(
-            milp.objVal,
+            milp.gurobi_model.objVal,
             (relu1.forward(torch.from_numpy(x_next_sol)) -
              relu1.forward(torch.from_numpy(x_sol))).item())
 
@@ -101,14 +101,19 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             (milp_test, x_test, _, _, _, _, _, _, _) =\
                 dut.lyapunov_as_milp(relu1)
             for i in range(self.system1.x_dim):
-                milp_test.addConstr(x_test[i] == x_val[i])
-            milp_test.setParam(gurobipy.GRB.Param.OutputFlag, 0)
-            milp_test.optimize()
-            self.assertEqual(milp_test.status, gurobipy.GRB.Status.OPTIMAL)
-            self.assertAlmostEqual(cost_expected, milp_test.objVal)
+                milp_test.addLConstr(
+                    [torch.tensor([1.], dtype=milp_test.dtype)], [[x_test[i]]],
+                    rhs=x_val[i], sense=gurobipy.GRB.EQUAL)
+            milp_test.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            milp_test.gurobi_model.optimize()
+            self.assertEqual(milp_test.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(cost_expected,
+                                   milp_test.gurobi_model.objVal)
             # milp solves the problem without the bound on x[n], so it should
             # achieve the largest cost.
-            self.assertLessEqual(milp_test.objVal, milp.objVal)
+            self.assertLessEqual(milp_test.gurobi_model.objVal,
+                                 milp.gurobi_model.objVal)
 
         # Now test with random x[n]
         torch.manual_seed(0)
