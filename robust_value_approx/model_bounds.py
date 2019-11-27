@@ -150,7 +150,7 @@ class ModelBounds:
 
         r = [x, λ, ν, z, α, β]
 
-        min     .5 rᵀ Q r + rᵀ q1 + k
+        min     rᵀ Q r + rᵀ q1 + k
         s.t.    A r = b
                 G r <= h
                 rᵢ ∈ {0,1}, i ∈ intv
@@ -218,7 +218,7 @@ class ModelBounds:
 
         num_Ain = rhs_in.shape[0]
         num_Pin = qrhs_in.shape[0]
-        num_in = num_Pin + num_Ain + num_lambda + 2*num_x
+        num_in = num_Pin + num_Ain + num_lambda + 2*num_x + 2*num_z
 
         num_Aeq = rhs_eq.shape[0]
         num_Peq = qrhs_eq.shape[0]
@@ -228,13 +228,18 @@ class ModelBounds:
         G1[0:num_Ain, x_index_s:x_index_e] = Ain1
         G1[num_Ain:num_Ain+num_Pin, x_index_s:x_index_e] = Pin1
         G1[num_Ain:num_Ain+num_Pin, z_index_s:z_index_e] = Pin2
+        
         G1[num_Ain+num_Pin:num_Ain+num_Pin+num_lambda,
             lambda_index_s:lambda_index_e] = -torch.eye(num_lambda,
                                                         dtype=self.dtype)
+        
         G1[num_Ain+num_Pin+num_lambda:num_Ain+num_Pin+num_lambda+num_x,
             x_index_s:x_index_e] = torch.eye(num_x, dtype=self.dtype)
         G1[num_Ain+num_Pin+num_lambda+num_x:num_Ain+num_Pin+num_lambda+2*num_x,
             x_index_s:x_index_e] = -torch.eye(num_x, dtype=self.dtype)
+
+        G1[num_Ain+num_Pin+num_lambda+2*num_x:num_Ain+num_Pin+num_lambda+2*num_x+num_z,z_index_s:z_index_e] = torch.eye(num_z, dtype=self.dtype)
+        G1[num_Ain+num_Pin+num_lambda+2*num_x+num_z:num_Ain+num_Pin+num_lambda+2*num_x+2*num_z,z_index_s:z_index_e] = -torch.eye(num_z, dtype=self.dtype)
 
         G2 = torch.zeros(num_in, num_gamma, dtype=self.dtype)
         G2[0:num_Ain, alpha_index_s:alpha_index_e] = Ain3
@@ -244,7 +249,7 @@ class ModelBounds:
 
         h = torch.cat((rhs_in, qrhs_in.squeeze(),
                        torch.zeros(num_lambda, dtype=self.dtype),
-                       x_up, -x_lo), 0)
+                       x_up, -x_lo, torch.clamp(z_up,0), -torch.clamp(z_lo,0)), 0)
 
         A1 = torch.zeros(num_eq, num_y, dtype=self.dtype)
         A1[0:num_Aeq, x_index_s:x_index_e] = Aeq1
@@ -266,17 +271,18 @@ class ModelBounds:
         Q = torch.zeros(num_y+num_gamma, num_y+num_gamma, dtype=self.dtype)
 
         Q[lambda_index_s:lambda_index_e,
-            lambda_index_s:lambda_index_e] = Ain2_s @ Q1_inv @ Ain2_s.t()
+            lambda_index_s:lambda_index_e] = .5 * Ain2_s @ Q1_inv @ Ain2_s.t()
         Q[nu_index_s:nu_index_e,
-            nu_index_s:nu_index_e] = Aeq2_s @ Q1_inv @ Aeq2_s.t()
+            nu_index_s:nu_index_e] = .5 * Aeq2_s @ Q1_inv @ Aeq2_s.t()
+            
         Q[lambda_index_s:lambda_index_e,
-            nu_index_s:nu_index_e] = Ain2_s @ Q1_inv @ Aeq2_s.t()
+            nu_index_s:nu_index_e] = .5 * Ain2_s @ Q1_inv @ Aeq2_s.t()
         Q[nu_index_s:nu_index_e,
-            lambda_index_s:lambda_index_e] = Aeq2_s @ Q1_inv @ Ain2_s.t()
-
+            lambda_index_s:lambda_index_e] = .5 * Aeq2_s @ Q1_inv @ Ain2_s.t()
+            
         Q[x_index_s:x_index_e, lambda_index_s:lambda_index_e] = -.5*Ain1_s.t()
-        Q[x_index_s:x_index_e, nu_index_s:nu_index_e] = -.5*Aeq1_s.t()
         Q[lambda_index_s:lambda_index_e, x_index_s:x_index_e] = -.5*Ain1_s
+        Q[x_index_s:x_index_e, nu_index_s:nu_index_e] = -.5*Aeq1_s.t()
         Q[nu_index_s:nu_index_e, x_index_s:x_index_e] = -.5*Aeq1_s
 
         Q[lambda_index_s:lambda_index_e, num_y +
@@ -290,11 +296,11 @@ class ModelBounds:
 
         q = torch.zeros(num_y+num_gamma, dtype=self.dtype)
         q[lambda_index_s:lambda_index_e] = rhs_in_s + Ain2_s @ Q1_inv @ q2_val
-        q[nu_index_s:nu_index_e] = rhs_eq_s + Aeq2_s@ Q1_inv @ q2_val
+        q[nu_index_s:nu_index_e] = rhs_eq_s + Aeq2_s @ Q1_inv @ q2_val
         q[num_y+alpha_index_s:num_y+alpha_index_e] = -q3_val
         q[z_index_s:z_index_e] = a_out
 
-        k = -.5*q2_val.t()@Q1_inv@q2_val - c + b_out
+        k = .5*q2_val.t()@Q1_inv@q2_val - c + b_out
 
         intv = range(num_y, num_y+num_gamma)
 

@@ -3,6 +3,7 @@ import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 import robust_value_approx.model_bounds as model_bounds
 from robust_value_approx.utils import torch_to_numpy
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import double_integrator
 
 import numpy as np
@@ -11,6 +12,7 @@ import cvxpy as cp
 import torch
 import torch.nn as nn
 import cplex
+import gurobipy
 
 
 class ModelBoundsUpperBound(unittest.TestCase):
@@ -37,7 +39,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
                                                self.linear2,
                                                nn.ReLU(),
                                                self.linear3)
-
+                                                     
         # self.linear1 = nn.Linear(2, 10)
         # self.linear1.weight.data = torch.tensor(
         #     np.random.rand(10, 2), dtype=self.dtype)
@@ -52,13 +54,13 @@ class ModelBoundsUpperBound(unittest.TestCase):
         # self.linear3 = nn.Linear(10, 1)
         # self.linear3.weight.data = torch.tensor(
         #     np.random.rand(1, 10), dtype=self.dtype)
-        # self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        # self.linear3.bias.data = torch.tensor([1.], dtype=self.dtype)
         # self.double_integrator_model = nn.Sequential(self.linear1,
         #                                              nn.ReLU(),
         #                                              self.linear2,
         #                                              nn.ReLU(),
-        #                                              self.linear3,
-        #                                              nn.ReLU())
+        #                                              self.linear3)
+                                                     
         self.double_integrator_model = torch.load("double_integrator_model.pt")
 
     def test_upper_bound(self):
@@ -165,54 +167,53 @@ class ModelBoundsUpperBound(unittest.TestCase):
         x0_up = x_up
         bound_opt = mb.lower_bound_opt(
             self.double_integrator_model, x0_lo, x0_up)
-        Q, q, k, G, h, A, b, intv = torch_to_numpy(bound_opt)
-
-        num_var = Q.shape[0]
-
-        # # CPLEX
-        # lb = -1e5 * np.ones(num_var)
-        # ub = 1e5 * np.ones(num_var)
-        # lb[intv] = 0
-        # ub[intv] = 1
-        # 
-        # var_types = np.array(['C'] * num_var)
-        # var_types[intv] = 'I'
-        # var_types_arg = ''.join(var_types)
-        # 
-        # Cons = np.vstack((A, G))
-        # rows_i = [*range(Cons.shape[0])]
-        # cols = [[rows_i, Cons[:, ci]] for ci in range(Cons.shape[1])]
-        # 
-        # Q_rows_i = [*range(Q.shape[0])]
-        # qmat = [[Q_rows_i, Q[:, ci]] for ci in range(Q.shape[1])]
-        # 
-        # p = cplex.Cplex()
-        # p.set_problem_name("Lower bound")
-        # 
-        # p.linear_constraints.add(rhs=np.concatenate(
-        #     (b, h)), senses="E" * A.shape[0] + "L" * G.shape[0])
-        # 
-        # p.variables.add(obj=q, lb=lb, ub=ub, types=var_types_arg, columns=cols)
-        # 
-        # p.objective.set_sense(p.objective.sense.minimize)
-        # p.objective.set_quadratic(qmat)
-        # 
-        # target = p.parameters.optimalitytarget.values
-        # p.parameters.optimalitytarget.set(target.optimal_global)
-        # p.parameters.mip.limits.nodes.set(3000)
-        # 
-        # p.solve()
-        # 
-        # status = p.solution.get_status()
-        # print(p.solution.status[status])
-        # epsilon = -(p.solution.get_objective_value() + k)
-        # print(epsilon)
         
-        # GUROBI
-        m = Model("Lower bound")
-        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
-        gamma = m.addVar(vtype=GRB.BINARY, name="gamma")
+        Q, q, k, G, h, A, b, intv = bound_opt
+        num_var = Q.shape[0]
+        num_gamma = len(intv)
+        num_y = num_var - num_gamma
+        gtm = gurobi_torch_mip.GurobiTorchMIQP(dtype)
+        y = gtm.addVars(num_y, vtype=gurobipy.GRB.CONTINUOUS, name="y")
+        gamma = gtm.addVars(num_gamma, vtype=gurobipy.GRB.BINARY, name="gamma")
+        gtm.setObjective([.5*Q[:num_y,:num_y]+1e-12*torch.eye(num_y,dtype=dtype),
+                          .5*Q[num_y:,num_y:],
+                          Q[:num_y,num_y:]],
+                          [(y,y),(gamma,gamma),(y,gamma)],
+                          [q[:num_y],q[num_y:]],[y,gamma],
+                          constant=k,sense=gurobipy.GRB.MINIMIZE)
+        # gtm.setObjective([.5*Q[:num_y,:num_y],
+        #                   .5*Q[num_y:,num_y:],
+        #                   Q[:num_y,num_y:]],
+        #                   [(y,y),(gamma,gamma),(y,gamma)],
+        #                   [q[:num_y],q[num_y:]],[y,gamma],
+        #                   constant=k,sense=gurobipy.GRB.MINIMIZE)
+        for i in range(G.shape[0]):
+            gtm.addLConstr([G[i,:num_y],G[i,num_y:]],[y,gamma],
+                           gurobipy.GRB.LESS_EQUAL,h[i])
+        for i in range(A.shape[0]):
+            gtm.addLConstr([A[i,:num_y],A[i,num_y:]],[y,gamma],
+                           gurobipy.GRB.EQUAL,b[i])
 
+        gtm.gurobi_model.update()
+        gtm.gurobi_model.optimize()
+        epsilon = -gtm.gurobi_model.getObjective().getValue()     
+        print("EPSILON: %f" % epsilon)
+
+        V = vf.get_value_function()
+        for i in range(10):
+            x0_sub = torch.rand(sys.x_dim, dtype=sys.dtype) * (x0_up - x0_lo) + x0_lo
+            x0_sub = torch.max(torch.min(x0_sub, x0_up), x0_lo)
+            value_sub = None
+            try:
+                value_sub, _, _ = V(x0_sub)
+            except AttributeError:
+                # for some reason the solver didn't return anything
+                pass
+            if value_sub is not None:
+                z_nn_sub = self.double_integrator_model(x0_sub).item()
+                epsilon_sub = value_sub - z_nn_sub
+                print(epsilon_sub)
+                # self.assertLessEqual(epsilon_sub, epsilon)
 
 if __name__ == '__main__':
     unittest.main()
