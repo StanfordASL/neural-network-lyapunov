@@ -365,7 +365,7 @@ class TestGurobiTorchMILP(unittest.TestCase):
                 [x], sense=gurobipy.GRB.LESS_EQUAL, rhs=a[0] + 2 * a[2] * a[1])
             dut.addLConstr(
                 [torch.stack((torch.tensor(2., dtype=dtype), a[1]**2,
-                 torch.tensor(0.5, dtype=dtype))),
+                              torch.tensor(0.5, dtype=dtype))),
                  torch.tensor([1., 1.], dtype=dtype)], [x, alpha],
                 sense=gurobipy.GRB.EQUAL, rhs=2 * a[0] + 1)
             dut.setObjective(
@@ -388,6 +388,54 @@ class TestGurobiTorchMILP(unittest.TestCase):
             np.array([1., 2., 3.]))
         np.testing.assert_array_almost_equal(
             grad.detach().numpy(), grad_numerical)
+
+
+class TestGurobiTorchMIQP(unittest.TestCase):
+    def test_setObjective(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIQP(dtype)
+        x = dut.addVars(2, lb=0, vtype=gurobipy.GRB.CONTINUOUS, name="x")
+        alpha = dut.addVars(3, vtype=gurobipy.GRB.BINARY, name="alpha")
+        y = dut.addVars(4, vtype=gurobipy.GRB.CONTINUOUS, name="y")
+        beta = dut.addVars(1, vtype=gurobipy.GRB.BINARY, name="beta")
+        for sense in (gurobipy.GRB.MINIMIZE, gurobipy.GRB.MAXIMIZE):
+            dut.setObjective([torch.tensor([[1, 2], [3, 4]], dtype=dtype),
+                              torch.tensor([[5]], dtype=dtype),
+                              torch.tensor([[6], [7]], dtype=dtype)],
+                             [(x, x), ([alpha[0]], [alpha[1]]), (x, beta)],
+                             [torch.tensor([1, 2], dtype=dtype),
+                              torch.tensor([2, 0.5], dtype=dtype),
+                              torch.tensor([0.5], dtype=dtype),
+                              torch.tensor([2.5], dtype=dtype)],
+                             [x, [alpha[0], alpha[2]], beta, [y[2]]],
+                             constant=3., sense=sense)
+            self.assertTrue(
+                torch.all(dut.c_r == torch.tensor([1, 2, 0, 0, 2.5, 0],
+                                                  dtype=dtype)))
+            self.assertTrue(
+                torch.all(dut.c_zeta == torch.tensor([2, 0, 0.5, 0.5],
+                                                     dtype=dtype)))
+            self.assertTrue(dut.c_constant == torch.tensor(3, dtype=dtype))
+            self.assertEqual(dut.sense, sense)
+            self.assertTrue(torch.all(dut.Q_r ==
+                            torch.tensor([[1, 2, 0, 0, 0, 0],
+                                          [3, 4, 0, 0, 0, 0],
+                                          [0, 0, 0, 0, 0, 0],
+                                          [0, 0, 0, 0, 0, 0],
+                                          [0, 0, 0, 0, 0, 0],
+                                          [0, 0, 0, 0, 0, 0]], dtype=dtype)))
+            self.assertTrue(torch.all(dut.Q_zeta ==
+                            torch.tensor([[0, 5, 0, 0],
+                                          [0, 0, 0, 0],
+                                          [0, 0, 0, 0],
+                                          [0, 0, 0, 0]], dtype=dtype)))
+            self.assertTrue(torch.all(dut.Q_rzeta ==
+                            torch.tensor([[0, 0, 0, 6],
+                                          [0, 0, 0, 7],
+                                          [0, 0, 0, 0],
+                                          [0, 0, 0, 0],
+                                          [0, 0, 0, 0],
+                                          [0, 0, 0, 0]], dtype=dtype)))
 
 
 if __name__ == "__main__":
