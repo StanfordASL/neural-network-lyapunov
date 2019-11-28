@@ -159,6 +159,8 @@ class ModelBoundsUpperBound(unittest.TestCase):
         vf.set_cost(R=R)
         vf.set_terminal_cost(Qt=Q)
         vf.set_terminal_cost(Rt=R)
+        # vf.set_cost(r=torch.ones(sys.u_dim),q=torch.ones(sys.x_dim))
+        # vf.set_terminal_cost(rt=torch.ones(sys.u_dim),qt=torch.ones(sys.x_dim))
         xN = torch.Tensor([1., 1.])
         vf.set_constraints(xN=xN)
 
@@ -175,18 +177,12 @@ class ModelBoundsUpperBound(unittest.TestCase):
         gtm = gurobi_torch_mip.GurobiTorchMIQP(dtype)
         y = gtm.addVars(num_y, vtype=gurobipy.GRB.CONTINUOUS, name="y")
         gamma = gtm.addVars(num_gamma, vtype=gurobipy.GRB.BINARY, name="gamma")
-        gtm.setObjective([.5*Q[:num_y,:num_y]+1e-12*torch.eye(num_y,dtype=dtype),
-                          .5*Q[num_y:,num_y:],
+        gtm.setObjective([Q[:num_y,:num_y]+1e-12*torch.eye(num_y,dtype=dtype),
+                          Q[num_y:,num_y:],
                           Q[:num_y,num_y:]],
                           [(y,y),(gamma,gamma),(y,gamma)],
                           [q[:num_y],q[num_y:]],[y,gamma],
                           constant=k,sense=gurobipy.GRB.MINIMIZE)
-        # gtm.setObjective([.5*Q[:num_y,:num_y],
-        #                   .5*Q[num_y:,num_y:],
-        #                   Q[:num_y,num_y:]],
-        #                   [(y,y),(gamma,gamma),(y,gamma)],
-        #                   [q[:num_y],q[num_y:]],[y,gamma],
-        #                   constant=k,sense=gurobipy.GRB.MINIMIZE)
         for i in range(G.shape[0]):
             gtm.addLConstr([G[i,:num_y],G[i,num_y:]],[y,gamma],
                            gurobipy.GRB.LESS_EQUAL,h[i])
@@ -196,11 +192,11 @@ class ModelBoundsUpperBound(unittest.TestCase):
 
         gtm.gurobi_model.update()
         gtm.gurobi_model.optimize()
-        epsilon = -gtm.gurobi_model.getObjective().getValue()     
+        epsilon = -gtm.gurobi_model.getObjective().getValue() 
         print("EPSILON: %f" % epsilon)
-
+        
         V = vf.get_value_function()
-        for i in range(10):
+        for i in range(5):
             x0_sub = torch.rand(sys.x_dim, dtype=sys.dtype) * (x0_up - x0_lo) + x0_lo
             x0_sub = torch.max(torch.min(x0_sub, x0_up), x0_lo)
             value_sub = None
@@ -213,7 +209,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 z_nn_sub = self.double_integrator_model(x0_sub).item()
                 epsilon_sub = value_sub - z_nn_sub
                 print(epsilon_sub)
-                # self.assertLessEqual(epsilon_sub, epsilon)
+                self.assertLessEqual(epsilon_sub, epsilon)
 
 if __name__ == '__main__':
     unittest.main()

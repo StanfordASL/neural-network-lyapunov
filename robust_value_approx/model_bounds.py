@@ -274,25 +274,25 @@ class ModelBounds:
             lambda_index_s:lambda_index_e] = .5 * Ain2_s @ Q1_inv @ Ain2_s.t()
         Q[nu_index_s:nu_index_e,
             nu_index_s:nu_index_e] = .5 * Aeq2_s @ Q1_inv @ Aeq2_s.t()
-            
+                
         Q[lambda_index_s:lambda_index_e,
-            nu_index_s:nu_index_e] = .5 * Ain2_s @ Q1_inv @ Aeq2_s.t()
-        Q[nu_index_s:nu_index_e,
-            lambda_index_s:lambda_index_e] = .5 * Aeq2_s @ Q1_inv @ Ain2_s.t()
-            
-        Q[x_index_s:x_index_e, lambda_index_s:lambda_index_e] = -.5*Ain1_s.t()
-        Q[lambda_index_s:lambda_index_e, x_index_s:x_index_e] = -.5*Ain1_s
-        Q[x_index_s:x_index_e, nu_index_s:nu_index_e] = -.5*Aeq1_s.t()
-        Q[nu_index_s:nu_index_e, x_index_s:x_index_e] = -.5*Aeq1_s
-
+            nu_index_s:nu_index_e] = Ain2_s @ Q1_inv @ Aeq2_s.t()
+        # Q[nu_index_s:nu_index_e,
+        #     lambda_index_s:lambda_index_e] = .5 * Aeq2_s @ Q1_inv @ Ain2_s.t()
+        
+        Q[x_index_s:x_index_e, lambda_index_s:lambda_index_e] = -Ain1_s.t()
+        # Q[lambda_index_s:lambda_index_e, x_index_s:x_index_e] = -.5*Ain1_s
+        Q[x_index_s:x_index_e, nu_index_s:nu_index_e] = -Aeq1_s.t()
+        # Q[nu_index_s:nu_index_e, x_index_s:x_index_e] = -.5*Aeq1_s
+        
         Q[lambda_index_s:lambda_index_e, num_y +
-            alpha_index_s:num_y+alpha_index_e] = -.5*Ain3_s
-        Q[num_y+alpha_index_s:num_y+alpha_index_e,
-            lambda_index_s:lambda_index_e] = -.5*Ain3_s.t()
+            alpha_index_s:num_y+alpha_index_e] = -Ain3_s
+        # Q[num_y+alpha_index_s:num_y+alpha_index_e,
+        #     lambda_index_s:lambda_index_e] = -.5*Ain3_s.t()
         Q[nu_index_s:nu_index_e,
-            num_y+alpha_index_s:num_y+alpha_index_e] = -.5*Aeq3_s
-        Q[num_y+alpha_index_s:num_y+alpha_index_e,
-            nu_index_s:nu_index_e] = -.5*Aeq3_s.t()
+            num_y+alpha_index_s:num_y+alpha_index_e] = -Aeq3_s
+        # Q[num_y+alpha_index_s:num_y+alpha_index_e,
+        #     nu_index_s:nu_index_e] = -.5*Aeq3_s.t()
 
         q = torch.zeros(num_y+num_gamma, dtype=self.dtype)
         q[lambda_index_s:lambda_index_e] = rhs_in_s + Ain2_s @ Q1_inv @ q2_val
