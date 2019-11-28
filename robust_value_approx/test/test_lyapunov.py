@@ -6,6 +6,7 @@ import torch.nn as nn
 
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.lyapunov as lyapunov
+import robust_value_approx.utils as utils
 
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
@@ -131,6 +132,87 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                             self.system1.P[i] @ x_val <= self.system1.q[i]):
                         found_x = True
                 test_milp_cost(i, x_val)
+
+    def test_lyapunov_as_milp_gradient(self):
+        """
+        Test the gradient of the MILP optimal cost w.r.t the ReLU network
+        weights and bias. I can first compute the gradient through pytorch
+        autograd, and then compare that against numerical gradient.
+        """
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+
+        def compute_milp_cost_given_relu(weight_all, bias_all, requires_grad):
+            # Construct a simple ReLU model with 2 hidden layers
+            assert(isinstance(weight_all, np.ndarray))
+            assert(isinstance(bias_all, np.ndarray))
+            assert(weight_all.shape == (22,))
+            assert(bias_all.shape == (8,))
+            weight_tensor = torch.from_numpy(weight_all).type(self.dtype)
+            weight_tensor.requires_grad = True
+            bias_tensor = torch.from_numpy(bias_all).type(self.dtype)
+            bias_tensor.requires_grad = True
+            linear1 = nn.Linear(2, 3)
+            linear1.weight.data = weight_tensor[:6].clone().reshape((3, 2))
+            linear1.bias.data = bias_tensor[:3].clone()
+            linear2 = nn.Linear(3, 4)
+            linear2.weight.data = weight_tensor[6:18].clone().reshape((4, 3))
+            linear2.bias.data = bias_tensor[3:7].clone()
+            linear3 = nn.Linear(4, 1)
+            linear3.weight.data = weight_tensor[18:].clone().reshape((1, 4))
+            linear3.bias.data = bias_tensor[7:].clone()
+            relu1 = nn.Sequential(
+                linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+
+            (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
+                dut.lyapunov_as_milp(relu1)
+
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            objective = milp.compute_objective_from_mip_data_and_solution()
+            if requires_grad:
+                objective.backward()
+                weight_grad = np.concatenate(
+                    (linear1.weight.grad.detach().numpy().reshape((-1,)),
+                     linear2.weight.grad.detach().numpy().reshape((-1,)),
+                     linear3.weight.grad.detach().numpy().reshape((-1,))),
+                    axis=0)
+                bias_grad = np.concatenate(
+                    (linear1.bias.grad.detach().numpy().reshape((-1,)),
+                     linear2.bias.grad.detach().numpy().reshape((-1,)),
+                     linear3.bias.grad.detach().numpy().reshape((-1,))),
+                    axis=0)
+                return (weight_grad, bias_grad)
+            else:
+                return np.array([objective.item()])
+
+        # Test arbitrary weight and bias.
+        weight_all_list = []
+        bias_all_list = []
+        weight_all_list.append(
+            np.array(
+                [0.1, 0.5, -0.2, -2.5, 0.9, 4.5, -11, -2.4, 0.6, 12.5, 21.3,
+                 0.32, -2.9, 4.98, -14.23, 16.8, 0.54, 0.42, 1.54, 13.22, 20.1,
+                 -4.5]))
+        bias_all_list.append(
+            np.array([0.45, -2.3, -4.3, 0.58, 2.45, 12.1, 4.6, -3.2]))
+        weight_all_list.append(
+            np.array(
+                [-0.3, 2.5, -3.2, -2.9, 4.9, 4.1, -1.1, -5.43, 0.9, 12.1, 29.3,
+                 4.32, -2.98, 4.92, 12.13, -16.8, 0.94, -4.42, 1.54, -13.22,
+                 29.1, -14.5]))
+        bias_all_list.append(
+            np.array([2.45, -12.3, -4.9, 3.58, -2.15, 10.1, -4.6, -3.8]))
+
+        for weight_all, bias_all in zip(weight_all_list, bias_all_list):
+            (weight_grad, bias_grad) = compute_milp_cost_given_relu(
+                weight_all, bias_all, True)
+            grad_numerical = utils.compute_numerical_gradient(
+                lambda weight, bias: compute_milp_cost_given_relu(
+                    weight, bias, False), weight_all, bias_all, dx=1e-6)
+            np.testing.assert_allclose(
+                weight_grad, grad_numerical[0].squeeze(), rtol=1e-3, atol=0.04)
+            np.testing.assert_allclose(
+                bias_grad, grad_numerical[1].squeeze(), rtol=1e-3, atol=0.02)
 
 
 if __name__ == "__main__":
