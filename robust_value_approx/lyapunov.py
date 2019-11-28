@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import gurobipy
-import numpy as np
 import torch
 
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 
 
 class LyapunovDiscreteTimeHybridSystem:
@@ -45,6 +45,7 @@ class LyapunovDiscreteTimeHybridSystem:
         layer to be a ReLU activation layer, so as to guarantee the Lyapunov
         function to be non-negative.
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
+        where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
         (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
         """
@@ -52,27 +53,23 @@ class LyapunovDiscreteTimeHybridSystem:
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             relu_model, self.system.dtype)
 
-        milp = gurobipy.Model()
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
         # x is the variable x[n]
-        def addVars(num_vars, lb, vtype, name):
-            var = milp.addVars(num_vars, lb=lb, vtype=vtype, name=name)
-            return [var[i] for i in range(num_vars)]
-
-        x = addVars(
+        x = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n]")
         # x_next is the variable x[n+1]
-        x_next = addVars(
+        x_next = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
         # s is the slack variable to convert hybrid linear system to
         # mixed-integer linear constraint.
-        s = addVars(
+        s = milp.addVars(
             self.system.x_dim * self.system.num_modes,
             lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS, name="s")
         # gamma is the binary variable determining the hybrid mode of x[n]
-        gamma = addVars(
+        gamma = milp.addVars(
             self.system.num_modes, lb=0, vtype=gurobipy.GRB.BINARY,
             name="gamma")
         # Now add the milp constraint to formulate the hybrid linear system.
@@ -80,20 +77,19 @@ class LyapunovDiscreteTimeHybridSystem:
             self.system.mixed_integer_constraints()
         # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
         for i in range(self.system.x_dim):
-            lin_expr = x_next[i] - gurobipy.LinExpr(Aeq_s1[i].tolist(), s) -\
-                gurobipy.LinExpr(Aeq_gamma1[i].tolist(), gamma)
-            milp.addLConstr(lin_expr, sense=gurobipy.GRB.EQUAL, rhs=0.)
+            milp.addLConstr(
+                [torch.tensor([1.], dtype=milp.dtype), -Aeq_s1[i],
+                 -Aeq_gamma1[i]], [[x_next[i]], s, gamma],
+                sense=gurobipy.GRB.EQUAL, rhs=0.)
         # Now add the constraint
         # Ain_x1 * x + Ain_s1 * s + Ain_gamma1 * gamma <= rhs_in1
         for i in range(Ain_x1.shape[0]):
-            lin_expr = gurobipy.LinExpr(Ain_x1[i].tolist(), x) +\
-                gurobipy.LinExpr(Ain_s1[i].tolist(), s) +\
-                gurobipy.LinExpr(Ain_gamma1[i].tolist(), gamma)
-            milp.addLConstr(lin_expr, sense=gurobipy.GRB.LESS_EQUAL,
-                            rhs=rhs_in1[i])
+            milp.addLConstr(
+                [Ain_x1[i], Ain_s1[i], Ain_gamma1[i]], [x, s, gamma],
+                sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in1[i])
         # Now add the constraint that sum gamma = 1
         milp.addLConstr(
-            gurobipy.LinExpr(np.ones((self.system.num_modes, 1)), gamma),
+            [torch.ones((self.system.num_modes,))], [gamma],
             sense=gurobipy.GRB.EQUAL, rhs=1.)
 
         # Add the mixed-integer constraint that formulates the output of
@@ -104,53 +100,47 @@ class LyapunovDiscreteTimeHybridSystem:
          a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
              relu_model, torch.from_numpy(self.system.x_lo_all),
              torch.from_numpy(self.system.x_up_all))
-        z = addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                    vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
-        beta = addVars(Ain_beta.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
-                       name="beta[n]")
+        z = milp.addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
+        beta = milp.addVars(Ain_beta.shape[1], lb=0.,
+                            vtype=gurobipy.GRB.BINARY, name="beta[n]")
 
         for i in range(Ain_x2.shape[0]):
             milp.addLConstr(
-                gurobipy.LinExpr(Ain_x2[i].tolist(), x) +
-                gurobipy.LinExpr(Ain_z[i].tolist(), z) +
-                gurobipy.LinExpr(Ain_beta[i].tolist(), beta),
+                [Ain_x2[i], Ain_z[i], Ain_beta[i]], [x, z, beta],
                 sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in2[i],
                 name="milp_relu_xn[" + str(i) + "]")
 
         for i in range(Aeq_x2.shape[0]):
             milp.addLConstr(
-                gurobipy.LinExpr(Aeq_x2[i].tolist(), x) +
-                gurobipy.LinExpr(Aeq_z[i].tolist(), z) +
-                gurobipy.LinExpr(Aeq_beta[i].tolist(), beta),
+                [Aeq_x2[i], Aeq_z[i], Aeq_beta[i]], [x, z, beta],
                 sense=gurobipy.GRB.EQUAL, rhs=rhs_eq2[i],
                 name="milp_relu_xn[" + str(i) + "]")
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
-        z_next = addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                         vtype=gurobipy.GRB.CONTINUOUS, name="z[n+1]")
-        beta_next = addVars(Ain_beta.shape[1], lb=0.,
-                            vtype=gurobipy.GRB.BINARY, name="beta[n+1]")
-        milp.update()
+        z_next = milp.addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+                              vtype=gurobipy.GRB.CONTINUOUS, name="z[n+1]")
+        beta_next = milp.addVars(Ain_beta.shape[1], lb=0.,
+                                 vtype=gurobipy.GRB.BINARY, name="beta[n+1]")
+        milp.gurobi_model.update()
 
         for i in range(Ain_x2.shape[0]):
             milp.addLConstr(
-                gurobipy.LinExpr(Ain_x2[i].tolist(), x_next) +
-                gurobipy.LinExpr(Ain_z[i].tolist(), z_next) +
-                gurobipy.LinExpr(Ain_beta[i].tolist(), beta_next),
+                [Ain_x2[i], Ain_z[i], Ain_beta[i]],
+                [x_next, z_next, beta_next],
                 sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in2[i],
                 name="milp_relu_xnext[" + str(i) + "]")
         for i in range(Aeq_x2.shape[0]):
             milp.addLConstr(
-                gurobipy.LinExpr(Aeq_x2[i].tolist(), x_next) +
-                gurobipy.LinExpr(Aeq_z[i].tolist(), z_next) +
-                gurobipy.LinExpr(Aeq_beta[i].tolist(), beta_next),
+                [Aeq_x2[i], Aeq_z[i], Aeq_beta[i]],
+                [x_next, z_next, beta_next],
                 sense=gurobipy.GRB.EQUAL, rhs=rhs_eq2[i],
                 name="milp_relu_xnext[" + str(i) + "]")
 
         # The cost function is max ReLU(x[n+1]) - ReLU(x[n])
         milp.setObjective(
-            gurobipy.LinExpr(a_out.tolist(), z_next) -
-            gurobipy.LinExpr(a_out.tolist(), z), gurobipy.GRB.MAXIMIZE)
+            [a_out, -a_out], [z_next, z], torch.tensor(0, dtype=milp.dtype),
+            gurobipy.GRB.MAXIMIZE)
 
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
