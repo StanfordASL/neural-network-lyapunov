@@ -402,14 +402,14 @@ class GurobiTorchMIQP(GurobiTorchMIP):
         ∑ᵢ quad_variables[i][0]ᵀ * quad_coeffs[i] * quad_variables[i][1]
         + ∑ᵢ lin_coeffs[i]ᵀ * lin_variables[i] + c_constant
         @param quad_coeffs A list of 2D pytorch tensors. quad_coeffs[k][i,j] is
-        the coefficient for (quad_variables[k][0]ᵀ * quad_variables[k][1])[i,j]
+        the coefficient for quad_variables[k][0][i]ᵀ * quad_variables[k][1][j]
         @param quad_variables A list of tuples of lists. quad_variables[i] is a
         tuple of list of gurobi variables. Note that the variables cannot
         overlap.
         @param lin_coeffs A list of 1D pytorch tensors. lin_coeffs[i] are the
         coefficients for variables[i]
         @param lin_variables A list of lists. lin_variables[i] is a list of
-        gurobi variables. Note that the variables cannot overlap.
+        gurobi variables.
         @param constant The constant term added to the cost (a dtype)
         @param sense GRB.MAXIMIZE or GRB.MINIMIZE
         """
@@ -457,9 +457,7 @@ class GurobiTorchMIQP(GurobiTorchMIP):
                     self.c_zeta[zeta_index] = coeff[i]
         for coeff, (var_left, var_right) in zip(quad_coeffs, quad_variables):
             assert(isinstance(coeff, torch.Tensor))
-            assert(len(coeff.shape) == 2)
-            assert(coeff.shape[0] == len(var_left))
-            assert(coeff.shape[1] == len(var_right))
+            assert(coeff.shape == (len(var_left), len(var_right)))
             for i in range(len(var_left)):
                 for j in range(len(var_right)):
                     if var_left[i] in self.r_indices.keys()\
