@@ -137,7 +137,8 @@ class GurobiTorchMIP:
                 if var[i] in self.r_indices.keys():
                     r_index = self.r_indices[var[i]]
                     if r_used_flag[r_index]:
-                        raise Exception("addLConstr: variable " + var[i].name
+                        raise Exception("addLConstr: variable "
+                                        + var[i].VarName
                                         + " is duplicated.")
                     r_used_flag[r_index] = True
                     if sense == gurobipy.GRB.EQUAL:
@@ -153,7 +154,8 @@ class GurobiTorchMIP:
                 elif var[i] in self.zeta_indices.keys():
                     zeta_index = self.zeta_indices[var[i]]
                     if zeta_used_flag[zeta_index]:
-                        raise Exception("addLConstr: variable " + var[i].name
+                        raise Exception("addLConstr: variable "
+                                        + var[i].VarName
                                         + " is duplicated.")
                     zeta_used_flag[zeta_index] = True
                     if sense == gurobipy.GRB.EQUAL:
@@ -168,7 +170,7 @@ class GurobiTorchMIP:
                     num_bin_vars += 1
                 else:
                     raise Exception("addLConstr: unknown variable " +
-                                    var[i].name)
+                                    var[i].VarName)
         if sense == gurobipy.GRB.EQUAL:
             if num_cont_vars > 0:
                 self.Aeq_r_row.extend(new_Aeq_r_row[:num_cont_vars])
@@ -292,14 +294,16 @@ class GurobiTorchMILP(GurobiTorchMIP):
                 if var[i] in self.r_indices.keys():
                     r_index = self.r_indices[var[i]]
                     if r_used_flag[r_index]:
-                        raise Exception("setObjective: variable " + var[i].name
+                        raise Exception("setObjective: variable "
+                                        + var[i].VarName
                                         + " is duplicated.")
                     r_used_flag[r_index] = True
                     self.c_r[r_index] = coeff[i]
                 elif var[i] in self.zeta_indices.keys():
                     zeta_index = self.zeta_indices[var[i]]
                     if zeta_used_flag[zeta_index]:
-                        raise Exception("setObjective: variable " + var[i].name
+                        raise Exception("setObjective: variable "
+                                        + var[i].VarName
                                         + " is duplicated.")
                     zeta_used_flag[zeta_index] = True
                     self.c_zeta[zeta_index] = coeff[i]
@@ -365,3 +369,165 @@ class GurobiTorchMILP(GurobiTorchMIP):
             active_constraint_tolerance])
         return self.compute_objective_from_mip_data(
             active_ineq_row_indices, zeta_sol)
+
+
+class GurobiTorchMIQP(GurobiTorchMIP):
+    """
+    This class is a subclass of GurobiTorchMIP. It allows quadratic cost. The
+    MIQP is in this form (Note there is no .5 in front of the quadratic term,
+    the user needs to take care of this when setting the coefficients if
+    needed)
+    min/max rᵀ * Qᵣ * r + ζᵀ * Q_zeta ζ + rᵀ * Q_rzeta * ζ
+            + cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
+    s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
+        Aeq_r * r + Aeq_zeta * ζ = rhs_eq
+    """
+
+    def __init__(self, dtype):
+        GurobiTorchMIP.__init__(self, dtype)
+        self.Q_r = None
+        self.Q_zeta = None
+        self.Q_rzeta = None
+        self.c_r = None
+        self.c_zeta = None
+        self.c_constant = None
+        # Whether the objective is minimization or maximization.
+        self.sense = None
+
+    def setObjective(self, quad_coeffs, quad_variables,
+                     lin_coeffs, lin_variables, constant, sense):
+        """
+        Set the objective.
+        The objective is
+        ∑ᵢ quad_variables[i][0]ᵀ * quad_coeffs[i] * quad_variables[i][1]
+        + ∑ᵢ lin_coeffs[i]ᵀ * lin_variables[i] + c_constant
+        @param quad_coeffs A list of 2D pytorch tensors. quad_coeffs[k][i,j] is
+        the coefficient for quad_variables[k][0][i]ᵀ * quad_variables[k][1][j]
+        @param quad_variables A list of tuples of lists. quad_variables[i] is a
+        tuple of list of gurobi variables. Note that the variables cannot
+        overlap.
+        @param lin_coeffs A list of 1D pytorch tensors. lin_coeffs[i] are the
+        coefficients for variables[i]
+        @param lin_variables A list of lists. lin_variables[i] is a list of
+        gurobi variables.
+        @param constant The constant term added to the cost (a dtype)
+        @param sense GRB.MAXIMIZE or GRB.MINIMIZE
+        """
+        assert(isinstance(lin_coeffs, list))
+        assert(isinstance(lin_variables, list))
+        assert(isinstance(quad_coeffs, list))
+        assert(isinstance(quad_variables, list))
+        assert(len(lin_coeffs) == len(lin_variables))
+        assert(len(quad_coeffs) == len(quad_variables))
+        assert(sense == gurobipy.GRB.MAXIMIZE or
+               sense == gurobipy.GRB.MINIMIZE)
+        self.sense = sense
+        lin_r_used_flag = [False] * len(self.r)
+        lin_zeta_used_flag = [False] * len(self.zeta)
+        quad_r_used_flag = [[False] * len(self.r) for j in range(len(self.r))]
+        quad_zeta_used_flag = [
+            [False] * len(self.zeta) for j in range(len(self.zeta))]
+        quad_rzeta_used_flag = [
+            [False] * len(self.zeta) for j in range(len(self.r))]
+        self.c_r = torch.zeros((len(self.r),), dtype=self.dtype)
+        self.c_zeta = torch.zeros((len(self.zeta),), dtype=self.dtype)
+        self.Q_r = torch.zeros((len(self.r), len(self.r)), dtype=self.dtype)
+        self.Q_zeta = torch.zeros((len(self.zeta), len(self.zeta)),
+                                  dtype=self.dtype)
+        self.Q_rzeta = torch.zeros((len(self.r), len(self.zeta)),
+                                   dtype=self.dtype)
+        for coeff, var in zip(lin_coeffs, lin_variables):
+            assert(isinstance(coeff, torch.Tensor))
+            for i in range(len(var)):
+                if var[i] in self.r_indices.keys():
+                    r_index = self.r_indices[var[i]]
+                    if lin_r_used_flag[r_index]:
+                        raise Exception("setObjective: variable "
+                                        + var[i].VarName
+                                        + " is duplicated in linear cost.")
+                    lin_r_used_flag[r_index] = True
+                    self.c_r[r_index] = coeff[i]
+                elif var[i] in self.zeta_indices.keys():
+                    zeta_index = self.zeta_indices[var[i]]
+                    if lin_zeta_used_flag[zeta_index]:
+                        raise Exception("setObjective: variable "
+                                        + var[i].VarName
+                                        + " is duplicated in linear cost.")
+                    lin_zeta_used_flag[zeta_index] = True
+                    self.c_zeta[zeta_index] = coeff[i]
+        for coeff, (var_left, var_right) in zip(quad_coeffs, quad_variables):
+            assert(isinstance(coeff, torch.Tensor))
+            assert(coeff.shape == (len(var_left), len(var_right)))
+            for i in range(len(var_left)):
+                for j in range(len(var_right)):
+                    if var_left[i] in self.r_indices.keys()\
+                            and var_right[j] in self.r_indices.keys():
+                        # in Q_r
+                        r_index_l = self.r_indices[var_left[i]]
+                        r_index_r = self.r_indices[var_right[j]]
+                        if quad_r_used_flag[r_index_l][r_index_r]:
+                            raise Exception("setObjective: variable (" +
+                                            var_left[i].VarName + "," +
+                                            var_right[j].VarName
+                                            + ") is duplicated in quad cost.")
+                        quad_r_used_flag[r_index_l][r_index_r] = True
+                        self.Q_r[r_index_l, r_index_r] = coeff[i, j]
+                    elif var_left[i] in self.zeta_indices.keys()\
+                            and var_right[j] in self.zeta_indices.keys():
+                        # in Q_zeta
+                        zeta_index_l = self.zeta_indices[var_left[i]]
+                        zeta_index_r = self.zeta_indices[var_right[j]]
+                        if quad_zeta_used_flag[zeta_index_l][zeta_index_r]:
+                            raise Exception("setObjective: variable (" +
+                                            var_left[i].VarName + "," +
+                                            var_right[j].VarName
+                                            + ") is duplicated in quad cost.")
+                        quad_zeta_used_flag[zeta_index_l][zeta_index_r] = True
+                        self.Q_zeta[zeta_index_l,
+                                    zeta_index_r] = coeff[i, j]
+                    else:
+                        # in Q_rzeta
+                        if var_left[i] in self.r_indices.keys():
+                            r_index_l = self.r_indices[var_left[i]]
+                        else:
+                            zeta_index_r = self.zeta_indices[var_left[i]]
+                        if var_right[j] in self.r_indices.keys():
+                            r_index_l = self.r_indices[var_right[j]]
+                        else:
+                            zeta_index_r = self.zeta_indices[var_right[j]]
+                        if quad_rzeta_used_flag[r_index_l][zeta_index_r]:
+                            raise Exception("setObjective: variable (" +
+                                            var_left[i].VarName + "," +
+                                            var_right[j].VarName
+                                            + ") is duplicated in quad cost.")
+                        quad_rzeta_used_flag[r_index_l][zeta_index_r] = True
+                        self.Q_rzeta[r_index_l,
+                                     zeta_index_r] = coeff[i, j]
+        if isinstance(constant, float):
+            self.c_constant = torch.tensor(constant, dtype=self.dtype)
+        elif isinstance(constant, torch.Tensor):
+            assert(len(constant.shape) == 0)
+            self.c_constant = constant
+        else:
+            raise Exception("setObjective: constant must be either a float" +
+                            " or a torch tensor.")
+        quad_obj = gurobipy.QuadExpr()
+        for i in range(len(self.r)):
+            for j in range(len(self.r)):
+                if self.Q_r[i, j] != 0:
+                    quad_obj.add(self.r[i] * self.r[j], self.Q_r[i, j].item())
+        for i in range(len(self.zeta)):
+            for j in range(len(self.zeta)):
+                if self.Q_zeta[i, j] != 0:
+                    quad_obj.add(self.zeta[i] * self.zeta[j],
+                                 self.Q_zeta[i, j].item())
+        for i in range(len(self.r)):
+            for j in range(len(self.zeta)):
+                if self.Q_rzeta[i, j] != 0:
+                    quad_obj.add(self.r[i] * self.zeta[j],
+                                 self.Q_rzeta[i, j].item())
+        self.gurobi_model.setObjective(
+            quad_obj +
+            gurobipy.LinExpr(self.c_r, self.r) +
+            gurobipy.LinExpr(self.c_zeta, self.zeta) + self.c_constant,
+            sense=sense)
