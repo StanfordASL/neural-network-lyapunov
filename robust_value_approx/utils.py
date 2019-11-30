@@ -205,8 +205,8 @@ def train_model(model, inputs, labels, batch_size=100,
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            # if epoch % 10 == 0:
-            #     print(loss)
+            if epoch % 10 == 0:
+                print(loss)
 
     return model
 
