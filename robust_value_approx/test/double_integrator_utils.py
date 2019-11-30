@@ -12,14 +12,18 @@ def generate_data():
     print("generating data...")
 
     dtype = torch.float64
-    (A, B) = double_integrator.double_integrator_dynamics(dtype)
-    x_dim = A.shape[1]
-    u_dim = B.shape[1]
-    sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
+    (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+    x_dim = A_c.shape[1]
+    u_dim = B_c.shape[1]
+    # continuous to discrete using forward euler
+    dt = 1.
+    A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+    B = dt * B_c
 
+    sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
     c = torch.zeros(x_dim, dtype=dtype)
-    x_lo = -1. * torch.ones(x_dim, dtype=dtype)
-    x_up = 1. * torch.ones(x_dim, dtype=dtype)
+    x_lo = -4. * torch.ones(x_dim, dtype=dtype)
+    x_up = 4. * torch.ones(x_dim, dtype=dtype)
     u_lo = -1. * torch.ones(u_dim, dtype=dtype)
     u_up = 1. * torch.ones(u_dim, dtype=dtype)
     P = torch.cat((-torch.eye(x_dim+u_dim),
@@ -33,12 +37,12 @@ def generate_data():
     R = torch.eye(sys.u_dim)
     vf.set_cost(R=R)
     vf.set_terminal_cost(Rt=R)
-    xN = torch.ones(x_dim, dtype=dtype)
+    xN = torch.Tensor([0., 0.]).type(dtype)
     vf.set_constraints(xN=xN)
 
     x0_lo = x_lo
     x0_up = x_up
-    num_breaks = [20] * x_dim
+    num_breaks = [50] * x_dim
 
     x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
 
@@ -55,7 +59,7 @@ def generate_model():
     nn_width = 36
     model = nn.Sequential(nn.Linear(x_samples.shape[1], nn_width),
                           nn.ReLU(), nn.Linear(nn_width, nn_width),
-                          nn.ReLU(), nn.Linear(nn_width, 1), nn.ReLU())
+                          nn.ReLU(), nn.Linear(nn_width, 1))
     model.double()
 
     utils.train_model(model, x_samples, v_samples,

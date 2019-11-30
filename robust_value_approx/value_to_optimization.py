@@ -344,16 +344,16 @@ class ValueFunction:
                 torch.zeros(slackdim))).repeat(N).type(torch.bool), :]
         rhs_up = torch.cat((self.x_up, self.u_up)).repeat(N)
         Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
-                         alphadim, dtype=self.dtype)), 0)
+                                            alphadim, dtype=self.dtype)), 0)
 
         Alo = -torch.eye(N * (xdim + udim + slackdim), N *
                          (xdim + udim + slackdim), dtype=self.dtype)
         Alo = Alo[torch.cat((torch.ones(xdim + udim),
-                            torch.zeros(slackdim))).repeat(N).type(
-                            torch.bool), :]
+                             torch.zeros(slackdim))).repeat(N).type(
+            torch.bool), :]
         rhs_lo = -torch.cat((self.x_lo, self.u_lo)).repeat(N)
         Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
-                         alphadim, dtype=self.dtype)), 0)
+                                            alphadim, dtype=self.dtype)), 0)
 
         Ain1 = torch.cat((Ain1, Aup[:, :xdim], Alo[:, :xdim]), 0)
         Ain2 = torch.cat((Ain2, Aup[:, xdim:], Alo[:, xdim:]), 0)
@@ -401,22 +401,19 @@ class ValueFunction:
 
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
+        x0 = cp.Parameter(Ain1.shape[1])
 
         obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 *
                           cp.quad_form(alpha, Q3) + q2.T@s + q3.T@alpha + c)
+        con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
+               Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq]
+        prob = cp.Problem(obj, con)
 
-        def V(x0):
-            if isinstance(x0, torch.Tensor):
-                x0 = x0.detach().numpy().squeeze()
-
-            con = [
-                Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
-                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
-            ]
-
-            prob = cp.Problem(obj, con)
-            prob.solve(solver=cp.GUROBI, verbose=False)
-
+        def V(x):
+            if isinstance(x, torch.Tensor):
+                x = x.detach().numpy().squeeze()
+            x0.value = x
+            prob.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
             return(obj.value, s.value, alpha.value)
 
         return V
