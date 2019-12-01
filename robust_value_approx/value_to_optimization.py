@@ -456,3 +456,71 @@ class ValueFunction:
                     axis=0)
 
         return(x_samples, v_samples)
+
+    def step_cost(self, x_val, u_val, alpha_val):
+        """
+        Computes the cost of a single step with the value function.
+        Note that the step should not be the terminal one (i.e. not
+        correspond to Qt, Rt and Zt.
+        @param x_val A tensor with the value of the state
+        @param u_val A tensor with the value of the control input
+        @param alpha_val A tensor with the value of the discrete variables
+        """
+        cost = 0.
+        if self.Q is not None:
+            cost += .5 * x_val @ self.Q @ x_val
+        if self.R is not None:
+            cost += .5 * u_val @ self.R @ u_val
+        if self.Z is not None:
+            cost += .5 * alpha_val @ self.Z @ alpha_val
+        if self.q is not None:
+            cost += x_val @ self.q
+        if self.r is not None:
+            cost += u_val @ self.r
+        if self.z is not None:
+            cost += alpha_val @ self.z
+        return cost
+
+    def get_sim_step_function(self):
+        """
+        Return a function that can be used to compute the next state and
+        the cost of that step. Returns a function with the following arguments
+        @param xn A tensor representing the starting state
+        @param un A tensor representing the control action over that interval
+        TODO(blandry) @param num_steps to allow variables number of
+        integration steps
+        """
+        (Aeq_slack,
+         Aeq_alpha,
+         Ain_x,
+         Ain_u,
+         Ain_slack,
+         Ain_alpha,
+         rhs_in_dyn) = torch_to_numpy(self.sys.mixed_integer_constraints(),
+                                      squeeze=False)
+        xn = cp.Parameter(self.sys.x_dim)
+        un = cp.Parameter(self.sys.u_dim)
+        slack = cp.Variable(Ain_slack.shape[1])
+        alpha = cp.Variable(Ain_alpha.shape[1], boolean=True)
+        obj = cp.Minimize(0.)
+        cons = [Ain_x @ xn + Ain_u @ un +
+                Ain_slack @ slack + Ain_alpha @ alpha <=
+                rhs_in_dyn,
+                cp.sum(alpha) == 1]
+        dyn_prob = cp.Problem(obj, cons)
+
+        def sim_step(xn_val, un_val):
+            assert(type(xn_val) == torch.Tensor)
+            assert(type(un_val) == torch.Tensor)
+            xn.value = xn_val.detach().numpy()
+            un.value = un_val.detach().numpy()
+            dyn_prob.solve(solver=cp.GUROBI, warm_start=True)
+            if ~isinstance(slack.value, type(None)):
+                cost = self.step_cost(xn_val, un_val,
+                                      torch.Tensor(slack.value)
+                                      .type(self.dtype))
+                return(torch.Tensor(Aeq_slack @ slack.value +
+                                    Aeq_alpha @ alpha.value)
+                       .type(self.dtype), cost)
+            return(None, None)
+        return sim_step
