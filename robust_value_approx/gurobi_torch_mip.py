@@ -328,12 +328,16 @@ class GurobiTorchMILP(GurobiTorchMIP):
         / objective data.
         cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
         where A_act, b_act are computed from get_active_constraints
+        @param penalty The matrix A_act is not always invertible. We use a
+        penalized version of least square problem to compute its pseudo inverse
+        as (A_actᵀ * A_act + penalty * I)⁻¹ * A_actᵀ
         @return objective cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
         """
         (A_act, b_act) = self.get_active_constraints(
             active_ineq_row_indices, zeta_sol)
         # Now compute A_act⁻¹ * b_act. A_act may not be invertible, so we
-        # use its pseudo-inverse (A_actᵀ * A_act)⁻¹ * A_actᵀ * b_act
+        # use its pseudo-inverse
+        # (A_actᵀ * A_act + penalty * I)⁻¹ * A_actᵀ * b_act
         return self.c_r @ torch.inverse(
             A_act.T @ A_act +
             penalty * torch.eye(len(self.r), dtype=self.dtype)) @ (A_act.T) @\
@@ -354,6 +358,8 @@ class GurobiTorchMILP(GurobiTorchMIP):
         @param active_constraint_tolerance If the constraint violation is less
         than this tolerance at the solution, then we think this constraint is
         active at the solution.
+        @param penalty Refer to compute_objective_from_mip_data() for more
+        details.
         """
         assert(solution_number >= 0 and
                solution_number < self.gurobi_model.solCount)

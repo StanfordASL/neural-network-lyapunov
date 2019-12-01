@@ -7,6 +7,8 @@ class LyapunovReluTrainingOptions:
     def __init__(self):
         # The number of samples xⁱ in each batch.
         self.batch_size = 100
+        # The learning rate of the optimizer
+        self.learning_rate = 0.003
         # The weights of the MILP cost maxₓ c(x) in the total loss.
         self.mip_cost_weights = 10
         # The number of (sub)optimal solutions of the MILP cost. We will sum
@@ -91,10 +93,58 @@ def train_lyapunov_relu(
 
         if (options.output_flag):
             print("Loss:{}".format(loss))
-        optimizer = torch.optim.Adam(relu.parameters(), lr=0.003)
+        optimizer = torch.optim.Adam(relu.parameters(),
+                                     lr=options.learning_rate)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         iter_count += 1
 
+    return False
+
+
+class TrainValueApproximatorOptions:
+    def __init__(self):
+        self.max_epochs = 100
+        # When the training error is less than this tolerance, stop the
+        # training.
+        self.convergence_tolerance = 1e-3
+        self.learning_rate = 0.02
+        # Number of steps for the cost-to-go horizon.
+        self.num_steps = 100
+
+
+def train_value_approximator(
+    hybrid_linear_system, relu, instantaneous_cost_fun, state_samples_all,
+        options):
+    """
+    Train a ReLU network to approximates the cost-to-go (value function) of a
+    hybrid linear system.
+    @param hybrid_linear_system This system has to define a cost_to_go(x)
+    function, that computes the cost-to-go from a state x.
+    @param relu Both an input and an output paramter. As an input, it
+    represents the initial guess of the network. As an output, it represents
+    the trained network.
+    @param instantaneous_cost_fun A function evaluates the instantaneous cost
+    of a state.
+    @param state_samples_all A list of state samples.
+    @param options A TrainValueApproximatorOptions instance.
+    @return is_converged Whether the training converged or not.
+    """
+    assert(isinstance(state_samples_all, list))
+    assert(isinstance(options, TrainValueApproximatorOptions))
+    value_samples = [hybrid_linear_system.cost_to_go(
+        state, instantaneous_cost_fun, options.num_steps)
+        for state in state_samples_all]
+
+    optimizer = torch.optim.Adam(relu.parameters(), lr=options.learning_rate)
+    for epoch in range(options.max_epochs):
+        optimizer.zero_grad()
+        relu_output = relu(torch.stack(state_samples_all, dim=0))
+        loss = torch.nn.MSELoss()(
+            relu_output.squeeze(), torch.stack(value_samples, dim=0))
+        if (loss.item() <= options.convergence_tolerance):
+            return True
+        loss.backward()
+        optimizer.step()
     return False
