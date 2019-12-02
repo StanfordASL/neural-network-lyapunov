@@ -39,21 +39,22 @@ class ModelBoundsUpperBound(unittest.TestCase):
                                                self.linear2,
                                                nn.ReLU(),
                                                self.linear3)
-                                                     
-        # self.linear1 = nn.Linear(2, 10)
+                            
+        # width = 10          
+        # self.linear1 = nn.Linear(2, width)
         # self.linear1.weight.data = torch.tensor(
-        #     np.random.rand(10, 2), dtype=self.dtype)
+        #     np.random.rand(width, 2), dtype=self.dtype)
         # self.linear1.bias.data = torch.tensor(
-        #     np.random.rand(10), dtype=self.dtype)
-        # self.linear2 = nn.Linear(10, 10)
+        #     np.random.rand(width), dtype=self.dtype)
+        # self.linear2 = nn.Linear(width, width)
         # self.linear2.weight.data = torch.tensor(
-        #     np.random.rand(10, 10),
+        #     np.random.rand(width, width),
         #     dtype=self.dtype)
         # self.linear2.bias.data = torch.tensor(
-        #     np.random.rand(10), dtype=self.dtype)
-        # self.linear3 = nn.Linear(10, 1)
+        #     np.random.rand(width), dtype=self.dtype)
+        # self.linear3 = nn.Linear(width, 1)
         # self.linear3.weight.data = torch.tensor(
-        #     np.random.rand(1, 10), dtype=self.dtype)
+        #     np.random.rand(1, width), dtype=self.dtype)
         # self.linear3.bias.data = torch.tensor([1.], dtype=self.dtype)
         # self.double_integrator_model = nn.Sequential(self.linear1,
         #                                              nn.ReLU(),
@@ -133,75 +134,70 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 self.assertGreaterEqual(epsilon_sub, epsilon)
 
     def test_lower_bound(self):
-        dtype = torch.float64
-        (A, B) = double_integrator.double_integrator_dynamics(dtype)
-        x_dim = A.shape[1]
-        u_dim = B.shape[1]
-        sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
-
+        dtype = self.dtype
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        # continuous to discrete using forward euler
+        dt = 1.
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
         c = torch.zeros(x_dim, dtype=dtype)
-        x_lo = -1. * torch.ones(x_dim, dtype=dtype)
-        x_up = 1. * torch.ones(x_dim, dtype=dtype)
+        x_lo = -2. * torch.ones(x_dim, dtype=dtype)
+        x_up = 2. * torch.ones(x_dim, dtype=dtype)
         u_lo = -1. * torch.ones(u_dim, dtype=dtype)
         u_up = 1. * torch.ones(u_dim, dtype=dtype)
         P = torch.cat((-torch.eye(x_dim+u_dim),
                        torch.eye(x_dim+u_dim)), 0).type(dtype)
-        q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
-        sys.add_mode(A, B, c, P, q)
+        q = torch.cat((-x_lo, -u_lo,
+                       x_up, u_up), 0).type(dtype)
+        double_int = hybrid_linear_system.HybridLinearSystem(x_dim,
+                                                             u_dim,
+                                                             dtype)
+        double_int.add_mode(A, B, c, P, q)
 
         # value function
-        N = 5
-        vf = value_to_optimization.ValueFunction(
-            sys, N, x_lo, x_up, u_lo, u_up)
-        Q = torch.eye(sys.x_dim)
-        R = torch.eye(sys.u_dim)
-        vf.set_cost(Q=Q)
-        vf.set_cost(R=R)
-        vf.set_terminal_cost(Qt=Q)
-        vf.set_terminal_cost(Rt=R)
-        # vf.set_cost(r=torch.ones(sys.u_dim),q=torch.ones(sys.x_dim))
-        # vf.set_terminal_cost(rt=torch.ones(sys.u_dim),qt=torch.ones(sys.x_dim))
-        xN = torch.Tensor([1., 1.])
+        N = 6
+        vf = value_to_optimization.ValueFunction(double_int, N, x_lo, x_up,
+                                                 u_lo, u_up)
+        Q = torch.eye(double_int.x_dim)
+        R = torch.eye(double_int.u_dim)
+        vf.set_cost(Q=Q, R=R)
+        vf.set_terminal_cost(Qt=Q, Rt=R)
+        xN = torch.Tensor([0., 0.]).type(dtype)
         vf.set_constraints(xN=xN)
+        vf_value_fun = vf.get_value_function()
 
         mb = model_bounds.ModelBounds(self.double_integrator_model, vf)
-        x0_lo = x_lo
-        x0_up = x_up
-        bound_opt = mb.lower_bound_opt(
-            self.double_integrator_model, x0_lo, x0_up)
-        
-        Q, q, k, G, h, A, b, intv = bound_opt
-        num_var = Q.shape[0]
-        num_gamma = len(intv)
-        num_y = num_var - num_gamma
+        bound_opt = mb.lower_bound_opt(self.double_integrator_model, x_lo, x_up)
+        Q1, Q2, Q3, q1, q2, k, G1, G2, h, A1, A2, b = bound_opt
+        num_y = Q1.shape[0]
+        num_gamma = Q2.shape[0]
         gtm = gurobi_torch_mip.GurobiTorchMIQP(dtype)
         y = gtm.addVars(num_y, vtype=gurobipy.GRB.CONTINUOUS, name="y")
         gamma = gtm.addVars(num_gamma, vtype=gurobipy.GRB.BINARY, name="gamma")
-        gtm.setObjective([Q[:num_y,:num_y]+1e-12*torch.eye(num_y,dtype=dtype),
-                          Q[num_y:,num_y:],
-                          Q[:num_y,num_y:]],
-                          [(y,y),(gamma,gamma),(y,gamma)],
-                          [q[:num_y],q[num_y:]],[y,gamma],
-                          constant=k,sense=gurobipy.GRB.MINIMIZE)
-        for i in range(G.shape[0]):
-            gtm.addLConstr([G[i,:num_y],G[i,num_y:]],[y,gamma],
+        assert(torch.all(Q2 == 0.))
+        gtm.setObjective([Q1,Q3],[(y,y),(y,gamma)],[q1,q2],[y,gamma],constant=k, sense=gurobipy.GRB.MINIMIZE)
+        for i in range(G1.shape[0]):
+            gtm.addLConstr([G1[i,:],G2[i,:]],[y,gamma],
                            gurobipy.GRB.LESS_EQUAL,h[i])
-        for i in range(A.shape[0]):
-            gtm.addLConstr([A[i,:num_y],A[i,num_y:]],[y,gamma],
+        for i in range(A1.shape[0]):
+            gtm.addLConstr([A1[i,:],A2[i,:]],[y,gamma],
                            gurobipy.GRB.EQUAL,b[i])
 
+        gtm.gurobi_model.setParam("NonConvex", 2)
         gtm.gurobi_model.update()
         gtm.gurobi_model.optimize()
         epsilon = -gtm.gurobi_model.getObjective().getValue() 
         print("EPSILON: %f" % epsilon)
         
-        V = vf.get_value_function()
-        for i in range(5):
-            x0_sub = torch.rand(sys.x_dim, dtype=sys.dtype) * (x0_up - x0_lo) + x0_lo
-            x0_sub = torch.max(torch.min(x0_sub, x0_up), x0_lo)
+        for i in range(20):
+            x0_sub = torch.rand(double_int.x_dim, dtype=double_int.dtype) *\
+                (x_up - x_lo) + x_lo
+            x0_sub = torch.max(torch.min(x0_sub, x_up), x_lo)
             value_sub = None
             try:
-                value_sub, _, _ = V(x0_sub)
+                value_sub, _, _ = vf_value_fun(x0_sub)
             except AttributeError:
                 # for some reason the solver didn't return anything
                 pass
@@ -209,7 +205,7 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 z_nn_sub = self.double_integrator_model(x0_sub).item()
                 epsilon_sub = value_sub - z_nn_sub
                 print(epsilon_sub)
-                self.assertLessEqual(epsilon_sub, epsilon)
+                # self.assertLessEqual(epsilon_sub, epsilon)
 
 if __name__ == '__main__':
     unittest.main()
