@@ -23,8 +23,6 @@ class RandomShootingMPC:
         self.model = model
         self.num_samples = num_samples
         self.sim_step = vf.get_sim_step_function()
-        self.v_opt = float("Inf")
-        self.u_opt = torch.zeros(vf.sys.u_dim, dtype=vf.dtype)
         self.u_range = (self.vf.u_up - self.vf.u_lo).repeat(num_samples, 1)
         self.u_lo_samples = self.vf.u_lo.repeat(num_samples, 1)
 
@@ -36,13 +34,14 @@ class RandomShootingMPC:
         """
         u_samples = torch.rand((self.num_samples, self.vf.sys.u_dim),
                                dtype=self.vf.dtype) * self.u_range +\
-            self.u_lo_samples
-        self.v_opt = float("Inf")
+                               self.u_lo_samples
+        v_opt = float("Inf")
+        u_opt = torch.zeros(self.vf.sys.u_dim, dtype=self.vf.dtype)
         for k in range(self.num_samples):
             (xn, step_cost) = self.sim_step(x0, u_samples[k, :])
             if ~isinstance(xn, type(None)):
                 v = step_cost + torch.clamp(self.model(xn), 0.)
-                if v < self.v_opt:
-                    self.v_opt = v
-                    self.u_opt = u_samples[k, :]
-        return self.u_opt
+                if v < v_opt:
+                    v_opt = v
+                    u_opt = u_samples[k, :]
+        return u_opt
