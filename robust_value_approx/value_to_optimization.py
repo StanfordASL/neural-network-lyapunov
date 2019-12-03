@@ -480,3 +480,101 @@ class ValueFunction:
         if self.z is not None:
             cost += alpha_val @ self.z
         return cost
+
+    def traj_opt_dual(self, x0):
+        """
+        Dual of the traj opt problem
+        """
+        (Ain1_all, Ain2_all, Ain3_all, rhs_in_all,
+        Aeq1_all, Aeq2_all, Aeq3_all, rhs_eq_all,
+        Q2_val, Q3_val, q2_val, q3_val, c_val) = self.traj_opt_constraint()
+
+        assert(torch.all(Q3_val == 0.))
+
+        s_in = torch.any(Ain2_all != 0., dim=1)
+        s_eq = torch.any(Aeq2_all != 0., dim=1)
+
+        Ain1_s = Ain1_all[s_in, :]
+        Ain2_s = Ain2_all[s_in, :]
+        Ain3_s = Ain3_all[s_in, :]
+        rhs_in_s = rhs_in_all[s_in]
+        Aeq1_s = Aeq1_all[s_eq, :]
+        Aeq2_s = Aeq2_all[s_eq, :]
+        Aeq3_s = Aeq3_all[s_eq, :]
+        rhs_eq_s = rhs_eq_all[s_eq]
+
+        Ain1 = Ain1_all[~s_in, :]
+        Ain3 = Ain3_all[~s_in, :]
+        rhs_in = rhs_in_all[~s_in]
+        Aeq1 = Aeq1_all[~s_eq, :]
+        Aeq3 = Aeq3_all[~s_eq, :]
+        rhs_eq = rhs_eq_all[~s_eq]
+
+        num_lambda = Ain2_s.shape[0]
+        num_nu = Aeq2_s.shape[0]
+        num_alpha = Ain3.shape[1]
+        num_y = num_lambda + num_nu
+        num_gamma = num_alpha
+
+        lambda_index_s = 0
+        lambda_index_e = num_lambda
+        nu_index_s = num_lambda
+        nu_index_e = num_lambda+num_nu
+
+        alpha_index_s = 0
+        alpha_index_e = num_alpha
+
+        num_Ain = rhs_in.shape[0]
+        num_in = num_Ain + num_lambda
+
+        num_Aeq = rhs_eq.shape[0]
+        num_eq = num_Aeq
+
+        G1 = torch.zeros(num_in, num_y, dtype=self.dtype)
+        G1[num_Ain:num_Ain+num_lambda, 
+          lambda_index_s:lambda_index_e] = -torch.eye(num_lambda,
+                                                      dtype=self.dtype)
+
+        G2 = torch.zeros(num_in, num_gamma, dtype=self.dtype)
+        G2[0:num_Ain, alpha_index_s:alpha_index_e] = Ain3
+
+        h = torch.cat((rhs_in - Ain1 @ x0,
+                       torch.zeros(num_lambda, dtype=self.dtype)),0)
+
+        A1 = torch.zeros(num_eq, num_y, dtype=self.dtype)
+
+        A2 = torch.zeros(num_eq, num_gamma, dtype=self.dtype)
+        A2[0:num_Aeq, alpha_index_s:alpha_index_e] = Aeq3
+
+        b = rhs_eq - Aeq1 @ x0
+
+        # slack variables have no cost,
+        # so we take the pseudoinverse to ignore them
+        Q1_inv = torch.pinverse(Q2_val)
+
+        Q1 = torch.zeros(num_y, num_y, dtype=self.dtype)
+        Q1[lambda_index_s:lambda_index_e,
+          lambda_index_s:lambda_index_e] = .5 * Ain2_s @ Q1_inv @ Ain2_s.t()
+        Q1[nu_index_s:nu_index_e,
+          nu_index_s:nu_index_e] = .5 * Aeq2_s @ Q1_inv @ Aeq2_s.t()
+        Q1[lambda_index_s:lambda_index_e,
+          nu_index_s:nu_index_e] = .5 * Ain2_s @ Q1_inv @ Aeq2_s.t()
+        Q1[nu_index_s:nu_index_e,
+          lambda_index_s:lambda_index_e] = .5 * Aeq2_s @ Q1_inv @ Ain2_s.t()
+
+        Q2 = torch.zeros(num_gamma, num_gamma, dtype=self.dtype)
+
+        Q3 = torch.zeros(num_y, num_gamma, dtype=self.dtype)
+        Q3[lambda_index_s:lambda_index_e, alpha_index_s:alpha_index_e] = -Ain3_s
+        Q3[nu_index_s:nu_index_e, alpha_index_s:alpha_index_e] = -Aeq3_s
+
+        q1 = torch.zeros(num_y, dtype=self.dtype)
+        q1[lambda_index_s:lambda_index_e] = rhs_in_s + Ain2_s @ Q1_inv @ q2_val - Ain1_s @ x0
+        q1[nu_index_s:nu_index_e] = rhs_eq_s + Aeq2_s @ Q1_inv @ q2_val - Aeq1_s @ x0
+
+        q2 = torch.zeros(num_gamma, dtype=self.dtype)
+        q2[alpha_index_s:alpha_index_e] = -q3_val
+
+        k = .5*q2_val.t()@Q1_inv@q2_val - c_val
+                  
+        return(Q1, Q2, Q3, q1, q2, k, G1, G2, h, A1, A2, b)

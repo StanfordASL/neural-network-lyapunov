@@ -206,6 +206,69 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 epsilon_sub = value_sub - z_nn_sub
                 print(epsilon_sub)
                 # self.assertLessEqual(epsilon_sub, epsilon)
+                
+    def test_dual_prob(self):
+        dtype = self.dtype
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        # continuous to discrete using forward euler
+        dt = 1.
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
+        c = torch.zeros(x_dim, dtype=dtype)
+        x_lo = -2. * torch.ones(x_dim, dtype=dtype)
+        x_up = 2. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up = 1. * torch.ones(u_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        q = torch.cat((-x_lo, -u_lo,
+                       x_up, u_up), 0).type(dtype)
+        double_int = hybrid_linear_system.HybridLinearSystem(x_dim,
+                                                             u_dim,
+                                                             dtype)
+        double_int.add_mode(A, B, c, P, q)
+
+        # value function
+        N = 6
+        vf = value_to_optimization.ValueFunction(double_int, N, x_lo, x_up,
+                                                 u_lo, u_up)
+        Q = torch.eye(double_int.x_dim)
+        R = torch.eye(double_int.u_dim)
+        vf.set_cost(Q=Q, R=R)
+        vf.set_terminal_cost(Qt=Q, Rt=R)
+        xN = torch.Tensor([0., 0.]).type(dtype)
+        vf.set_constraints(xN=xN)
+        vf_value_fun = vf.get_value_function()
+
+        x0 = torch.rand(double_int.x_dim, dtype=double_int.dtype) * (x_up - x_lo) + x_lo
+        print(x0)
+
+        (Q1, Q2, Q3, q1, q2, k, G1, G2, h, A1, A2, b) = vf.traj_opt_dual(x0)
+
+        num_y = Q1.shape[0]
+        num_gamma = Q2.shape[0]
+        gtm = gurobi_torch_mip.GurobiTorchMIQP(dtype)
+        y = gtm.addVars(num_y, vtype=gurobipy.GRB.CONTINUOUS, name="y")
+        gamma = gtm.addVars(num_gamma, vtype=gurobipy.GRB.BINARY, name="gamma")
+        assert(torch.all(Q2 == 0.))
+        gtm.setObjective([Q1,Q3],[(y,y),(y,gamma)],[q1,q2],[y,gamma],constant=k, sense=gurobipy.GRB.MINIMIZE)
+        for i in range(G1.shape[0]):
+            gtm.addLConstr([G1[i,:],G2[i,:]],[y,gamma],
+                           gurobipy.GRB.LESS_EQUAL,h[i])
+        for i in range(A1.shape[0]):
+            gtm.addLConstr([A1[i,:],A2[i,:]],[y,gamma],
+                           gurobipy.GRB.EQUAL,b[i])
+                           
+        gtm.gurobi_model.setParam("NonConvex", 2)
+        gtm.gurobi_model.update()
+        gtm.gurobi_model.optimize()
+        epsilon = -gtm.gurobi_model.getObjective().getValue() 
+        print("Dual: %f" % epsilon)                     
+                           
+        print("Value: %f" % vf_value_fun(x0)[0])
+
 
 if __name__ == '__main__':
     unittest.main()
