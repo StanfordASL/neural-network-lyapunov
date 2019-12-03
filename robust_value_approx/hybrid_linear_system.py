@@ -215,6 +215,27 @@ class HybridLinearSystem:
         return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,
                 rhs_in)
 
+    def step_forward(self, x_start, u_start):
+        """
+        Computes the next state and the currently active mode
+        @param x_start A tensor representing the starting state
+        @param u_start A tensor representing the control action over that
+        interval
+        TODO(blandry) @param num_steps to allow variables number of
+        integration steps
+        @return x_i A tensor with the next state, or None if no mode is active
+        @return mode An integer correspoding to the mode that was active on
+        that step, or None if no mode is active
+        """
+        assert(type(x_start) == torch.Tensor)
+        assert(type(u_start) == torch.Tensor)
+        for j in range(self.num_modes):
+            if (torch.all(self.P[j] @ torch.cat((x_start, u_start)) <=\
+                    self.q[j])):
+                x_i = self.A[j] @ x_start + self.B[j] @ u_start + self.c[j]
+                return(x_i, j)
+        return(None, None)
+
 
 class AutonomousHybridLinearSystem:
     """
