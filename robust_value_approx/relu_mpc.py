@@ -33,7 +33,7 @@ class RandomShootingMPC:
         """
         u_samples = torch.rand((self.num_samples, self.vf.sys.u_dim),
                                dtype=self.vf.dtype) * self.u_range +\
-                               self.u_lo_samples
+            self.u_lo_samples
         v_opt = float("Inf")
         u_opt = torch.zeros(self.vf.sys.u_dim, dtype=self.vf.dtype)
         for k in range(self.num_samples):
