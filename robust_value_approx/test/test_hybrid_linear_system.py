@@ -234,6 +234,61 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             test_mode(mode, None, torch.tensor([-1, -1], dtype=dut.dtype))
             test_mode(mode, None, None)
 
+    def test_cost_to_go(self):
+        """
+        The piecewise affine system is from "Analysis of discrete-time
+        piecewise affine and hybrid systems" by Giancarlo Ferrari-Trecate
+        et.al.
+        """
+        dtype = torch.float64
+        dut = hybrid_linear_system.AutonomousHybridLinearSystem(
+            2, dtype)
+        dut.add_mode(
+            torch.tensor([[-0.999, 0], [-0.139, 0.341]], dtype=dtype),
+            torch.zeros((2,), dtype=dtype),
+            torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+            torch.tensor([1, 0, 0, 1], dtype=dtype))
+        dut.add_mode(
+            torch.tensor([[0.436, 0.323], [0.388, -0.049]], dtype=dtype),
+            torch.zeros((2,), dtype=dtype),
+            torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+            torch.tensor([1, 0, 1, 0], dtype=dtype))
+        dut.add_mode(
+            torch.tensor([[-0.457, 0.215], [0.491, 0.49]], dtype=dtype),
+            torch.zeros((2,), dtype=dtype),
+            torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+            torch.tensor([0, 1, 0, 1], dtype=dtype))
+        dut.add_mode(
+            torch.tensor([[-0.022, 0.344], [0.458, 0.271]], dtype=dtype),
+            torch.zeros((2,), dtype=dtype),
+            torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+            torch.tensor([0, 1, 1, 0], dtype=dtype))
+
+        def instantaneous_cost_fun(x):
+            return x @ x
+
+        def test_fun(x):
+            num_steps = 100
+            total_cost = dut.cost_to_go(x, instantaneous_cost_fun, num_steps)
+            total_cost_expected = instantaneous_cost_fun(x)
+            x_i = x.clone()
+            for i in range(num_steps):
+                for j in range(dut.num_modes):
+                    if (torch.all(dut.P[j] @ x_i <= dut.q[j])):
+                        x_i = dut.A[j] @ x_i + dut.g[j]
+                        break
+                total_cost_expected += instantaneous_cost_fun(x_i)
+            self.assertAlmostEqual(total_cost.item(),
+                                   total_cost_expected.item())
+
+        x_sample, y_sample = torch.meshgrid(
+            torch.linspace(-1., 1., 11).type(dut.dtype),
+            torch.linspace(-1., 1., 11).type(dut.dtype))
+        for i in range(x_sample.shape[0]):
+            for j in range(x_sample.shape[1]):
+                test_fun(torch.tensor(
+                    [x_sample[i, j], y_sample[i, j]], dtype=dut.dtype))
+
 
 if __name__ == "__main__":
     unittest.main()

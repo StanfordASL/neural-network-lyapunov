@@ -321,24 +321,31 @@ class GurobiTorchMILP(GurobiTorchMIP):
             sense=sense)
 
     def compute_objective_from_mip_data(
-            self, active_ineq_row_indices, zeta_sol):
+            self, active_ineq_row_indices, zeta_sol, penalty=0.):
         """
         Given the active inequality constraints and the value for binary
         variables, compute the objective as a function of the MIP constraint
         / objective data.
         cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
         where A_act, b_act are computed from get_active_constraints
+        @param penalty The matrix A_act is not always invertible. We use a
+        penalized version of least square problem to compute its pseudo inverse
+        as (A_actᵀ * A_act + penalty * I)⁻¹ * A_actᵀ
         @return objective cᵣᵀ * A_act⁻¹ * b_act + c_zetaᵀ * ζ + c_constant
         """
         (A_act, b_act) = self.get_active_constraints(
             active_ineq_row_indices, zeta_sol)
         # Now compute A_act⁻¹ * b_act. A_act may not be invertible, so we
-        # use its pseudo-inverse (A_actᵀ * A_act)⁻¹ * A_actᵀ * b_act
-        return self.c_r @ torch.inverse(A_act.T @ A_act) @ (A_act.T) @ b_act\
-            + self.c_zeta @ zeta_sol + self.c_constant
+        # use its pseudo-inverse
+        # (A_actᵀ * A_act + penalty * I)⁻¹ * A_actᵀ * b_act
+        return self.c_r @ torch.inverse(
+            A_act.T @ A_act +
+            penalty * torch.eye(len(self.r), dtype=self.dtype)) @ (A_act.T) @\
+            b_act + self.c_zeta @ zeta_sol + self.c_constant
 
     def compute_objective_from_mip_data_and_solution(
-            self, solution_number=0, active_constraint_tolerance=1e-6):
+            self, solution_number=0, active_constraint_tolerance=1e-6,
+            penalty=0.):
         """
         Suppose the MILP is solved to optimality. We then retrieve the active
         constraints from the (suboptimal) solution, together with the binary
@@ -351,6 +358,8 @@ class GurobiTorchMILP(GurobiTorchMIP):
         @param active_constraint_tolerance If the constraint violation is less
         than this tolerance at the solution, then we think this constraint is
         active at the solution.
+        @param penalty Refer to compute_objective_from_mip_data() for more
+        details.
         """
         assert(solution_number >= 0 and
                solution_number < self.gurobi_model.solCount)
@@ -368,7 +377,7 @@ class GurobiTorchMILP(GurobiTorchMIP):
             np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
             active_constraint_tolerance])
         return self.compute_objective_from_mip_data(
-            active_ineq_row_indices, zeta_sol)
+            active_ineq_row_indices, zeta_sol, penalty)
 
 
 class GurobiTorchMIQP(GurobiTorchMIP):

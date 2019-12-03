@@ -374,3 +374,27 @@ class AutonomousHybridLinearSystem:
             ineq_count += self.P[i].shape[0]
 
         return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
+
+    def cost_to_go(self, x_start, instantaneous_cost_fun, num_steps):
+        """
+        Compute the cost-to-go ∑ᵢ c(x[i]) starting from x_start
+        @param x_start The starting state.
+        @param instantaneous_cost_fun A function evaluator that takes a state
+        and evaluates the one-step cost c(x).
+        @param num_steps The length of horizon for the cost-to-go.
+        """
+        assert(isinstance(x_start, torch.Tensor))
+        assert(x_start.shape == (self.x_dim,))
+        total_cost = torch.tensor(0., dtype=self.dtype)
+        x_i = x_start.clone()
+        total_cost += instantaneous_cost_fun(x_i)
+        for i in range(num_steps):
+            mode = None
+            for j in range(self.num_modes):
+                if (torch.all(self.P[j] @ x_i <= self.q[j])):
+                    mode = j
+                    x_i = self.A[j] @ x_i + self.g[j]
+                    break
+            assert(mode is not None)
+            total_cost += instantaneous_cost_fun(x_i)
+        return total_cost

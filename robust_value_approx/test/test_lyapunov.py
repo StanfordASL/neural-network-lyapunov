@@ -14,7 +14,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
     def setUp(self):
         """
         The piecewise affine system is from "Analysis of discrete-time
-        piecewise affine and hybrid systems
+        piecewise affine and hybrid systems" by Giancarlo Ferrari-Trecate
+        et.al.
         """
         self.dtype = torch.float64
         self.system1 = hybrid_linear_system.AutonomousHybridLinearSystem(
@@ -213,6 +214,50 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 weight_grad, grad_numerical[0].squeeze(), rtol=1e-3, atol=0.04)
             np.testing.assert_allclose(
                 bias_grad, grad_numerical[1].squeeze(), rtol=1e-3, atol=0.02)
+
+    def test_lyapunov_loss_at_sample(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+        # Construct a simple ReLU model with 2 hidden layers
+        linear1 = nn.Linear(2, 3)
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=self.dtype)
+        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=self.dtype)
+        linear2 = nn.Linear(3, 4)
+        linear2.weight.data = torch.tensor(
+                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+                dtype=self.dtype)
+        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=self.dtype)
+        linear3 = nn.Linear(4, 1)
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
+        linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
+        relu1 = nn.Sequential(
+            linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+
+        x_samples = []
+        x_samples.append(torch.tensor([-0.5, -0.2], dtype=self.dtype))
+        x_samples.append(torch.tensor([-0.5, 0.25], dtype=self.dtype))
+        x_samples.append(torch.tensor([-0.7, -0.55], dtype=self.dtype))
+        x_samples.append(torch.tensor([0.1, 0.85], dtype=self.dtype))
+        x_samples.append(torch.tensor([0.45, 0.35], dtype=self.dtype))
+        x_samples.append(torch.tensor([0.45, -0.78], dtype=self.dtype))
+        x_samples.append(torch.tensor([0.95, -0.23], dtype=self.dtype))
+        margin = 0.1
+        for x_sample in x_samples:
+            loss = dut.lyapunov_loss_at_sample(relu1, x_sample, margin)
+            is_in_mode = False
+            for i in range(self.system1.num_modes):
+                if (torch.all(
+                        self.system1.P[i] @ x_sample <= self.system1.q[i])):
+                    x_next = self.system1.A[i] @ x_sample + self.system1.g[i]
+                    is_in_mode = True
+                    break
+            assert(is_in_mode)
+            V_x_sample = relu1.forward(x_sample)
+            V_x_next = relu1.forward(x_next)
+            V_diff = V_x_next - V_x_sample
+            loss_expected = V_diff + margin if V_diff > margin else\
+                torch.tensor(0., dtype=self.dtype)
+            self.assertAlmostEqual(loss.item(), loss_expected.item())
 
 
 if __name__ == "__main__":
