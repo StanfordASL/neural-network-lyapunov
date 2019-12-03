@@ -22,8 +22,8 @@ def generate_data():
 
     sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
     c = torch.zeros(x_dim, dtype=dtype)
-    x_lo = -4. * torch.ones(x_dim, dtype=dtype)
-    x_up = 4. * torch.ones(x_dim, dtype=dtype)
+    x_lo = -2. * torch.ones(x_dim, dtype=dtype)
+    x_up = 2. * torch.ones(x_dim, dtype=dtype)
     u_lo = -1. * torch.ones(u_dim, dtype=dtype)
     u_up = 1. * torch.ones(u_dim, dtype=dtype)
     P = torch.cat((-torch.eye(x_dim+u_dim),
@@ -56,14 +56,15 @@ def generate_model():
     x_samples = torch.load('double_integrator_x_samples.pt')
     v_samples = torch.load('double_integrator_v_samples.pt')
 
-    nn_width = 36
+    nn_width = 64
     model = nn.Sequential(nn.Linear(x_samples.shape[1], nn_width),
+                          nn.ReLU(), nn.Linear(nn_width, nn_width),
                           nn.ReLU(), nn.Linear(nn_width, nn_width),
                           nn.ReLU(), nn.Linear(nn_width, 1))
     model.double()
 
     utils.train_model(model, x_samples, v_samples,
-                      num_epoch=1000, batch_size=100, learning_rate=1e-2)
+                      num_epoch=1000, batch_size=100, learning_rate=1e-3)
 
     torch.save(model, 'double_integrator_model.pt')
 

@@ -456,3 +456,27 @@ class ValueFunction:
                     axis=0)
 
         return(x_samples, v_samples)
+
+    def step_cost(self, x_val, u_val, alpha_val):
+        """
+        Computes the cost of a single step with the value function.
+        Note that the step should not be the terminal one (i.e. not
+        correspond to Qt, Rt and Zt.
+        @param x_val A tensor with the value of the state
+        @param u_val A tensor with the value of the control input
+        @param alpha_val A tensor with the value of the discrete variables
+        """
+        cost = 0.
+        if self.Q is not None:
+            cost += .5 * x_val @ self.Q @ x_val
+        if self.R is not None:
+            cost += .5 * u_val @ self.R @ u_val
+        if self.Z is not None:
+            cost += .5 * alpha_val @ self.Z @ alpha_val
+        if self.q is not None:
+            cost += x_val @ self.q
+        if self.r is not None:
+            cost += u_val @ self.r
+        if self.z is not None:
+            cost += alpha_val @ self.z
+        return cost
