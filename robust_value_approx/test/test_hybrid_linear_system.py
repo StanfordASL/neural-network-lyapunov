@@ -2,8 +2,39 @@ import torch
 import numpy as np
 import unittest
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
-import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
 import cvxpy as cp
+
+
+def setup_trecate_discrete_time_system():
+    """
+    The piecewise affine system is from "Analysis of discrete-time
+    piecewise affine and hybrid systems" by Giancarlo Ferrari-Trecate
+    et.al.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(
+        2, dtype)
+    system.add_mode(
+        torch.tensor([[-0.999, 0], [-0.139, 0.341]], dtype=dtype),
+        torch.zeros((2,), dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 0, 1], dtype=dtype))
+    system.add_mode(
+        torch.tensor([[0.436, 0.323], [0.388, -0.049]], dtype=dtype),
+        torch.zeros((2,), dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 1, 0], dtype=dtype))
+    system.add_mode(
+        torch.tensor([[-0.457, 0.215], [0.491, 0.49]], dtype=dtype),
+        torch.zeros((2,), dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 0, 1], dtype=dtype))
+    system.add_mode(
+        torch.tensor([[-0.022, 0.344], [0.458, 0.271]], dtype=dtype),
+        torch.zeros((2,), dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 1, 0], dtype=dtype))
+    return system
 
 
 class HybridLinearSystemTest(unittest.TestCase):
@@ -236,7 +267,7 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             test_mode(mode, None, None)
 
     def test_cost_to_go(self):
-        dut = test_train_lyapunov.setup_discrete_time_system()
+        dut = setup_trecate_discrete_time_system()
 
         def instantaneous_cost_fun(x):
             return x @ x
@@ -264,7 +295,7 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
                     [x_sample[i, j], y_sample[i, j]], dtype=dut.dtype))
 
     def test_mode(self):
-        dut = test_train_lyapunov.setup_discrete_time_system()
+        dut = setup_trecate_discrete_time_system()
         self.assertEqual(dut.mode(torch.tensor([0.4, 0.5], dtype=dut.dtype)),
                          1)
         self.assertEqual(dut.mode(torch.tensor([-0.4, 0.5], dtype=dut.dtype)),
@@ -273,6 +304,24 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
                          2)
         self.assertEqual(dut.mode(torch.tensor([0.4, -0.5], dtype=dut.dtype)),
                          0)
+
+    def test_step_forward(self):
+        dut = setup_trecate_discrete_time_system()
+
+        def test_fun(x):
+            mode = dut.mode(x)
+            x_next_expected = dut.step_forward(x, mode)
+            x_next_expected2 = dut.step_forward(x)
+            x_next = dut.A[mode] @ x + dut.g[mode]
+            np.testing.assert_array_almost_equal(
+                x_next.detach().numpy(), x_next_expected.detach().numpy())
+            np.testing.assert_array_almost_equal(
+                x_next.detach().numpy(), x_next_expected2.detach().numpy())
+
+        test_fun(torch.tensor([0.4, 0.5], dtype=dut.dtype))
+        test_fun(torch.tensor([0.4, -0.5], dtype=dut.dtype))
+        test_fun(torch.tensor([-0.4, -0.5], dtype=dut.dtype))
+        test_fun(torch.tensor([-0.4, 0.5], dtype=dut.dtype))
 
 
 if __name__ == "__main__":

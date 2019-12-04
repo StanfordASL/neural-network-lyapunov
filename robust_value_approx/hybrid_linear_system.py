@@ -434,7 +434,7 @@ class AutonomousHybridLinearSystem:
                 return i
         return None
 
-    def step_forward(self, x, mode_x):
+    def step_forward(self, x, mode_x=None):
         """
         Compute the one-step forward simulation x[n+1] = A[i] * x[n] + g[i]
         where i is the mode of x.

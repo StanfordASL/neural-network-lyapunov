@@ -60,6 +60,8 @@ def train_lyapunov_relu(
 
     dtype = lyapunov_hybrid_system.system.dtype
     iter_count = 0
+    state_samples_next = [lyapunov_hybrid_system.system.step_forward(x) for
+                          x in state_samples_all]
     while iter_count < options.max_iterations:
         lyapunov_as_milp_return = lyapunov_hybrid_system.\
             lyapunov_as_milp(relu)
@@ -79,9 +81,10 @@ def train_lyapunov_relu(
         state_sample_indices = torch.randint(
             0, len(state_samples_all), (options.batch_size,))
         for i in state_sample_indices:
-            loss += lyapunov_hybrid_system.lyapunov_loss_at_sample(
-                relu, state_samples_all[i],
-                margin=options.sample_lyapunov_loss_margin)
+            loss += lyapunov_hybrid_system.\
+                lyapunov_loss_at_sample_and_next_state(
+                    relu, state_samples_all[i], state_samples_next[i],
+                    margin=options.sample_lyapunov_loss_margin)
 
         for mip_sol_number in range(options.mip_pool_solutions):
             if (mip_sol_number < mip.gurobi_model.solCount):

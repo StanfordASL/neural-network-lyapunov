@@ -3,6 +3,8 @@ import robust_value_approx.lyapunov as lyapunov
 import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
+import robust_value_approx.test.test_hybrid_linear_system as\
+    test_hybrid_linear_system
 import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
 
 
@@ -61,7 +63,7 @@ def validate_relu(relu, system, state_samples):
 
 
 if __name__ == "__main__":
-    system = test_train_lyapunov.setup_discrete_time_system()
+    system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
     relu = test_train_lyapunov.setup_relu()
