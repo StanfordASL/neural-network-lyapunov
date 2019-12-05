@@ -25,6 +25,12 @@ class LyapunovReluTrainingOptions:
         # the Lyapunov derivative to be strictly negative, then set this margin
         # to a positive number.
         self.sample_lyapunov_loss_margin = 0.
+        # A strictly positive number. For all x[n] outside of the sublevel set
+        # V(x) <= ρ, we want V(x[n+1]) - V(x[n]) to be <= -dV_margin.
+        self.dV_margin = 0.1
+        # A strictly positive number. We want to prove that all states converge
+        # to the sublevel set V(x) <= ρ, where ρ is lyapunov_sublevel.
+        self.lyapunov_sublevel = 0.1
 
 
 def train_lyapunov_relu(
@@ -39,7 +45,9 @@ def train_lyapunov_relu(
     where hinge_loss is max(-x + margin, 0), xⁱ is the i'th sample of the
     state.
     The training stops at either the iteration limit is achieved, or when the
-    condition maxₓ c(x) ≤ 0 ∀x is satisfied.
+    following condition are satisfied
+    1. maxₓ c(x) ≤ 0 ∀x
+    2. c(x) < -dV_margin ∀x s.t V(x) > ρ
     @param lyapunov_hybrid_system This input should define a common interface
     lyapunov_as_milp() (which represents the MIP maxₓ c(x)) and
     lyapunov_loss_at_sample() (which represents hinge_loss(c(xⁱ)). One example
@@ -71,10 +79,24 @@ def train_lyapunov_relu(
         mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
                                   options.mip_pool_solutions)
         mip.gurobi_model.optimize()
+
+        sublevelset_as_milp_return = lyapunov_hybrid_system.lyapunov_as_milp(
+            relu, options.lyapunov_sublevel)
+        mip_sublevel = sublevelset_as_milp_return[0]
+        mip_sublevel.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        mip_sublevel.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSearchMode, 2)
+        mip_sublevel.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSolutions, options.mip_pool_solutions)
+        mip_sublevel.gurobi_model.optimize()
+
         if (options.output_flag):
-            print("Iteration: {}, MIP objective:{}".format(
-                iter_count, mip.gurobi_model.ObjVal))
-        if (mip.gurobi_model.ObjVal <= 0.):
+            print("Iteration: {}, MIP objective:{}, Sublevel MIP obj:{}".
+                  format(iter_count, mip.gurobi_model.ObjVal,
+                         mip_sublevel.gurobi_model.ObjVal))
+        if (mip.gurobi_model.ObjVal <= 0. and
+                mip_sublevel.gurobi_model.ObjVal <= -options.dV_margin):
             return True
 
         loss = torch.tensor(0., dtype=dtype)
@@ -93,6 +115,16 @@ def train_lyapunov_relu(
                     mip_sol_number) *\
                         mip.compute_objective_from_mip_data_and_solution(
                             solution_number=mip_sol_number)
+        for mip_sol_number in range(options.mip_pool_solutions):
+            if (mip_sol_number < mip_sublevel.gurobi_model.solCount):
+                loss += torch.pow(
+                    torch.tensor(options.mip_cost_decay_rate, dtype=dtype),
+                    mip_sol_number) *\
+                        torch.nn.HingeEmbeddingLoss(margin=options.dV_margin)(
+                            -mip_sublevel.
+                            compute_objective_from_mip_data_and_solution(
+                                solution_number=mip_sol_number),
+                            torch.tensor(-1.))
 
         if (options.output_flag):
             print("Loss:{}".format(loss))

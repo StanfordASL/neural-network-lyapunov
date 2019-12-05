@@ -2,6 +2,7 @@ import robust_value_approx.train_lyapunov as train_lyapunov
 import robust_value_approx.lyapunov as lyapunov
 import torch
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from mpl_toolkits import mplot3d
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -35,7 +36,8 @@ def plot_relu(relu, system, mesh_size):
     fig = plt.figure()
     ax1 = fig.add_subplot(2, 1, 1, projection='3d')
     ax1.plot_surface(samples_x.detach().numpy(),
-                     samples_y.detach().numpy(), V.detach().numpy())
+                     samples_y.detach().numpy(), V.detach().numpy(),
+                     cmap=cm.coolwarm)
     ax1.set_xlabel("x")
     ax1.set_ylabel("y")
     ax1.set_zlabel("V")
