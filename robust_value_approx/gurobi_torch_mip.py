@@ -249,6 +249,43 @@ class GurobiTorchMIP:
             Ain_zeta[row, col] = val
         return (Ain_r, Ain_zeta, rhs_in)
 
+    def compute_objective_from_mip_data_and_solution(
+            self, solution_number=0, active_constraint_tolerance=1e-6,
+            penalty=0.):
+        """
+        Suppose the MIP is solved to optimality. We then retrieve the active
+        constraints from the (suboptimal) solution, together with the binary
+        variable solutions. We can then compute the objective as a function of
+        MIP constraint/objective data, by using
+        compute_objective_from_mip_data() function.
+        @param solution_number The index of the suboptimal solution. Should be
+        in the range of [0, gurobi_model.solCount). Setting solution_number to
+        0 means the optimal solution.
+        @param active_constraint_tolerance If the constraint violation is less
+        than this tolerance at the solution, then we think this constraint is
+        active at the solution.
+        @param penalty Refer to compute_objective_from_mip_data() for more
+        details. For MIQP, please set the penalty to a strictly positive
+        number.
+        """
+        assert(solution_number >= 0 and
+               solution_number < self.gurobi_model.solCount)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
+                                   solution_number)
+        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
+        zeta_sol = torch.tensor([var.xn for var in self.zeta],
+                                dtype=self.dtype)
+        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+        with torch.no_grad():
+            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
+        active_ineq_row_indices = np.arange(len(self.rhs_in))
+        active_ineq_row_indices = set(active_ineq_row_indices[
+            np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
+            active_constraint_tolerance])
+        return self.compute_objective_from_mip_data(
+            active_ineq_row_indices, zeta_sol, penalty)
+
 
 class GurobiTorchMILP(GurobiTorchMIP):
     """
@@ -342,42 +379,6 @@ class GurobiTorchMILP(GurobiTorchMIP):
             A_act.T @ A_act +
             penalty * torch.eye(len(self.r), dtype=self.dtype)) @ (A_act.T) @\
             b_act + self.c_zeta @ zeta_sol + self.c_constant
-
-    def compute_objective_from_mip_data_and_solution(
-            self, solution_number=0, active_constraint_tolerance=1e-6,
-            penalty=0.):
-        """
-        Suppose the MILP is solved to optimality. We then retrieve the active
-        constraints from the (suboptimal) solution, together with the binary
-        variable solutions. We can then compute the objective as a function of
-        MIP constraint/objective data, by using
-        compute_objective_from_mip_data() function.
-        @param solution_number The index of the suboptimal solution. Should be
-        in the range of [0, gurobi_model.solCount). Setting solution_number to
-        0 means the optimal solution.
-        @param active_constraint_tolerance If the constraint violation is less
-        than this tolerance at the solution, then we think this constraint is
-        active at the solution.
-        @param penalty Refer to compute_objective_from_mip_data() for more
-        details.
-        """
-        assert(solution_number >= 0 and
-               solution_number < self.gurobi_model.solCount)
-        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
-                                   solution_number)
-        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
-        zeta_sol = torch.tensor([var.xn for var in self.zeta],
-                                dtype=self.dtype)
-        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
-        with torch.no_grad():
-            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
-        active_ineq_row_indices = np.arange(len(self.rhs_in))
-        active_ineq_row_indices = set(active_ineq_row_indices[
-            np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
-            active_constraint_tolerance])
-        return self.compute_objective_from_mip_data(
-            active_ineq_row_indices, zeta_sol, penalty)
 
 
 class GurobiTorchMIQP(GurobiTorchMIP):
@@ -540,3 +541,47 @@ class GurobiTorchMIQP(GurobiTorchMIP):
             gurobipy.LinExpr(self.c_r, self.r) +
             gurobipy.LinExpr(self.c_zeta, self.zeta) + self.c_constant,
             sense=sense)
+
+    def compute_objective_from_mip_data(
+            self, active_ineq_row_indices, zeta_sol, penalty=1e-8):
+        """
+        Compute the optimal objective as a function of MIQP data.
+        If we fix the binary variable ζ, and take out the active linear
+        constraints as A_act * r = b_act, then the optimal solution and cost of
+        the QP can be computed from the KKT condition
+        [2*Qᵣ, A_actᵀ] * [r] = [ -cᵣ ]
+        [ A_act,   0 ]   [λ]   [b_act]
+        where λ is the dual variable. We could compare the pair of primal/dual
+        variable (r, λ) as
+        [r] = [2*Qᵣ, A_actᵀ]⁻¹ * [ -cᵣ ]
+        [λ]   [ A_act,   0 ]     [b_act]
+        since the matrix is not invertible (it is psd but not positive
+        definite), so we add a small identity matrix to make sure it is
+        invertible
+        [r] = [2*Qᵣ + εI, A_actᵀ]⁻¹ * [ -cᵣ ]
+        [λ]   [ A_act,       εI ]     [b_act]
+        We can then compute the optimal cost
+        rᵀQᵣr + ζᵀ*Q_zeta*ζ + rᵀ*Q_rzeta*ζ+cᵣᵀr+c_zetaᵀζ + c_constant as a
+        function of the MIQP data.
+        @param active_ineq_row_indices A set of row indices of the active
+        inequality constraints.
+        @param zeta_sol A torch 1D tensor of binary variable solutions.
+        @param penalty The small ε used to make sure the matrix is invertible.
+        @return The cost of MIQP computed from problem data.
+        """
+        (A_act, b_act) = self.get_active_constraints(
+            active_ineq_row_indices, zeta_sol)
+        M = torch.zeros((len(self.r) + len(b_act), len(self.r) + len(b_act)),
+                        dtype=self.dtype)
+        M[:len(self.r), :len(self.r)] =\
+            2 * self.Q_r + penalty * torch.eye(len(self.r), dtype=self.dtype)
+        M[:len(self.r), len(self.r):] = A_act.T
+        M[len(self.r):, :len(self.r)] = A_act
+        M[len(self.r):, len(self.r):] =\
+            penalty * torch.eye(len(b_act), dtype=self.dtype)
+
+        primal_dual = torch.inverse(M) @ torch.cat((-self.c_r, b_act), axis=0)
+        r = primal_dual[:len(self.r)]
+        return r @ (self.Q_r @ r) + zeta_sol @ (self.Q_zeta @ zeta_sol) +\
+            r @ (self.Q_rzeta @ zeta_sol) + self.c_r @ r +\
+            self.c_zeta @ zeta_sol + self.c_constant
