@@ -59,6 +59,42 @@ class HybridLinearSystemTest(unittest.TestCase):
         dut.add_mode(A0, B0, c0, P0, q0, True)
         self.assertEqual(dut.num_modes, 1)
 
+    def test_mode(self):
+        dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
+        A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
+        B0 = torch.tensor([[2], [3]], dtype=dut.dtype)
+        c0 = torch.tensor([-1, 2], dtype=dut.dtype)
+        P0 = torch.cat((torch.eye(3, dtype=dut.dtype),
+                        -torch.eye(3, dtype=dut.dtype)), dim=0)
+        q0 = torch.tensor([1, 2, 3, 1, 2, 3], dtype=dut.dtype)
+        dut.add_mode(A0, B0, c0, P0, q0, True)
+        A1 = torch.tensor([[3, 2], [-2, 1]], dtype=dut.dtype)
+        B1 = torch.tensor([[-2], [4]], dtype=dut.dtype)
+        c1 = torch.tensor([3, -2], dtype=dut.dtype)
+        P1 = torch.cat((3 * torch.eye(3, dtype=dut.dtype),
+                        -2 * torch.eye(3, dtype=dut.dtype),
+                        torch.tensor([[1, 2, 3]], dtype=dut.dtype)), dim=0)
+        q1 = torch.tensor([12, 2, 4, -1, 1, 3, 7], dtype=dut.dtype)
+        dut.add_mode(A1, B1, c1, P1, q1)
+        A2 = torch.tensor([[3, -2], [6, 1]], dtype=dut.dtype)
+        B2 = torch.tensor([[2], [7]], dtype=dut.dtype)
+        c2 = torch.tensor([1, -4], dtype=dut.dtype)
+        P2 = torch.cat((2 * torch.eye(3, dtype=dut.dtype),
+                        -5 * torch.eye(3, dtype=dut.dtype),
+                        torch.tensor([[4, 2, 1]], dtype=dut.dtype)), dim=0)
+        q2 = torch.tensor([1, 3, 3, -1, 1, 3, 4], dtype=dut.dtype)
+        dut.add_mode(A2, B2, c2, P2, q2)
+
+        self.assertEqual(
+            dut.mode(torch.tensor([0, 0], dtype=dut.dtype),
+                     torch.tensor([0], dtype=dut.dtype)), 0)
+        self.assertEqual(
+            dut.mode(torch.tensor([1, 0], dtype=dut.dtype),
+                     torch.tensor([2], dtype=dut.dtype)), 0)
+        self.assertIsNone(
+            dut.mode(torch.tensor([10, 20], dtype=dut.dtype),
+                     torch.tensor([5], dtype=dut.dtype)))
+
     def test_mixed_integer_constraints(self):
         dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
         A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
