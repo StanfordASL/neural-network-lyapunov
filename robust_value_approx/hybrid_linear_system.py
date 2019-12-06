@@ -215,6 +215,27 @@ class HybridLinearSystem:
         return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,
                 rhs_in)
 
+    def mode(self, x_start, u_start):
+        """
+        Returns the mode of x_start, u_start, namely
+        self.P[mode] * (x_start, u_start) <= self.q[mode].
+        If x_start, u_start is on the boundary of the neighbouring modes,
+        return the mode with the smaller index.
+        @param x_start The state.
+        @param u_start The control
+        @return mode If (x_start, u_start) doesn't belong to any mode, then
+        returns None.
+        """
+        assert(isinstance(x_start, torch.Tensor))
+        assert(isinstance(u_start, torch.Tensor))
+        assert(x_start.shape == (self.x_dim,))
+        assert(u_start.shape == (self.u_dim,))
+        for j in range(self.num_modes):
+            if (torch.all(self.P[j] @ torch.cat((x_start, u_start)) <=
+                          self.q[j])):
+                return j
+        return None
+
     def step_forward(self, x_start, u_start):
         """
         Computes the next state and the currently active mode
@@ -229,12 +250,11 @@ class HybridLinearSystem:
         """
         assert(type(x_start) == torch.Tensor)
         assert(type(u_start) == torch.Tensor)
-        for j in range(self.num_modes):
-            if (torch.all(self.P[j] @ torch.cat((x_start, u_start)) <=\
-                    self.q[j])):
-                x_i = self.A[j] @ x_start + self.B[j] @ u_start + self.c[j]
-                return(x_i, j)
-        return(None, None)
+        mode = self.mode(x_start, u_start)
+        if mode is None:
+            return (None, None)
+        return (self.A[mode] @ x_start + self.B[mode] @ u_start +
+                self.c[mode], mode)
 
 
 class AutonomousHybridLinearSystem:
@@ -419,3 +439,34 @@ class AutonomousHybridLinearSystem:
             assert(mode is not None)
             total_cost += instantaneous_cost_fun(x_i)
         return total_cost
+
+    def mode(self, x):
+        """
+        Returns the mode of state x. Namely P[mode] * x <= q[mode].
+        returns None if x is not in any mode.
+        Notice that we choose the first mode that satisfies
+        P[mode] * x <= q[mode]
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.x_dim,))
+        for i in range(self.num_modes):
+            if torch.all(self.P[i] @ x <= self.q[i]):
+                return i
+        return None
+
+    def step_forward(self, x, mode_x=None):
+        """
+        Compute the one-step forward simulation x[n+1] = A[i] * x[n] + g[i]
+        where i is the mode of x.
+        @param x The starting state.
+        @param mode_x The mode in which x is in. If mode_x = None, then we will
+        determine the mode of x.
+        @return x_next The next continuous state.
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.x_dim,))
+        if mode_x is None:
+            mode_x = self.mode(x)
+        if mode_x is None:
+            raise Exception("step_forward(): the state is not in any mode.")
+        return self.A[mode_x] @ x + self.g[mode_x]

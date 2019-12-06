@@ -163,16 +163,36 @@ class LyapunovDiscreteTimeHybridSystem:
         assert(isinstance(state_sample, torch.Tensor))
         assert(state_sample.shape == (self.system.x_dim,))
         # First compute the next state x̅[n+1]
-        is_in_mode = None
-        for i in range(self.system.num_modes):
-            if torch.all(self.system.P[i] @ state_sample <= self.system.q[i]):
-                is_in_mode = i
-                state_next = self.system.A[i] @ state_sample + self.system.g[i]
-                break
-        if is_in_mode is None:
+        mode = self.system.mode(state_sample)
+        if mode is None:
             raise Exception("lyapunov_loss_at_sample: the input state_sample" +
                             " is not in any mode of the hybrid system.")
+        state_next = self.system.step_forward(state_sample, mode)
 
+        return self.lyapunov_loss_at_sample_and_next_state(
+            relu_model, state_sample, state_next, margin)
+
+    def lyapunov_loss_at_sample_and_next_state(
+            self, relu_model, state_sample, state_next, margin=0.):
+        """
+        We will sample a state x̅[n], compute the next state x̅[n+1], and we
+        would like the Lyapunov function to decrease on the sampled state
+        x̅[n]. To do so, we define a loss as
+        max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        @param relu_model The output of the ReLU model is the Lyapunov function
+        value.
+        @param state_sample The sampled state x̅[n]
+        @param state_next The next state x̅[n+1]
+        @param margin We might want to shift the margin for the Lyapunov
+        loss. For example, Lyapunov condition requires V(x[n+1]) - V(x[n]) to
+        be strictly negative for all x[n]. To do so, we can set margin to
+        be a positive number
+        @return loss The loss max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        """
+        assert(isinstance(state_sample, torch.Tensor))
+        assert(state_sample.shape == (self.system.x_dim,))
+        assert(isinstance(state_next, torch.Tensor))
+        assert(state_next.shape == (self.system.x_dim,))
         v1 = relu_model.forward(state_sample)
         v2 = relu_model.forward(state_next)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(

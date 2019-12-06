@@ -1,40 +1,9 @@
 import robust_value_approx.train_lyapunov as train_lyapunov
-import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.test.test_hybrid_linear_system as\
+    test_hybrid_linear_system
 import torch
 import torch.nn as nn
 import unittest
-
-
-def setup_discrete_time_system():
-    """
-    The piecewise affine system is from "Analysis of discrete-time
-    piecewise affine and hybrid systems" by Giancarlo Ferrari-Trecate
-    et.al.
-    """
-    dtype = torch.float64
-    system = hybrid_linear_system.AutonomousHybridLinearSystem(
-        2, dtype)
-    system.add_mode(
-        torch.tensor([[-0.999, 0], [-0.139, 0.341]], dtype=dtype),
-        torch.zeros((2,), dtype=dtype),
-        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([1, 0, 0, 1], dtype=dtype))
-    system.add_mode(
-        torch.tensor([[0.436, 0.323], [0.388, -0.049]], dtype=dtype),
-        torch.zeros((2,), dtype=dtype),
-        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([1, 0, 1, 0], dtype=dtype))
-    system.add_mode(
-        torch.tensor([[-0.457, 0.215], [0.491, 0.49]], dtype=dtype),
-        torch.zeros((2,), dtype=dtype),
-        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([0, 1, 0, 1], dtype=dtype))
-    system.add_mode(
-        torch.tensor([[-0.022, 0.344], [0.458, 0.271]], dtype=dtype),
-        torch.zeros((2,), dtype=dtype),
-        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([0, 1, 1, 0], dtype=dtype))
-    return system
 
 
 def setup_relu():
@@ -75,7 +44,8 @@ def setup_state_samples_all(mesh_size):
 
 class TestTrainLyapunov(unittest.TestCase):
     def setUp(self):
-        self.system = setup_discrete_time_system()
+        self.system = \
+            test_hybrid_linear_system.setup_trecate_discrete_time_system()
         self.relu = setup_relu()
 
     def test_train_value_approximator(self):
