@@ -31,14 +31,18 @@ class LyapunovDiscreteTimeHybridSystem:
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
         self.system = system
 
-    def lyapunov_as_milp(self, relu_model, lyapunov_lower=None,
-                         lyapunov_upper=None):
+    def lyapunov_gradient_as_milp(
+            self, relu_model, x_equilibrium, epsilon, lyapunov_lower=None,
+            lyapunov_upper=None):
         """
+        We assume that the Lyapunov function V(x) = ReLU(x) - ReLU(x*), where
+        x* is the equilibrium state.
         Formulate the Lyapunov condition
-        V(x[n+1]) <= V(x[n]) ∀x[n] satisfying lower <= V(x[n]) <= upper
+        V(x[n+1]) - V(x[n]) <= -ε * V(x[n]) ∀x[n] satisfying
+        lower <= V(x[n]) <= upper
         as the maximal of following optimization problem is no larger
         than 0.
-        max V(x[n+1]) - V(x[n])
+        max V(x[n+1]) - V(x[n]) + ε * V(x[n])
         s.t lower <= V(x[n]) <= upper
         Notice that to prove global stability, then lower = 0 and upper = inf,
         the optimal has to be strictly less than 0 except at the equilibrium.
@@ -66,7 +70,17 @@ class LyapunovDiscreteTimeHybridSystem:
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
         @param lyapunov_upper the "upper" bound in the documentation above. If
         lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
+        @param epsilon The rate of exponential convergence. If the goal is to
+        verify convergence but not exponential convergence, then set epsilon
+        to 0.
         """
+        assert(isinstance(x_equilibrium, torch.Tensor))
+        assert(x_equilibrium.shape == (self.system.x_dim,))
+        if lyapunov_lower is not None:
+            assert(isinstance(lyapunov_lower, float))
+        if lyapunov_upper is not None:
+            assert(isinstance(lyapunov_upper, float))
+        assert(isinstance(epsilon, float))
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             relu_model, self.system.dtype)
@@ -124,15 +138,18 @@ class LyapunovDiscreteTimeHybridSystem:
         beta = milp.addVars(Ain_beta.shape[1], lb=0.,
                             vtype=gurobipy.GRB.BINARY, name="beta[n]")
 
-        # Now add the constraint lower <= ReLU(x[n]) <= upper
+        # Now compute ReLU(x*)
+        relu_x_equilibrium = relu_model.forward(x_equilibrium).item()
+
+        # Now add the constraint lower <= ReLU(x[n]) - ReLU(x*) <= upper
         if lyapunov_lower is not None:
             milp.addLConstr(
                 [a_out], [z], sense=gurobipy.GRB.GREATER_EQUAL,
-                rhs=lyapunov_lower - b_out)
+                rhs=lyapunov_lower - b_out + relu_x_equilibrium)
         if lyapunov_upper is not None:
             milp.addLConstr(
                 [a_out], [z], sense=gurobipy.GRB.LESS_EQUAL,
-                rhs=lyapunov_upper - b_out)
+                rhs=lyapunov_upper - b_out + relu_x_equilibrium)
 
         for i in range(Ain_x2.shape[0]):
             milp.addLConstr(
@@ -167,14 +184,16 @@ class LyapunovDiscreteTimeHybridSystem:
                 sense=gurobipy.GRB.EQUAL, rhs=rhs_eq2[i],
                 name="milp_relu_xnext[" + str(i) + "]")
 
-        # The cost function is max ReLU(x[n+1]) - ReLU(x[n])
+        # The cost function is
+        # max ReLU(x[n+1]) - ReLU(x[n]) + epsilon * (ReLU(x[n]) - ReLU(x*))
         milp.setObjective(
-            [a_out, -a_out], [z_next, z], torch.tensor(0, dtype=milp.dtype),
-            gurobipy.GRB.MAXIMIZE)
+            [a_out, (epsilon - 1) * a_out], [z_next, z],
+            -epsilon * relu_x_equilibrium, gurobipy.GRB.MAXIMIZE)
 
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
 
-    def lyapunov_loss_at_sample(self, relu_model, state_sample, margin=0.):
+    def lyapunov_gradient_loss_at_sample(
+            self, relu_model, state_sample, margin=0.):
         """
         We will sample a state x̅[n], compute the next state x̅[n+1], and we
         would like the Lyapunov function to decrease on the sampled state
