@@ -46,7 +46,7 @@ class TestReLUMPC(unittest.TestCase):
         self.vf_value_fun = vf.get_value_function()
 
         # should be trained from vf (minus one time step)
-        self.model = torch.load("double_integrator_model.pt")
+        self.model = torch.load("data/double_integrator_model.pt")
 
     def test_random_shooting(self):
         num_samples = 100
