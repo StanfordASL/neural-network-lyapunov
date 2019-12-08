@@ -46,15 +46,15 @@ def generate_data():
 
     x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
 
-    torch.save(x_samples, 'double_integrator_x_samples.pt')
-    torch.save(v_samples, 'double_integrator_v_samples.pt')
+    torch.save(x_samples, 'data/double_integrator_x_samples.pt')
+    torch.save(v_samples, 'data/double_integrator_v_samples.pt')
 
 
 def generate_model():
     print("training a model...")
 
-    x_samples = torch.load('double_integrator_x_samples.pt')
-    v_samples = torch.load('double_integrator_v_samples.pt')
+    x_samples = torch.load('data/double_integrator_x_samples.pt')
+    v_samples = torch.load('data/double_integrator_v_samples.pt')
 
     nn_width = 64
     model = nn.Sequential(nn.Linear(x_samples.shape[1], nn_width),
@@ -66,7 +66,7 @@ def generate_model():
     utils.train_model(model, x_samples, v_samples,
                       num_epoch=1000, batch_size=100, learning_rate=1e-3)
 
-    torch.save(model, 'double_integrator_model.pt')
+    torch.save(model, 'data/double_integrator_model.pt')
 
 
 if __name__ == "__main__":

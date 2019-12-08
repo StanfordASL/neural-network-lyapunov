@@ -46,7 +46,7 @@ class TestReLUMPC(unittest.TestCase):
         self.vf_value_fun = vf.get_value_function()
 
         # should be trained from vf (minus one time step)
-        self.model = torch.load("double_integrator_model.pt")
+        self.model = torch.load("data/double_integrator_model.pt")
 
     def test_random_shooting(self):
         num_samples = 100
@@ -58,6 +58,18 @@ class TestReLUMPC(unittest.TestCase):
             if isinstance(u_opt, type(None)):
                 continue
             u = ctrl.get_ctrl(x0)
+            if ~isinstance(u_opt, type(None)):
+                self.assertLessEqual(abs(u.item() - u_opt[0]), .05)
+
+    def test_relu_mpc(self):
+        ctrl = relu_mpc.ReLUMPC(self.vf, self.model, self.x_lo, self.x_up)
+        for i in range(10):
+            x0 = torch.rand(self.vf.sys.x_dim, dtype=self.dtype) *\
+                (self.x_up - self.x_lo) + self.x_lo
+            u_opt = self.vf_value_fun(x0)[1]
+            if isinstance(u_opt, type(None)):
+                continue
+            u, x = ctrl.get_ctrl(x0)
             if ~isinstance(u_opt, type(None)):
                 self.assertLessEqual(abs(u.item() - u_opt[0]), .05)
 

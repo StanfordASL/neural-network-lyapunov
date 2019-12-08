@@ -132,3 +132,6 @@ gurobi.log
 
 # Pytorch tensors
 *.pt
+
+# trained model used in tests
+!*/test/data/double_integrator_model.pt
