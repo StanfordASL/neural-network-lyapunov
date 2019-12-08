@@ -154,7 +154,7 @@ class TestReLU(unittest.TestCase):
             num_z_lo_positive = np.sum([z_lo_i >= 0 for z_lo_i in z_lo])
             num_z_up_negative = np.sum([z_up_i <= 0 for z_up_i in z_up])
             num_ineq = (relu_free_pattern.num_relu_units -
-                        num_z_lo_positive - num_z_up_negative) * 4
+                        num_z_lo_positive - num_z_up_negative) * 4 + 4
             num_eq = (num_z_lo_positive + num_z_up_negative) * 2
             self.assertListEqual(
                 list(Ain1.shape), [num_ineq, 2])
@@ -172,6 +172,40 @@ class TestReLU(unittest.TestCase):
                                  num_eq, relu_free_pattern.num_relu_units])
             self.assertListEqual(
                 list(rhs_eq.shape), [num_eq, 1])
+
+            def test_input_output(x):
+                (z, beta, output) = \
+                    relu_free_pattern.compute_relu_unit_outputs_and_activation(
+                    model, x)
+                # Now formulate an optimization problem, with fixed input,
+                # search for z and beta. There should be only one solution.
+                z_var = cp.Variable(relu_free_pattern.num_relu_units)
+                beta_var = cp.Variable(relu_free_pattern.num_relu_units,
+                                       boolean=True)
+                x_np = x.detach().numpy()
+                con = [Ain1.detach().numpy() @ x_np +
+                       Ain2.detach().numpy() @ z_var +
+                       Ain3.detach().numpy() @ beta_var <=
+                       rhs_in.squeeze().detach().numpy(),
+                       Aeq1.detach().numpy() @ x_np +
+                       Aeq2.detach().numpy() @ z_var +
+                       Aeq3.detach().numpy() @ beta_var ==
+                       rhs_eq.squeeze().detach().numpy()]
+                objective = cp.Minimize(0.)
+                prob = cp.Problem(objective, con)
+                prob.solve(solver=cp.GUROBI)
+                if torch.all(x <= x_up) and torch.all(x >= x_lo):
+                    self.assertEqual(prob.status, "optimal")
+                    z_opt_var = z_var.value
+                    beta_opt_var = beta_var.value
+                    np.testing.assert_array_almost_equal(
+                        z_opt_var, z.squeeze().detach().numpy())
+                    np.testing.assert_array_almost_equal(
+                        beta_opt_var, beta.squeeze().detach().numpy())
+                    self.assertAlmostEqual(a_out @ z.squeeze() + b_out,
+                                           model.forward(x))
+                else:
+                    self.assertEqual(prob.status, "infeasible")
 
             def test_input_x(x):
                 # For an arbitrary input x, compute its activation pattern and
@@ -202,10 +236,7 @@ class TestReLU(unittest.TestCase):
                 self.assertTrue(torch.all(
                     torch.le(lhs_in.squeeze(),
                              rhs_in.squeeze() + torch.tensor(precision))))
-                self.assertTrue(
-                    torch.all(
-                        torch.le(
-                            torch.abs(
+                self.assertTrue(torch.all(torch.le(torch.abs(
                                 lhs_eq.squeeze() - rhs_eq.squeeze()),
                             precision)))
                 # Now perturb beta by changing some entry from 1 to 0, and vice
@@ -223,30 +254,7 @@ class TestReLU(unittest.TestCase):
                              rhs_in.squeeze() + torch.tensor(precision))) and
                     torch.all(torch.le(torch.abs(lhs_eq_perturbed - rhs_eq),
                                        precision)))
-
-                # Now formulate an optimization problem, with fixed input,
-                # search for z and beta. There should be only one solution.
-                z_var = cp.Variable(relu_free_pattern.num_relu_units)
-                beta_var = cp.Variable(relu_free_pattern.num_relu_units,
-                                       boolean=True)
-                x_np = x.detach().numpy()
-                con = [Ain1.detach().numpy() @ x_np +
-                       Ain2.detach().numpy() @ z_var +
-                       Ain3.detach().numpy() @ beta_var <=
-                       rhs_in.squeeze().detach().numpy(),
-                       Aeq1.detach().numpy() @ x_np +
-                       Aeq2.detach().numpy() @ z_var +
-                       Aeq3.detach().numpy() @ beta_var ==
-                       rhs_eq.squeeze().detach().numpy()]
-                objective = cp.Minimize(0.)
-                prob = cp.Problem(objective, con)
-                prob.solve(solver=cp.GUROBI)
-                z_opt_var = z_var.value
-                beta_opt_var = beta_var.value
-                self.assertTrue(np.all(np.abs(
-                    z_opt_var - z.squeeze().detach().numpy()) < 1E-5))
-                self.assertTrue(np.all(np.abs(
-                    beta_opt_var - beta.squeeze().detach().numpy()) < 1E-5))
+                test_input_output(x)
 
             # Test with different input x.
             test_input_x(torch.tensor([0.7, 0.2], dtype=self.dtype))
@@ -254,6 +262,10 @@ class TestReLU(unittest.TestCase):
             test_input_x(torch.tensor([-0.15, -0.2], dtype=self.dtype))
             test_input_x(torch.tensor([1.1, -0.22], dtype=self.dtype))
             test_input_x(torch.tensor([1.5, -0.8], dtype=self.dtype))
+            # The next two input x are outside of [x_lo, x_up]. The constraints
+            # should be infeasible.
+            test_input_output(torch.tensor([-2., 10.], dtype=self.dtype))
+            test_input_output(torch.tensor([-2., 4.], dtype=self.dtype))
             # randomized test
             torch.manual_seed(0)
             np.random.seed(0)
