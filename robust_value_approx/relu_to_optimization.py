@@ -153,13 +153,13 @@ class ReLUFreePattern:
         where βᵢ(j) is a binary variable,
         such that βᵢ(j) = 1 means that the j'th ReLU unit on the i'th layer
         is active.
+        Moreover, we impose the constraint that x_lo <= x <= x_up
         We will write the constraint in a more concise way
         Ain1 * x + Ain2 * z + Ain3 * β <= rhs_in  (case 1)
         Aeq1 * x + Aeq2 * z + Aeq3 * β = rhs_eq   (case 2 and 3)
         ReLU(x) = aₒᵤₜᵀz + bₒᵤₜ
         where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
-        β = [β₀; β₁; ...; βₙ₋₁]. Note that the network output zₙ is the LAST
-        entry of z.
+        β = [β₀; β₁; ...; βₙ₋₁].
         @param model A ReLU network. This network must have the same structure
         as the network in the class constructor (but the weights can be
         different).
@@ -181,13 +181,14 @@ class ReLUFreePattern:
         assert(torch.all(torch.le(x_lo, x_up)))
 
         # Each ReLU unit introduces at most 4 inequality constraints.
-        Ain1 = torch.zeros((4 * self.num_relu_units, self.x_size),
-                           dtype=self.dtype)
-        Ain2 = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
-                           dtype=self.dtype)
-        Ain3 = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
-                           dtype=self.dtype)
-        rhs_in = torch.empty((4 * self.num_relu_units, 1), dtype=self.dtype)
+        Ain1 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
+                            self.x_size), dtype=self.dtype)
+        Ain2 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
+                            self.num_relu_units), dtype=self.dtype)
+        Ain3 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
+                            self.num_relu_units), dtype=self.dtype)
+        rhs_in = torch.empty((4 * self.num_relu_units + 2 * self.x_size, 1),
+                             dtype=self.dtype)
         # Each ReLU unit introduces at most 2 equality constraints.
         Aeq1 = torch.zeros((2 * self.num_relu_units, self.x_size),
                            dtype=self.dtype)
@@ -199,6 +200,13 @@ class ReLUFreePattern:
 
         eq_constraint_count = 0
         ineq_constraint_count = 0
+        # First add the constraint x_lo <= x <= x_up
+        Ain1[:self.x_size] = torch.eye(self.x_size, dtype=self.dtype)
+        rhs_in[:self.x_size] = x_up.reshape((-1, 1))
+        Ain1[self.x_size: 2*self.x_size] =\
+            -torch.eye(self.x_size, dtype=self.dtype)
+        rhs_in[self.x_size:2*self.x_size] = -x_lo.reshape((-1, 1))
+        ineq_constraint_count = 2 * self.x_size
         layer_count = 0
         z_pre_relu_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
         z_pre_relu_up = torch.empty(self.num_relu_units, dtype=self.dtype)

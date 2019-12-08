@@ -31,11 +31,23 @@ class LyapunovDiscreteTimeHybridSystem:
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
         self.system = system
 
-    def lyapunov_as_milp(self, relu_model):
+    def lyapunov_as_milp(self, relu_model, lyapunov_lower=None,
+                         lyapunov_upper=None):
         """
-        Formulate the Lyapunov condition V[x[n+1]] <= V[x[n]] ∀x[n] as the
-        maximal cost of an MILP is no larger than 0. This function returns the
-        MILP formulation.
+        Formulate the Lyapunov condition
+        V(x[n+1]) <= V(x[n]) ∀x[n] satisfying lower <= V(x[n]) <= upper
+        as the maximal of following optimization problem is no larger
+        than 0.
+        max V(x[n+1]) - V(x[n])
+        s.t lower <= V(x[n]) <= upper
+        Notice that to prove global stability, then lower = 0 and upper = inf,
+        the optimal has to be strictly less than 0 except at the equilibrium.
+        If lower > 0 and the maximal is strictly less than 0, then we prove
+        that all states outside of the level set {x[n] | V(x[n]) <= lower} will
+        converge to this level set.
+        We would formulate this optimization problem as an MILP.
+
+        This function returns the MILP formulation.
         max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
         s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
             Aeq_r * r + Aeq_zeta * ζ = rhs_eq
@@ -48,6 +60,12 @@ class LyapunovDiscreteTimeHybridSystem:
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
         (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
+        @param relu_model The Lyapunov function is represented as the output of
+        a ReLU model.
+        @param lyapunov_lower the "lower" bound in the documentation above. If
+        lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
+        @param lyapunov_upper the "upper" bound in the documentation above. If
+        lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
         """
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
@@ -100,10 +118,21 @@ class LyapunovDiscreteTimeHybridSystem:
          a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
              relu_model, torch.from_numpy(self.system.x_lo_all),
              torch.from_numpy(self.system.x_up_all))
-        z = milp.addVars(Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                         vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
+        z = milp.addVars(
+            Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
         beta = milp.addVars(Ain_beta.shape[1], lb=0.,
                             vtype=gurobipy.GRB.BINARY, name="beta[n]")
+
+        # Now add the constraint lower <= ReLU(x[n]) <= upper
+        if lyapunov_lower is not None:
+            milp.addLConstr(
+                [a_out], [z], sense=gurobipy.GRB.GREATER_EQUAL,
+                rhs=lyapunov_lower - b_out)
+        if lyapunov_upper is not None:
+            milp.addLConstr(
+                [a_out], [z], sense=gurobipy.GRB.LESS_EQUAL,
+                rhs=lyapunov_upper - b_out)
 
         for i in range(Ain_x2.shape[0]):
             milp.addLConstr(
