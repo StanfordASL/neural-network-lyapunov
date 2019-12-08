@@ -6,9 +6,8 @@ import unittest
 import numpy as np
 
 
-def setup_milp1():
+def setup_mip1(dut):
     dtype = torch.float64
-    dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
     # The constraints are
     # x[i] >= 0
     # alpha[0] + alpha[1] = 1
@@ -34,7 +33,7 @@ def setup_milp1():
          torch.tensor([-1], dtype=dtype, requires_grad=True)],
         [x[1:], [alpha[1]]], sense=gurobipy.GRB.LESS_EQUAL,
         rhs=torch.tensor(0, dtype=dtype, requires_grad=True))
-    return (dut, x, alpha)
+    return (x, alpha)
 
 
 class TestGurobiTorchMIP(unittest.TestCase):
@@ -215,7 +214,8 @@ class TestGurobiTorchMIP(unittest.TestCase):
 
     def test_get_active_constraints(self):
         dtype = torch.float64
-        dut, x, alpha = setup_milp1()
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x, alpha = setup_mip1(dut)
 
         (A_act, b_act) = dut.get_active_constraints(
             {2, 3}, torch.tensor([1, 0], dtype=dtype))
@@ -296,7 +296,8 @@ class TestGurobiTorchMILP(unittest.TestCase):
 
     def test_compute_objective_given_active_constraints(self):
         dtype = torch.float64
-        dut, x, alpha = setup_milp1()
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x, alpha = setup_mip1(dut)
         # If the objective is max x[0] + 1, then the active constraints are
         # x[1] >= 0, x[2] >= 0, x[0] + x[1] <= alpha[0],
         # x[1] + x[2] <= alpha[1], the binary variable solution is
@@ -417,25 +418,58 @@ class TestGurobiTorchMIQP(unittest.TestCase):
                                                      dtype=dtype)))
             self.assertTrue(dut.c_constant == torch.tensor(3, dtype=dtype))
             self.assertEqual(dut.sense, sense)
-            self.assertTrue(torch.all(dut.Q_r ==
-                            torch.tensor([[1, 2, 0, 0, 0, 0],
-                                          [3, 4, 0, 0, 0, 0],
-                                          [0, 0, 0, 0, 0, 0],
-                                          [0, 0, 0, 0, 0, 0],
-                                          [0, 0, 0, 0, 0, 0],
-                                          [0, 0, 0, 0, 0, 0]], dtype=dtype)))
-            self.assertTrue(torch.all(dut.Q_zeta ==
-                            torch.tensor([[0, 5, 0, 0],
-                                          [0, 0, 0, 0],
-                                          [0, 0, 0, 0],
-                                          [0, 0, 0, 0]], dtype=dtype)))
-            self.assertTrue(torch.all(dut.Q_rzeta ==
-                            torch.tensor([[0, 0, 0, 6],
-                                          [0, 0, 0, 7],
-                                          [0, 0, 0, 0],
-                                          [0, 0, 0, 0],
-                                          [0, 0, 0, 0],
-                                          [0, 0, 0, 0]], dtype=dtype)))
+            self.assertTrue(torch.all(
+                dut.Q_r == torch.tensor([[1, 2, 0, 0, 0, 0],
+                                         [3, 4, 0, 0, 0, 0],
+                                         [0, 0, 0, 0, 0, 0],
+                                         [0, 0, 0, 0, 0, 0],
+                                         [0, 0, 0, 0, 0, 0],
+                                         [0, 0, 0, 0, 0, 0]], dtype=dtype)))
+            self.assertTrue(torch.all(
+                dut.Q_zeta == torch.tensor([[0, 5, 0, 0],
+                                            [0, 0, 0, 0],
+                                            [0, 0, 0, 0],
+                                            [0, 0, 0, 0]], dtype=dtype)))
+            self.assertTrue(torch.all(
+                dut.Q_rzeta == torch.tensor([[0, 0, 0, 6],
+                                             [0, 0, 0, 7],
+                                             [0, 0, 0, 0],
+                                             [0, 0, 0, 0],
+                                             [0, 0, 0, 0],
+                                             [0, 0, 0, 0]], dtype=dtype)))
+
+    def test_compute_objective_from_mip_data(self):
+        dut = gurobi_torch_mip.GurobiTorchMIQP(torch.float64)
+        x, alpha = setup_mip1(dut)
+        # The objective is min x[0]² + x[1]² + 4 * alpha[0]² + 4 * alpha[1]²
+        # + 3 * x[0]*alpha[0] + 3*x[1]*alpha[1] + 2*x[1] + 3*x[2] +
+        # 4 * alpha[0] + 6 * alpha[1] + 1
+        dut.setObjective(
+            [torch.eye(2, dtype=torch.float64),
+             4 * torch.eye(2, dtype=torch.float64),
+             3 * torch.eye(2, dtype=torch.float64)],
+            [[x[:2], x[:2]], [alpha, alpha], [x[:2], alpha]],
+            [torch.tensor([2, 3], dtype=torch.float64),
+             torch.tensor([4, 6], dtype=torch.float64)], [x[1:], alpha], 1.,
+            sense=gurobipy.GRB.MINIMIZE)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data(
+                {1, 2, 3, 4}, torch.tensor([1., 0.], dtype=torch.float64)).
+            item(), 13., places=6)
+        self.assertAlmostEqual(dut.compute_objective_from_mip_data(
+            {0, 1, 3, 4}, torch.tensor([0., 1.], dtype=torch.float64)).item(),
+            14, places=6)
+
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions, 2)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
+        dut.gurobi_model.optimize()
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(0, penalty=1e-8).
+            item(), 13, places=6)
+        self.assertAlmostEqual(
+            dut.compute_objective_from_mip_data_and_solution(1, penalty=1e-8).
+            item(), 14, places=6)
 
 
 if __name__ == "__main__":
