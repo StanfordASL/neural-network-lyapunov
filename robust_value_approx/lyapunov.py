@@ -5,6 +5,7 @@ import torch
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
+import robust_value_approx.utils as utils
 
 
 class LyapunovDiscreteTimeHybridSystem:
@@ -30,6 +31,98 @@ class LyapunovDiscreteTimeHybridSystem:
         assert(isinstance(
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
         self.system = system
+
+    def lyapunov_positivity_as_milp(
+            self, relu_model, x_equilibrium, V_epsilon):
+        """
+        For a ReLU network, in order to determine if the function
+        V(x) = ReLU(x) - ReLU(x*)
+        satisfies the positivity constraint of Lyapunov condition
+        V(x) > 0 ∀ x ≠ x*
+        We check a strong condition
+        V(x) ≥ V(x*) + ε |x - x*|₁ ∀ x
+        where ε is a small positive number, and |x - x*|₁ is the 1-norm of the
+        vector x - x*. To check if the stronger condition is satisfied, we
+        can solve the following optimization problem
+        min x V(x) - ε |x - x*|₁
+        We can formulate this optimization problem as a mixed integer linear
+        program, solve the for optimal solution of this program. If the optimal
+        cost is no smaller than 0, then we proved the positivity constraint
+        V(x) > 0 ∀ x ≠ x*
+        @param relu_model A ReLU pytorch model.
+        @param x_equilibrium The equilibrium state x*.
+        @param V_epsilon A scalar. ε in the documentation above.
+        @return (milp, x) milp is a GurobiTorchMILP instance, x is the decision
+        variable for state.
+        """
+        assert(isinstance(x_equilibrium, torch.Tensor))
+        assert(x_equilibrium.shape == (self.system.x_dim,))
+        assert(isinstance(V_epsilon, float))
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            relu_model, self.system.dtype)
+
+        dtype = self.system.dtype
+        milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x")
+        # z is the slack variable to write the output of ReLU network as mixed
+        # integer constraints.
+        Ain_x, Ain_z, Ain_beta, rhs_in, Aeq_x, Aeq_z, Aeq_beta, rhs_eq, a_out,\
+            b_out, _, _ = relu_free_pattern.output_constraint(
+                relu_model, torch.from_numpy(self.system.x_lo_all),
+                torch.from_numpy(self.system.x_up_all))
+        z = milp.addVars(
+            Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="z")
+        beta = milp.addVars(
+            Ain_beta.shape[1], vtype=gurobipy.GRB.BINARY, name="beta")
+        for i in range(Ain_x.shape[0]):
+            milp.addLConstr(
+                [Ain_x[i], Ain_z[i], Ain_beta[i]], [x, z, beta],
+                sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in[i])
+        for i in range(Aeq_x.shape[0]):
+            milp.addLConstr([Aeq_x[i], Aeq_z[i], Aeq_beta[i]], [x, z, beta],
+                            sense=gurobipy.GRB.EQUAL, rhs=rhs_eq[i])
+
+        # Now write the 1-norm |x - x*|₁ as mixed-integer linear constraints.
+        # TODO(hongkai.di): support the case when x_equilibrium is not in the
+        # strict interior of the state space.
+        if not torch.all(torch.from_numpy(self.system.x_lo_all) <
+                         x_equilibrium) or\
+                not torch.all(torch.from_numpy(self.system.x_up_all) >
+                              x_equilibrium):
+            raise Exception("lyapunov_positivity_as_milp: we currently " +
+                            "require that x_lo < x_equilibrium < x_up")
+        s = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="s")
+        gamma = milp.addVars(
+            self.system.x_dim, vtype=gurobipy.GRB.BINARY, name="gamma")
+
+        for i in range(self.system.x_dim):
+            if self.system.x_lo_all[i] < x_equilibrium[i] and\
+                    self.system.x_up_all[i] > x_equilibrium[i]:
+                Ain_x2, Ain_s2, Ain_gamma2, rhs_in2 =\
+                    utils.replace_absolute_value_with_mixed_integer_constraint(
+                        self.system.x_lo_all[i] - x_equilibrium[i],
+                        self.system.x_up_all[i] - x_equilibrium[i],
+                        dtype=dtype)
+                for j in range(Ain_x2.shape[0]):
+                    milp.addLConstr(
+                        [torch.tensor([Ain_x2[j], Ain_s2[j], Ain_gamma2[j]],
+                                      dtype=self.system.dtype)],
+                        [[x[i], s[i], gamma[i]]],
+                        sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in2[j])
+        # Now compute ReLU(x*)
+        relu_x_equilibrium = relu_model.forward(x_equilibrium)
+
+        milp.setObjective(
+            [a_out,
+             -V_epsilon * torch.ones((self.system.x_dim,), dtype=dtype)],
+            [z, s], constant=b_out - relu_x_equilibrium.item(),
+            sense=gurobipy.GRB.MINIMIZE)
+        return (milp, x)
 
     def lyapunov_gradient_as_milp(
             self, relu_model, x_equilibrium, epsilon, lyapunov_lower=None,

@@ -44,6 +44,39 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         self.system1 = test_hybrid_linear_system.\
             setup_trecate_discrete_time_system()
 
+    def test_lyapunov_positivity_as_milp(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+
+        relu1 = setup_relu(dut.system.dtype)
+        x_equilibrium = torch.tensor([0, 0], dtype=dut.system.dtype)
+        V_epsilon = 0.01
+        relu_x_equilibrium = relu1.forward(x_equilibrium)
+
+        def test_fun(x_val):
+            # Fix x to different values. Now check if the optimal cost is
+            # ReLU(x) - ReLU(x*) - epsilon * |x - x*|₁
+            (milp, x) = dut.lyapunov_positivity_as_milp(
+                relu1, x_equilibrium, V_epsilon)
+            for i in range(dut.system.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
+                    rhs=x_val[i], sense=gurobipy.GRB.EQUAL)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(
+                milp.gurobi_model.ObjVal, relu1.forward(x_val).item() -
+                relu_x_equilibrium.item() -
+                V_epsilon * torch.norm(x_val - x_equilibrium, p=1).item())
+
+        test_fun(torch.tensor([0, 0], dtype=self.dtype))
+        test_fun(torch.tensor([0, 0.5], dtype=self.dtype))
+        test_fun(torch.tensor([0.1, 0.5], dtype=self.dtype))
+        test_fun(torch.tensor([-0.3, 0.8], dtype=self.dtype))
+        test_fun(torch.tensor([-0.3, -0.2], dtype=self.dtype))
+        test_fun(torch.tensor([0.6, -0.2], dtype=self.dtype))
+
     def test_lyapunov_gradient_as_milp(self):
         """
         Test lyapunov_gradient_as_milp without bounds on V(x[n])
@@ -311,9 +344,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 lambda weight, bias: compute_milp_cost_given_relu(
                     weight, bias, False), weight_all, bias_all, dx=1e-6)
             np.testing.assert_allclose(
-                weight_grad, grad_numerical[0].squeeze(), rtol=1e-3, atol=0.13)
+                weight_grad, grad_numerical[0].squeeze(), rtol=1e-2, atol=0.1)
             np.testing.assert_allclose(
-                bias_grad, grad_numerical[1].squeeze(), rtol=1e-3, atol=0.32)
+                bias_grad, grad_numerical[1].squeeze(), rtol=1e-2, atol=0.2)
 
     def test_lyapunov_gradient_loss_at_sample(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
