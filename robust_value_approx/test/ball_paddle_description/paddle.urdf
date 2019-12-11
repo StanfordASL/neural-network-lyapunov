@@ -1,0 +1,66 @@
+<?xml version="1.0" ?>
+<robot name="paddle" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <link name="base">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+       <mass value="0"/>
+       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 .5"/>
+      <geometry>
+        <box size=".05 .05 1"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="paddle_height" type="prismatic">
+    <parent link="base"/>
+    <child link="wrist"/>
+    <origin rpy="0 0 0" xyz=".025 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1e9" lower="0." upper="1.0" velocity="1e9"/>
+  </joint>
+  <link name="wrist">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+       <mass value="0"/>
+       <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="paddle_angle" type="revolute">
+    <parent link="wrist"/>
+    <child link="paddle"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit effort="1e9" lower="-3.14" upper="3.14" velocity="1e9"/>
+  </joint>  
+  <link name="paddle">
+    <contact>
+      <restitution value=".9" />
+      <rolling_friction value="1000."/>
+      <spinning_friction value="1000."/>
+  	</contact>
+    <inertial>
+      <origin rpy="0 0 0" xyz=".1 0 0"/>
+       <mass value="100"/>
+       <inertia ixx="10" ixy="0" ixz="0" iyy="10" iyz="0" izz="10"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz=".1 0 0"/>
+      <geometry>
+        <box size=".2 .2 .025"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz=".1 0 0"/>
+      <geometry>
+        <box size=".2 .2 .025"/>
+      </geometry>
+      <material name="white"/>
+    </collision>
+  </link>
+</robot>
