@@ -262,8 +262,9 @@ class ReLUFreePattern:
                                 # A_relu_output * zᵢ₊₁(j) +
                                 # A_relu_beta * βᵢ(j) <= relu_rhs
                                 Ain1[ineq_constraint_count:
-                                     ineq_constraint_count + 4] = A_relu_input\
-                                    @ layer.weight[j].reshape((1, -1))
+                                     ineq_constraint_count + 4] =\
+                                         A_relu_input.reshape((-1, 1))\
+                                         @ layer.weight[j].reshape((1, -1))
                             else:
                                 # If this layer is not the input layer, then
                                 # the constraint is
@@ -273,7 +274,7 @@ class ReLUFreePattern:
                                 Ain2[ineq_constraint_count:
                                      ineq_constraint_count+4,
                                      self.relu_unit_index[layer_count - 1]] =\
-                                    A_relu_input @\
+                                    A_relu_input.reshape((-1, 1)) @\
                                     layer.weight[j].reshape((1, -1))
                             Ain2[ineq_constraint_count:ineq_constraint_count+4,
                                  self.relu_unit_index[layer_count][j]] =\
@@ -282,8 +283,8 @@ class ReLUFreePattern:
                                  self.relu_unit_index[layer_count][j]] =\
                                 A_relu_beta.squeeze()
                             rhs_in[ineq_constraint_count: ineq_constraint_count
-                                   + 4] =\
-                                relu_rhs - A_relu_input * layer.bias[j]
+                                   + 4] = relu_rhs.reshape((-1, 1)) -\
+                                A_relu_input.reshape((-1, 1)) * layer.bias[j]
                             ineq_constraint_count += 4
                         elif z_pre_relu_lo[z_bound_index] >= 0:
                             # Case 2, introduce 2 equality constraints

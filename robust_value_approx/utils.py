@@ -114,12 +114,57 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
     """
     assert(x_lo < 0)
     assert(x_up > 0)
-    A_x = torch.tensor([[0], [1], [0], [-1]], dtype=dtype)
-    A_y = torch.tensor([[-1], [-1], [1], [1]], dtype=dtype)
-    A_alpha = torch.tensor([[0], [0], [-x_up], [-x_lo]], dtype=dtype)
-    rhs = torch.tensor([[0], [0], [0], [-x_lo]], dtype=dtype)
-    return (A_x, A_y, A_alpha, rhs)
+    A_x = torch.tensor([0, 1, 0, -1], dtype=dtype)
+    A_y = torch.tensor([-1, -1, 1, 1], dtype=dtype)
+    A_beta = torch.tensor([0, 0, -x_up, -x_lo], dtype=dtype)
+    rhs = torch.tensor([0, 0, 0, -x_lo], dtype=dtype)
+    return (A_x, A_y, A_beta, rhs)
 
+
+def replace_leaky_relu_with_mixed_integer_constraint(
+        negative_slope, x_lo, x_up, dtype=torch.float64):
+    """
+    For input x ∈ [x_lo, x_up] (and x_lo < 0 < x_up), the leaky relu output
+    y satisfies
+    y = x if x >= 0
+    y = a*x if x <= 0
+    where a is the negative slope. We can use a binary variable β to
+    indicate whether the ReLU unit is active or not. Namely
+    β = 1 => x >= 0
+    β = 0 => x <= 0
+    We can writ the relationship between (x, y, β) as mixed-integer linear
+    constraints
+    if a <=1:
+    y >= x
+    y >= a*x
+    -a*x + y + (a-1)*x_up * β <= 0
+    -x + y + (a-1)*x_lo * β <= (a-1)*x_lo
+    if a >= 1:
+    y <= x
+    y <= a*x
+    -a*x + y + (a-1)*x_up * β >= 0
+    -x + y + (a-1)*x_lo * β >= (a-1)*x_lo
+    We write these constraints concisely as
+    A_x * x + A_y * y + A_beta * β <= rhs
+    @param negative_slope The slope in the negative domain of leaky relu. This
+    number has to be smaller than 1
+    @param x_lo The lower bound of input x.
+    @param x_up The upper bound of input x.
+    @return (A_x, A_y, A_beta, rhs)
+    """
+    assert(x_lo < 0)
+    assert(x_up > 0)
+    A_x = torch.tensor([1., negative_slope, -negative_slope, -1], dtype=dtype)
+    A_y = torch.tensor([-1., -1., 1., 1.], dtype=dtype)
+    A_beta = torch.tensor([0., 0., (negative_slope-1) * x_up,
+                           (negative_slope-1) * x_lo], dtype=dtype)
+    rhs = torch.tensor([0., 0., 0., (negative_slope-1) * x_lo], dtype=dtype)
+    if negative_slope <= 1:
+        return (A_x, A_y, A_beta, rhs)
+    else:
+        return (-A_x, -A_y, -A_beta, -rhs)
+
+ 
 
 def compare_numpy_matrices(actual, desired, rtol, atol):
     try:
