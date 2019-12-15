@@ -40,6 +40,35 @@ class test_replace_binary_continuous_product(unittest.TestCase):
         test_fun(-2, 1)
 
 
+class test_replace_absolute_value_with_mixed_integer_constraint(
+        unittest.TestCase):
+    def test(self):
+        Ain_x, Ain_s, Ain_alpha, rhs_in =\
+            utils.replace_absolute_value_with_mixed_integer_constraint(-2, 3)
+
+        def test_fun(x, s, alpha, satisfied):
+            self.assertEqual(
+                torch.all(Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in),
+                satisfied)
+
+        test_fun(0., 0., 0., True)
+        test_fun(0., 0., 1., True)
+        test_fun(1., 1., 1., True)
+        test_fun(2., 2., 1., True)
+        test_fun(3., 3., 1., True)
+        test_fun(2., 2.01, 1., False)
+        test_fun(1., 0.99, 1., False)
+        test_fun(1., 0.99, 0., False)
+        test_fun(1., 1., 0., False)
+        test_fun(4., 4., 1., False)
+        test_fun(-1., 1., 0., True)
+        test_fun(-2., 2., 0., True)
+        test_fun(-3., 3., 0., False)
+        test_fun(-1., 0.5, 0., False)
+        test_fun(-1., -0.5, 0., False)
+        test_fun(-1., 1., 1., False)
+
+
 class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
     def setUp(self):
         pass

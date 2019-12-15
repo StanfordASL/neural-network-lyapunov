@@ -31,10 +31,13 @@ class LyapunovReluTrainingOptions:
         # A strictly positive number. We want to prove that all states converge
         # to the sublevel set V(x) <= ρ, where ρ is lyapunov_sublevel.
         self.lyapunov_sublevel = 0.1
+        # We will prove the exponential convergence rate dV <= -epsilon * V
+        self.dV_epsilon = 0.01
 
 
 def train_lyapunov_relu(
-        lyapunov_hybrid_system, relu, state_samples_all, options):
+        lyapunov_hybrid_system, relu, x_equilibrium, state_samples_all,
+        options):
     """
     We will train a ReLU network to represent the (control) Lyapunov function
     for piecewise affine systems (in either discrete or continuous time). The
@@ -49,12 +52,13 @@ def train_lyapunov_relu(
     1. maxₓ c(x) ≤ 0 ∀x
     2. c(x) < -dV_margin ∀x s.t V(x) > ρ
     @param lyapunov_hybrid_system This input should define a common interface
-    lyapunov_as_milp() (which represents the MIP maxₓ c(x)) and
-    lyapunov_loss_at_sample() (which represents hinge_loss(c(xⁱ)). One example
-    of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
+    lyapunov_gradient_as_milp() (which represents the MIP maxₓ c(x)) and
+    lyapunov_gradient_loss_at_sample() (which represents hinge_loss(c(xⁱ)).
+    One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
     @param relu Both as an input and an output. As an input, this represents
     the initial guess of the ReLU network. As an output, this represents the
     network after training.
+    @param x_equilibrium The equilibrium state.
     @param state_samples_all A list of torch 1D tensors. Each torch 1D tensor
     is a sampled state xⁱ.
     @param options A LyapunovReluTrainingOptions object.
@@ -64,6 +68,7 @@ def train_lyapunov_relu(
     assert(isinstance(
         lyapunov_hybrid_system, lyapunov.LyapunovDiscreteTimeHybridSystem))
     assert(isinstance(state_samples_all, list))
+    assert(isinstance(x_equilibrium, torch.Tensor))
     assert(isinstance(options, LyapunovReluTrainingOptions))
 
     dtype = lyapunov_hybrid_system.system.dtype
@@ -71,17 +76,19 @@ def train_lyapunov_relu(
     state_samples_next = [lyapunov_hybrid_system.system.step_forward(x) for
                           x in state_samples_all]
     while iter_count < options.max_iterations:
-        lyapunov_as_milp_return = lyapunov_hybrid_system.\
-            lyapunov_as_milp(relu)
-        mip = lyapunov_as_milp_return[0]
+        lyapunov_gradient_as_milp_return = lyapunov_hybrid_system.\
+            lyapunov_gradient_as_milp(relu, x_equilibrium, options.dV_epsilon)
+        mip = lyapunov_gradient_as_milp_return[0]
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
                                   options.mip_pool_solutions)
         mip.gurobi_model.optimize()
 
-        sublevelset_as_milp_return = lyapunov_hybrid_system.lyapunov_as_milp(
-            relu, options.lyapunov_sublevel)
+        sublevelset_as_milp_return = lyapunov_hybrid_system.\
+            lyapunov_gradient_as_milp(
+                relu, x_equilibrium, options.dV_epsilon,
+                options.lyapunov_sublevel)
         mip_sublevel = sublevelset_as_milp_return[0]
         mip_sublevel.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -114,7 +121,7 @@ def train_lyapunov_relu(
                     torch.tensor(options.mip_cost_decay_rate, dtype=dtype),
                     mip_sol_number) *\
                         mip.compute_objective_from_mip_data_and_solution(
-                            solution_number=mip_sol_number)
+                            solution_number=mip_sol_number, penalty=1e-8)
         for mip_sol_number in range(options.mip_pool_solutions):
             if (mip_sol_number < mip_sublevel.gurobi_model.solCount):
                 loss += torch.pow(

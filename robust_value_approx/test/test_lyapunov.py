@@ -28,6 +28,7 @@ def setup_relu(dtype):
     linear3.bias.data = torch.tensor([-9], dtype=dtype)
     relu1 = nn.Sequential(
         linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+    assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype)).item() == 0)
     return relu1
 
 
@@ -43,15 +44,50 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         self.system1 = test_hybrid_linear_system.\
             setup_trecate_discrete_time_system()
 
-    def test_lyapunov_as_milp(self):
+    def test_lyapunov_positivity_as_milp(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+
+        relu1 = setup_relu(dut.system.dtype)
+        x_equilibrium = torch.tensor([0, 0], dtype=dut.system.dtype)
+        V_epsilon = 0.01
+        relu_x_equilibrium = relu1.forward(x_equilibrium)
+
+        def test_fun(x_val):
+            # Fix x to different values. Now check if the optimal cost is
+            # ReLU(x) - ReLU(x*) - epsilon * |x - x*|₁
+            (milp, x) = dut.lyapunov_positivity_as_milp(
+                relu1, x_equilibrium, V_epsilon)
+            for i in range(dut.system.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
+                    rhs=x_val[i], sense=gurobipy.GRB.EQUAL)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(
+                milp.gurobi_model.ObjVal, relu1.forward(x_val).item() -
+                relu_x_equilibrium.item() -
+                V_epsilon * torch.norm(x_val - x_equilibrium, p=1).item())
+
+        test_fun(torch.tensor([0, 0], dtype=self.dtype))
+        test_fun(torch.tensor([0, 0.5], dtype=self.dtype))
+        test_fun(torch.tensor([0.1, 0.5], dtype=self.dtype))
+        test_fun(torch.tensor([-0.3, 0.8], dtype=self.dtype))
+        test_fun(torch.tensor([-0.3, -0.2], dtype=self.dtype))
+        test_fun(torch.tensor([0.6, -0.2], dtype=self.dtype))
+
+    def test_lyapunov_gradient_as_milp(self):
         """
-        Test lyapunov_as_milp without bounds on V(x[n])
+        Test lyapunov_gradient_as_milp without bounds on V(x[n])
         """
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
 
         relu1 = setup_relu(dut.system.dtype)
+        x_equilibrium = torch.tensor([0, 0], dtype=dut.system.dtype)
+        dV_epsilon = 0.01
         (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
-            dut.lyapunov_as_milp(relu1)
+            dut.lyapunov_gradient_as_milp(relu1, x_equilibrium, dV_epsilon)
         # First solve this MILP. The solution has to satisfy that
         # x_next = Ai * x + g_i where i is the active mode inferred from gamma.
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
@@ -79,20 +115,25 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         self.assertAlmostEqual(
             milp.gurobi_model.objVal,
             (relu1.forward(torch.from_numpy(x_next_sol)) -
-             relu1.forward(torch.from_numpy(x_sol))).item())
+             relu1.forward(torch.from_numpy(x_sol)) +
+             dV_epsilon * (relu1.forward(torch.from_numpy(x_sol)) -
+                           relu1.forward(x_equilibrium))).item())
 
-        # Now test reformulating ReLU(x[n+1]) - ReLU(x[n]) as a mixed-integer
-        # linear program. We fix x[n] to some value, compute the cost function
-        # of the MILP, and then check if it is the same as evaluating the
-        # ReLU network on x[n] and x[n+1]
+        # Now test reformulating
+        # ReLU(x[n+1]) - ReLU(x[n]) + epsilon * (Relu(x[n]) - ReLU(x*)) as a
+        # mixed-integer linear program. We fix x[n] to some value, compute the
+        # cost function of the MILP, and then check if it is the same as
+        # evaluating the ReLU network on x[n] and x[n+1]
         def test_milp_cost(mode, x_val):
             assert(torch.all(
                 self.system1.P[mode] @ x_val <= self.system1.q[mode]))
             x_next_val = self.system1.A[mode] @ x_val + self.system1.g[mode]
-            cost_expected = (relu1.forward(x_next_val) -
-                             relu1.forward(x_val)).item()
+            cost_expected = \
+                (relu1.forward(x_next_val) - relu1.forward(x_val) +
+                 dV_epsilon * (relu1.forward(x_val) -
+                               relu1.forward(x_equilibrium))).item()
             (milp_test, x_test, _, _, _, _, _, _, _) =\
-                dut.lyapunov_as_milp(relu1)
+                dut.lyapunov_gradient_as_milp(relu1, x_equilibrium, dV_epsilon)
             for i in range(self.system1.x_dim):
                 milp_test.addLConstr(
                     [torch.tensor([1.], dtype=milp_test.dtype)], [[x_test[i]]],
@@ -125,12 +166,13 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                         found_x = True
                 test_milp_cost(i, x_val)
 
-    def test_lyapunov_as_milp_bounded(self):
+    def test_lyapunov_gradient_as_milp_bounded(self):
         """
-        Test lyapunov_as_milp function, but with a lower and upper bounds on
-        V(x[n])
+        Test lyapunov_gradient_as_milp function, but with a lower and upper
+        bounds on V(x[n])
         """
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+        x_equilibrium = torch.tensor([0, 0], dtype=dut.system.dtype)
 
         relu1 = setup_relu(dut.system.dtype)
         # First find out what is the lower and upper bound of the ReLU network.
@@ -161,24 +203,29 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         milp_relu.gurobi_model.optimize()
         self.assertEqual(
             milp_relu.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
-        v_upper = milp_relu.gurobi_model.ObjVal
+        relu_x_equilibrium = relu1.forward(x_equilibrium).item()
+        v_upper = milp_relu.gurobi_model.ObjVal - relu_x_equilibrium
         self.assertAlmostEqual(
             relu1.forward(torch.tensor([v.x for v in x],
-                          dtype=dut.system.dtype)).item(), v_upper)
+                          dtype=dut.system.dtype)).item(),
+            v_upper + relu_x_equilibrium)
         milp_relu.setObjective(
             [a_out], [z], float(b_out), sense=gurobipy.GRB.MINIMIZE)
         milp_relu.gurobi_model.optimize()
         self.assertEqual(
             milp_relu.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
-        v_lower = milp_relu.gurobi_model.ObjVal
+        v_lower = milp_relu.gurobi_model.ObjVal - relu_x_equilibrium
         self.assertAlmostEqual(
             relu1.forward(torch.tensor([v.x for v in x],
-                          dtype=dut.system.dtype)).item(), v_lower)
+                          dtype=dut.system.dtype)).item(),
+            v_lower + relu_x_equilibrium)
 
         # If we set lyapunov_lower to be v_upper + 1, the problem should be
         # infeasible.
+        dV_epsilon = 0.01
         (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_as_milp(relu1, v_upper + 1, v_upper + 2)
+            dut.lyapunov_gradient_as_milp(
+                relu1, x_equilibrium, dV_epsilon, v_upper + 1, v_upper + 2)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
         milp.gurobi_model.optimize()
@@ -187,7 +234,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         # If we set lyapunov_upper to be v_lower - 1, the problem should be
         # infeasible.
         (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_as_milp(relu1, v_lower - 2, v_lower - 1)
+            dut.lyapunov_gradient_as_milp(
+                relu1, x_equilibrium, dV_epsilon, v_lower - 2, v_lower - 1)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
         milp.gurobi_model.optimize()
@@ -201,19 +249,22 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         lyapunov_lower = 0.9 * v_lower + 0.1 * v_upper
         lyapunov_upper = 0.1 * v_lower + 0.9 * v_upper
         (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_as_milp(relu1, lyapunov_lower, lyapunov_upper)
+            dut.lyapunov_gradient_as_milp(
+                relu1, x_equilibrium, dV_epsilon, lyapunov_lower,
+                lyapunov_upper)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.optimize()
         self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
         for _ in range(100):
             x_sample = torch.from_numpy(np.random.random((2,)) * 2 - 1)
-            v = relu1.forward(x_sample)
+            v = relu1.forward(x_sample) - relu_x_equilibrium
             if v >= lyapunov_lower and v <= lyapunov_upper:
                 x_next = self.system1.step_forward(x_sample)
-                v_next = relu1.forward(x_next)
-                self.assertLessEqual(v_next - v, milp.gurobi_model.ObjVal)
+                v_next = relu1.forward(x_next) - relu_x_equilibrium
+                self.assertLessEqual(v_next - v + dV_epsilon * v,
+                                     milp.gurobi_model.ObjVal)
 
-    def test_lyapunov_as_milp_gradient(self):
+    def test_lyapunov_gradient_as_milp_gradient(self):
         """
         Test the gradient of the MILP optimal cost w.r.t the ReLU network
         weights and bias. I can first compute the gradient through pytorch
@@ -243,8 +294,11 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             relu1 = nn.Sequential(
                 linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
 
+            dV_epsilon = 0.01
             (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
-                dut.lyapunov_as_milp(relu1)
+                dut.lyapunov_gradient_as_milp(
+                    relu1, torch.tensor([0, 0], dtype=self.system1.dtype),
+                    dV_epsilon)
 
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
@@ -290,11 +344,11 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 lambda weight, bias: compute_milp_cost_given_relu(
                     weight, bias, False), weight_all, bias_all, dx=1e-6)
             np.testing.assert_allclose(
-                weight_grad, grad_numerical[0].squeeze(), rtol=1e-3, atol=0.04)
+                weight_grad, grad_numerical[0].squeeze(), rtol=1e-2, atol=0.1)
             np.testing.assert_allclose(
-                bias_grad, grad_numerical[1].squeeze(), rtol=1e-3, atol=0.02)
+                bias_grad, grad_numerical[1].squeeze(), rtol=1e-2, atol=0.2)
 
-    def test_lyapunov_loss_at_sample(self):
+    def test_lyapunov_gradient_loss_at_sample(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
         # Construct a simple ReLU model with 2 hidden layers
         linear1 = nn.Linear(2, 3)
@@ -322,7 +376,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         x_samples.append(torch.tensor([0.95, -0.23], dtype=self.dtype))
         margin = 0.1
         for x_sample in x_samples:
-            loss = dut.lyapunov_loss_at_sample(relu1, x_sample, margin)
+            loss = dut.lyapunov_gradient_loss_at_sample(
+                relu1, x_sample, margin)
             is_in_mode = False
             for i in range(self.system1.num_modes):
                 if (torch.all(

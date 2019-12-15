@@ -79,6 +79,7 @@ if __name__ == "__main__":
         system, relu, lambda x: x@x, state_samples_all1, options1)
     plot_relu(relu, system, (51, 51))
 
+    x_equilibrium = torch.tensor([0, 0], dtype=torch.float64)
     # Ignore the samples that are close to the origin. These samples don't have
     # to be strictly negative, but can be close to 0.
     state_samples_all = test_train_lyapunov.setup_state_samples_all((21, 21))
@@ -89,9 +90,11 @@ if __name__ == "__main__":
     options.output_flag = True
     options.max_iterations = 3000
     options.sample_lyapunov_loss_margin = 0.1
+    options.dV_epsilon = 0.
 
     result = train_lyapunov.train_lyapunov_relu(
-        lyapunov_hybrid_system, relu, state_samples_all, options)
+        lyapunov_hybrid_system, relu, x_equilibrium, state_samples_all,
+        options)
 
     plot_relu(relu, system, (51, 51))
 

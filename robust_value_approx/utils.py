@@ -61,6 +61,32 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     return (A_x, A_s, A_alpha, rhs)
 
 
+def replace_absolute_value_with_mixed_integer_constraint(
+        x_lo, x_up, dtype=torch.float64):
+    """
+    For a variable x in the interval [x_lo, x_up], where x_lo < 0 < x_up,
+    if we denote the absolute value |x| as s, and introduce a binary variable
+    alpha, such that
+    alpha = 1 => x >= 0
+    alpha = 0 => x <= 0
+    then s, x and alpha shouls satisfy the following mixed-integer constraint
+    s >= x
+    s >= -x
+    -x + s - 2 * x_lo*alpha <= -2 * x_lo
+    x + s - 2 * x_up * alpha <= 0
+    We write this constraint in the conside form as
+    Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in
+    @return (Ain_x, Ain_s, Ain_alpha, rhs_in)
+    """
+    assert(x_lo < 0)
+    assert(x_up > 0)
+    Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
+    Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
+    Ain_alpha = torch.tensor([0, 0, -2*x_lo, -2*x_up], dtype=dtype)
+    rhs_in = torch.tensor([0, 0, -2*x_lo, 0], dtype=dtype)
+    return (Ain_x, Ain_s, Ain_alpha, rhs_in)
+
+
 def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
                                                dtype=torch.float64):
     """
