@@ -180,7 +180,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         relu1_free_pattern = relu_to_optimization.ReLUFreePattern(
             relu1, dut.system.dtype)
         Ain_x, Ain_z, Ain_beta, rhs_in, Aeq_x, Aeq_z, Aeq_beta, rhs_eq, a_out,\
-            b_out, _, _ = relu1_free_pattern.output_constraint(
+            b_out, _, _, _, _ = relu1_free_pattern.output_constraint(
                 relu1, torch.tensor([-1.0, -1.0], dtype=dut.system.dtype),
                 torch.tensor([1.0, 1.0], dtype=dut.system.dtype))
         x = milp_relu.addVars(

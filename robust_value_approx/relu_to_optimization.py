@@ -10,8 +10,8 @@ import robust_value_approx.utils as utils
 
 def ComputeReLUActivationPattern(model_relu, x):
     """
-    For a given input x to a ReLU network, returns the activation pattern for
-    this input.
+    For a given input x to a ReLU (including leaky ReLU) network, returns the
+    activation pattern for this input.
     @param model_relu A ReLU network (constructed by Sequential Linear and
     ReLU units).
     @param x A numpy array, the input to the network.
@@ -25,7 +25,7 @@ def ComputeReLUActivationPattern(model_relu, x):
     for layer in model_relu:
         if (isinstance(layer, nn.Linear)):
             layer_x = layer.forward(layer_x)
-        elif isinstance(layer, nn.ReLU):
+        elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
             activation_pattern.append([relu_x >= 0 for relu_x in layer_x])
             layer_x = layer.forward(layer_x)
     return activation_pattern
@@ -58,7 +58,7 @@ def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
             b_layer = layer.weight @ b_layer + \
                 layer.bias.reshape((-1, 1))
             num_linear_layer_output = layer.weight.shape[0]
-        elif (isinstance(layer, nn.ReLU)):
+        elif (isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU)):
             assert(len(activation_pattern[relu_layer_count])
                    == num_linear_layer_output)
             for row, activation_flag in enumerate(
@@ -73,8 +73,12 @@ def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
                     # is the same as A.row(i) * x <= -b(i)
                     P = torch.cat([P, A_layer[row].reshape((1, -1))], dim=0)
                     q = torch.cat([q, -b_layer[row].reshape((1, -1))], dim=0)
-                    A_layer[row] = 0
-                    b_layer[row] = 0
+                    if (isinstance(layer, nn.ReLU)):
+                        A_layer[row] = 0
+                        b_layer[row] = 0
+                    elif (isinstance(layer, nn.LeakyReLU)):
+                        A_layer[row] *= layer.negative_slope
+                        b_layer[row] *= layer.negative_slope
             relu_layer_count += 1
         else:
             raise Exception(
@@ -111,7 +115,7 @@ class ReLUFreePattern:
                 if layer_count == 0:
                     self.x_size = layer.weight.shape[1]
                 layer_count += 1
-            elif (isinstance(layer, nn.ReLU)):
+            elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 self.last_layer_is_relu = True
             else:
                 raise Exception("Only accept linear or relu layer")
@@ -140,6 +144,9 @@ class ReLUFreePattern:
             (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
             This formulation is explained in
             replace_relu_with_mixed_integer_constraint()
+            Similarly if the layer is a leaky relu layer, then we replace the
+            leaky relu output using
+            replace_leaky_relu_with_mixed_integer_constraint()
         case 2
             If 0 <= zₗₒ <= zᵤₚ, the ReLU unit is always active,  then
             the constraints are
@@ -214,6 +221,8 @@ class ReLUFreePattern:
         z_post_relu_up = torch.empty(self.num_relu_units, dtype=self.dtype)
         for layer in model:
             if (isinstance(layer, nn.Linear)):
+                Wi = layer.weight
+                bi = layer.bias
                 if (layer_count < len(self.relu_unit_index)):
                     for j in range(len(self.relu_unit_index[layer_count])):
                         # First compute zᵤₚ, zₗₒ as the bounds for
@@ -248,77 +257,6 @@ class ReLUFreePattern:
                                     layer.weight[j][k] * zi_lo[k]
                         assert(z_pre_relu_lo[z_bound_index] <=
                                z_pre_relu_up[z_bound_index])
-                        if z_pre_relu_lo[z_bound_index] < 0 and\
-                                z_pre_relu_up[z_bound_index] > 0:
-                            (A_relu_input, A_relu_output, A_relu_beta,
-                                relu_rhs) = utils.\
-                                replace_relu_with_mixed_integer_constraint(
-                                z_pre_relu_lo[z_bound_index],
-                                z_pre_relu_up[z_bound_index], self.dtype)
-                            if layer_count == 0:
-                                # If this layer is the input layer, then the
-                                # constraint is
-                                # A_relu_input * ((Wᵢx)(j)+bᵢ(j))
-                                # A_relu_output * zᵢ₊₁(j) +
-                                # A_relu_beta * βᵢ(j) <= relu_rhs
-                                Ain1[ineq_constraint_count:
-                                     ineq_constraint_count + 4] =\
-                                         A_relu_input.reshape((-1, 1))\
-                                         @ layer.weight[j].reshape((1, -1))
-                            else:
-                                # If this layer is not the input layer, then
-                                # the constraint is
-                                # A_relu_input * ((Wᵢzᵢ)(j)+bᵢ(j)) +
-                                # A_relu_output * zᵢ₊₁(j) +
-                                # A_relu_beta * βᵢ(j) <= relu_rhs
-                                Ain2[ineq_constraint_count:
-                                     ineq_constraint_count+4,
-                                     self.relu_unit_index[layer_count - 1]] =\
-                                    A_relu_input.reshape((-1, 1)) @\
-                                    layer.weight[j].reshape((1, -1))
-                            Ain2[ineq_constraint_count:ineq_constraint_count+4,
-                                 self.relu_unit_index[layer_count][j]] =\
-                                A_relu_output.squeeze()
-                            Ain3[ineq_constraint_count:ineq_constraint_count+4,
-                                 self.relu_unit_index[layer_count][j]] =\
-                                A_relu_beta.squeeze()
-                            rhs_in[ineq_constraint_count: ineq_constraint_count
-                                   + 4] = relu_rhs.reshape((-1, 1)) -\
-                                A_relu_input.reshape((-1, 1)) * layer.bias[j]
-                            ineq_constraint_count += 4
-                        elif z_pre_relu_lo[z_bound_index] >= 0:
-                            # Case 2, introduce 2 equality constraints
-                            # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
-                            Aeq2[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            if layer_count == 0:
-                                Aeq1[eq_constraint_count] = - \
-                                    layer.weight[j]
-                            else:
-                                for k in range(zi_size):
-                                    Aeq2[eq_constraint_count][
-                                        self.relu_unit_index[layer_count-1]
-                                        [k]] = -layer.weight[j][k]
-                            rhs_eq[eq_constraint_count] =\
-                                layer.bias[j].clone()
-                            eq_constraint_count += 1
-                            # βᵢ(j) = 1
-                            Aeq3[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 1.
-                            eq_constraint_count += 1
-                        else:
-                            # Case 3, introduce 2 equality constraints
-                            # zᵢ₊₁(j) = 0
-                            Aeq2[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 0.
-                            eq_constraint_count += 1
-                            # βᵢ(j) = 0
-                            Aeq3[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 0.
-                            eq_constraint_count += 1
 
                 else:
                     # This is for the output layer when the output layer
@@ -331,17 +269,146 @@ class ReLUFreePattern:
                             layer.weight[0][k]
                     b_out = layer.bias.item()
 
-            elif (isinstance(layer, nn.ReLU)):
+            elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.
+                negative_slope = layer.negative_slope if\
+                    isinstance(layer, nn.LeakyReLU) else 0.
                 for j in range(len(self.relu_unit_index[layer_count])):
-                    z_post_relu_lo[self.relu_unit_index[layer_count][j]] =\
-                        torch.max(
-                        z_pre_relu_lo[self.relu_unit_index[layer_count][j]],
-                        torch.tensor(0., dtype=self.dtype))
-                    z_post_relu_up[self.relu_unit_index[layer_count][j]] =\
-                        torch.max(
-                        z_pre_relu_up[self.relu_unit_index[layer_count][j]],
-                        torch.tensor(0., dtype=self.dtype))
+                    z_bound_index = self.relu_unit_index[layer_count][j]
+                    if z_pre_relu_lo[z_bound_index] < 0 and\
+                            z_pre_relu_up[z_bound_index] > 0:
+                        if (isinstance(layer, nn.ReLU)):
+                            (A_relu_input, A_relu_output, A_relu_beta,
+                                relu_rhs) = utils.\
+                                replace_relu_with_mixed_integer_constraint(
+                                z_pre_relu_lo[z_bound_index],
+                                z_pre_relu_up[z_bound_index], self.dtype)
+                        elif isinstance(layer, nn.LeakyReLU):
+                            A_relu_input, A_relu_output, A_relu_beta, relu_rhs\
+                                = utils.\
+                                replace_leaky_relu_mixed_integer_constraint(
+                                    layer.negative_slope,
+                                    z_pre_relu_lo[z_bound_index],
+                                    z_pre_relu_up[z_bound_index], self.dtype)
+                        if layer_count == 0:
+                            # If this layer is the input layer, then the
+                            # constraint is
+                            # A_relu_input * ((Wᵢx)(j)+bᵢ(j))
+                            # A_relu_output * zᵢ₊₁(j) +
+                            # A_relu_beta * βᵢ(j) <= relu_rhs
+                            Ain1[ineq_constraint_count:
+                                 ineq_constraint_count + 4] =\
+                                     A_relu_input.reshape((-1, 1))\
+                                     @ Wi[j].reshape((1, -1))
+                        else:
+                            # If this layer is not the input layer, then
+                            # the constraint is
+                            # A_relu_input * ((Wᵢzᵢ)(j)+bᵢ(j)) +
+                            # A_relu_output * zᵢ₊₁(j) +
+                            # A_relu_beta * βᵢ(j) <= relu_rhs
+                            Ain2[ineq_constraint_count:
+                                 ineq_constraint_count+4,
+                                 self.relu_unit_index[layer_count - 1]] =\
+                                A_relu_input.reshape((-1, 1)) @\
+                                Wi[j].reshape((1, -1))
+                        Ain2[ineq_constraint_count:ineq_constraint_count+4,
+                             self.relu_unit_index[layer_count][j]] =\
+                            A_relu_output.squeeze()
+                        Ain3[ineq_constraint_count:ineq_constraint_count+4,
+                             self.relu_unit_index[layer_count][j]] =\
+                            A_relu_beta.squeeze()
+                        rhs_in[ineq_constraint_count: ineq_constraint_count
+                               + 4] = relu_rhs.reshape((-1, 1)) -\
+                            A_relu_input.reshape((-1, 1)) * bi[j]
+                        ineq_constraint_count += 4
+                        relu_unit_index_ij =\
+                            self.relu_unit_index[layer_count][j]
+                        if (negative_slope >= 0):
+                            z_post_relu_lo[relu_unit_index_ij] =\
+                                negative_slope * z_pre_relu_lo[
+                                    relu_unit_index_ij]
+                            z_post_relu_up[relu_unit_index_ij] = \
+                                z_pre_relu_up[relu_unit_index_ij]
+                        else:
+                            z_post_relu_lo[relu_unit_index_ij] = 0
+                            z_post_relu_up[relu_unit_index_ij] = torch.max(
+                                negative_slope * z_pre_relu_lo[
+                                    relu_unit_index_ij], z_pre_relu_up[
+                                        relu_unit_index_ij])
+                    elif z_pre_relu_lo[z_bound_index] >= 0:
+                        # Case 2, introduce 2 equality constraints
+                        # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
+                        Aeq2[eq_constraint_count][
+                            self.relu_unit_index[layer_count][j]] = 1.
+                        if layer_count == 0:
+                            Aeq1[eq_constraint_count] = -Wi[j]
+                        else:
+                            for k in range(zi_size):
+                                Aeq2[eq_constraint_count][
+                                    self.relu_unit_index[layer_count-1]
+                                    [k]] = -Wi[j][k]
+                        rhs_eq[eq_constraint_count] = bi[j].clone()
+                        eq_constraint_count += 1
+                        # βᵢ(j) = 1
+                        Aeq3[eq_constraint_count][
+                            self.relu_unit_index[layer_count][j]] = 1.
+                        rhs_eq[eq_constraint_count] = 1.
+                        eq_constraint_count += 1
+                        relu_unit_index_ij =\
+                            self.relu_unit_index[layer_count][j]
+                        z_post_relu_lo[relu_unit_index_ij] =\
+                            z_pre_relu_lo[relu_unit_index_ij]
+                        z_post_relu_up[relu_unit_index_ij] =\
+                            z_pre_relu_up[relu_unit_index_ij]
+                    else:
+                        # Case 3, introduce 2 equality constraints
+                        # zᵢ₊₁(j) = negative_slope * ((Wᵢzᵢ)(j) + bᵢ(j))
+                        if (isinstance(layer, nn.ReLU)):
+                            Aeq2[eq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1.
+                            rhs_eq[eq_constraint_count] = 0.
+                            eq_constraint_count += 1
+                            # βᵢ(j) = 0
+                            Aeq3[eq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1.
+                            rhs_eq[eq_constraint_count] = 0.
+                            eq_constraint_count += 1
+                        elif isinstance(layer, nn.LeakyReLU):
+                            # zᵢ₊₁(j) = negative_slope * ((Wᵢzᵢ)(j) + bᵢ(j))
+                            Aeq2[eq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1.
+                            if layer_count == 0:
+                                Aeq1[eq_constraint_count] =\
+                                    -layer.negative_slope * Wi[j]
+                            else:
+                                for k in range(zi_size):
+                                    Aeq2[eq_constraint_count][
+                                        self.relu_unit_index[layer_count-1]
+                                        [k]] = -layer.negative_slope * Wi[j][k]
+                            rhs_eq[eq_constraint_count] =\
+                                layer.negative_slope * bi[j].clone()
+                            eq_constraint_count += 1
+                            # βᵢ(j) = 0
+                            Aeq3[eq_constraint_count][
+                                self.relu_unit_index[layer_count][j]] = 1.
+                            rhs_eq[eq_constraint_count] = 0.
+                            eq_constraint_count += 1
+                        relu_unit_index_ij =\
+                            self.relu_unit_index[layer_count][j]
+                        if negative_slope >= 0:
+                            z_post_relu_lo[relu_unit_index_ij] =\
+                                negative_slope *\
+                                z_pre_relu_lo[relu_unit_index_ij]
+                            z_post_relu_up[relu_unit_index_ij] =\
+                                negative_slope *\
+                                z_pre_relu_up[relu_unit_index_ij]
+                        else:
+                            z_post_relu_lo[relu_unit_index_ij] =\
+                                negative_slope *\
+                                z_pre_relu_up[relu_unit_index_ij]
+                            z_post_relu_up[relu_unit_index_ij] =\
+                                negative_slope *\
+                                z_pre_relu_lo[relu_unit_index_ij]
 
                 layer_count += 1
         if self.last_layer_is_relu:
@@ -358,7 +425,8 @@ class ReLUFreePattern:
         rhs_eq = rhs_eq[:eq_constraint_count]
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
-               b_out, z_pre_relu_lo, z_pre_relu_up)
+               b_out, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
+               z_post_relu_up)
 
     def compute_relu_unit_outputs_and_activation(self, model, x):
         """
@@ -380,13 +448,18 @@ class ReLUFreePattern:
         for layer in model:
             if (isinstance(layer, nn.Linear)):
                 z_layer = layer.forward(z_layer)
-            elif (isinstance(layer, nn.ReLU)):
+            elif (isinstance(layer, nn.ReLU) or
+                  isinstance(layer, nn.LeakyReLU)):
                 for i in range(z_layer.numel()):
                     beta[relu_unit_count + i][0] = 1 if z_layer[i] > 0 else 0
                 z_layer = layer.forward(z_layer)
                 z[relu_unit_count:relu_unit_count +
                     z_layer.numel()] = z_layer.reshape((-1, 1))
                 relu_unit_count += z_layer.numel()
+            else:
+                raise Exception("compute_relu_unit_outputs_and_activation: " +
+                                " only supports linear, relu or leaky relu " +
+                                "units.")
         # The output layer
         output = z_layer.item()
 
@@ -530,6 +603,9 @@ class ReLUFreePattern:
 
             elif (isinstance(layer, nn.ReLU)):
                 layer_count += 1
+            else:
+                raise Exception("output_gradient: currently only " +
+                                "supports linear and ReLU layers.")
 
         if self.last_layer_is_relu:
             # Now append 0 to the end of the beta index (the last layer has
@@ -691,4 +767,7 @@ class ReLUFreePattern:
                 z_lo[self.relu_unit_index[layer_count]] = zi_lo
                 z_up[self.relu_unit_index[layer_count]] = zi_up
                 layer_count += 1
+            else:
+                raise Exception("output_gradient_times_vector: we currently " +
+                                "only support linear and ReLU units.")
         return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up)

@@ -121,7 +121,7 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
     return (A_x, A_y, A_beta, rhs)
 
 
-def replace_leaky_relu_with_mixed_integer_constraint(
+def replace_leaky_relu_mixed_integer_constraint(
         negative_slope, x_lo, x_up, dtype=torch.float64):
     """
     For input x ∈ [x_lo, x_up] (and x_lo < 0 < x_up), the leaky relu output
@@ -164,7 +164,6 @@ def replace_leaky_relu_with_mixed_integer_constraint(
     else:
         return (-A_x, -A_y, -A_beta, -rhs)
 
- 
 
 def compare_numpy_matrices(actual, desired, rtol, atol):
     try:

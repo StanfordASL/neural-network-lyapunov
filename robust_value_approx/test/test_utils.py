@@ -118,7 +118,7 @@ class TestReplaceLeakyReluWithMixedIntegerConstraint(unittest.TestCase):
 
         def test_fun(negative_slope, x, y, beta):
             A_x, A_y, A_beta, rhs = utils.\
-                replace_leaky_relu_with_mixed_integer_constraint(
+                replace_leaky_relu_mixed_integer_constraint(
                     negative_slope, x_lo, x_up)
             satisfied_flag = torch.all(A_x * x + A_y * y + A_beta * beta <=
                                        rhs)
