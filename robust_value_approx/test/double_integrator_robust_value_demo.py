@@ -97,19 +97,16 @@ if __name__ == "__main__":
                 mb_prob = gurobi_torch_mip.GurobiTorchMIQP(vf.dtype)
                 mb_prob.gurobi_model.setParam(
                     gurobipy.GRB.Param.OutputFlag, False)
-                mb_prob.gurobi_model.setParam(
-                    gurobipy.GRB.Param.PoolSolutions, 2)
-                mb_prob.gurobi_model.setParam(
-                    gurobipy.GRB.Param.PoolSearchMode, 2)
+                # the continuous variables: y = [x, s, z]
                 y = mb_prob.addVars(Q1.shape[0], lb=-gurobipy.GRB.INFINITY,
                                     vtype=gurobipy.GRB.CONTINUOUS, name="y")
+                # the binary variable: γ = [α, β]
                 gamma = mb_prob.addVars(Q2.shape[0], vtype=gurobipy.GRB.BINARY,
                                         name="gamma")
                 mb_prob.setObjective([.5 * Q1, .5 * Q2],
                                      [(y, y), (gamma, gamma)],
                                      [q1, q2], [y, gamma], k,
                                      gurobipy.GRB.MINIMIZE)
-                mb_prob.gurobi_model.remove(mb_prob.gurobi_model.getConstrs())
                 for i in range(G1.shape[0]):
                     mb_prob.addLConstr([G1[i, :], G2[i, :]], [y, gamma],
                                        gurobipy.GRB.LESS_EQUAL, h[i])
@@ -138,10 +135,6 @@ if __name__ == "__main__":
                 mb_prob = gurobi_torch_mip.GurobiTorchMIQP(vf.dtype)
                 mb_prob.gurobi_model.setParam(
                     gurobipy.GRB.Param.OutputFlag, False)
-                mb_prob.gurobi_model.setParam(
-                    gurobipy.GRB.Param.PoolSolutions, 2)
-                mb_prob.gurobi_model.setParam(
-                    gurobipy.GRB.Param.PoolSearchMode, 2)
                 y = mb_prob.addVars(Q1.shape[0], lb=-gurobipy.GRB.INFINITY,
                                     vtype=gurobipy.GRB.CONTINUOUS, name="y")
                 gamma = mb_prob.addVars(Q2.shape[0], vtype=gurobipy.GRB.BINARY,
@@ -150,7 +143,6 @@ if __name__ == "__main__":
                                      [(y, y), (gamma, gamma)],
                                      [q1, q2], [y, gamma], k,
                                      gurobipy.GRB.MINIMIZE)
-                mb_prob.gurobi_model.remove(mb_prob.gurobi_model.getConstrs())
                 for i in range(G1.shape[0]):
                     mb_prob.addLConstr([G1[i, :], G2[i, :]], [y, gamma],
                                        gurobipy.GRB.LESS_EQUAL, h[i])
