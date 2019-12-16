@@ -33,7 +33,7 @@ class ModelBounds:
         The solution to the returned problem corresponds to ε̅, and has the
         property that
 
-        η(x) ≤ V(x) + ε̅, ∀ x_lo ≤ x ≤ x_up
+        η(x) ≤ V(x) - ε̅, ∀ x_lo ≤ x ≤ x_up
 
         where η is the output of the neural network, V is the optimal
         cost-to-go
