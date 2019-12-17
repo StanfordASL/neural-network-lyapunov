@@ -7,6 +7,8 @@ import numpy as np
 import cvxpy as cp
 import torch
 
+import matplotlib.pyplot as plt
+
 
 class ValueToOptimizationTest(unittest.TestCase):
     def test_trajopt_x0xN(self):
@@ -252,6 +254,61 @@ class ValueToOptimizationTest(unittest.TestCase):
         # print(obj.item())
 
         self.assertAlmostEqual(obj_exp.item(), obj.item())
+        
+    def test_trajopt_trapz(self):
+       dtype = torch.float64
+       dt = .05
+       x_lo = torch.Tensor(
+           [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
+       x_up = torch.Tensor(
+           [1., 10., .3, 1e6, 1e6, 1e6]).type(dtype)
+       u_lo = torch.Tensor([-np.pi / 2, -1e6]).type(dtype)
+       u_up = torch.Tensor([np.pi / 2, 1e6]).type(dtype)
+       sys = bphls.get_ball_paddle_hybrid_linear_system(
+           dtype, dt, x_lo, x_up, u_lo, u_up, collision_eps=1e-2, trapz=True)
+
+       N = 20
+       vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
+       Q = torch.diag(torch.Tensor([0., 10., 0., 0., 1., 0.]).type(dtype))
+       R = torch.diag(torch.Tensor([0., .01]).type(dtype))
+       vf.set_cost(Q=Q, R=R)
+       vf.set_terminal_cost(Qt=Q, Rt=R)
+       # xtraj = torch.Tensor([0., .5, 0., 0., 0., 0.]).type(dtype).unsqueeze(1).repeat(1,N-1)
+       # vf.set_traj(xtraj=xtraj)
+       xN = torch.Tensor([np.nan, .6, np.nan, np.nan, 0., np.nan])
+       vf.set_constraints(xN=xN)
+       
+       # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
+       x0 = torch.Tensor([0., .5, 0., 0., 0., 0.]).type(dtype)
+
+       traj_opt = vf.traj_opt_constraint()
+       (Ain1, Ain2, Ain3, rhs_in,
+        Aeq1, Aeq2, Aeq3, rhs_eq,
+        Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+
+       s = cp.Variable(Ain2.shape[1])
+       z = cp.Variable(Ain3.shape[1], boolean=True)
+
+       obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 * cp.quad_form(z, Q3)
+                         + q2.T@s + q3.T@z + c)
+       con = [
+           Ain1@x0.detach().numpy() + Ain2@s + Ain3@z <= rhs_in,
+           Aeq1@x0.detach().numpy() + Aeq2@s + Aeq3@z == rhs_eq,
+       ]
+
+       prob = cp.Problem(obj, con)
+       prob.solve(solver=cp.GUROBI, verbose=False)
+
+       s_val = torch.Tensor(s.value).type(dtype)
+       traj_val = torch.cat((x0, s_val)).reshape(N,-1).t()
+       xtraj_val = traj_val[:sys.x_dim,:]
+       
+       # plt.plot(xtraj_val[1,:])
+       # plt.plot(xtraj_val[2,:])
+       # plt.show()
+
+       self.assertAlmostEqual(xtraj_val[1, -1], xN[1])
+       self.assertAlmostEqual(xtraj_val[4, -1], xN[4])
 
     def test_trajopt_trapz(self):
         dtype = torch.float64
