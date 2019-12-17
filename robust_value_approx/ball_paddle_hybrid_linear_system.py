@@ -2,8 +2,8 @@ import torch
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 
 
-def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up, 
-                                         cr=.8, collision_eps=1e-4, 
+def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
+                                         cr=.8, collision_eps=1e-4,
                                          trapz=False):
     """
     x = [ballx, bally, paddley, ballvx, ballvy, paddlevy]
@@ -46,7 +46,7 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
                                  [0., 0.],
                                  [0., 0.],
                                  [0., dt]]).type(dtype)
-        c = Xinv @ torch.Tensor([0., 0., 0., 0., dt*g, 0.]).type(dtype)        
+        c = Xinv @ torch.Tensor([0., 0., 0., 0., dt*g, 0.]).type(dtype)
     else:
         # free falling mode
         A = torch.Tensor([[1., 0., 0., dt, 0., 0.],
