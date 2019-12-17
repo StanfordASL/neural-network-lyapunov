@@ -53,7 +53,7 @@ class ModelBounds:
         """
         (Pin1, Pin2, Pin3, qrhs_in,
          Peq1, Peq2, Peq3, qrhs_eq,
-         a_out, b_out, z_lo, z_up) = self.relu_opt.output_constraint(
+         a_out, b_out, z_lo, z_up, _, _) = self.relu_opt.output_constraint(
              model, x_lo, x_up)
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,

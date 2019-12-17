@@ -222,7 +222,7 @@ class LyapunovDiscreteTimeHybridSystem:
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
         (Ain_x2, Ain_z, Ain_beta, rhs_in2, Aeq_x2, Aeq_z, Aeq_beta, rhs_eq2,
-         a_out, b_out, z_lo, z_up) = relu_free_pattern.output_constraint(
+         a_out, b_out, z_lo, z_up, _, _) = relu_free_pattern.output_constraint(
              relu_model, torch.from_numpy(self.system.x_lo_all),
              torch.from_numpy(self.system.x_up_all))
         z = milp.addVars(

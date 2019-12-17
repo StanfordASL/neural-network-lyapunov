@@ -93,18 +93,22 @@ def verify_control_lyapunov(model, x_lo, x_up):
     t = cp.Variable()
     alpha = cp.Variable(Ain4.shape[1], boolean=True)
     beta = cp.Variable(Ain5.shape[1], boolean=True)
-    constraint1 = Ain1.to_dense().numpy() * x + Ain2.to_dense().numpy() * s\
-        + Ain3.to_dense().numpy().squeeze() * t\
-        + Ain4.to_dense().numpy() * alpha + Ain5.to_dense().numpy() * beta\
+    constraint1 = Ain1.to_dense().detach().numpy() * x\
+        + Ain2.to_dense().detach().numpy() * s\
+        + Ain3.to_dense().detach().numpy().squeeze() * t\
+        + Ain4.to_dense().detach().numpy() * alpha\
+        + Ain5.to_dense().detach().numpy() * beta\
         <= rhs.squeeze()
-    (Ain6, Ain7, Ain8, rhs_in, Aeq6, Aeq7, Aeq8, rhs_eq, _, _, _, _) =\
+    (Ain6, Ain7, Ain8, rhs_in, Aeq6, Aeq7, Aeq8, rhs_eq, _, _, _, _, _, _) =\
         verifier.relu_free_pattern.output_constraint(model, x_lo, x_up)
     z = cp.Variable(Ain7.shape[1])
-    constraints = [constraint1, Ain6.numpy() * x + Ain7.numpy() * z
-                   + Ain8.numpy() * beta <= rhs_in.squeeze(),
-                   Aeq6.numpy() * x + Aeq7.numpy() * z + Aeq8.numpy() * beta
-                   == rhs_eq.squeeze()]
-    objective = cp.Maximize(c1.numpy().T * s + t + c2.numpy().T * alpha)
+    constraints = [
+        constraint1, Ain6.detach().numpy() * x + Ain7.detach().numpy() * z
+        + Ain8.detach().numpy() * beta <= rhs_in.squeeze().detach().numpy(),
+        Aeq6.detach().numpy() * x + Aeq7.detach().numpy() * z +
+        Aeq8.detach().numpy() * beta == rhs_eq.squeeze().detach().numpy()]
+    objective = cp.Maximize(
+        c1.detach().numpy().T * s + t + c2.detach().numpy().T * alpha)
     cp_prob = cp.Problem(objective, constraints)
     cp_prob.solve(solver=cp.GUROBI, verbose=True)
     if (cp_prob.value <= 0):

@@ -70,17 +70,14 @@ class test_replace_absolute_value_with_mixed_integer_constraint(
 
 
 class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
-    def setUp(self):
-        pass
-
     def test(self):
         def test_fun(x_lo, x_up):
             (A_x, A_y, A_beta, rhs) = utils.\
                     replace_relu_with_mixed_integer_constraint(x_lo, x_up)
-            self.assertEqual(A_x.shape, (4, 1))
-            self.assertEqual(A_y.shape, (4, 1))
-            self.assertEqual(A_beta.shape, (4, 1))
-            self.assertEqual(rhs.shape, (4, 1))
+            self.assertEqual(A_x.shape, (4,))
+            self.assertEqual(A_y.shape, (4,))
+            self.assertEqual(A_beta.shape, (4,))
+            self.assertEqual(rhs.shape, (4,))
             # Now check at the vertices of the polytope, if there are 3
             # inequality constraints being active, and one inactive.
             vertices = torch.tensor([[x_lo, 0, 0],
@@ -112,6 +109,51 @@ class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
         test_fun(-1, 1)
         test_fun(-2, 10)
         test_fun(-100, 1)
+
+
+class TestReplaceLeakyReluWithMixedIntegerConstraint(unittest.TestCase):
+    def test(self):
+        x_lo = -2
+        x_up = 5
+
+        def test_fun(negative_slope, x, y, beta):
+            A_x, A_y, A_beta, rhs = utils.\
+                replace_leaky_relu_mixed_integer_constraint(
+                    negative_slope, x_lo, x_up)
+            satisfied_flag = torch.all(A_x * x + A_y * y + A_beta * beta <=
+                                       rhs)
+            satisfied_expected = (
+                x >= 0 and beta == 1 and y == x and x <= x_up) or \
+                (x <= 0 and beta == 0 and y == negative_slope * x and
+                 x >= x_lo)
+            self.assertEqual(satisfied_flag, satisfied_expected)
+
+        test_fun(0.5, 0., 0., 0)
+        test_fun(0.5, 0., 0., 1)
+        test_fun(0.5, 1., 1., 1)
+        test_fun(0.5, 2., 2., 1)
+        test_fun(0.5, 2., 2., 0)
+        test_fun(0.5, 5., 5., 1)
+        test_fun(0.5, 5., 5., 0)
+        test_fun(0.5, 6., 6., 1)
+        test_fun(0.5, 1., 2., 1)
+        test_fun(0.5, 2., -2., 1)
+        test_fun(0.5, -2., -1., 0)
+        test_fun(0.5, -1., -0.5, 0)
+        test_fun(0.5, -1., -0.6, 0)
+        test_fun(0.5, -1., -0.9, 0)
+        test_fun(0.5, -1., -1.9, 0)
+        test_fun(0.5, -1., -1.9, 1)
+        test_fun(0.5, -1., -0.5, 1)
+        test_fun(2, -1., -2., 0)
+        test_fun(2, -2., -4., 0)
+        test_fun(2, -2., -3., 0)
+        test_fun(2, -2., -5., 0)
+        test_fun(2, -1.5, -3., 0)
+        test_fun(2, -1.5, -3., 1)
+        test_fun(2, 1.5, 1.5, 1)
+        test_fun(2, 1.5, 3, 0)
+        test_fun(2, 2.5, 5, 0)
 
 
 class test_compute_numerical_gradient(unittest.TestCase):

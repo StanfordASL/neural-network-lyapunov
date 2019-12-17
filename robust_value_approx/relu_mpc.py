@@ -73,8 +73,8 @@ class ReLUMPC:
         (Pin1, Pin2, Pin3, Prhs_in,
          Peq1, Peq2, Peq3, Prhs_eq,
          a_out, b_out,
-         z_pre_relu_lo, z_pre_relu_up) = utils.torch_to_numpy(relu_con,
-                                                              squeeze=False)
+         z_pre_relu_lo, z_pre_relu_up, _, _) = utils.torch_to_numpy(
+             relu_con, squeeze=False)
         (Aeq_slack, Aeq_alpha,
          Ain_x, Ain_u, Ain_slack,
          Ain_alpha, Arhs_in) = utils.torch_to_numpy(

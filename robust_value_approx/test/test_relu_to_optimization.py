@@ -31,6 +31,13 @@ class TestReLU(unittest.TestCase):
         self.model2 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                     nn.ReLU(), self.linear3)
 
+        # Model with leaky ReLU with a leaky ReLU unit in the output layer.
+        self.leaky_relus =\
+            [nn.LeakyReLU(0.1), nn.LeakyReLU(-0.2), nn.LeakyReLU(0.01)]
+        self.model3 = nn.Sequential(
+            self.linear1, self.leaky_relus[0], self.linear2,
+            self.leaky_relus[1], self.linear3, self.leaky_relus[2])
+
     def test_compute_relu_activation_pattern1(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
         activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
@@ -66,14 +73,39 @@ class TestReLU(unittest.TestCase):
         for i in range(4):
             self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
 
+    def test_compute_relu_activation_pattern3(self):
+        # Test with leakly relu.
+        def test_fun(x):
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(self.model3, x)
+            self.assertEqual(len(activation_pattern), 3)
+            self.assertEqual(len(activation_pattern[0]), 3)
+            self.assertEqual(len(activation_pattern[1]), 4)
+            self.assertEqual(len(activation_pattern[2]), 1)
+            x_linear1 = self.linear1.forward(x)
+            x_relu1 = self.leaky_relus[0].forward(x_linear1)
+            for i in range(3):
+                self.assertEqual(x_linear1[i] >= 0, activation_pattern[0][i])
+            x_linear2 = self.linear2.forward(x_relu1)
+            for i in range(4):
+                self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
+            x_relu2 = self.leaky_relus[1].forward(x_linear2)
+            x_linear3 = self.linear3.forward(x_relu2)
+            self.assertEqual(x_linear3[0] >= 0, activation_pattern[2][0])
+
+        test_fun(torch.tensor([-1, 2], dtype=self.dtype))
+        test_fun(torch.tensor([-1, 3], dtype=self.dtype))
+        test_fun(torch.tensor([4, 3], dtype=self.dtype))
+        test_fun(torch.tensor([-10, -4], dtype=self.dtype))
+
     def test_relu_given_activation_pattern(self):
         def test_relu_given_activation_pattern_util(self, model, x):
             activation_pattern = relu_to_optimization.\
                 ComputeReLUActivationPattern(model, x)
             (g, h, P, q) = relu_to_optimization.ReLUGivenActivationPattern(
                 model, 2, activation_pattern, self.dtype)
-            output_expected = model.forward(x)
-            output = g.T @ x.reshape((2, 1)) + h
+            output_expected = model.forward(x).item()
+            output = (g.T @ x.reshape((2, 1)) + h).item()
             self.assertAlmostEqual(output, output_expected, 10)
             self.assertTrue(torch.all(torch.le(P @ (x.reshape((-1, 1))), q)))
             # Randomly take 100 sample of inputs. If the sample shares the
@@ -118,6 +150,18 @@ class TestReLU(unittest.TestCase):
             self, self.model2, torch.tensor([3, -4], dtype=self.dtype))
         test_relu_given_activation_pattern_util(
             self, self.model2, torch.tensor([-3, -4], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model2, torch.tensor([-10, -20], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model3, torch.tensor([-6, 4], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model3, torch.tensor([-10, 4], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model3, torch.tensor([3, -4], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model3, torch.tensor([-3, -4], dtype=self.dtype))
+        test_relu_given_activation_pattern_util(
+            self, self.model3, torch.tensor([-10, -20], dtype=self.dtype))
 
     def test_relu_free_pattern_constructor1(self):
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model1,
@@ -148,14 +192,20 @@ class TestReLU(unittest.TestCase):
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
             (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
-                z_lo, z_up) = relu_free_pattern.output_constraint(
+                z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up)\
+                = relu_free_pattern.output_constraint(
                 model, x_lo, x_up)
-            # print("z_lo:{}\nz_up:{}".format(z_lo, z_up))
-            num_z_lo_positive = np.sum([z_lo_i >= 0 for z_lo_i in z_lo])
-            num_z_up_negative = np.sum([z_up_i <= 0 for z_up_i in z_up])
-            num_ineq = (relu_free_pattern.num_relu_units -
-                        num_z_lo_positive - num_z_up_negative) * 4 + 4
-            num_eq = (num_z_lo_positive + num_z_up_negative) * 2
+            # print("z_pre_relu_lo:{}\nz_pre_relu_up:{}".format(
+            #    z_pre_relu_lo, z_pre_relu_up))
+            num_z_pre_relu_lo_positive = np.sum([
+                z_pre_relu_lo_i >= 0 for z_pre_relu_lo_i in z_pre_relu_lo])
+            num_z_pre_relu_up_negative = np.sum([
+                z_pre_relu_up_i <= 0 for z_pre_relu_up_i in z_pre_relu_up])
+            num_ineq = (
+                relu_free_pattern.num_relu_units - num_z_pre_relu_lo_positive
+                - num_z_pre_relu_up_negative) * 4 + 4
+            num_eq = (num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative)\
+                * 2
             self.assertListEqual(
                 list(Ain1.shape), [num_ineq, 2])
             self.assertListEqual(list(Ain2.shape), [
@@ -218,27 +268,23 @@ class TestReLU(unittest.TestCase):
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
                     model, x)
-                for i in range(relu_free_pattern.num_relu_units):
-                    self.assertTrue(
-                        torch.le(
-                            z[i][0], torch.max(
-                                z_up[i], torch.tensor(0., dtype=self.dtype))))
-                    self.assertTrue(
-                        torch.ge(
-                            z[i][0], torch.max(
-                                z_lo[i], torch.tensor(0., dtype=self.dtype))))
+                np.testing.assert_array_less(
+                    z.squeeze().detach().numpy(),
+                    z_post_relu_up.detach().numpy() + 1E-10)
+                np.testing.assert_array_less(
+                    z_post_relu_lo.detach().numpy() - 1E-10,
+                    z.squeeze().detach().numpy())
                 # Check the output
                 self.assertAlmostEqual(output, (a_out.T @ z + b_out).item(), 3)
                 x_vec = x.reshape((-1, 1))
                 lhs_in = Ain1 @ x_vec + Ain2 @z + Ain3 @ beta
                 lhs_eq = Aeq1 @ x_vec + Aeq2 @z + Aeq3 @ beta
                 precision = 1E-10
-                self.assertTrue(torch.all(
-                    torch.le(lhs_in.squeeze(),
-                             rhs_in.squeeze() + torch.tensor(precision))))
-                self.assertTrue(torch.all(torch.le(torch.abs(
-                                lhs_eq.squeeze() - rhs_eq.squeeze()),
-                            precision)))
+                np.testing.assert_array_less(
+                    lhs_in.squeeze().detach().numpy(),
+                    rhs_in.squeeze().detach().numpy() + precision)
+                np.testing.assert_allclose(lhs_eq.squeeze().detach().numpy(),
+                                           rhs_eq.squeeze().detach().numpy())
                 # Now perturb beta by changing some entry from 1 to 0, and vice
                 # versa. Now it should not satisfy the constraint.
                 perturbed_beta_entry = np.random.randint(0, beta.numel())
@@ -282,6 +328,7 @@ class TestReLU(unittest.TestCase):
 
         test_model(self.model1)
         test_model(self.model2)
+        test_model(self.model3)
 
     def test_compute_alpha_index1(self):
         relu_free_pattern = relu_to_optimization.\
