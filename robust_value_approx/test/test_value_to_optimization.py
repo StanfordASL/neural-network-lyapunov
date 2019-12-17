@@ -7,8 +7,6 @@ import numpy as np
 import cvxpy as cp
 import torch
 
-import matplotlib.pyplot as plt
-
 
 class ValueToOptimizationTest(unittest.TestCase):
     def test_trajopt_x0xN(self):
