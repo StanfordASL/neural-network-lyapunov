@@ -4,6 +4,188 @@ import gurobipy
 
 
 class LyapunovReluTrainingOptions:
+    """
+    This option is used for train_lyapunov_relu() function.
+    """
+    def __init__(self):
+        # The number of samples xⁱ in each batch.
+        self.batch_size = 100
+        # The learning rate of the optimizer
+        self.learning_rate = 0.003
+        # Number of iterations in the training.
+        self.max_iterations = 1000
+        # The weight of hinge(-V(xⁱ)) in the total loss
+        self.lyapunov_positivity_sample_cost_weight = 1.
+        # The margin in hinge(-V(xⁱ))
+        self.lyapunov_positivity_sample_margin = 0.
+        # The weight of hinge(dV(xⁱ) + ε V(xⁱ)) in the total loss
+        self.lyapunov_derivative_sample_cost_weight = 1.
+        # The margin in hinge(dV(xⁱ) + ε V(xⁱ))
+        self.lyapunov_derivative_sample_margin = 0.1
+        # The weight of -min_x V(x) - ε₂ |x - x*|₁ in the total loss
+        self.lyapunov_positivity_mip_cost_weight = 10.
+        # The number of (sub)optimal solutions for the MIP
+        # min_x V(x) - V(x*) - ε₂ |x - x*|₁
+        self.lyapunov_positivity_mip_pool_solutions = 10
+        # The weight of max_x dV(x) + εV(x)
+        self.lyapunov_derivative_mip_cost_weight = 10.
+        # The number of (sub)optimal solutions for the MIP
+        # max_x dV(x) + εV(x)
+        self.lyapunov_derivative_mip_pool_solutions = 10
+        # If set to true, we will print some messages during training.
+        self.output_flag = False
+        # The MIP objective loss is ∑ⱼ rʲ * j_th_objective. r is the decay
+        # rate.
+        self.lyapunov_positivity_mip_cost_decay_rate = 0.9
+        self.lyapunov_derivative_mip_cost_decay_rate = 0.9
+        # This is ε₂ in  V(x) >=  ε₂ |x - x*|₁
+        self.lyapunov_positivity_epsilon = 0.01
+        # This is ε in dV(x) ≤ -ε V(x)
+        self.lyapunov_derivative_epsilon = 0.01
+
+
+def train_lyapunov_relu(
+        lyapunov_hybrid_system, relu, V_rho, x_equilibrium, state_samples_all,
+        options):
+    """
+    We will train a ReLU network, such that the function
+    V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁ is a Lyapunov function that certifies
+    (exponential) convergence. Namely V(x) should satisfy the following
+    conditions
+    1. V(x) > V(x*) ∀ x ≠ x*
+    2. dV(x) ≤ -ε V(x) ∀ x
+    where dV(x) = V̇(x) for continuous time system, and
+    dV(x[n]) = V(x[n+1]) - V(x[n]) for discrete time system.
+    In order to find such V(x), we penalize a (weighted) sum of the following
+    loss
+    1. hinge(-V(xⁱ)) for sampled state xⁱ.
+    2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
+    3. -min_x V(x) - ε₂ |x - x*|₁
+    4. max_x dV(x) + ε V(x)
+    where ε₂ is a given positive scalar, and |x - x*|₁ is the 1-norm of x - x*.
+    hinge(z) = max(z + margin, 0) where margin is a given scalar.
+    @param lyapunov_hybrid_system This input should define a common interface
+    lyapunov_positivity_as_milp() (which represents minₓ V(x) - ε₂ |x - x*|₁)
+    lyapunov_positivity_loss_at_sample() (which represents hinge(-V(xⁱ)))
+    lyapunov_derivative_as_milp() (which represents maxₓ dV(x) + ε V(x))
+    lyapunov_derivative_loss_at_sample() (which represents
+    hinge(dV(xⁱ) + ε V(xⁱ)).
+    One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
+    @param relu Both as an input and an output. As an input, this represents
+    the initial guess of the ReLU network. As an output, this represents the
+    network after training.
+    @param V_rho ρ in the documentation above. It is part of the Lyapunov
+    function.
+    @param x_equilibrium The equilibrium state.
+    @param state_samples_all A list of torch 1D tensors. Each torch 1D tensor
+    is a sampled state xⁱ.
+    @param options A LyapunovReluTrainingOptions object.
+    @return lyapunov_condition_satisfied At termination, whether the Lyapunov
+    condition is satisfied or not.
+    """
+    assert(isinstance(lyapunov_hybrid_system,
+                      lyapunov.LyapunovDiscreteTimeHybridSystem))
+    assert(isinstance(V_rho, float))
+    assert(isinstance(state_samples_all, list))
+    assert(isinstance(x_equilibrium, torch.Tensor))
+    assert(isinstance(options, LyapunovReluTrainingOptions))
+
+    dtype = lyapunov_hybrid_system.system.dtype
+    iter_count = 0
+    state_samples_next = [lyapunov_hybrid_system.system.step_forward(x) for
+                          x in state_samples_all]
+    while iter_count < options.max_iterations:
+        lyapunov_positivity_as_milp_return = lyapunov_hybrid_system.\
+            lyapunov_positivity_as_milp(
+                relu, x_equilibrium, V_rho,
+                options.lyapunov_positivity_epsilon)
+        lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
+        lyapunov_positivity_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        lyapunov_positivity_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSearchMode, 2)
+        lyapunov_positivity_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSolutions,
+            options.lyapunov_positivity_mip_pool_solutions)
+        lyapunov_positivity_mip.gurobi_model.optimize()
+
+        lyapunov_derivative_as_milp_return = lyapunov_hybrid_system.\
+            lyapunov_derivative_as_milp(
+                relu, x_equilibrium, V_rho,
+                options.lyapunov_derivative_epsilon)
+        lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
+        lyapunov_derivative_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        lyapunov_derivative_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSearchMode, 2)
+        lyapunov_derivative_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.PoolSolutions,
+            options.lyapunov_derivative_mip_pool_solutions)
+        lyapunov_derivative_mip.gurobi_model.optimize()
+        output_msg = ""
+        if (options.output_flag):
+            output_msg = output_msg + "Iterations: " + str(iter_count) +\
+                ", positivity MIP objective: " + str(
+                        lyapunov_positivity_mip.gurobi_model.ObjVal) +\
+                ", derivative MIP objective: " + \
+                str(lyapunov_derivative_mip.gurobi_model.ObjVal)
+        if (lyapunov_positivity_mip.gurobi_model.ObjVal >= 0. and
+                lyapunov_derivative_mip.gurobi_model.ObjVal <= 0.):
+            return True
+
+        loss = torch.tensor(0., dtype=dtype)
+        state_sample_indices = torch.randint(
+            0, len(state_samples_all), (options.batch_size,))
+        relu_at_equilibrium = relu.forward(x_equilibrium)
+        for i in state_sample_indices:
+            loss += lyapunov_hybrid_system.\
+                lyapunov_derivative_loss_at_sample_and_next_state(
+                    relu, V_rho, state_samples_all[i], state_samples_next[i],
+                    x_equilibrium,
+                    margin=options.lyapunov_derivative_sample_margin)
+            loss += lyapunov_hybrid_system.\
+                lyapunov_positivity_loss_at_sample(
+                    relu, relu_at_equilibrium, x_equilibrium,
+                    state_samples_all[i], V_rho,
+                    margin=options.lyapunov_positivity_sample_margin)
+
+        for mip_sol_number in range(
+                options.lyapunov_positivity_mip_pool_solutions):
+            if (mip_sol_number <
+                    lyapunov_positivity_mip.gurobi_model.solCount):
+                loss += torch.pow(torch.tensor(
+                    options.lyapunov_positivity_mip_cost_decay_rate,
+                    dtype=dtype), mip_sol_number) *\
+                    -lyapunov_positivity_mip.\
+                    compute_objective_from_mip_data_and_solution(
+                        solution_number=mip_sol_number, penalty=1e-8)
+        for mip_sol_number in range(
+                options.lyapunov_derivative_mip_pool_solutions):
+            if (mip_sol_number <
+                    lyapunov_derivative_mip.gurobi_model.solCount):
+                loss += torch.pow(torch.tensor(
+                    options.lyapunov_derivative_mip_cost_decay_rate,
+                    dtype=dtype), mip_sol_number) *\
+                    lyapunov_derivative_mip.\
+                    compute_objective_from_mip_data_and_solution(
+                        solution_number=mip_sol_number, penalty=1e-8)
+        if (options.output_flag):
+            output_msg = output_msg + ", Loss:{}".format(loss)
+
+        if (options.output_flag):
+            print(output_msg)
+
+        optimizer = torch.optim.Adam(
+            relu.parameters(), lr=options.learning_rate)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        iter_count += 1
+
+    return False
+
+
+class LyapunovInvarianceReluTrainingOptions:
     def __init__(self):
         # The number of samples xⁱ in each batch.
         self.batch_size = 100
@@ -35,7 +217,7 @@ class LyapunovReluTrainingOptions:
         self.dV_epsilon = 0.01
 
 
-def train_lyapunov_relu(
+def train_lyapunov_invariance_relu(
         lyapunov_hybrid_system, relu, x_equilibrium, state_samples_all,
         options):
     """
@@ -52,8 +234,8 @@ def train_lyapunov_relu(
     1. maxₓ c(x) ≤ 0 ∀x
     2. c(x) < -dV_margin ∀x s.t V(x) > ρ
     @param lyapunov_hybrid_system This input should define a common interface
-    lyapunov_gradient_as_milp() (which represents the MIP maxₓ c(x)) and
-    lyapunov_gradient_loss_at_sample() (which represents hinge_loss(c(xⁱ)).
+    lyapunov_derivative_as_milp() (which represents the MIP maxₓ c(x)) and
+    lyapunov_derivative_loss_at_sample() (which represents hinge_loss(c(xⁱ)).
     One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
     @param relu Both as an input and an output. As an input, this represents
     the initial guess of the ReLU network. As an output, this represents the
@@ -61,7 +243,7 @@ def train_lyapunov_relu(
     @param x_equilibrium The equilibrium state.
     @param state_samples_all A list of torch 1D tensors. Each torch 1D tensor
     is a sampled state xⁱ.
-    @param options A LyapunovReluTrainingOptions object.
+    @param options A LyapunovInvarianceReluTrainingOptions object.
     @return lyapunov_condition_satisfied At termination, whether the Lyapunov
     condition is satisfied or not.
     """
@@ -69,16 +251,17 @@ def train_lyapunov_relu(
         lyapunov_hybrid_system, lyapunov.LyapunovDiscreteTimeHybridSystem))
     assert(isinstance(state_samples_all, list))
     assert(isinstance(x_equilibrium, torch.Tensor))
-    assert(isinstance(options, LyapunovReluTrainingOptions))
+    assert(isinstance(options, LyapunovInvarianceReluTrainingOptions))
 
     dtype = lyapunov_hybrid_system.system.dtype
     iter_count = 0
     state_samples_next = [lyapunov_hybrid_system.system.step_forward(x) for
                           x in state_samples_all]
     while iter_count < options.max_iterations:
-        lyapunov_gradient_as_milp_return = lyapunov_hybrid_system.\
-            lyapunov_gradient_as_milp(relu, x_equilibrium, options.dV_epsilon)
-        mip = lyapunov_gradient_as_milp_return[0]
+        lyapunov_derivative_as_milp_return = lyapunov_hybrid_system.\
+            lyapunov_derivative_as_milp(
+                relu, x_equilibrium, options.dV_epsilon)
+        mip = lyapunov_derivative_as_milp_return[0]
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
@@ -86,7 +269,7 @@ def train_lyapunov_relu(
         mip.gurobi_model.optimize()
 
         sublevelset_as_milp_return = lyapunov_hybrid_system.\
-            lyapunov_gradient_as_milp(
+            lyapunov_derivative_as_milp(
                 relu, x_equilibrium, options.dV_epsilon,
                 options.lyapunov_sublevel)
         mip_sublevel = sublevelset_as_milp_return[0]
@@ -111,7 +294,7 @@ def train_lyapunov_relu(
             0, len(state_samples_all), (options.batch_size,))
         for i in state_sample_indices:
             loss += lyapunov_hybrid_system.\
-                lyapunov_loss_at_sample_and_next_state(
+                lyapunov_derivative_loss_at_sample_and_next_state(
                     relu, state_samples_all[i], state_samples_next[i],
                     margin=options.sample_lyapunov_loss_margin)
 
@@ -157,22 +340,27 @@ class TrainValueApproximatorOptions:
 
 
 def train_value_approximator(
-    hybrid_linear_system, relu, instantaneous_cost_fun, state_samples_all,
-        options):
+    hybrid_linear_system, relu, V_rho, x_equilibrium, instantaneous_cost_fun,
+        state_samples_all, options):
     """
-    Train a ReLU network to approximates the cost-to-go (value function) of a
-    hybrid linear system.
+    Train a ReLU network such that ReLU(x) - ReLU(x*) + ρ|x-x*|₁ approximates
+    the cost-to-go (value function) of a hybrid linear system.
     @param hybrid_linear_system This system has to define a cost_to_go(x)
     function, that computes the cost-to-go from a state x.
     @param relu Both an input and an output paramter. As an input, it
     represents the initial guess of the network. As an output, it represents
     the trained network.
+    @param V_rho ρ in the documentation above.
+    @param x_equilibrium The equilibrium state x*.
     @param instantaneous_cost_fun A function evaluates the instantaneous cost
     of a state.
     @param state_samples_all A list of state samples.
     @param options A TrainValueApproximatorOptions instance.
     @return is_converged Whether the training converged or not.
     """
+    assert(isinstance(x_equilibrium, torch.Tensor))
+    assert(x_equilibrium.shape == (hybrid_linear_system.x_dim,))
+    assert(isinstance(V_rho, float))
     assert(isinstance(state_samples_all, list))
     assert(isinstance(options, TrainValueApproximatorOptions))
     value_samples = [hybrid_linear_system.cost_to_go(
@@ -182,9 +370,15 @@ def train_value_approximator(
     optimizer = torch.optim.Adam(relu.parameters(), lr=options.learning_rate)
     for epoch in range(options.max_epochs):
         optimizer.zero_grad()
-        relu_output = relu(torch.stack(state_samples_all, dim=0))
+        state_samples_all_torch = torch.stack(state_samples_all, dim=0)
+        relu_output = relu(state_samples_all_torch)
+        relu_x_equilibrium = relu.forward(x_equilibrium)
+        value_relu = relu_output.squeeze() - relu_x_equilibrium +\
+            V_rho * torch.norm(
+                state_samples_all_torch - x_equilibrium.reshape((1, -1)).
+                expand(state_samples_all_torch.shape[0], -1), dim=1, p=1)
         loss = torch.nn.MSELoss()(
-            relu_output.squeeze(), torch.stack(value_samples, dim=0))
+            value_relu, torch.stack(value_samples, dim=0))
         if (loss.item() <= options.convergence_tolerance):
             return True
         loss.backward()

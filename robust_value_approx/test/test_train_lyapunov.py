@@ -53,9 +53,11 @@ class TestTrainLyapunov(unittest.TestCase):
         options = train_lyapunov.TrainValueApproximatorOptions()
         options.max_epochs = 1000
         options.convergence_tolerance = 0.05
+        V_rho = 0.1
+        x_equilibrium = torch.tensor([0., 0.], dtype=torch.float64)
         result = train_lyapunov.train_value_approximator(
-            self.system, self.relu, lambda x: x @ x, state_samples_all,
-            options)
+            self.system, self.relu, V_rho, x_equilibrium, lambda x: x @ x,
+            state_samples_all, options)
         self.assertTrue(result)
 
 
