@@ -32,6 +32,25 @@ class LyapunovDiscreteTimeHybridSystem:
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
         self.system = system
 
+    def lyapunov_value(
+            self, relu_model, x, x_equilibrium, V_rho,
+            relu_at_equilibrium=None):
+        """
+        Compute the value of the Lyapunov function as
+        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
+        where |x-x*|₁ is the 1-norm of x-x*.
+        @param relu_model A ReLU (including leaky relu) model.
+        @param x a torch tensor. Evaluate Lyapunov function at this point.
+        @param x_equilibrium a torch tensor. The equilibrium state x*.
+        @param V_rho ρ in the documentation above.
+        @param relu_at_equilibrium. ReLU(x*). If set to None, then we compute
+        ReLU(x*) in this function.
+        """
+        if relu_at_equilibrium is None:
+            relu_at_equilibrium = relu_model.forward(x_equilibrium)
+        return relu_model.forward(x) - relu_at_equilibrium +\
+            V_rho * torch.norm(x - x_equilibrium, p=1)
+
     def lyapunov_positivity_as_milp(
             self, relu_model, x_equilibrium, V_rho, V_epsilon):
         """
@@ -149,10 +168,10 @@ class LyapunovDiscreteTimeHybridSystem:
         assert(x_equilibrium.shape == (self.system.x_dim,))
         assert(isinstance(V_rho, float))
         assert(isinstance(margin, float))
-        relu_x = relu_model.forward(state_sample)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
-            relu_x - relu_at_equilibrium + V_rho * torch.norm(
-                state_sample - x_equilibrium, p=1), torch.tensor(-1.))
+            self.lyapunov_value(
+                relu_model, state_sample, x_equilibrium, V_rho,
+                relu_at_equilibrium), torch.tensor(-1.))
 
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,

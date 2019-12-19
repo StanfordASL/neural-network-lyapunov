@@ -66,6 +66,22 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         self.system1 = test_hybrid_linear_system.\
             setup_trecate_discrete_time_system()
 
+    def test_lyapunov_value(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+        relu = setup_leaky_relu(dut.system.dtype)
+        x_equilibrium = torch.tensor([1., 2.], dtype=dut.system.dtype)
+        V_rho = 0.1
+
+        def test_fun(x):
+            self.assertAlmostEqual(
+                (relu.forward(x) - relu.forward(x_equilibrium) +
+                 V_rho * torch.norm(x - x_equilibrium, p=1)).item(),
+                dut.lyapunov_value(relu, x, x_equilibrium, V_rho).item())
+
+        test_fun(torch.tensor([0., 0.], dtype=dut.system.dtype))
+        test_fun(torch.tensor([1., 0.], dtype=dut.system.dtype))
+        test_fun(torch.tensor([-0.2, 0.4], dtype=dut.system.dtype))
+
     def test_lyapunov_positivity_as_milp(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
 
@@ -138,12 +154,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     self.system1.A[mode].detach().numpy() @ x_sol +
                     self.system1.g[mode].detach().numpy(),
                     x_next_sol, decimal=5)
-        v_next = relu1.forward(torch.from_numpy(x_next_sol)) -\
-            relu1.forward(x_equilibrium) + V_rho * torch.norm(
-                torch.from_numpy(x_next_sol) - x_equilibrium, p=1)
-        v = relu1.forward(torch.from_numpy(x_sol)) -\
-            relu1.forward(x_equilibrium) + V_rho * torch.norm(
-                torch.from_numpy(x_sol) - x_equilibrium, p=1)
+        v_next = dut.lyapunov_value(
+            relu1, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
+        v = dut.lyapunov_value(
+            relu1, torch.from_numpy(x_sol), x_equilibrium, V_rho)
         self.assertAlmostEqual(
             milp.gurobi_model.objVal,
             (v_next - v + dV_epsilon * v).item())
@@ -158,10 +172,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             assert(torch.all(
                 self.system1.P[mode] @ x_val <= self.system1.q[mode]))
             x_next_val = self.system1.A[mode] @ x_val + self.system1.g[mode]
-            v_next = relu1.forward(x_next_val) - relu1.forward(x_equilibrium)\
-                + V_rho * torch.norm(x_next_val - x_equilibrium, p=1)
-            v = relu1.forward(x_val) - relu1.forward(x_equilibrium)\
-                + V_rho * torch.norm(x_val - x_equilibrium, p=1)
+            v_next = dut.lyapunov_value(
+                relu1, x_next_val, x_equilibrium, V_rho)
+            v = dut.lyapunov_value(relu1, x_val, x_equilibrium, V_rho)
             cost_expected = (v_next - v + dV_epsilon * v).item()
             (milp_test, x_test, _, _, _, _, _, _, _) =\
                 dut.lyapunov_derivative_as_milp(
@@ -251,32 +264,33 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     [[x[i], s_x_norm[i], beta_x_norm[i]]],
                     rhs=rhs_x_norm[j]+Ain_x_norm[j]*x_equilibrium[i],
                     sense=gurobipy.GRB.LESS_EQUAL)
+        relu_x_equilibrium = relu1.forward(x_equilibrium).item()
         milp_relu.setObjective(
             [a_out,
              V_rho*torch.ones((self.system1.x_dim,), dtype=self.system1.dtype)
-             ], [z, s_x_norm], float(b_out), sense=gurobipy.GRB.MAXIMIZE)
+             ], [z, s_x_norm], float(b_out) - relu_x_equilibrium,
+            sense=gurobipy.GRB.MAXIMIZE)
         milp_relu.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp_relu.gurobi_model.optimize()
         self.assertEqual(
             milp_relu.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
-        relu_x_equilibrium = relu1.forward(x_equilibrium).item()
-        v_upper = milp_relu.gurobi_model.ObjVal - relu_x_equilibrium
+        v_upper = milp_relu.gurobi_model.ObjVal
         x_sol = torch.tensor([v.x for v in x], dtype=dut.system.dtype)
-        self.assertAlmostEqual(
-            (relu1.forward(x_sol) - relu_x_equilibrium +
-             V_rho * torch.norm(x_sol - x_equilibrium, p=1)).item(), v_upper)
+        self.assertAlmostEqual(dut.lyapunov_value(
+            relu1, x_sol, x_equilibrium, V_rho, relu_x_equilibrium).item(),
+            v_upper)
         milp_relu.setObjective(
             [a_out,
              V_rho*torch.ones((self.system1.x_dim,), dtype=self.system1.dtype)
-             ], [z, s_x_norm], float(b_out), sense=gurobipy.GRB.MINIMIZE)
+             ], [z, s_x_norm], float(b_out) - relu_x_equilibrium,
+            sense=gurobipy.GRB.MINIMIZE)
         milp_relu.gurobi_model.optimize()
         self.assertEqual(
             milp_relu.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
-        v_lower = milp_relu.gurobi_model.ObjVal - relu_x_equilibrium
+        v_lower = milp_relu.gurobi_model.ObjVal
         x_sol = torch.tensor([v.x for v in x], dtype=dut.system.dtype)
-        self.assertAlmostEqual(
-            (relu1.forward(x_sol) + V_rho * torch.norm(
-                x_sol - x_equilibrium, p=1) - relu_x_equilibrium).item(),
+        self.assertAlmostEqual(dut.lyapunov_value(
+            relu1, x_sol, x_equilibrium, V_rho, relu_x_equilibrium).item(),
             v_lower)
 
         # If we set lyapunov_lower to be v_upper + 1, the problem should be
@@ -491,10 +505,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     is_in_mode = True
                     break
             assert(is_in_mode)
-            V_x_sample = relu1.forward(x_sample) +\
-                V_rho * torch.norm(x_sample - x_equilibrium, p=1)
-            V_x_next = relu1.forward(x_next) +\
-                V_rho * torch.norm(x_next - x_equilibrium, p=1)
+            V_x_sample = dut.lyapunov_value(
+                relu1, x_sample, x_equilibrium, V_rho)
+            V_x_next = dut.lyapunov_value(
+                relu1, x_next, x_equilibrium, V_rho)
             V_diff = V_x_next - V_x_sample
             loss_expected = V_diff + margin if V_diff > margin else\
                 torch.tensor(0., dtype=self.dtype)
