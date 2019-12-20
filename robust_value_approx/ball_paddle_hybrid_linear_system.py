@@ -88,8 +88,7 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
     for theta in paddle_angles:
         st = torch.sin(theta)
         ct = torch.cos(theta)
-        # if midpoint:
-        if False:
+        if midpoint:
             X = torch.Tensor([[1., 0., 0., -.5*dt, 0., 0.],
                               [0., 1., 0., 0., 0., -.5*dt],
                               [0., 0., 1., 0., 0., -.5*dt],

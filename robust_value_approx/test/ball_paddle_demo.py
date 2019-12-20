@@ -46,7 +46,7 @@ if __name__ == "__main__":
     # generate an initial state
     bally0 = .75
     paddley0 = .15
-    ballvy0 = -2.5 # anywhere between -5 and 0 seems OK
+    ballvy0 = -2. # anywhere between -5 and 0 seems OK
     x0 = torch.Tensor([0., bally0, paddley0, 0., ballvy0, 0.]).type(dtype)
     # compute a feedforward trajectory from vf
     (obj_val, s_val, alpha_val) = V(x0)
