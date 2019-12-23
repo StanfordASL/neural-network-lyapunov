@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # # generate an initial state
     bally0 = .75
     paddley0 = .15
-    ballvy0 = -2. # anywhere between -5 and 0 seems OK
+    ballvy0 = -2.  # anywhere between -5 and 0 seems OK
     x0 = torch.Tensor([0., bally0, paddley0, 0., ballvy0, 0.]).type(dtype)
     # compute a feedforward trajectory from vf
     (obj_val, s_val, alpha_val) = V(x0)
@@ -123,7 +123,7 @@ if __name__ == "__main__":
         (ballx, bally) = (ball_pos[0], ball_pos[2])
         ball_vel = p.getBaseVelocity(ball_id)[0]
         (ballvx, ballvy) = (ball_vel[0], ball_vel[2])
-        paddle_state = p.getLinkState(panda_id, 12, 
+        paddle_state = p.getLinkState(panda_id, 12,
                                       computeLinkVelocity=1,
                                       computeForwardKinematics=1)
         (paddley, paddlevy) = (paddle_state[0][2], paddle_state[6][2])
@@ -145,7 +145,7 @@ if __name__ == "__main__":
                                                    solver=p.IK_DLS)
         lin_jac, ang_jac = p.calculateJacobian(panda_id,
                                                12,
-                                               [0.,0.,0.],
+                                               [0., 0., 0.],
                                                joint_poses,
                                                [0.] * panda_num_joints,
                                                [0.] * panda_num_joints)
@@ -159,9 +159,9 @@ if __name__ == "__main__":
                                     targetVelocities=joint_vels,
                                     forces=panda_efforts,
                                     positionGains=1.*torch.ones(
-                                                            panda_num_joints),
+                                        panda_num_joints),
                                     velocityGains=1.*torch.ones(
-                                                            panda_num_joints))
+                                        panda_num_joints))
         p.stepSimulation()
         time.sleep(0.001)
     legend = []
