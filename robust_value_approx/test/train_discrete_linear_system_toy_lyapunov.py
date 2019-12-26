@@ -8,7 +8,6 @@ import torch.nn as nn
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
-import robust_value_approx.test.utils
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -18,22 +17,29 @@ from mpl_toolkits import mplot3d
 def setup_relu():
     # Construct a simple ReLU model with 2 hidden layers
     dtype = torch.float64
-    linear1 = nn.Linear(2, 3)
-    linear1.weight.data = torch.tensor([[-1, 0.5], [-0.3, 0.74], [-2, 1.5]],
-                                       dtype=dtype)
-    linear1.bias.data = torch.tensor([-0.1, 1.0, 0.5], dtype=dtype)
-    linear2 = nn.Linear(3, 4)
+    linear1 = nn.Linear(2, 4)
+    linear1.weight.data = torch.tensor(
+        [[-1, 0.5], [-0.3, 0.74], [-2, 1.5], [-0.5, 0.2]], dtype=dtype)
+    linear1.bias.data = torch.tensor(
+        [-0.1, 1.0, 0.5, 0.2], dtype=dtype)
+    linear2 = nn.Linear(4, 4)
     linear2.weight.data = torch.tensor(
-            [[-1, -0.5, 1.5], [2, -1.5, 2.6], [-2, -0.3, -.4],
-             [0.2, -0.5, 1.2]],
+            [[-1, -0.5, 1.5, 1.2], [2, -1.5, 2.6, 0.3], [-2, -0.3, -.4, -0.1],
+             [0.2, -0.5, 1.2, 1.3]],
             dtype=dtype)
     linear2.bias.data = torch.tensor([-0.3, 0.2, 0.7, 0.4], dtype=dtype)
-    linear3 = nn.Linear(4, 1)
-    linear3.weight.data = torch.tensor([[-.4, .5, -.6, 0.3]], dtype=dtype)
-    linear3.bias.data = torch.tensor([-0.9], dtype=dtype)
+    linear3 = nn.Linear(4, 4)
+    linear3.weight.data = torch.tensor(
+        [[-0.5, 0.2, 0.3, 0.1], [0.1, 0.2, 0.3, 0.4], [0.5, 0.6, -0.1, -0.2],
+         [0.3, -1.1, 0.2, 0.4]], dtype=dtype)
+    linear3.bias.data = torch.tensor([-0.1, 0.1, 0.2, 0.3], dtype=dtype)
+    linear4 = nn.Linear(4, 1)
+    linear4.weight.data = torch.tensor(
+        [[-.4, .5, -.6, 0.3]], dtype=dtype)
+    linear4.bias.data = torch.tensor([-0.9], dtype=dtype)
     relu1 = nn.Sequential(
-        linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3,
-        nn.LeakyReLU(0.1))
+        linear1, nn.LeakyReLU(0.1), linear4, nn.LeakyReLU(0.1))#, linear2, nn.LeakyReLU(0.1), linear3,
+        #nn.LeakyReLU(0.1), linear4, nn.LeakyReLU(0.1))
     return relu1
 
 
@@ -103,22 +109,21 @@ if __name__ == "__main__":
     state_samples_all1 = test_train_lyapunov.setup_state_samples_all((51, 51))
     # First train a ReLU to approximate the value function.
     options1 = train_lyapunov.TrainValueApproximatorOptions()
-    options1.max_epochs = 100
+    options1.max_epochs = 200
     options1.convergence_tolerance = 0.01
     result1 = train_lyapunov.train_value_approximator(
         system, relu, V_rho, x_equilibrium, lambda x: torch.norm(x, p=1),
         state_samples_all1, options1)
-    robust_value_approx.test.utils.plot_relu(
-        relu, system, V_rho, x_equilibrium, (51, 51))
+    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))
 
     state_samples_all = state_samples_all1
-    options = train_lyapunov.LyapunovReluTrainingOptions()
-    options.output_flag = True
-    options.max_iterations = 300
-    options.lyapunov_derivative_epsilon = 0.
+    dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system, V_rho, x_equilibrium)
+    dut.output_flag = True
+    dut.max_iterations = 1000
+    dut.lyapunov_derivative_mip_pool_solutions = 20
+    result = dut.train(relu, state_samples_all)
 
-    result = train_lyapunov.train_lyapunov_relu(
-        lyapunov_hybrid_system, relu, V_rho, x_equilibrium, state_samples_all,
-        options)
-    robust_value_approx.test.utils.plot_relu(
-        relu, system, V_rho, x_equilibrium, (51, 51))
+#    result = train_lyapunov.train_lyapunov_relu(
+#        lyapunov_hybrid_system, relu, V_rho, x_equilibrium, state_samples_all,
+#        options)
+    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))

@@ -470,3 +470,21 @@ class AutonomousHybridLinearSystem:
         if mode_x is None:
             raise Exception("step_forward(): the state is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
+
+    def possible_next_states(self, x):
+        """
+        Optimization problem cannot impose strictly inequality constraint,
+        hence for the state on the boundary of the hybrid modes, in
+        optimization we need to think about multiple possible states.
+        @param x The state
+        @return next_states A list. If x is on the boundary of the modes, then
+        return multiple possible next states, otherwise return a list of single
+        next state. If x is not in any hybrid mode, then return an empty list.
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.x_dim,))
+        next_states = []
+        for i in range(self.num_modes):
+            if torch.all(self.P[i] @ x <= self.q[i]):
+                next_states.append(self.A[i] @ x + self.g[i])
+        return next_states

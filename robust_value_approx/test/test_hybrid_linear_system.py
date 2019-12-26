@@ -359,6 +359,30 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         test_fun(torch.tensor([-0.4, -0.5], dtype=dut.dtype))
         test_fun(torch.tensor([-0.4, 0.5], dtype=dut.dtype))
 
+    def test_possible_next_states(self):
+        dut = setup_trecate_discrete_time_system()
+
+        x = torch.tensor([0.5, 0.6], dtype=dut.dtype)
+        next_states = dut.possible_next_states(x)
+        self.assertEqual(len(next_states), 1)
+        np.testing.assert_allclose(
+            next_states[0].detach().numpy(),
+            (dut.A[1] @ x + dut.g[1]).detach().numpy())
+
+        x = torch.tensor([0.5, 0], dtype=dut.dtype)
+        next_states = dut.possible_next_states(x)
+        self.assertEqual(len(next_states), 2)
+        np.testing.assert_allclose(
+            next_states[0].detach().numpy(),
+            (dut.A[0] @ x + dut.g[0]).detach().numpy())
+        np.testing.assert_allclose(
+            next_states[1].detach().numpy(),
+            (dut.A[1] @ x + dut.g[1]).detach().numpy())
+
+        x = torch.tensor([1.5, 0], dtype=dut.dtype)
+        next_states = dut.possible_next_states(x)
+        self.assertEqual(len(next_states), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
