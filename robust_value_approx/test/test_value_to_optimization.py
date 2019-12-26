@@ -253,9 +253,9 @@ class ValueToOptimizationTest(unittest.TestCase):
 
         self.assertAlmostEqual(obj_exp.item(), obj.item())
 
-    def test_trajopt_trapz(self):
+    def test_trajopt_midpoint(self):
         dtype = torch.float64
-        dt = .05
+        dt = .1
         x_lo = torch.Tensor(
             [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
@@ -263,9 +263,10 @@ class ValueToOptimizationTest(unittest.TestCase):
         u_lo = torch.Tensor([-np.pi / 2, -1e6]).type(dtype)
         u_up = torch.Tensor([np.pi / 2, 1e6]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
-            dtype, dt, x_lo, x_up, u_lo, u_up, collision_eps=1e-2, trapz=True)
+            dtype, dt, x_lo, x_up, u_lo, u_up,
+            collision_eps=1e-2, midpoint=True)
 
-        N = 20
+        N = 10
         vf = value_to_optimization.ValueFunction(
             sys, N, x_lo, x_up, u_lo, u_up)
         Q = torch.diag(torch.Tensor([0., 10., 0., 0., 1., 0.]).type(dtype))
