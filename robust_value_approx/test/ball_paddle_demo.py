@@ -17,8 +17,8 @@ if __name__ == "__main__":
     paddle_ang = torch.Tensor([.1, .2, .3, .4, .5, .6, .7]).type(dtype)
     x_lo = torch.Tensor([-10., -10., 0., -1e2, -1e2, 0.]).type(dtype)
     x_up = torch.Tensor([10., 10., 1., 1e2, 1e2, 1e2]).type(dtype)
-    u_lo = torch.Tensor([-np.pi, -1e4]).type(dtype)
-    u_up = torch.Tensor([np.pi, 1e4]).type(dtype)
+    u_lo = torch.Tensor([-np.pi, -1e2]).type(dtype)
+    u_up = torch.Tensor([np.pi, 1e2]).type(dtype)
     b_cap_lo = ball_capture - capture_size
     b_cap_up = ball_capture + capture_size
     sys = bphls.get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up,

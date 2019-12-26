@@ -22,7 +22,7 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
     @param collision_eps The distance at which we consider collision
     @param midpoint Whether or not to use midpoint integration
     """
-    if isinstance(paddle_angles, type(None)):
+    if paddle_angles is None:
         paddle_angles = torch.Tensor([0.]).type(dtype)
     g = -9.81
     x_dim = 6
@@ -137,10 +137,9 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
         hls.add_mode(A, B, c, torch.cat(
             (P, P_lim), dim=0), torch.cat(
                 (q, q_lim), dim=0))
-    if not isinstance(ball_capture_lo, type(None)) or\
-            not isinstance(ball_capture_up, type(None)) :
-        assert(not isinstance(ball_capture_lo, type(None)))
-        assert(not isinstance(ball_capture_up, type(None)))
+    if ball_capture_lo is not None or ball_capture_up is not None:
+        assert(ball_capture_lo is not None)
+        assert(ball_capture_up is not None)
         A = torch.Tensor([[1., 0., 0., 0., 0., 0.],
                           [0., 1., 0., 0., 0., 0.],
                           [0., 0., 1., 0., 0., 0.],
@@ -157,10 +156,10 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
         # capture state
         # goal_x_lo <= ball_x <= goal_x_up
         # goal_y_lo <= ball_y <= goal_y_up
-        P = torch.Tensor([[-1.,0.,0.,0.,0.,0.,0.,0.],
-                          [0.,-1.,0.,0.,0.,0.,0.,0.],
-                          [1.,0.,0.,0.,0.,0.,0.,0.],
-                          [0.,1.,0.,0.,0.,0.,0.,0.]]).type(dtype)
+        P = torch.Tensor([[-1., 0., 0., 0., 0., 0., 0., 0.],
+                          [0., -1., 0., 0., 0., 0., 0., 0.],
+                          [1., 0., 0., 0., 0., 0., 0., 0.],
+                          [0., 1., 0., 0., 0., 0., 0., 0.]]).type(dtype)
         q = torch.Tensor([-ball_capture_lo[0],
                           -ball_capture_lo[1],
                           ball_capture_up[0],
