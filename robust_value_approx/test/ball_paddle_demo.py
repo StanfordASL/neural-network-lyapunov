@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 import robust_value_approx.value_to_optimization as value_to_optimization
+import robust_value_approx.constants as constants
 import matplotlib.pyplot as plt
 
 
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     ttraj_val = torch.arange(0., N*dt, dt, dtype=dtype)
 
     p.connect(p.GUI)
-    p.setGravity(0, 0, -9.8)
+    p.setGravity(0, 0, constants.G)
     currentdir = os.path.dirname(os.path.abspath(
                                  inspect.getfile(inspect.currentframe())))
     p.setAdditionalSearchPath(currentdir)

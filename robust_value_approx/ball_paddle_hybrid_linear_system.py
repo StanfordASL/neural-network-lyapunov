@@ -1,5 +1,6 @@
 import torch
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.constants as constants
 
 
 def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
@@ -24,7 +25,6 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
     """
     if paddle_angles is None:
         paddle_angles = torch.Tensor([0.]).type(dtype)
-    g = -9.81
     x_dim = 6
     u_dim = 2
     assert(len(x_lo) == x_dim)
@@ -56,7 +56,8 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
                                  [0., 0.],
                                  [0., 0.],
                                  [0., dt]]).type(dtype)
-        c = Xinv @ torch.Tensor([0., 0., 0., 0., dt*g, 0.]).type(dtype)
+        c = Xinv @ torch.Tensor([0., 0., 0.,
+                                 0., dt*constants.G, 0.]).type(dtype)
     else:
         A = torch.Tensor([[1., 0., 0., dt, 0., 0.],
                           [0., 1., 0., 0., dt, 0.],
@@ -70,7 +71,7 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
                           [0., 0.],
                           [0., 0.],
                           [0., dt]]).type(dtype)
-        c = torch.Tensor([0., 0., 0., 0., dt*g, 0.]).type(dtype)
+        c = torch.Tensor([0., 0., 0., 0., dt*constants.G, 0.]).type(dtype)
     # free falling mode away from paddle
     # ballx > 0
     P = torch.Tensor([[-1., 0., 0., 0., 0., 0., 0., 0.]]).type(dtype)
