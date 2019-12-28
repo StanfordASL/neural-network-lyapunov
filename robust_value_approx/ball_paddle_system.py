@@ -1,4 +1,5 @@
 import torch
+import robust_value_approx.constants as constants
 
 
 class BallPaddleSystem:
@@ -27,20 +28,18 @@ class BallPaddleSystem:
         self.M = M
         self.dtype = dtype
 
-        self.g = -9.81
-
         self._init_eq()
         self._init_in()
 
-        g = self.g
+        g = constants.G
         M = self.M
         # 0 == zp[n] + u[n]*dt*.5 - zp[n+1] + u[n+1]*dt*.5
         self._add_eq([1., 0., 0.], [.5*dt], [-1., 0., 0.], [.5*dt], [0.], [0.])
         # 0 == zb[n] + zbdot[n]*dt*.5 - zb[n+1] + zbdot[n+1]*dt*.5
         self._add_eq([0., 1., .5*dt], [0.], [0., -1., .5*dt], [0.], [0.], [0.])
-        # zbdot[n] - zbdot[n+1] - M*a[n] <= -self.g*dt
+        # zbdot[n] - zbdot[n+1] - M*a[n] <= -constants.G*dt
         self._add_in([0., 0., 1.], [0.], [0., 0., -1.], [0.], [-M], [-g*dt])
-        # - zbdot[n] + zbdot[n+1] - M*a[n] <= self.g*dt
+        # - zbdot[n] + zbdot[n+1] - M*a[n] <= constants.G*dt
         self._add_in([0., 0., -1.], [0.], [0., 0., 1.], [0.], [-M], [g*dt])
         # -cr*zbdot[n] + (cr+1)*u[n] - zbdot[n+1] + M*a[n] <= M
         self._add_in([0., 0., -cr], [1.+cr], [0., 0., -1.], [0.], [M], [M])
