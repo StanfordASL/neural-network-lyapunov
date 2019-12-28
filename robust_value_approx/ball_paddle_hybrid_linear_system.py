@@ -15,7 +15,7 @@ def get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up, u_lo, u_up,
     and the system will be linearized around
     @param ball_capture_lo A tensor of the lower bound for a bounding
     box where the state becomes stationary (e.g. reaching the goal).
-    The dynamics are ALLOWED (not forced) to go to zero if 
+    The dynamics are ALLOWED (not forced) to go to zero if
     ball_capture_lo <= [ballx, bally] <= ball_capture_up
     @param ball_capture_up see ball_capture_lo
     @param cr The coefficient of restitution

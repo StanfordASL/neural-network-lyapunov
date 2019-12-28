@@ -397,13 +397,18 @@ class ValueFunction:
         # u[i,n] == u[i,n+1]
         for constant_control_index in self.constant_controls:
             for i in range(N-1):
-                Aeq1 = torch.cat((Aeq1, torch.zeros(1, xdim, dtype=self.dtype)), 0)
+                Aeq1 = torch.cat(
+                    (Aeq1, torch.zeros(1, xdim, dtype=self.dtype)), 0)
                 const_input = torch.zeros(1, sdim, dtype=self.dtype)
-                const_input[0, i*(xdim + udim + slackdim) + constant_control_index] = 1.
-                const_input[0, (i+1)*(xdim + udim + slackdim) + constant_control_index] = -1.
+                const_input[0, i*(xdim + udim + slackdim) +
+                            constant_control_index] = 1.
+                const_input[0, (i+1)*(xdim + udim + slackdim) +
+                            constant_control_index] = -1.
                 Aeq2 = torch.cat((Aeq2, const_input), 0)
-                Aeq3 = torch.cat((Aeq3, torch.zeros(1, alphadim, dtype=self.dtype)), 0)
-                rhs_eq = torch.cat((rhs_eq, torch.zeros(1, dtype=self.dtype)), 0)
+                Aeq3 = torch.cat(
+                    (Aeq3, torch.zeros(1, alphadim, dtype=self.dtype)), 0)
+                rhs_eq = torch.cat(
+                    (rhs_eq, torch.zeros(1, dtype=self.dtype)), 0)
 
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2,
                q3, c)
@@ -436,7 +441,7 @@ class ValueFunction:
                 x = x.detach().numpy().squeeze()
             x0.value = x
             prob.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
-            return(obj.value, torch.Tensor(s.value).type(self.dtype), 
+            return(obj.value, torch.Tensor(s.value).type(self.dtype),
                    torch.Tensor(alpha.value).type(self.dtype))
 
         return V
