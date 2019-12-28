@@ -44,7 +44,7 @@ def generate_data():
     x0_up = x_up
     num_breaks = [50] * x_dim
 
-    x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
+    x_samples, v_samples = vf.get_value_sample_grid(x0_lo, x0_up, num_breaks)
 
     torch.save(x_samples, 'data/double_integrator_x_samples.pt')
     torch.save(v_samples, 'data/double_integrator_v_samples.pt')

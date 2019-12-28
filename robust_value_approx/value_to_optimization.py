@@ -438,15 +438,60 @@ class ValueFunction:
 
         def V(x):
             if isinstance(x, torch.Tensor):
-                x = x.detach().numpy().squeeze()
+                x = x.detach().numpy()
             x0.value = x
             prob.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
-            return(obj.value, torch.Tensor(s.value).type(self.dtype),
-                   torch.Tensor(alpha.value).type(self.dtype))
+            if obj.value is not None:
+                return(obj.value, torch.Tensor(s.value).type(self.dtype),
+                       torch.Tensor(alpha.value).type(self.dtype))
+            else:
+                return (None, None, None)
 
         return V
 
-    def get_sample_grid(self, x_lo, x_up, num_breaks):
+    def get_q_function(self):
+        """
+        return a function that can be evaluated to get the optimal cost-to-go
+        for a given initial state and initial action. Uses cvxpy in order to
+        solve the cost-to-go
+
+        @return Q a function handle that takes x0 and u0, the initial state as
+        a tensor and returns the associated optimal cost-to-go as a scalar
+        """
+        traj_opt = self.traj_opt_constraint()
+        (Ain1, Ain2, Ain3, rhs_in,
+         Aeq1, Aeq2, Aeq3, rhs_eq,
+         Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+
+        s = cp.Variable(Ain2.shape[1])
+        alpha = cp.Variable(Ain3.shape[1], boolean=True)
+        x0 = cp.Parameter(Ain1.shape[1])
+        u0 = cp.Parameter(self.sys.u_dim)
+
+        obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 *
+                          cp.quad_form(alpha, Q3) + q2.T@s + q3.T@alpha + c)
+        con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
+               Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
+               s[:self.sys.u_dim] == u0]
+        prob = cp.Problem(obj, con)
+
+        def Q(x, u):
+            if isinstance(x, torch.Tensor):
+                x = x.detach().numpy()
+            if isinstance(u, torch.Tensor):
+                u = u.detach().numpy()
+            x0.value = x
+            u0.value = u
+            prob.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
+            if obj.value is not None:
+                return(obj.value, torch.Tensor(s.value).type(self.dtype),
+                       torch.Tensor(alpha.value).type(self.dtype))
+            else:
+                return (None, None, None)
+
+        return Q
+
+    def get_value_sample_grid(self, x_lo, x_up, num_breaks):
         """
         generates a uniformly sampled grid of optimal cost-to-go samples
         for this value function
@@ -484,6 +529,57 @@ class ValueFunction:
                     axis=0)
 
         return(x_samples, v_samples)
+
+    def get_q_sample_grid(self, x_lo, x_up, x_num_breaks,
+                          u_lo, u_up, u_num_breaks):
+        """
+        generates a uniformly sampled grid of Q-values for this value function
+
+        @param x_lo the lower bound of the sample grid of states as a tensor
+        @param x_up the upper bound of the sample grid of states as a tensor
+        @param x_num_breaks the number of points along each axis
+        as a list of integers (of same dimension as x_lo and x_up)
+        @param u_lo the lower bound of the sample grid of inputs as a tensor
+        @param u_up the upper bound of the sample grid of inputs as a tensor
+        @param u_num_breaks see x_num_breaks
+
+        @return x_samples a tensor with each row corresponding to an x sample
+        @return u_samples a tensor with each row corresponding to a u sample
+        @return v_samples a tensor with each row corresponding to the value
+        associated with the matching row in x_samples and u_samples
+        """
+        assert(len(x_lo) == len(x_up))
+        assert(len(x_lo) == len(x_num_breaks))
+        assert(len(u_lo) == len(u_up))
+        assert(len(u_lo) == len(u_num_breaks))
+
+        dim_samples = []
+        for i in range(len(x_lo)):
+            dim_samples.append(torch.linspace(
+                x_lo[i], x_up[i], x_num_breaks[i]).type(self.dtype))
+        for i in range(len(u_lo)):
+            dim_samples.append(torch.linspace(
+                u_lo[i], u_up[i], u_num_breaks[i]).type(self.dtype))
+        grid = torch.meshgrid(dim_samples)
+        xu_samples_all = torch.cat([g.reshape(-1, 1) for g in grid], axis=1)
+
+        x_samples = torch.zeros((0, len(x_lo)), dtype=self.dtype)
+        u_samples = torch.zeros((0, len(u_lo)), dtype=self.dtype)
+        v_samples = torch.zeros((0, 1), dtype=self.dtype)
+
+        Q = self.get_q_function()
+        for i in range(xu_samples_all.shape[0]):
+            x = xu_samples_all[i, :self.sys.x_dim]
+            u = xu_samples_all[i, self.sys.x_dim:]
+            v = Q(x, u)
+            if not isinstance(v[0], type(None)):
+                x_samples = torch.cat((x_samples, x.unsqueeze(0)), axis=0)
+                u_samples = torch.cat((u_samples, u.unsqueeze(0)), axis=0)
+                v_samples = torch.cat(
+                    (v_samples, torch.Tensor([[v[0]]]).type(self.dtype)),
+                    axis=0)
+
+        return(x_samples, u_samples, v_samples)
 
     def step_cost(self, x_val, u_val, alpha_val):
         """

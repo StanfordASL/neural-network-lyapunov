@@ -57,7 +57,8 @@ class ModelTrainingTest(unittest.TestCase):
         x0_lo = torch.Tensor([0., 0., 0., 0., 0., 0.]).type(dtype)
         x0_up = torch.Tensor([0., 2., .1, 0., 0., 0.]).type(dtype)
         num_breaks = [1, 3, 3, 1, 3, 1]
-        x_samples, v_samples = vf.get_sample_grid(x0_lo, x0_up, num_breaks)
+        x_samples, v_samples = vf.get_value_sample_grid(
+            x0_lo, x0_up, num_breaks)
 
         # check loss pre training
         res = self.model(x_samples) - v_samples
