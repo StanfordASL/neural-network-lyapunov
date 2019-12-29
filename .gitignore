@@ -135,3 +135,4 @@ gurobi.log
 
 # trained model used in tests
 !*/test/data/double_integrator_model.pt
+!*/test/data/double_integrator_q_model.pt
