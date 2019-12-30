@@ -4,7 +4,7 @@ import os
 import inspect
 import torch
 import numpy as np
-import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.ball_paddle_hybrid_linear_system as bp
 import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.constants as constants
 import matplotlib.pyplot as plt
@@ -22,15 +22,15 @@ if __name__ == "__main__":
     u_up = torch.Tensor([1e2, 1e2]).type(dtype)
     b_cap_lo = ball_capture - capture_size
     b_cap_up = ball_capture + capture_size
-    sys = bphls.get_ball_paddle_hybrid_linear_system_vel_ctrl(dtype, dt,
-                                                    x_lo, x_up,
-                                                    u_lo, u_up,
-                                                    ball_capture_lo=b_cap_lo,
-                                                    ball_capture_up=b_cap_up,
-                                                    paddle_angles=paddle_ang,
-                                                    cr=.9,
-                                                    collision_eps=.01,
-                                                    midpoint=True)
+    sys_con = bp.get_ball_paddle_hybrid_linear_system_vel_ctrl
+    sys = sys_con(dtype, dt,
+                  x_lo, x_up,
+                  u_lo, u_up,
+                  ball_capture_lo=b_cap_lo,
+                  ball_capture_up=b_cap_up,
+                  paddle_angles=paddle_ang,
+                  cr=.9, collision_eps=.01,
+                  midpoint=True)
     N = 10
     vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
     Q = torch.diag(torch.Tensor([1., 1., 0., 0., 0., 0., 0.]).type(dtype))
