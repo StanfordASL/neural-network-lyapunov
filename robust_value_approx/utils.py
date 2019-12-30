@@ -56,8 +56,14 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     assert(x_lo <= x_up)
     A_x = torch.tensor([0, 0, 1, -1], dtype=dtype)
     A_s = torch.tensor([-1, 1, -1, 1], dtype=dtype)
-    A_alpha = torch.tensor([x_lo, -x_up, x_up, -x_lo], dtype=dtype)
-    rhs = torch.tensor([0, 0, x_up, -x_lo], dtype=dtype)
+    A_alpha = torch.zeros(4, dtype=dtype)
+    A_alpha[0] = x_lo
+    A_alpha[1] = -x_up
+    A_alpha[2] = x_up
+    A_alpha[3] = -x_lo
+    rhs = torch.zeros(4, dtype=dtype)
+    rhs[2] = x_up
+    rhs[3] = -x_lo
     return (A_x, A_s, A_alpha, rhs)
 
 
@@ -82,8 +88,11 @@ def replace_absolute_value_with_mixed_integer_constraint(
     assert(x_up > 0)
     Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
     Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    Ain_alpha = torch.tensor([0, 0, -2*x_lo, -2*x_up], dtype=dtype)
-    rhs_in = torch.tensor([0, 0, -2*x_lo, 0], dtype=dtype)
+    Ain_alpha = torch.zeros(4, dtype=dtype)
+    Ain_alpha[2] = -2*x_lo
+    Ain_alpha[3] = -2*x_up
+    rhs_in = torch.zeros(4, dtype=dtype)
+    rhs_in[2] = -2*x_lo
     return (Ain_x, Ain_s, Ain_alpha, rhs_in)
 
 
@@ -116,8 +125,11 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
     assert(x_up > 0)
     A_x = torch.tensor([0, 1, 0, -1], dtype=dtype)
     A_y = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    A_beta = torch.tensor([0, 0, -x_up, -x_lo], dtype=dtype)
-    rhs = torch.tensor([0, 0, 0, -x_lo], dtype=dtype)
+    A_beta = torch.zeros(4, dtype=dtype)
+    A_beta[2] = -x_up
+    A_beta[3] = -x_lo
+    rhs = torch.zeros(4, dtype=dtype)
+    rhs[3] = -x_lo
     return (A_x, A_y, A_beta, rhs)
 
 
@@ -156,9 +168,11 @@ def replace_leaky_relu_mixed_integer_constraint(
     assert(x_up > 0)
     A_x = torch.tensor([1., negative_slope, -negative_slope, -1], dtype=dtype)
     A_y = torch.tensor([-1., -1., 1., 1.], dtype=dtype)
-    A_beta = torch.tensor([0., 0., (negative_slope-1) * x_up,
-                           (negative_slope-1) * x_lo], dtype=dtype)
-    rhs = torch.tensor([0., 0., 0., (negative_slope-1) * x_lo], dtype=dtype)
+    A_beta = torch.zeros(4, dtype=dtype)
+    A_beta[2] = (negative_slope-1) * x_up
+    A_beta[3] = (negative_slope-1) * x_lo
+    rhs = torch.zeros(4, dtype=dtype)
+    rhs[3] = (negative_slope-1) * x_lo
     if negative_slope <= 1:
         return (A_x, A_y, A_beta, rhs)
     else:

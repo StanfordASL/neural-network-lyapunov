@@ -280,7 +280,7 @@ class LyapunovDiscreteTimeHybridSystem:
         z = milp.addVars(
             Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="z[n]")
-        beta = milp.addVars(Ain_beta.shape[1], lb=0.,
+        beta = milp.addVars(Ain_beta.shape[1],
                             vtype=gurobipy.GRB.BINARY, name="beta[n]")
 
         for i in range(Ain_x2.shape[0]):

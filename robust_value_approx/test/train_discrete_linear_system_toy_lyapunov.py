@@ -28,18 +28,13 @@ def setup_relu():
              [0.2, -0.5, 1.2, 1.3]],
             dtype=dtype)
     linear2.bias.data = torch.tensor([-0.3, 0.2, 0.7, 0.4], dtype=dtype)
-    linear3 = nn.Linear(4, 4)
+    linear3 = nn.Linear(4, 1)
     linear3.weight.data = torch.tensor(
-        [[-0.5, 0.2, 0.3, 0.1], [0.1, 0.2, 0.3, 0.4], [0.5, 0.6, -0.1, -0.2],
-         [0.3, -1.1, 0.2, 0.4]], dtype=dtype)
-    linear3.bias.data = torch.tensor([-0.1, 0.1, 0.2, 0.3], dtype=dtype)
-    linear4 = nn.Linear(4, 1)
-    linear4.weight.data = torch.tensor(
         [[-.4, .5, -.6, 0.3]], dtype=dtype)
-    linear4.bias.data = torch.tensor([-0.9], dtype=dtype)
+    linear3.bias.data = torch.tensor([-0.9], dtype=dtype)
     relu1 = nn.Sequential(
-        linear1, nn.LeakyReLU(0.1), linear4, nn.LeakyReLU(0.1))#, linear2, nn.LeakyReLU(0.1), linear3,
-        #nn.LeakyReLU(0.1), linear4, nn.LeakyReLU(0.1))
+        linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3,
+        nn.LeakyReLU(0.1))
     return relu1
 
 
@@ -103,13 +98,13 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
     relu = setup_relu()
-    V_rho = 0.
+    V_rho = 0.1
     x_equilibrium = torch.tensor([0, 0], dtype=torch.float64)
 
     state_samples_all1 = test_train_lyapunov.setup_state_samples_all((51, 51))
     # First train a ReLU to approximate the value function.
     options1 = train_lyapunov.TrainValueApproximatorOptions()
-    options1.max_epochs = 200
+    options1.max_epochs = 1000
     options1.convergence_tolerance = 0.01
     result1 = train_lyapunov.train_value_approximator(
         system, relu, V_rho, x_equilibrium, lambda x: torch.norm(x, p=1),
@@ -117,13 +112,15 @@ if __name__ == "__main__":
     plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))
 
     state_samples_all = state_samples_all1
-    dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system, V_rho, x_equilibrium)
+    dut = train_lyapunov.TrainLyapunovReLU(
+        lyapunov_hybrid_system, V_rho, x_equilibrium)
     dut.output_flag = True
     dut.max_iterations = 1000
+    dut.learning_rate = 1e-3
     dut.lyapunov_derivative_mip_pool_solutions = 20
+    dut.lyapunov_positivity_sample_cost_weight = 0.
+    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_positivity_mip_cost_weight = 0.
     result = dut.train(relu, state_samples_all)
 
-#    result = train_lyapunov.train_lyapunov_relu(
-#        lyapunov_hybrid_system, relu, V_rho, x_equilibrium, state_samples_all,
-#        options)
     plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))

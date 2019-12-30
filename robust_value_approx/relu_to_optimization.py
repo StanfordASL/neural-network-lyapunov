@@ -127,7 +127,8 @@ class ReLUFreePattern:
 
     def output_constraint(self, model, x_lo, x_up):
         """
-        The output of ReLU network is a piecewise linear function of the input.
+        The output of (leaky) ReLU network is a piecewise linear function of
+        the input.
         ReLU(x) = wₙᵀzₙ+bₙ
         s.t zᵢ₊₁ = max{0, Wᵢzᵢ+bᵢ}
             z₀ = x
@@ -215,10 +216,10 @@ class ReLUFreePattern:
         rhs_in[self.x_size:2*self.x_size] = -x_lo.reshape((-1, 1))
         ineq_constraint_count = 2 * self.x_size
         layer_count = 0
-        z_pre_relu_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
-        z_pre_relu_up = torch.empty(self.num_relu_units, dtype=self.dtype)
-        z_post_relu_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
-        z_post_relu_up = torch.empty(self.num_relu_units, dtype=self.dtype)
+        z_pre_relu_lo = [None] * self.num_relu_units
+        z_pre_relu_up = [None] * self.num_relu_units
+        z_post_relu_lo = [None] * self.num_relu_units
+        z_post_relu_up = [None] * self.num_relu_units
         for layer in model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
@@ -228,33 +229,40 @@ class ReLUFreePattern:
                         # First compute zᵤₚ, zₗₒ as the bounds for
                         # (Wᵢzᵢ)(j) + bᵢ(j)
                         z_bound_index = self.relu_unit_index[layer_count][j]
-                        z_pre_relu_lo[z_bound_index] = layer.bias[j].clone()
-                        z_pre_relu_up[z_bound_index] = layer.bias[j].clone()
                         # z0 is the input x.
                         if layer_count == 0:
                             zi_size = self.x_size
-                            zi_lo = x_lo
-                            zi_up = x_up
+                            zi_lo = x_lo.clone()
+                            zi_up = x_up.clone()
                         else:
                             zi_size = len(
                                 self.relu_unit_index[layer_count - 1])
-                            zi_lo = [z_post_relu_lo[z_index]
-                                     for z_index in
-                                     self.relu_unit_index[layer_count - 1]]
-                            zi_up = [z_post_relu_up[z_index]
-                                     for z_index in
-                                     self.relu_unit_index[layer_count - 1]]
-                        for k in range(zi_size):
-                            if (layer.weight[j][k] > 0):
-                                z_pre_relu_lo[z_bound_index] += \
-                                    layer.weight[j][k] * zi_lo[k]
-                                z_pre_relu_up[z_bound_index] +=\
-                                    layer.weight[j][k] * zi_up[k]
-                            else:
-                                z_pre_relu_lo[z_bound_index] +=\
-                                    layer.weight[j][k] * zi_up[k]
-                                z_pre_relu_up[z_bound_index] +=\
-                                    layer.weight[j][k] * zi_lo[k]
+                            # Note that z_post_relu_lo and z_post_relu_up are
+                            # lists, not torch tensors (because Tensor[]
+                            # operator is an inplace operator, which causes
+                            # the pytorch autograd to fail. So we have to use
+                            # a for loop below to copy z_post_relu_lo to zi_lo,
+                            # and z_post_relu_up to zi_up.
+                            zi_lo = torch.empty(len(self.relu_unit_index[
+                                layer_count-1]), dtype=self.dtype)
+                            zi_up = torch.empty(len(self.relu_unit_index[
+                                layer_count-1]), dtype=self.dtype)
+                            for k in range(len(self.relu_unit_index[
+                                    layer_count-1])):
+                                zi_lo[k] = z_post_relu_lo[self.relu_unit_index[
+                                    layer_count-1][k]].clone()
+                                zi_up[k] = z_post_relu_up[self.relu_unit_index[
+                                    layer_count-1][k]].clone()
+                        mask1 = torch.where(layer.weight[j] > 0)[0]
+                        mask2 = torch.where(layer.weight[j] <= 0)[0]
+                        z_pre_relu_lo[z_bound_index] = layer.weight[j][mask1] \
+                            @ zi_lo[mask1].reshape((-1)) + \
+                            layer.weight[j][mask2] @ \
+                            zi_up[mask2].reshape((-1)) + layer.bias[j]
+                        z_pre_relu_up[z_bound_index] = layer.weight[j][mask1] \
+                            @ zi_up[mask1].reshape((-1)) + \
+                            layer.weight[j][mask2] @ \
+                            zi_lo[mask2].reshape((-1)) + layer.bias[j]
                         assert(z_pre_relu_lo[z_bound_index] <=
                                z_pre_relu_up[z_bound_index])
 
@@ -328,7 +336,7 @@ class ReLUFreePattern:
                                 negative_slope * z_pre_relu_lo[
                                     relu_unit_index_ij]
                             z_post_relu_up[relu_unit_index_ij] = \
-                                z_pre_relu_up[relu_unit_index_ij]
+                                z_pre_relu_up[relu_unit_index_ij].clone()
                         else:
                             z_post_relu_lo[relu_unit_index_ij] = 0
                             z_post_relu_up[relu_unit_index_ij] = torch.max(
@@ -726,15 +734,11 @@ class ReLUFreePattern:
                     for j in range(layer.weight.shape[0]):
                         for k in range(layer.weight.shape[1]):
                             if layer.weight[j][k] > 0:
-                                Wizi_lo[j] += layer.weight[j][k] *\
-                                    zi_lo[k]
-                                Wizi_up[j] += layer.weight[j][k] *\
-                                    zi_up[k]
+                                Wizi_lo[j] += layer.weight[j][k] * zi_lo[k]
+                                Wizi_up[j] += layer.weight[j][k] * zi_up[k]
                             else:
-                                Wizi_lo[j] += layer.weight[j][k] *\
-                                    zi_up[k]
-                                Wizi_up[j] += layer.weight[j][k] *\
-                                    zi_lo[k]
+                                Wizi_lo[j] += layer.weight[j][k] * zi_up[k]
+                                Wizi_up[j] += layer.weight[j][k] * zi_lo[k]
                         (A_pre, A_z_next, A_beta_i, rhs_i) =\
                             utils.replace_binary_continuous_product(
                                 Wizi_lo[j], Wizi_up[j], dtype=self.dtype)

@@ -137,21 +137,6 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         self.assertAlmostEqual(lyapunov_derivative_mip_cost,
                                lyapunov_derivative_mip.gurobi_model.ObjVal)
 
-    def test_total_loss_gradient(self):
-        system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
-        V_rho = 0.1
-        x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
-        lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
-            system)
-        dut = train_lyapunov.TrainLyapunovReLU(
-            lyapunov_hybrid_system, V_rho, x_equilibrium)
-        dut.lyapunov_positivity_sample_cost_weight = 0.5
-        dut.lyapunov_derivative_sample_cost_weight = 0.6
-        relu = setup_relu()
-        state_samples_all = setup_state_samples_all((21, 21))
-        state_samples_next = \
-            [system.possible_next_states(xi) for xi in state_samples_all]
-
 
 class TestTrainLyapunov(unittest.TestCase):
     def setUp(self):

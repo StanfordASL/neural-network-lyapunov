@@ -91,7 +91,7 @@ if __name__ == "__main__":
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_rho, x_equilibrium)
     dut.output_flag = True
-    dut.max_iterations = 1000
+    dut.max_iterations = 3000
     dut.learning_rate = 0.00001
     result = dut.train(relu, state_samples_all)
     plot_relu(relu, system, V_rho, x_equilibrium)
