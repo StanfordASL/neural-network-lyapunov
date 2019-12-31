@@ -156,8 +156,70 @@ class ReLUMPC:
         @param x0 A tensor that is the current/starting state
         """
         assert(isinstance(x0, torch.Tensor))
-        self.x0.value = x0.detach().numpy().squeeze()
+        self.x0.value = x0.detach().numpy()
         self.prob.solve(solver=cp.GUROBI, warm_start=True)
         u0_opt = torch.Tensor(self.u0.value).type(self.vf.dtype)
         x1_opt = torch.Tensor(self.x1.value).type(self.vf.dtype)
         return(u0_opt, x1_opt)
+
+
+class QReLUMPC:
+    def __init__(self, model, x_lo, x_up, u_lo, u_up):
+        """
+        Controller that computes optimal control actions by optimizing
+        over the learned Q-function directly
+        @param model A pytorch model to be used to approximated the q-function
+        (model input is [state,input], output is optimal cost to go)
+        @param x_lo A tensor that is the lower bound of the state input to the
+        controller
+        @param x_up A tensor that is the upper bound of the state input to the
+        controller
+        @param u_lo A tensor that is the lower bound of the input to the
+        controller
+        @param u_up A tensor that is the upper bound of the input to the
+        controller
+        """
+        self.dtype = x_lo.dtype
+        self.x_dim = x_lo.shape[0]
+        self.u_dim = u_lo.shape[0]
+        self.model = model
+        relu = relu_to_optimization.ReLUFreePattern(model, self.dtype)
+        xu_lo = torch.cat((x_lo, u_lo), 0)
+        xu_up = torch.cat((x_up, u_up), 0)
+        relu_con = relu.output_constraint(model, xu_lo, xu_up)
+        (Pin1, Pin2, Pin3, Prhs_in,
+         Peq1, Peq2, Peq3, Prhs_eq,
+         a_out, b_out,
+         z_pre_relu_lo, z_pre_relu_up, _, _) = utils.torch_to_numpy(
+             relu_con, squeeze=False)
+        self.x0 = cp.Parameter(self.x_dim)
+        self.u0 = cp.Variable(self.u_dim)
+        self.z = cp.Variable(Pin2.shape[1])
+        self.beta = cp.Variable(Pin3.shape[1], boolean=True)
+        self.obj = cp.Minimize(a_out @ self.z + b_out)
+        self.cons = []
+        if len(Prhs_in) > 0:
+            self.cons.append(Pin1[:, :self.x_dim] @ self.x0 +
+                             Pin1[:, self.x_dim:] @ self.u0 +
+                             Pin2 @ self.z +
+                             Pin3 @ self.beta <= Prhs_in.squeeze())
+        if len(Prhs_eq) > 0:
+            self.cons.append(Peq1[:, :self.x_dim] @ self.x0 +
+                             Peq1[:, self.x_dim:] @ self.u0 +
+                             Peq2 @ self.z +
+                             Peq3 @ self.beta == Prhs_eq.squeeze())
+        self.prob = cp.Problem(self.obj, self.cons)
+
+    def get_ctrl(self, x0):
+        """
+        Solves an MIQP to return the optimal control action corresponding
+        to the learned q function
+        @param x0 A tensor that is the current/starting state
+        """
+        assert(isinstance(x0, torch.Tensor))
+        self.x0.value = x0.detach().numpy()
+        self.prob.solve(solver=cp.GUROBI, warm_start=True)
+        if self.u0.value is None:
+            return None
+        u0_opt = torch.Tensor(self.u0.value).type(self.dtype)
+        return u0_opt

@@ -1,6 +1,8 @@
 import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 from robust_value_approx.utils import torch_to_numpy, get_simple_trajopt_cost
+import double_integrator
 
 import unittest
 import numpy as np
@@ -307,6 +309,58 @@ class ValueToOptimizationTest(unittest.TestCase):
 
         self.assertAlmostEqual(xtraj_val[1, -1], xN[1])
         self.assertAlmostEqual(xtraj_val[4, -1], xN[4])
+
+    def test_q_fun(self):
+        dtype = torch.float64
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        # continuous to discrete using forward euler
+        dt = 1.
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
+        c = torch.zeros(x_dim, dtype=dtype)
+        x_lo = -10. * torch.ones(x_dim, dtype=dtype)
+        x_up = 10. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -100. * torch.ones(u_dim, dtype=dtype)
+        u_up = 100. * torch.ones(u_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        q = torch.cat((-x_lo, -u_lo,
+                       x_up, u_up), 0).type(dtype)
+        double_int = hybrid_linear_system.HybridLinearSystem(x_dim,
+                                                             u_dim,
+                                                             dtype)
+        double_int.add_mode(A, B, c, P, q)
+        N = 6
+        vf = value_to_optimization.ValueFunction(double_int, N,
+                                                 x_lo, x_up,
+                                                 u_lo, u_up)
+        R = torch.eye(double_int.u_dim)
+        vf.set_cost(R=R)
+        vf.set_terminal_cost(Rt=R)
+        Q = vf.get_q_function()
+        x0 = torch.Tensor([1., 1.]).type(dtype)
+        u0 = torch.Tensor([1.5]).type(dtype)
+        self.assertTrue(Q(x0, u0)[0] is not None)
+        x_lo_grid = -1. * torch.ones(x_dim, dtype=dtype)
+        x_up_grid = 1. * torch.ones(x_dim, dtype=dtype)
+        u_lo_grid = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up_grid = 1. * torch.ones(u_dim, dtype=dtype)
+        x_num_breaks = [2, 2]
+        u_num_breaks = [2]
+        (x_samples, u_samples, v_samples) = vf.get_q_sample_grid(x_lo_grid,
+                                                                 x_up_grid,
+                                                                 x_num_breaks,
+                                                                 u_lo_grid,
+                                                                 u_up_grid,
+                                                                 u_num_breaks)
+        self.assertEqual(x_samples.shape[0],
+                         x_num_breaks[0]*x_num_breaks[1]*u_num_breaks[0])
+        self.assertEqual(u_samples.shape[0],
+                         x_num_breaks[0]*x_num_breaks[1]*u_num_breaks[0])
+        self.assertEqual(v_samples.shape[0],
+                         x_num_breaks[0]*x_num_breaks[1]*u_num_breaks[0])
 
 
 if __name__ == '__main__':

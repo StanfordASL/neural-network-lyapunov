@@ -48,8 +48,9 @@ if __name__ == "__main__":
     x0_up = 1. * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
     if gen_samples:
         num_breaks = [5] * vf.sys.x_dim
-        x_samples_train, v_samples_train = vf.get_sample_grid(x0_lo, x0_up,
-                                                              num_breaks)
+        x_samples_train, v_samples_train = vf.get_value_sample_grid(x0_lo,
+                                                                    x0_up,
+                                                                    num_breaks)
         torch.save(x_samples_train, x_samples_file + '_train.pt')
         torch.save(v_samples_train, v_samples_file + '_train.pt')
     else:

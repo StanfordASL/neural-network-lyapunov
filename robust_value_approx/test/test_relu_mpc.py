@@ -31,7 +31,6 @@ class TestReLUMPC(unittest.TestCase):
                                                                   u_dim,
                                                                   dtype)
         self.double_int.add_mode(A, B, c, P, q)
-
         # value function
         N = 6
         vf = value_to_optimization.ValueFunction(self.double_int, N,
@@ -44,7 +43,6 @@ class TestReLUMPC(unittest.TestCase):
         vf.set_constraints(xN=xN)
         self.vf = vf
         self.vf_value_fun = vf.get_value_function()
-
         # should be trained from vf (minus one time step)
         self.model = torch.load("data/double_integrator_model.pt")
 
@@ -72,6 +70,57 @@ class TestReLUMPC(unittest.TestCase):
             u, x = ctrl.get_ctrl(x0)
             if ~isinstance(u_opt, type(None)):
                 self.assertLessEqual(abs(u.item() - u_opt[0]), .05)
+
+
+class TestQReLUMPC(unittest.TestCase):
+    def setUp(self):
+        dtype = torch.float64
+        self.dtype = dtype
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        # continuous to discrete using forward euler
+        dt = 1.
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
+        sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
+        c = torch.zeros(x_dim, dtype=dtype)
+        x_lo = -10. * torch.ones(x_dim, dtype=dtype)
+        x_up = 10. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up = 1. * torch.ones(u_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
+        sys.add_mode(A, B, c, P, q)
+        # value function
+        N = 5
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
+        Q = torch.eye(sys.x_dim)
+        R = torch.eye(sys.u_dim)
+        vf.set_cost(Q=Q, R=R)
+        vf.set_terminal_cost(Qt=Q, Rt=R)
+        # vf.set_constant_control(0)
+        self.vf = vf
+        self.vf_value_fun = vf.get_value_function()
+        self.model = torch.load("data/double_integrator_q_model.pt")
+
+    def test_qrelu_mpc(self):
+        x0_lo = -1. * torch.ones(self.vf.sys.x_dim, dtype=self.dtype)
+        x0_up = 1. * torch.ones(self.vf.sys.x_dim, dtype=self.dtype)
+        u0_lo = -1. * torch.ones(self.vf.sys.u_dim, dtype=self.dtype)
+        u0_up = 1. * torch.ones(self.vf.sys.u_dim, dtype=self.dtype)
+        ctrl = relu_mpc.QReLUMPC(self.model, x0_lo, x0_up, u0_lo, u0_up)
+        for i in range(10):
+            x0 = torch.rand(self.vf.sys.x_dim, dtype=self.dtype) *\
+                (x0_up - x0_lo) + x0_lo
+            u_opt = self.vf_value_fun(x0)[1]
+            if u_opt is None:
+                continue
+            u_opt = u_opt[:self.vf.sys.u_dim]
+            u = ctrl.get_ctrl(x0)
+            self.assertLessEqual(abs(u.item() - u_opt[0]), .2)
 
 
 if __name__ == "__main__":
