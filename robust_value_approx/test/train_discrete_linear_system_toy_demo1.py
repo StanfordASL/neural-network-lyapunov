@@ -3,7 +3,7 @@ import robust_value_approx.lyapunov as lyapunov
 import torch
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits import mplot3d
+from mpl_toolkits import mplot3d # noqa
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov

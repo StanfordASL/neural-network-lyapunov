@@ -11,7 +11,7 @@ import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits import mplot3d
+from mpl_toolkits import mplot3d # noqa
 
 
 def setup_relu():
