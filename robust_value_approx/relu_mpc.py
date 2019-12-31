@@ -208,14 +208,12 @@ class QReLUMPC:
                              Peq1[:, self.x_dim:] @ self.u0 +
                              Peq2 @ self.z +
                              Peq3 @ self.beta == Prhs_eq.squeeze())
-        self.cons.append(self.u0 >= u_lo)
-        self.cons.append(self.u0 <= u_up)
         self.prob = cp.Problem(self.obj, self.cons)
 
     def get_ctrl(self, x0):
         """
         Solves an MIQP to return the optimal control action corresponding
-        to the leanred q function
+        to the learned q function
         @param x0 A tensor that is the current/starting state
         """
         assert(isinstance(x0, torch.Tensor))
