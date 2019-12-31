@@ -4,7 +4,7 @@ import os
 import inspect
 import torch
 import numpy as np
-import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
+import robust_value_approx.ball_paddle_hybrid_linear_system as bp
 import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.constants as constants
 import matplotlib.pyplot as plt
@@ -16,39 +16,42 @@ if __name__ == "__main__":
     ball_capture = torch.Tensor([.5, .5]).type(dtype)
     capture_size = .05
     paddle_ang = torch.Tensor([.1, .2, .3, .4, .5, .6, .7]).type(dtype)
-    x_lo = torch.Tensor([-10., -10., 0., -1e2, -1e2, 0.]).type(dtype)
-    x_up = torch.Tensor([10., 10., 1., 1e2, 1e2, 1e2]).type(dtype)
-    u_lo = torch.Tensor([-np.pi, -1e2]).type(dtype)
-    u_up = torch.Tensor([np.pi, 1e2]).type(dtype)
+    x_lo = torch.Tensor([-10., -10., 0., -np.pi, -1e2, -1e2, 0.]).type(dtype)
+    x_up = torch.Tensor([10., 10., 1., np.pi, 1e2, 1e2, 1e2]).type(dtype)
+    u_lo = torch.Tensor([-1e2, -1e2]).type(dtype)
+    u_up = torch.Tensor([1e2, 1e2]).type(dtype)
     b_cap_lo = ball_capture - capture_size
     b_cap_up = ball_capture + capture_size
-    sys = bphls.get_ball_paddle_hybrid_linear_system(dtype, dt, x_lo, x_up,
-                                                     u_lo, u_up,
-                                                     ball_capture_lo=b_cap_lo,
-                                                     ball_capture_up=b_cap_up,
-                                                     paddle_angles=paddle_ang,
-                                                     cr=.9, collision_eps=.01,
-                                                     midpoint=True)
+    sys_con = bp.get_ball_paddle_hybrid_linear_system_vel_ctrl
+    sys = sys_con(dtype, dt,
+                  x_lo, x_up,
+                  u_lo, u_up,
+                  ball_capture_lo=b_cap_lo,
+                  ball_capture_up=b_cap_up,
+                  paddle_angles=paddle_ang,
+                  cr=.9, collision_eps=.01,
+                  midpoint=True)
     N = 10
     vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
-    Q = torch.diag(torch.Tensor([1., 1., 0., 0., 0., 0.]).type(dtype))
-    Qt = torch.diag(torch.Tensor([100., 100., 0., 0., 0., 0.]).type(dtype))
-    R = torch.diag(torch.Tensor([1., .001]).type(dtype))
-    Rt = torch.diag(torch.Tensor([1., .001]).type(dtype))
-    xtraj = torch.Tensor([ball_capture[0], ball_capture[1], 0.,
+    Q = torch.diag(torch.Tensor([1., 1., 0., 0., 0., 0., 0.]).type(dtype))
+    Qt = torch.diag(torch.Tensor([100., 100., 0., 0., 0., 0., 0.]).type(dtype))
+    R = torch.diag(torch.Tensor([.1, .001]).type(dtype))
+    Rt = torch.diag(torch.Tensor([.1, .001]).type(dtype))
+    xtraj = torch.Tensor([ball_capture[0], ball_capture[1], 0., 0.,
                           0., 0., 0.]).type(dtype).unsqueeze(1).repeat(1, N-1)
     vf.set_cost(Q=Q, R=R)
     vf.set_terminal_cost(Qt=Qt, Rt=Rt)
     vf.set_traj(xtraj=xtraj)
     # to make it easier we set the paddle angle to be constant
-    vf.set_constant_control(0)
     V = vf.get_value_function()
 
     # generate an initial state
     bally0 = .75
     paddley0 = .15
+    paddletheta0 = 0.
     ballvy0 = -2.  # anywhere between -5 and 0 seems OK
-    x0 = torch.Tensor([0., bally0, paddley0, 0., ballvy0, 0.]).type(dtype)
+    x0 = torch.Tensor([0., bally0, paddley0, paddletheta0,
+                       0., ballvy0, 0.]).type(dtype)
     # compute a feedforward trajectory from vf
     (obj_val, s_val, alpha_val) = V(x0)
     traj_val = torch.cat((x0, s_val)).reshape(N, -1).t()
@@ -65,7 +68,7 @@ if __name__ == "__main__":
     paddle_id = p.loadURDF(
         "ball_paddle_description/paddle.urdf", [-.125, 0, 0])
     p.resetJointState(paddle_id, 0, paddley0, targetVelocity=0.)
-    p.resetJointState(paddle_id, 1, utraj_val[0, 0], targetVelocity=0.)
+    p.resetJointState(paddle_id, 1, paddletheta0, targetVelocity=0.)
     ball_id = p.loadURDF("ball_paddle_description/ball.urdf", [0, 0, bally0])
     p.resetBaseVelocity(ball_id, [0, 0, ballvy0])
     target_vis_id = p.createVisualShape(shapeType=p.GEOM_SPHERE,
@@ -101,16 +104,19 @@ if __name__ == "__main__":
         (ballx, bally) = p.getBasePositionAndOrientation(ball_id)[0][1:3]
         (ballvx, ballvy) = p.getBaseVelocity(ball_id)[0][1:3]
         (paddley, paddlevy) = p.getJointState(paddle_id, 0)[0:2]
+        paddletheta = p.getJointState(paddle_id, 1)[0]
         x_current = torch.Tensor(
-            [ballx, bally, paddley, ballvx, ballvy, paddlevy]).type(dtype)
+            [ballx, bally, paddley, paddletheta,
+             ballvx, ballvy, paddlevy]).type(dtype)
         xtraj_sim[:, n] = x_current
         p.setJointMotorControlArray(paddle_id,
                                     jointIndices=[0, 1],
                                     controlMode=p.POSITION_CONTROL,
                                     targetPositions=[
                                         xtraj_val_sim[2, n],
-                                        utraj_val_sim[0, n]],
-                                    targetVelocities=[xtraj_val_sim[5, n], 0.],
+                                        xtraj_val_sim[3, n]],
+                                    targetVelocities=[xtraj_val_sim[6, n],
+                                                      utraj_val_sim[0, n]],
                                     forces=[1e9, 1e9],
                                     positionGains=[1., 1.],
                                     velocityGains=[1., 1.])
@@ -122,18 +128,20 @@ if __name__ == "__main__":
     plt.plot(ttraj_val, xtraj_val[1, :], '*')
     legend.append('plan bally')
     plt.plot(ttraj_val, xtraj_val[2, :], '*')
-    legend.append('plan paddle')
-    # plt.plot(ttraj_val, xtraj_val[5,:],'*')
+    legend.append('plan paddle y')
+    plt.plot(ttraj_val, xtraj_val[3, :], '*')
+    legend.append('plan paddle theta')
+    # plt.plot(ttraj_val, xtraj_val[6,:],'*')
     # legend.append('plan paddlev')
     plt.plot(ttraj_val_sim, xtraj_sim[0, :])
     legend.append('ballx')
     plt.plot(ttraj_val_sim, xtraj_sim[1, :])
     legend.append('bally')
     plt.plot(ttraj_val_sim, xtraj_sim[2, :])
-    legend.append('paddle')
-    # plt.plot(ttraj_val_sim, xtraj_sim[5,:])
-    # legend.append('paddlev')
-    plt.plot(ttraj_val, utraj_val[0, :])
+    legend.append('paddle y')
+    plt.plot(ttraj_val_sim, xtraj_sim[3, :])
     legend.append('paddle theta')
+    # plt.plot(ttraj_val_sim, xtraj_sim[6,:])
+    # legend.append('paddlev')
     plt.legend(legend)
     plt.show()
