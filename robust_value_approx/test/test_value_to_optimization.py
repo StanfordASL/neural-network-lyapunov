@@ -11,6 +11,7 @@ import torch
 
 
 class ValueToOptimizationTest(unittest.TestCase):
+    @unittest.skip("Takes too long time.")
     def test_trajopt_x0xN(self):
         """
         x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
@@ -275,7 +276,7 @@ class ValueToOptimizationTest(unittest.TestCase):
         R = torch.diag(torch.Tensor([0., .01]).type(dtype))
         vf.set_cost(Q=Q, R=R)
         vf.set_terminal_cost(Qt=Q, Rt=R)
-        xN = torch.Tensor([np.nan, .6, np.nan, np.nan, 0., np.nan])
+        xN = torch.Tensor([np.nan, .6, np.nan, np.nan, 0., np.nan]).type(dtype)
         vf.set_constraints(xN=xN)
 
         # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]

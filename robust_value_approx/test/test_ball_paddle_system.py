@@ -1,4 +1,5 @@
 import robust_value_approx.ball_paddle_system as ball_paddle_system
+import robust_value_approx.constants as constants
 
 import unittest
 import numpy as np
@@ -25,7 +26,7 @@ class BallPaddleSystemSim(unittest.TestCase):
         Ain5 = Ain5.detach().numpy()
         rhs_in = rhs_in.detach().numpy()
 
-        g = sys.g
+        g = constants.G
         M = sys.M
         dt = sys.dt
         cr = sys.cr
@@ -78,7 +79,7 @@ class BallPaddleSystemSim(unittest.TestCase):
         Ain5 = Ain5.detach().numpy()
         rhs_in = rhs_in.detach().numpy()
 
-        g = sys.g
+        g = constants.G
         dt = sys.dt
 
         # free falling
