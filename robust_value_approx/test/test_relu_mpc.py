@@ -3,6 +3,8 @@ import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.value_to_optimization as value_to_optimization
 import double_integrator
 
+import os
+
 import torch
 import unittest
 
@@ -44,7 +46,9 @@ class TestReLUMPC(unittest.TestCase):
         self.vf = vf
         self.vf_value_fun = vf.get_value_function()
         # should be trained from vf (minus one time step)
-        self.model = torch.load("data/double_integrator_model.pt")
+        self.model = torch.load(
+            os.path.dirname(os.path.realpath(__file__)) +
+            "/data/double_integrator_model.pt")
 
     def test_random_shooting(self):
         num_samples = 100
@@ -104,7 +108,9 @@ class TestQReLUMPC(unittest.TestCase):
         # vf.set_constant_control(0)
         self.vf = vf
         self.vf_value_fun = vf.get_value_function()
-        self.model = torch.load("data/double_integrator_q_model.pt")
+        self.model = torch.load(
+           os.path.dirname(os.path.realpath(__file__)) +
+           "/data/double_integrator_q_model.pt")
 
     def test_qrelu_mpc(self):
         x0_lo = -1. * torch.ones(self.vf.sys.x_dim, dtype=self.dtype)
