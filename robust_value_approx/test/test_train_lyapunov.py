@@ -57,6 +57,17 @@ class TestTrainLyapunov(unittest.TestCase):
             self.system, self.relu, lambda x: x @ x, state_samples_all,
             options)
         self.assertTrue(result)
+        # Now check the total loss.
+        with torch.no_grad():
+            cost_to_go_samples = \
+                [self.system.cost_to_go(
+                 state, lambda x: x @ x, options.num_steps) for state in
+                 state_samples_all]
+            relu_output = self.relu(torch.stack(state_samples_all, dim=0))
+            error = \
+                relu_output.squeeze() - torch.stack(cost_to_go_samples, dim=0)
+            loss = torch.sum(error * error) / len(cost_to_go_samples)
+            self.assertLessEqual(loss, options.convergence_tolerance)
 
 
 if __name__ == "__main__":
