@@ -1,6 +1,12 @@
 name: Hongkai-P50
 
-on: [push, pull_request, pull_request_review]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
 
 jobs:
   build:
