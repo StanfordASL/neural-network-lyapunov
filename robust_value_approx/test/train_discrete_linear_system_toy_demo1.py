@@ -3,7 +3,7 @@ import robust_value_approx.lyapunov as lyapunov
 import torch
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits import mplot3d
+from mpl_toolkits import mplot3d # noqa
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
@@ -86,13 +86,13 @@ if __name__ == "__main__":
     state_samples_all = [sample for sample in state_samples_all if
                          torch.all(torch.abs(sample) <= 0.05)]
 
-    options = train_lyapunov.LyapunovReluTrainingOptions()
+    options = train_lyapunov.LyapunovInvarianceReluTrainingOptions()
     options.output_flag = True
     options.max_iterations = 3000
     options.sample_lyapunov_loss_margin = 0.1
     options.dV_epsilon = 0.
 
-    result = train_lyapunov.train_lyapunov_relu(
+    result = train_lyapunov.train_lyapunov_invariance_relu(
         lyapunov_hybrid_system, relu, x_equilibrium, state_samples_all,
         options)
 

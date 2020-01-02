@@ -356,9 +356,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             assert(weight_all.shape == (22,))
             assert(bias_all.shape == (8,))
             weight_tensor = torch.from_numpy(weight_all).type(self.dtype)
-            weight_tensor.requires_grad = True
+            weight_tensor.requires_grad = requires_grad
             bias_tensor = torch.from_numpy(bias_all).type(self.dtype)
-            bias_tensor.requires_grad = True
+            bias_tensor.requires_grad = requires_grad
             linear1 = nn.Linear(2, 3)
             linear1.weight.data = weight_tensor[:6].clone().reshape((3, 2))
             linear1.bias.data = bias_tensor[:3].clone()
@@ -369,18 +369,20 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             linear3.weight.data = weight_tensor[18:].clone().reshape((1, 4))
             linear3.bias.data = bias_tensor[7:].clone()
             relu1 = nn.Sequential(
-                linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+                linear1, nn.ReLU(), linear2, nn.LeakyReLU(0.1), linear3,
+                nn.ReLU())
 
             V_rho = 0.1
             dV_epsilon = 0.01
-            (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
-                dut.lyapunov_derivative_as_milp(
+            milp_return = dut.lyapunov_derivative_as_milp(
                     relu1, torch.tensor([0, 0], dtype=self.system1.dtype),
                     V_rho, dV_epsilon)
+            milp = milp_return[0]
 
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
-            objective = milp.compute_objective_from_mip_data_and_solution()
+            objective = milp.compute_objective_from_mip_data_and_solution(
+                penalty=0.)
             if requires_grad:
                 objective.backward()
                 weight_grad = np.concatenate(
@@ -395,7 +397,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     axis=0)
                 return (weight_grad, bias_grad)
             else:
-                return np.array([objective.item()])
+                self.assertAlmostEqual(
+                    milp.gurobi_model.ObjVal, objective.item(), places=6)
+                return milp.gurobi_model.ObjVal
 
         # Test arbitrary weight and bias.
         weight_all_list = []
@@ -414,6 +418,17 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                  29.1, -14.5]))
         bias_all_list.append(
             np.array([2.45, -12.3, -4.9, 3.58, -2.15, 10.1, -4.6, -3.8]))
+        weight_all_list.append(np.array(
+            [0.1, -0.2, 2, -0.4, 0.21, 3.2, 14.2, 47.1, 0.1, -2.5, 12.1, 0.3,
+             0.5, -3.21, 0.75, 0.42, 3.45, 1.25, 2.41, 2.96, -3.22, -0.01]))
+        bias_all_list.append(np.array(
+            [0.25, 0.32, 0.34, -0.21, 0.46, 4.21, 12.4, -2.5]))
+        weight_all_list.append(np.array(
+            [3.1, -1.3, 2.4, -2.4, 3.01, -3.1, 1.2, -41.3, 4.1, -2.4, 14.8,
+             1.5, 2.5, -1.81, 3.78, 2.32, -.45, 2.25, 1.4, -.96, -3.95,
+             -2.01]))
+        bias_all_list.append(np.array(
+            [4.25, 2.37, 0.39, -0.24, 1.49, -4.31, 82.5, -12.5]))
 
         for weight_all, bias_all in zip(weight_all_list, bias_all_list):
             (weight_grad, bias_grad) = compute_milp_cost_given_relu(
@@ -422,9 +437,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 lambda weight, bias: compute_milp_cost_given_relu(
                     weight, bias, False), weight_all, bias_all, dx=1e-6)
             np.testing.assert_allclose(
-                weight_grad, grad_numerical[0].squeeze(), rtol=1e-3, atol=0.04)
+                    weight_grad, grad_numerical[0].squeeze(), atol=5e-5)
             np.testing.assert_allclose(
-                bias_grad, grad_numerical[1].squeeze(), rtol=1e-3, atol=0.01)
+                    bias_grad, grad_numerical[1].squeeze(), atol=1e-5)
 
     def test_lyapunov_positivity_loss_at_sample(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
