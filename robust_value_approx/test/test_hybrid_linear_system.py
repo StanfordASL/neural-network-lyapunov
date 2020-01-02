@@ -37,6 +37,58 @@ def setup_trecate_discrete_time_system():
     return system
 
 
+def setup_transformed_trecate_system(theta, x_equilibrium):
+    """
+    In paper "Analysis of discrete-time piecewise affine and hybrid systems"
+    by Giancarlo Ferrari-Trecate et.al. the authors define a piecewise affine
+    system in 2D.
+    We transform this system, such that
+    1. The equilibrium point is not the origin.
+    2. Each hybrid mode is not in one and only one quadrant.
+    If the system in Trecate's paper is
+    x[n+1] = Ai * x[n] if Pi * x[n] <= qi
+    The the transformed system is
+    R(θ)ᵀ*(x[n+1] - x*) = Ai*R(θ)ᵀ * (x[n] - x*) if Pi*R(θ)ᵀ*(x[n] - x*) <= qi
+    where R(θ) is a rotation matrix of angle θ in 2D, x* is the equilibrium
+    state.
+    @param theta The rotation angle for the transformation
+    @param x_equilibrium The equilibrium state of the transformed system.
+    """
+    assert(isinstance(theta, float))
+    assert(isinstance(x_equilibrium, torch.Tensor))
+    assert(x_equilibrium.shape == (2,))
+    dtype = x_equilibrium.dtype
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(
+        2, dtype)
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    R = torch.tensor(
+        [[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=dtype)
+
+    def add_mode(A, P, q):
+        system.add_mode(
+            R @ A @ (R.T), x_equilibrium - R @ A @ (R.T) @ x_equilibrium,
+            P @ (R.T), q + P @ (R.T) @ x_equilibrium)
+
+    add_mode(
+        torch.tensor([[-0.999, 0], [-0.139, 0.341]], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 0, 1], dtype=dtype))
+    add_mode(
+        torch.tensor([[0.436, 0.323], [0.388, -0.049]], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 1, 0], dtype=dtype))
+    add_mode(
+        torch.tensor([[-0.457, 0.215], [0.491, 0.49]], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 0, 1], dtype=dtype))
+    add_mode(
+        torch.tensor([[-0.022, 0.344], [0.458, 0.271]], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 1, 0], dtype=dtype))
+    return system
+
+
 class HybridLinearSystemTest(unittest.TestCase):
     def setUp(self):
         pass
@@ -330,18 +382,37 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
                 test_fun(torch.tensor(
                     [x_sample[i, j], y_sample[i, j]], dtype=dut.dtype))
 
-    def test_mode(self):
+    def test_mode1(self):
         dut = setup_trecate_discrete_time_system()
-        self.assertEqual(dut.mode(torch.tensor([0.4, 0.5], dtype=dut.dtype)),
-                         1)
-        self.assertEqual(dut.mode(torch.tensor([-0.4, 0.5], dtype=dut.dtype)),
-                         3)
-        self.assertEqual(dut.mode(torch.tensor([-0.4, -0.5], dtype=dut.dtype)),
-                         2)
-        self.assertEqual(dut.mode(torch.tensor([0.4, -0.5], dtype=dut.dtype)),
-                         0)
+        self.assertEqual(
+            dut.mode(torch.tensor([0.4, 0.5], dtype=dut.dtype)), 1)
+        self.assertEqual(
+            dut.mode(torch.tensor([-0.4, 0.5], dtype=dut.dtype)), 3)
+        self.assertEqual(
+            dut.mode(torch.tensor([-0.4, -0.5], dtype=dut.dtype)), 2)
+        self.assertEqual(
+            dut.mode(torch.tensor([0.4, -0.5], dtype=dut.dtype)), 0)
 
-    def test_step_forward(self):
+    def test_mode2(self):
+        theta = np.pi / 5
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        R = torch.tensor(
+            [[cos_theta, -sin_theta], [sin_theta, cos_theta]],
+            dtype=torch.float64)
+        x_equilibrium = torch.tensor([0.2, 1.5], dtype=torch.float64)
+        dut = setup_transformed_trecate_system(theta, x_equilibrium)
+        self.assertEqual(dut.mode(
+            R @ torch.tensor([0.4, 0.5], dtype=dut.dtype) + x_equilibrium), 1)
+        self.assertEqual(dut.mode(
+            R @ torch.tensor([-0.4, 0.5], dtype=dut.dtype) + x_equilibrium), 3)
+        self.assertEqual(dut.mode(
+            R @ torch.tensor([-0.4, -0.5], dtype=dut.dtype) + x_equilibrium),
+            2)
+        self.assertEqual(dut.mode(
+            R @ torch.tensor([0.4, -0.5], dtype=dut.dtype) + x_equilibrium), 0)
+
+    def test_step_forward1(self):
         dut = setup_trecate_discrete_time_system()
 
         def test_fun(x):
@@ -358,6 +429,30 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         test_fun(torch.tensor([0.4, -0.5], dtype=dut.dtype))
         test_fun(torch.tensor([-0.4, -0.5], dtype=dut.dtype))
         test_fun(torch.tensor([-0.4, 0.5], dtype=dut.dtype))
+
+    def test_step_forward2(self):
+        dut1 = setup_trecate_discrete_time_system()
+        theta = np.pi / 5
+        x_equilibrium = torch.tensor([0.2, 1.5], dtype=torch.float64)
+        dut2 = setup_transformed_trecate_system(theta, x_equilibrium)
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        R = torch.tensor(
+            [[cos_theta, -sin_theta], [sin_theta, cos_theta]],
+            dtype=torch.float64)
+
+        def test_fun(x):
+            x_next = dut1.step_forward(x)
+            x_transformed = R @ x + x_equilibrium
+            x_next_transformed = dut2.step_forward(x_transformed)
+            np.testing.assert_allclose(
+                (R @ x_next + x_equilibrium).detach().numpy(),
+                x_next_transformed.detach().numpy())
+
+        test_fun(torch.tensor([0.4, 0.5], dtype=torch.float64))
+        test_fun(torch.tensor([-0.4, 0.5], dtype=torch.float64))
+        test_fun(torch.tensor([-0.4, -0.5], dtype=torch.float64))
+        test_fun(torch.tensor([0.4, -0.5], dtype=torch.float64))
 
     def test_possible_next_states(self):
         dut = setup_trecate_discrete_time_system()
