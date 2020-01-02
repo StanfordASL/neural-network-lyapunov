@@ -268,12 +268,14 @@ class TestReLU(unittest.TestCase):
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
                     model, x)
+                z_post_relu_up_numpy =\
+                    np.array([zi.detach().numpy() for zi in z_post_relu_up])
+                z_post_relu_lo_numpy =\
+                    np.array([zi.detach().numpy() for zi in z_post_relu_lo])
                 np.testing.assert_array_less(
-                    z.squeeze().detach().numpy(),
-                    z_post_relu_up.detach().numpy() + 1E-10)
+                    z.squeeze().detach().numpy(), z_post_relu_up_numpy + 1E-10)
                 np.testing.assert_array_less(
-                    z_post_relu_lo.detach().numpy() - 1E-10,
-                    z.squeeze().detach().numpy())
+                    z_post_relu_lo_numpy - 1E-10, z.squeeze().detach().numpy())
                 # Check the output
                 self.assertAlmostEqual(output, (a_out.T @ z + b_out).item(), 3)
                 x_vec = x.reshape((-1, 1))

@@ -78,8 +78,7 @@ class TrainLyapunovReLU:
         # This is ε in dV(x) ≤ -ε V(x)
         self.lyapunov_derivative_epsilon = 0.01
 
-    def total_loss(self, relu, state_samples_all, state_samples_next,
-                   adversarial_states, adversarial_next_states):
+    def total_loss(self, relu, state_samples_all, state_samples_next):
         """
         Compute the total loss as the summation of
         1. hinge(-V(xⁱ)) for sampled state xⁱ.
@@ -179,15 +178,12 @@ class TrainLyapunovReLU:
             [self.lyapunov_hybrid_system.system.possible_next_states(x) for x
              in state_samples_all]
         iter_count = 0
-        adversarial_states = []
-        adversarial_next_states = []
         optimizer = torch.optim.Adam(
             relu.parameters(), lr=self.learning_rate)
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
             loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost \
-                = self.total_loss(relu, state_samples_all, state_samples_next,
-                                  adversarial_states, adversarial_next_states)
+                = self.total_loss(relu, state_samples_all, state_samples_next)
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
                       f"positivity cost {lyapunov_positivity_mip_cost}, " +
