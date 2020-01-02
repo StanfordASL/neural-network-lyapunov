@@ -338,7 +338,8 @@ class ReLUFreePattern:
                             z_post_relu_up[relu_unit_index_ij] = \
                                 z_pre_relu_up[relu_unit_index_ij].clone()
                         else:
-                            z_post_relu_lo[relu_unit_index_ij] = 0
+                            z_post_relu_lo[relu_unit_index_ij] = \
+                                torch.tensor(0., dtype=self.dtype)
                             z_post_relu_up[relu_unit_index_ij] = torch.max(
                                 negative_slope * z_pre_relu_lo[
                                     relu_unit_index_ij], z_pre_relu_up[
