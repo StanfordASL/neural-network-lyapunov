@@ -11,62 +11,54 @@ import torch
 
 
 class ValueToOptimizationTest(unittest.TestCase):
-    @unittest.skip("Takes too long time.")
     def test_trajopt_x0xN(self):
         """
         x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
         u = [paddletheta_dot, paddlevy_dot]
         """
         dtype = torch.float64
-        dt = .001
+        dt = .1
         x_lo = torch.Tensor(
-            [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
+            [-1., -1., 0., -1e3, -1e3, -1e3]).type(dtype)
         x_up = torch.Tensor(
-            [1., 10., 2., 1e6, 1e6, 1e6]).type(dtype)
-        u_lo = torch.Tensor([-np.pi / 2, -1e5]).type(dtype)
-        u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
+            [1., 10., 2., 1e3, 1e3, 1e3]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e3]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e3]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
-
-        N = 20
+        N = 10
         vf = value_to_optimization.ValueFunction(
             sys, N, x_lo, x_up, u_lo, u_up)
         [Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt] = get_simple_trajopt_cost(
             sys.x_dim, sys.u_dim, sys.num_modes, dtype)
         vf.set_cost(Q=Q, R=R, Z=Z, q=q, r=r, z=z)
         vf.set_terminal_cost(Qt=Qt, Rt=Rt, Zt=Zt, qt=qt, rt=rt, zt=zt)
-
         # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
-        x0 = torch.Tensor([0., .25, 0., 0., 0., 0.])
-        xN = torch.Tensor([np.nan, .6, 0., np.nan, 0., np.nan])
+        x0 = torch.Tensor([0., .25, .15, 0., 0., 0.])
+        xN = torch.Tensor([np.nan, .5, np.nan, np.nan, np.nan, np.nan])
         vf.set_constraints(x0=x0, xN=xN)
-
         traj_opt = vf.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
          Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
-
         x = cp.Variable(Ain1.shape[1])
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-
         obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 * cp.quad_form(z, Q3)
                           + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x + Ain2@s + Ain3@z <= rhs_in,
             Aeq1@x + Aeq2@s + Aeq3@z == rhs_eq,
         ]
-
         prob = cp.Problem(obj, con)
         prob.solve(solver=cp.GUROBI, verbose=False)
-
         traj = np.hstack((x.value, s.value))
         traj = np.reshape(traj, ((1 + sys.num_modes) *
                                  (sys.x_dim + sys.u_dim), N), order='F')
-
         self.assertAlmostEqual(traj[1, 0], x0[1])
         self.assertAlmostEqual(traj[2, 0], x0[2])
         self.assertAlmostEqual(traj[5, 0], x0[5])
+        self.assertAlmostEqual(traj[1, -1], xN[1])
 
     def test_trajopt_obj(self):
         dtype = torch.float64
@@ -131,11 +123,10 @@ class ValueToOptimizationTest(unittest.TestCase):
 
         self.assertAlmostEqual(obj_exp.item(), obj.item())
 
-    @unittest.skip("Test fails occasionally.")
     def test_trajopt_lim(self):
         dtype = torch.float64
         dt = .01
-        N = 20
+        N = 10
         x_lo = torch.Tensor(
             [-1., -1., 0., -1e6, -1e6, -1e6]).type(dtype)
         x_up = torch.Tensor(
@@ -144,39 +135,31 @@ class ValueToOptimizationTest(unittest.TestCase):
         u_up = torch.Tensor([np.pi / 2, 1e5]).type(dtype)
         sys = bphls.get_ball_paddle_hybrid_linear_system(
             dtype, dt, x_lo, x_up, u_lo, u_up)
-
-        x_lo = torch.rand(sys.x_dim)
-        u_up = torch.rand(sys.u_dim)
+        x_lo = torch.Tensor([.1, .1, .1, .1, .1, .1]).type(dtype)
+        u_up = torch.Tensor([0., 0.]).type(dtype)
         vf = value_to_optimization.ValueFunction(
             sys, N, x_lo, x_up, u_lo, u_up)
         vf.set_cost(q=torch.ones(sys.x_dim), r=-torch.ones(sys.u_dim))
-
         traj_opt = vf.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
          Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
-
         x = cp.Variable(Ain1.shape[1])
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-
         obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 *
                           cp.quad_form(z, Q3) + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x + Ain2@s + Ain3@z <= rhs_in,
             Aeq1@x + Aeq2@s + Aeq3@z == rhs_eq,
         ]
-
         prob = cp.Problem(obj, con)
         prob.solve(solver=cp.GUROBI, verbose=False)
-
         traj = np.hstack((x.value, s.value))
         traj = np.reshape(traj, ((1 + sys.num_modes) *
                                  (sys.x_dim + sys.u_dim), N), order='F')
-
         xtraj = traj[:sys.x_dim, :]
         utraj = traj[sys.x_dim:sys.x_dim + sys.u_dim, :]
-
         for i in range(N):
             for j in range(sys.x_dim):
                 self.assertLessEqual(x_lo[j], xtraj[j, i])
