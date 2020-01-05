@@ -3,11 +3,15 @@
 
 import robust_value_approx.train_lyapunov as train_lyapunov
 import robust_value_approx.lyapunov as lyapunov
-import torch
-import torch.nn as nn
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
-import robust_value_approx.test.test_train_lyapunov as test_train_lyapunov
+
+import torch
+import torch.nn as nn
+
+import numpy as np
+
+import argparse
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -38,14 +42,40 @@ def setup_relu():
     return relu1
 
 
-def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size):
+def setup_state_samples_all(mesh_size, x_equilibrium, theta):
     assert(isinstance(mesh_size, tuple))
     assert(len(mesh_size) == 2)
     dtype = torch.float64
+    (samples_x, samples_y) = torch.meshgrid(
+        torch.linspace(-1.+1e-6, 1.-1e-6, mesh_size[0], dtype=dtype),
+        torch.linspace(-1.+1e-6, 1.-1e-6, mesh_size[1], dtype=dtype))
+    state_samples = [None] * (mesh_size[0] * mesh_size[1])
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    R = torch.tensor([[
+        cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=dtype)
+    for i in range(samples_x.shape[0]):
+        for j in range(samples_x.shape[1]):
+            state_samples[i * samples_x.shape[1] + j] = R @ torch.tensor(
+                [samples_x[i, j], samples_y[i, j]], dtype=dtype) +\
+                    x_equilibrium
+    return state_samples
+
+
+def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size, theta):
+    assert(isinstance(mesh_size, tuple))
+    assert(len(mesh_size) == 2)
+    dtype = torch.float64
+    assert(isinstance(theta, float))
     with torch.no_grad():
-        (samples_x, samples_y) = torch.meshgrid(
-            torch.linspace(-1., 1., mesh_size[0], dtype=dtype),
-            torch.linspace(-1., 1., mesh_size[1], dtype=dtype))
+        state_samples_all = setup_state_samples_all(
+            mesh_size, x_equilibrium, theta)
+        samples_x = torch.empty(mesh_size)
+        samples_y = torch.empty(mesh_size)
+        for i in range(mesh_size[0]):
+            for j in range(mesh_size[1]):
+                samples_x[i, j] = state_samples_all[i * mesh_size[1] + j][0]
+                samples_y[i, j] = state_samples_all[i * mesh_size[1] + j][1]
         V = torch.zeros(mesh_size)
         dV = torch.zeros(mesh_size)
         relu_at_equilibrium = relu.forward(x_equilibrium)
@@ -55,12 +85,9 @@ def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size):
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 V[i, j] = relu.forward(state_sample) - relu_at_equilibrium +\
                     V_rho * torch.norm(state_sample - x_equilibrium, p=1)
-                for mode in range(system.num_modes):
-                    if (torch.all(system.P[mode] @ state_sample <=
-                                  system.q[mode])):
-                        state_next = system.A[mode] @ state_sample +\
-                            system.g[mode]
-                        break
+                state_next = None
+                mode = system.mode(state_sample)
+                state_next = system.step_forward(state_sample, mode)
                 V_next = relu.forward(state_next) - relu_at_equilibrium +\
                     V_rho * torch.norm(state_next - x_equilibrium, p=1)
                 dV[i, j] = V_next - V[i, j]
@@ -94,33 +121,59 @@ def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size):
 
 
 if __name__ == "__main__":
-    system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
+    parser = argparse.ArgumentParser(
+        description='learning lyapunov for Trecate system parameters')
+    parser.add_argument(
+        '--theta', type=float, default=0.,
+        help='rotation angle of the Trecate system transformation')
+    parser.add_argument(
+        '--equilibrium_state_x', type=float, default=0.,
+        help='x location of the equilibrium state')
+    parser.add_argument(
+        '--equilibrium_state_y', type=float, default=0.,
+        help='y location of the equilibrium state')
+    parser.add_argument(
+        '--learning_rate', type=float, default=1e-3,
+        help='learning rate for the Lyapunov function.')
+    parser.add_argument(
+        '--max_iterations', type=int, default=1000,
+        help='max iteration for learning Lyapunov function.')
+    args = parser.parse_args()
+
+    theta = args.theta
+    x_equilibrium = torch.tensor([
+        args.equilibrium_state_x, args.equilibrium_state_y],
+        dtype=torch.float64)
+
+    system = test_hybrid_linear_system.setup_transformed_trecate_system(
+        theta, x_equilibrium)
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
     relu = setup_relu()
     V_rho = 0.1
-    x_equilibrium = torch.tensor([0, 0], dtype=torch.float64)
 
-    state_samples_all1 = test_train_lyapunov.setup_state_samples_all((51, 51))
+    state_samples_all1 = setup_state_samples_all(
+        (51, 51), x_equilibrium, theta)
     # First train a ReLU to approximate the value function.
     options1 = train_lyapunov.TrainValueApproximatorOptions()
     options1.max_epochs = 1000
     options1.convergence_tolerance = 0.01
     result1 = train_lyapunov.train_value_approximator(
-        system, relu, V_rho, x_equilibrium, lambda x: torch.norm(x, p=1),
+        system, relu, V_rho, x_equilibrium,
+        lambda x: torch.norm(x - x_equilibrium, p=1),
         state_samples_all1, options1)
-    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))
+    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
 
     state_samples_all = state_samples_all1
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_rho, x_equilibrium)
     dut.output_flag = True
-    dut.max_iterations = 1000
-    dut.learning_rate = 1e-3
-    dut.lyapunov_derivative_mip_pool_solutions = 20
+    dut.max_iterations = args.max_iterations
+    dut.learning_rate = args.learning_rate
+    dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_sample_cost_weight = 0.
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_mip_cost_weight = 0.
     result = dut.train(relu, state_samples_all)
 
-    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51))
+    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
