@@ -581,26 +581,100 @@ class ValueFunction:
 
         return(x_samples, u_samples, v_samples)
 
-    def step_cost(self, x_val, u_val, alpha_val):
+    def traj_cost(self, x_traj_val, u_traj_val, alpha_traj_val=None):
         """
-        Computes the cost of a single step with the value function.
-        Note that the step should not be the terminal one (i.e. not
-        correspond to Qt, Rt and Zt.
-        @param x_val A tensor with the value of the state
-        @param u_val A tensor with the value of the control input
-        @param alpha_val A tensor with the value of the discrete variables
+        Computes the cost of a trajectory for this value function.
+        @param x_traj_val A tensor with the value of the state
+        @param u_traj_val A tensor with the value of the control input
+        @param alpha_traj_val A tensor with the value of the discrete variables
         """
-        cost = 0.
-        if self.Q is not None:
-            cost += .5 * x_val @ self.Q @ x_val
-        if self.R is not None:
-            cost += .5 * u_val @ self.R @ u_val
-        if self.Z is not None:
-            cost += .5 * alpha_val @ self.Z @ alpha_val
-        if self.q is not None:
-            cost += x_val @ self.q
-        if self.r is not None:
-            cost += u_val @ self.r
-        if self.z is not None:
-            cost += alpha_val @ self.z
-        return cost
+        assert(x_traj_val.shape[1] == (self.N - 1))
+        assert(u_traj_val.shape[1] == self.N)
+        if alpha_traj_val is not None:
+            assert(alpha_traj_val.shape[1] == self.N)
+        obj = 0.
+        for i in range(self.N - 2):
+            if self.xtraj is not None:
+                if self.Q is not None:
+                    obj += .5 * (x_traj_val[:, i] - self.xtraj[:, i]
+                                 ).t()@self.Q@(x_traj_val[:, i] -
+                                               self.xtraj[:, i])
+                if self.q is not None:
+                    obj += (x_traj_val[:, i] - self.xtraj[:, i]).t()@self.q
+            else:
+                if self.Q is not None:
+                    obj += .5 * x_traj_val[:, i].t()@self.Q@x_traj_val[:, i]
+                if self.q is not None:
+                    obj += x_traj_val[:, i].t()@self.q
+        i = self.N - 2
+        if self.xtraj is not None:
+            if self.Qt is not None:
+                obj += .5 * (x_traj_val[:, i] - self.xtraj[:, i]
+                             ).t()@self.Qt@(x_traj_val[:, i] -
+                                            self.xtraj[:, i])
+            if self.qt is not None:
+                obj += (x_traj_val[:, i] - self.xtraj[:, i]).t()@self.qt
+        else:
+            if self.Qt is not None:
+                obj += .5 * x_traj_val[:, i].t()@self.Qt@x_traj_val[:, i]
+            if self.qt is not None:
+                obj += x_traj_val[:, i].t()@self.qt
+        for i in range(self.N - 1):
+            if self.utraj is not None:
+                if self.R is not None:
+                    obj += .5 * (u_traj_val[:, i] - self.utraj[:, i]
+                                 ).t()@self.R@(u_traj_val[:, i] -
+                                               self.utraj[:, i])
+                if self.r is not None:
+                    obj += (u_traj_val[:, i] - self.utraj[:, i]).t()@self.r
+            else:
+                if self.R is not None:
+                    obj += .5 * u_traj_val[:, i].t()@self.R@u_traj_val[:, i]
+                if self.r is not None:
+                    obj += u_traj_val[:, i].t()@self.r
+        i = self.N - 1
+        if self.utraj is not None:
+            if self.Rt is not None:
+                obj += .5 * (u_traj_val[:, i] - self.utraj[:, i]
+                             ).t()@self.Rt@(u_traj_val[:, i] -
+                                            self.utraj[:, i])
+            if self.rt is not None:
+                obj += (u_traj_val[:, i] - self.utraj[:, i]).t()@self.rt
+        else:
+            if self.Rt is not None:
+                obj += .5 * u_traj_val[:, i].t()@self.Rt@u_traj_val[:, i]
+            if self.rt is not None:
+                obj += u_traj_val[:, i].t()@self.rt
+        if alpha_traj_val is not None:
+            for i in range(self.N - 1):
+                if self.alphatraj is not None:
+                    if self.Z is not None:
+                        obj += .5 * (alpha_traj_val[:, i] -
+                                     self.alphatraj[:, i]).t()@self.Z@(
+                            alpha_traj_val[:, i] - self.alphatraj[:, i])
+                    if self.z is not None:
+                        obj += (alpha_traj_val[:, i] -
+                                self.alphatraj[:, i]).t()@self.z
+                else:
+                    if self.Z is not None:
+                        obj += .5 * \
+                            alpha_traj_val[:, i].t(
+                            )@self.Z@alpha_traj_val[:, i]
+                    if self.z is not None:
+                        obj += alpha_traj_val[:, i].t()@self.z
+            i = self.N - 1
+            if self.alphatraj is not None:
+                if self.Zt is not None:
+                    obj += .5 * (alpha_traj_val[:, i] -
+                                 self.alphatraj[:, i]).t()@self.Zt@(
+                        alpha_traj_val[:, i] - self.alphatraj[:, i])
+                if self.zt is not None:
+                    obj += (alpha_traj_val[:, i] -
+                            self.alphatraj[:, i]).t()@self.zt
+            else:
+                if self.Zt is not None:
+                    obj += .5 *\
+                        alpha_traj_val[:, i].t()@self.Zt@alpha_traj_val[:, i]
+                if self.zt is not None:
+                    obj += alpha_traj_val[:, i].t()@self.zt
+        return obj
