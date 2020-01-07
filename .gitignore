@@ -136,3 +136,6 @@ gurobi.log
 # trained model used in tests
 !*/test/data/double_integrator_model.pt
 !*/test/data/double_integrator_q_model.pt
+
+# pytorch logs
+robust_value_approx/test/notebooks/runs

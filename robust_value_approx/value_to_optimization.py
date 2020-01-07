@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
-from robust_value_approx.utils import torch_to_numpy
+import robust_value_approx.utils as utils
 import cvxpy as cp
 
 
@@ -424,7 +424,7 @@ class ValueFunction:
         traj_opt = self.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+         Q2, Q3, q2, q3, c) = utils.torch_to_numpy(traj_opt)
 
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
@@ -461,7 +461,7 @@ class ValueFunction:
         traj_opt = self.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+         Q2, Q3, q2, q3, c) = utils.torch_to_numpy(traj_opt)
 
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
@@ -491,7 +491,8 @@ class ValueFunction:
 
         return Q
 
-    def get_value_sample_grid(self, x_lo, x_up, num_breaks):
+    def get_value_sample_grid(self, x_lo, x_up, num_breaks,
+                              update_progress=False):
         """
         generates a uniformly sampled grid of optimal cost-to-go samples
         for this value function
@@ -527,11 +528,13 @@ class ValueFunction:
                 v_samples = torch.cat(
                     (v_samples, torch.Tensor([[v[0]]]).type(self.dtype)),
                     axis=0)
+            if update_progress:
+                utils.update_progress((i + 1) / x_samples_all.shape[0])
 
         return(x_samples, v_samples)
 
     def get_q_sample_grid(self, x_lo, x_up, x_num_breaks,
-                          u_lo, u_up, u_num_breaks):
+                          u_lo, u_up, u_num_breaks, update_progress=False):
         """
         generates a uniformly sampled grid of Q-values for this value function
 
@@ -578,6 +581,8 @@ class ValueFunction:
                 v_samples = torch.cat(
                     (v_samples, torch.Tensor([[v[0]]]).type(self.dtype)),
                     axis=0)
+            if update_progress:
+                utils.update_progress((i + 1) / xu_samples_all.shape[0])
 
         return(x_samples, u_samples, v_samples)
 
