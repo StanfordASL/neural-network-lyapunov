@@ -67,6 +67,51 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     return (A_x, A_s, A_alpha, rhs)
 
 
+def leaky_relu_gradient_times_x(
+        x_lo, x_up, negative_slope, dtype=torch.float64):
+    """
+    Write the function
+    y = x if α = 1
+    y = c*x if α = 0
+    as mixed-integer linear constraints on x, y and α. Note that y could be
+    regarded as the gradient of a leaky relu unit (with negative slope = c)
+    times x.
+    The mixed-integer linear constraints are
+    A_x * x + A_y * y + A_alpha * alpha <= rhs
+    @param x_lo The lower bound of x.
+    @param x_up The upper bound of x.
+    """
+    assert(x_up >= x_lo)
+    A_x = torch.empty((4,), dtype=dtype)
+    A_y = torch.empty((4,), dtype=dtype)
+    A_alpha = torch.empty((4,), dtype=dtype)
+    rhs = torch.empty((4,), dtype=dtype)
+    A_x[0] = -1.
+    A_y[0] = 1.
+    A_alpha[0] = (negative_slope - 1.) * x_lo
+    rhs[0] = (negative_slope - 1.) * x_lo
+
+    A_x[1] = 1.
+    A_y[1] = -1.
+    A_alpha[1] = (1. - negative_slope) * x_up
+    rhs[1] = (1. - negative_slope) * x_up
+
+    A_x[2] = negative_slope
+    A_y[2] = -1.
+    A_alpha[2] = (1. - negative_slope) * x_lo
+    rhs[2] = 0.
+
+    A_x[3] = -negative_slope
+    A_y[3] = 1.
+    A_alpha[3] = (negative_slope - 1.) * x_up
+    rhs[3] = 0.
+
+    if negative_slope < 1.:
+        return (A_x, A_y, A_alpha, rhs)
+    else:
+        return (-A_x, -A_y, -A_alpha, -rhs)
+
+
 def replace_absolute_value_with_mixed_integer_constraint(
         x_lo, x_up, dtype=torch.float64):
     """

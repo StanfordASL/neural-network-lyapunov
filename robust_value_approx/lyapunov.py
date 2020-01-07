@@ -8,20 +8,11 @@ import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import robust_value_approx.utils as utils
 
 
-class LyapunovDiscreteTimeHybridSystem:
+class LyapunovHybridLinearSystem:
     """
-    For a discrete time autonomous hybrid linear system
-    x[n+1] = Aᵢ*x[n] + cᵢ
-    if Pᵢ * x[n] <= qᵢ
-    i = 1, ..., K.
-    we want to learn a ReLU network as the Lyapunov function for the system.
-    The condition for the Lyapunov function is that
-    V[x[n+1]] <= V[x[n]] ∀x[n]
-    We will first formulate this condition as the optimal cost of a certain
-    mixed-integer linear program (MILP) being non-positive. The optimal cost
-    is the loss function of our neural network. We will compute the gradient of
-    this loss function w.r.t to network weights/bias, and then call gradient
-    based optimization (SGD/Adam) to reduce the loss.
+    This is the super class of LyapunovDiscreteTimeHybridSystem and
+    LyapunovContinuousTimeHybridSystem. It implements the common part of these
+    two subclasses.
     """
 
     def __init__(self, system):
@@ -173,6 +164,32 @@ class LyapunovDiscreteTimeHybridSystem:
                 relu_model, state_sample, x_equilibrium, V_rho,
                 relu_at_equilibrium), torch.tensor(-1.))
 
+
+class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
+    """
+    For a discrete time autonomous hybrid linear system
+    x[n+1] = Aᵢ*x[n] + cᵢ
+    if Pᵢ * x[n] <= qᵢ
+    i = 1, ..., K.
+    we want to learn a ReLU network as the Lyapunov function for the system.
+    The condition for the Lyapunov function is that
+    V(x*) = 0
+    V(x) > 0 ∀ x ≠ x*
+    V(x[n+1]) - V(x[n]) ≤ -ε * V(x[n])
+    where x* is the equilibrium point.
+    We will first formulate this condition as the optimal cost of a certain
+    mixed-integer linear program (MILP) being non-positive. The optimal cost
+    is the loss function of our neural network. We will compute the gradient of
+    this loss function w.r.t to network weights/bias, and then call gradient
+    based optimization (SGD/Adam) to reduce the loss.
+    """
+
+    def __init__(self, system):
+        """
+        @param system A AutonomousHybridLinearSystem instance.
+        """
+        super(LyapunovDiscreteTimeHybridSystem, self).__init__(system)
+
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
@@ -187,11 +204,6 @@ class LyapunovDiscreteTimeHybridSystem:
         than 0.
         max V(x[n+1]) - V(x[n]) + ε * V(x[n])
         s.t lower <= V(x[n]) <= upper
-        Notice that to prove global stability, then lower = 0 and upper = inf,
-        the optimal has to be strictly less than 0 except at the equilibrium.
-        If lower > 0 and the maximal is strictly less than 0, then we prove
-        that all states outside of the level set {x[n] | V(x[n]) <= lower} will
-        converge to this level set.
         We would formulate this optimization problem as an MILP.
 
         This function returns the MILP formulation.
@@ -207,8 +219,6 @@ class LyapunovDiscreteTimeHybridSystem:
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
         (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
-        @param relu_model The Lyapunov function is represented as the output of
-        a ReLU model.
         @param V_rho ρ in the documentation above.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
@@ -450,3 +460,63 @@ class LyapunovDiscreteTimeHybridSystem:
             V_rho * torch.norm(state_next - x_equilibrium, p=1)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             v1 - v2, torch.tensor(-1.))
+
+
+class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
+    """
+    For a continuous time autonomous hybrid linear system
+    ẋ = Aᵢx + gᵢ if Pᵢx ≤ qᵢ
+    we want to learn a ReLU network as the Lyapunov function for the system.
+    The condition for the Lyapunov function is that
+    V(x*) = 0
+    V(x) > 0 ∀ x ≠ x*
+    V̇(x) ≤ -ε V(x)
+    This proves that the system converges exponentially to x*.
+    We will formulate these conditions as the optimal objective of certain
+    mixed-integer linear programs (MILP) being non-positive/non-negative.
+    """
+
+    def __init__(self, system):
+        super(LyapunovContinuousTimeHybridSystem, self).__init__(system)
+
+    def lyapunov_derivative_as_milp(
+            self, relu_model, x_equilibrium, V_rho, epsilon,
+            lyapunov_lower=None, lyapunov_upper=None):
+        """
+        We assume that the Lyapunov function
+        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
+        state.
+        Formulate the Lyapunov condition
+        V̇(x) ≤ -ε V(x) for all x satisfying
+        lower <= V(x) <= upper
+        as the maximal of following optimization problem is no larger
+        than 0.
+        max V̇(x) + ε * V(x)
+        s.t lower <= V(x) <= upper
+        We would formulate this optimization problem as an MILP.
+
+        This function returns the MILP formulation.
+        max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
+        s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
+            Aeq_r * r + Aeq_zeta * ζ = rhs_eq
+        where r includes all continuous variables, and ζ includes all binary
+        variables.
+        @param relu_model A pytorch ReLU network. Notice that we want the last
+        layer to be a ReLU activation layer, so as to guarantee the Lyapunov
+        function to be non-negative.
+        return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
+        where milp is a GurobiTorchMILP object.
+        The decision variables of the MILP are
+        (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
+        @param x_equilibrium The equilibrium state.
+        @param V_rho ρ in the documentation above.
+        @param epsilon The exponential convergence rate.
+        @param lyapunov_lower the "lower" bound in the documentation above. If
+        lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
+        @param lyapunov_upper the "upper" bound in the documentation above. If
+        lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
+        @param epsilon The rate of exponential convergence. If the goal is to
+        verify convergence but not exponential convergence, then set epsilon
+        to 0.
+        """
+        pass

@@ -667,12 +667,15 @@ class ReLUFreePattern:
         We want to compute the gradient of the network ∂ReLU(x)/∂x times a
         vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
         mixed-integer linear constraints.
+        We assume that the leaky relu unit has negative slope c (c = 0 for
+        ReLU unit). And we define a matrix
+        M(β, c) = c + (1-c)*diag(β)
         We notice that
-        ∂ReLU(x)/∂x = wₙᵀ * diag(βₙ₋₁) * Wₙ₋₁ * diag(βₙ₋₂) * Wₙ₋₂ * ...
-                      * diag(β₀) * W₀
+        ∂ReLU(x)/∂x = wₙᵀ * M(βₙ₋₁, c) +  * Wₙ₋₁ * M(βₙ₋₂, c) * Wₙ₋₂ * ...
+                      * M(β₀, c) * W₀
         So we introduce slack variable z, such that
         z₀ = y
-        zᵢ₊₁ = diag(βᵢ)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
+        zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
         The constraint (1) can be replaced by mixed-integer linear constraint
         on zᵢ and βᵢ.
         If the ReLU network has a ReLU unit for the output layer, then
