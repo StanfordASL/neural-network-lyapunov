@@ -78,7 +78,7 @@ class RandomShootingMPC:
 
 
 class ReLUMPC:
-    def __init__(self, vf, model, x_lo, x_up):
+    def __init__(self, vf, model):
         """
         Controller that computes optimal control actions by optimizing
         over the learned value function directly
@@ -97,7 +97,7 @@ class ReLUMPC:
         self.vf = vf
         self.model = model
         relu = relu_to_optimization.ReLUFreePattern(model, vf.dtype)
-        relu_con = relu.output_constraint(model, x_lo, x_up)
+        relu_con = relu.output_constraint(model, vf.x_lo, vf.x_up)
         (Pin1, Pin2, Pin3, Prhs_in,
          Peq1, Peq2, Peq3, Prhs_eq,
          a_out, b_out,
@@ -186,6 +186,8 @@ class ReLUMPC:
         assert(isinstance(x0, torch.Tensor))
         self.x0.value = x0.detach().numpy()
         self.prob.solve(solver=cp.GUROBI, warm_start=True)
+        if self.u0.value is None:
+            return (None, None)
         u0_opt = torch.Tensor(self.u0.value).type(self.vf.dtype)
         x1_opt = torch.Tensor(self.x1.value).type(self.vf.dtype)
         return(u0_opt, x1_opt)

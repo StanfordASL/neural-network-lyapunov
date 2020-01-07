@@ -8,38 +8,39 @@ import torch
 import torch.nn as nn
 
 
-def generate_data():
-    print("generating data...")
+def get_value_function():
+    dt = 1.
     dtype = torch.float64
     (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
     x_dim = A_c.shape[1]
     u_dim = B_c.shape[1]
-    # continuous to discrete using forward euler
-    dt = 1.
     A = torch.eye(x_dim, dtype=dtype) + dt * A_c
     B = dt * B_c
-
     sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
     c = torch.zeros(x_dim, dtype=dtype)
-    x_lo = -2. * torch.ones(x_dim, dtype=dtype)
-    x_up = 2. * torch.ones(x_dim, dtype=dtype)
-    u_lo = -1. * torch.ones(u_dim, dtype=dtype)
-    u_up = 1. * torch.ones(u_dim, dtype=dtype)
     P = torch.cat((-torch.eye(x_dim+u_dim),
                    torch.eye(x_dim+u_dim)), 0).type(dtype)
+    x_lo = -10. * torch.ones(x_dim, dtype=dtype)
+    x_up = 10. * torch.ones(x_dim, dtype=dtype)
+    u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+    u_up = 1. * torch.ones(u_dim, dtype=dtype)
     q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
     sys.add_mode(A, B, c, P, q)
-    # value function
+    R = torch.eye(sys.u_dim)
+    Q = torch.eye(sys.x_dim)
     N = 5
     vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
-    R = torch.eye(sys.u_dim)
-    vf.set_cost(R=R)
-    vf.set_terminal_cost(Rt=R)
-    xN = torch.Tensor([0., 0.]).type(dtype)
-    vf.set_constraints(xN=xN)
-    x0_lo = x_lo
-    x0_up = x_up
-    num_breaks = [50] * x_dim
+    vf.set_cost(Q=Q, R=R)
+    vf.set_terminal_cost(Qt=Q, Rt=R)
+    return vf
+
+
+def generate_data():
+    print("generating data...")
+    vf = get_value_function()
+    x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+    x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+    num_breaks = [50] * vf.sys.x_dim
     x_samples, v_samples = vf.get_value_sample_grid(x0_lo, x0_up, num_breaks)
     torch.save(x_samples, 'data/double_integrator_x_samples.pt')
     torch.save(v_samples, 'data/double_integrator_v_samples.pt')
@@ -62,38 +63,13 @@ def generate_model():
 
 def generate_q_data():
     print("generating q data...")
-    dtype = torch.float64
-    (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
-    x_dim = A_c.shape[1]
-    u_dim = B_c.shape[1]
-    # continuous to discrete using forward euler
-    dt = 1.
-    A = torch.eye(x_dim, dtype=dtype) + dt * A_c
-    B = dt * B_c
-    sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
-    c = torch.zeros(x_dim, dtype=dtype)
-    x_lo = -10. * torch.ones(x_dim, dtype=dtype)
-    x_up = 10. * torch.ones(x_dim, dtype=dtype)
-    u_lo = -1. * torch.ones(u_dim, dtype=dtype)
-    u_up = 1. * torch.ones(u_dim, dtype=dtype)
-    P = torch.cat((-torch.eye(x_dim+u_dim),
-                   torch.eye(x_dim+u_dim)), 0).type(dtype)
-    q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
-    sys.add_mode(A, B, c, P, q)
-    # value function
-    N = 5
-    vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
-    Q = torch.eye(sys.x_dim)
-    R = torch.eye(sys.u_dim)
-    vf.set_cost(Q=Q, R=R)
-    vf.set_terminal_cost(Qt=Q, Rt=R)
-    # vf.set_constant_control(0)
-    x0_lo = -1 * torch.ones(x_dim, dtype=dtype)
-    x0_up = 1 * torch.ones(x_dim, dtype=dtype)
-    u0_lo = u_lo.clone()
-    u0_up = u_up.clone()
-    x_num_breaks = [10] * x_dim
-    u_num_breaks = [10] * u_dim
+    vf = get_value_function()
+    x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+    x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+    u0_lo = vf.u_lo.clone()
+    u0_up = vf.u_up.clone()
+    x_num_breaks = [10] * vf.sys.x_dim
+    u_num_breaks = [10] * vf.sys.u_dim
     x_samples, u_samples, v_samples = vf.get_q_sample_grid(x0_lo, x0_up,
                                                            x_num_breaks,
                                                            u0_lo, u0_up,
