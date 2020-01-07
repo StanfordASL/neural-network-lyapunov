@@ -92,6 +92,6 @@ if __name__ == "__main__":
         lyapunov_hybrid_system, V_rho, x_equilibrium)
     dut.output_flag = True
     dut.max_iterations = 3000
-    dut.learning_rate = 0.00001
+    dut.learning_rate = 1e-3
     result = dut.train(relu, state_samples_all)
     plot_relu(relu, system, V_rho, x_equilibrium)
