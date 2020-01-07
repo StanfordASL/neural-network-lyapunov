@@ -10,7 +10,8 @@ class RandomShootingMPC:
     def __init__(self, vf, model, num_samples):
         """
         Class that uses random shooting and a learned model in order to
-        compute a control action
+        compute a control action. For now does not support value function
+        with feedforward terms
         @param vf A ValueFunction object containing the optimization
         representation that is approximated by model
         @param model A pytorch model to be used to approximated the optimal
@@ -27,6 +28,33 @@ class RandomShootingMPC:
         self.num_samples = num_samples
         self.u_range = (self.vf.u_up - self.vf.u_lo).repeat(num_samples, 1)
         self.u_lo_samples = self.vf.u_lo.repeat(num_samples, 1)
+        assert(self.vf.xtraj is None)
+        assert(self.vf.utraj is None)
+        assert(self.vf.alphatraj is None)
+
+    def step_cost(self, x_val, u_val, alpha_val):
+        """
+        Computes the cost of a single step with the value function.
+        Note that the step should not be the terminal one (i.e. not
+        correspond to Qt, Rt and Zt.
+        @param x_val A tensor with the value of the state
+        @param u_val A tensor with the value of the control input
+        @param alpha_val A tensor with the value of the discrete variables
+        """
+        cost = 0.
+        if self.vf.Q is not None:
+            cost += .5 * x_val @ self.vf.Q @ x_val
+        if self.vf.R is not None:
+            cost += .5 * u_val @ self.vf.R @ u_val
+        if self.vf.Z is not None:
+            cost += .5 * alpha_val @ self.vf.Z @ alpha_val
+        if self.vf.q is not None:
+            cost += x_val @ self.vf.q
+        if self.vf.r is not None:
+            cost += u_val @ self.vf.r
+        if self.vf.z is not None:
+            cost += alpha_val @ self.vf.z
+        return cost
 
     def get_ctrl(self, x0):
         """
@@ -41,7 +69,7 @@ class RandomShootingMPC:
         for k in range(self.num_samples):
             (xn, mode) = self.vf.sys.step_forward(x0, u_samples[k, :])
             if ~isinstance(xn, type(None)):
-                step_cost = self.vf.step_cost(x0, u_samples[k, :], mode)
+                step_cost = self.step_cost(x0, u_samples[k, :], mode)
                 v = step_cost + torch.clamp(self.model(xn), 0.)
                 if v < v_opt:
                     v_opt = v

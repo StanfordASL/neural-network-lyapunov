@@ -347,6 +347,54 @@ class ValueToOptimizationTest(unittest.TestCase):
         self.assertEqual(v_samples.shape[0],
                          x_num_breaks[0]*x_num_breaks[1]*u_num_breaks[0])
 
+    def test_traj_cost(self):
+        dtype = torch.float64
+        dt = .1
+        x_lo = torch.Tensor(
+            [-1., -1., 0., -1e3, -1e3, -1e3]).type(dtype)
+        x_up = torch.Tensor(
+            [1., 10., 2., 1e3, 1e3, 1e3]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e3]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e3]).type(dtype)
+        sys = bphls.get_ball_paddle_hybrid_linear_system(
+            dtype, dt, x_lo, x_up, u_lo, u_up)
+        N = 10
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
+        [Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt] = get_simple_trajopt_cost(
+            sys.x_dim, sys.u_dim, sys.num_modes, dtype)
+        vf.set_cost(Q=Q, R=R, Z=Z, q=q, r=r, z=z)
+        vf.set_terminal_cost(Qt=Qt, Rt=Rt, Zt=Zt, qt=qt, rt=rt, zt=zt)
+        # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
+        x0 = torch.Tensor([0., .25, .15, 0., 0., 0.])
+        xN = torch.Tensor([np.nan, .5, np.nan, np.nan, np.nan, np.nan])
+        vf.set_constraints(x0=x0, xN=xN)
+        traj_opt = vf.traj_opt_constraint()
+        (Ain1, Ain2, Ain3, rhs_in,
+         Aeq1, Aeq2, Aeq3, rhs_eq,
+         Q2, Q3, q2, q3, c) = torch_to_numpy(traj_opt)
+        x = cp.Variable(Ain1.shape[1])
+        s = cp.Variable(Ain2.shape[1])
+        z = cp.Variable(Ain3.shape[1], boolean=True)
+        obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 * cp.quad_form(z, Q3)
+                          + q2.T@s + q3.T@z + c)
+        con = [
+            Ain1@x + Ain2@s + Ain3@z <= rhs_in,
+            Aeq1@x + Aeq2@s + Aeq3@z == rhs_eq,
+        ]
+        prob = cp.Problem(obj, con)
+        prob.solve(solver=cp.GUROBI, verbose=False)
+        traj = np.hstack((x.value, s.value))
+        traj = np.reshape(traj, ((1 + sys.num_modes) *
+                                 (sys.x_dim + sys.u_dim), N), order='F')
+        xtraj = torch.Tensor(traj[:vf.sys.x_dim, :]).type(dtype)
+        utraj = torch.Tensor(
+            traj[vf.sys.x_dim:vf.sys.x_dim+vf.sys.u_dim, :]).type(dtype)
+        ztraj = torch.Tensor(np.reshape(
+            z.value, (vf.sys.num_modes, N), order='F')).type(dtype)
+        obj_ = vf.traj_cost(xtraj[:, 1:], utraj, ztraj)
+        self.assertAlmostEqual(obj.value, obj_.item(), places=6)
+
 
 if __name__ == '__main__':
     unittest.main()
