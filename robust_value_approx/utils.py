@@ -494,3 +494,43 @@ def linear_program_cost(c, d, A_in, b_in, A_eq, b_eq):
         A_act[i + num_eq] = A_in[active_in_indices[i]]
         b_act[i + num_eq] = b_in[active_in_indices[i]]
     return c @ torch.inverse(A_act) @ b_act + d
+
+
+def leaky_relu_interval(negative_slope, x_lo, x_up):
+    """
+    Given a Leaky ReLU unit and an input interval [x_lo, x_up], return the
+    interval of the output
+    @param negative_slope The negative slope of the leaky ReLU unit.
+    @param x_lo The lower bound of the interval.
+    @param x_up The upper bound of the interval.
+    @return (output_lo, output_up) The output is in the interval
+    [output_lo, output_up]
+    """
+    assert(x_up > x_lo)
+    assert(type(x_lo) == type(x_up))
+    if (negative_slope >= 0):
+        if x_lo >= 0:
+            if isinstance(x_lo, torch.Tensor):
+                return (x_lo.clone(), x_up.clone())
+            else:
+                return (x_lo, x_up)
+        elif x_up <= 0:
+            return (negative_slope * x_lo, negative_slope * x_up)
+        else:
+            if isinstance(x_up, torch.Tensor):
+                return (negative_slope * x_lo, x_up.clone())
+            else:
+                return (negative_slope * x_lo, x_up)
+    else:
+        if x_lo >= 0:
+            if isinstance(x_lo, torch.Tensor):
+                return (x_lo.clone(), x_up.clone())
+            else:
+                return (x_lo, x_up)
+        elif x_up <= 0:
+            return (negative_slope * x_up, negative_slope * x_lo)
+        else:
+            if isinstance(x_lo, torch.Tensor):
+                return (0., torch.max(negative_slope * x_lo, x_up))
+            else:
+                return (0., np.maximum(negative_slope * x_lo, x_up))

@@ -669,7 +669,7 @@ class ReLUFreePattern:
         mixed-integer linear constraints.
         We assume that the leaky relu unit has negative slope c (c = 0 for
         ReLU unit). And we define a matrix
-        M(β, c) = c + (1-c)*diag(β)
+        M(β, c) = c*I + (1-c)*diag(β)
         We notice that
         ∂ReLU(x)/∂x = wₙᵀ * M(βₙ₋₁, c) +  * Wₙ₋₁ * M(βₙ₋₂, c) * Wₙ₋₂ * ...
                       * M(β₀, c) * W₀
@@ -718,6 +718,7 @@ class ReLUFreePattern:
             a_out[self.relu_unit_index[-1]] = 1
         for layer in model:
             if (isinstance(layer, nn.Linear)):
+                Wi = layer.weight
                 if layer_count == len(self.relu_unit_index) and not\
                         self.last_layer_is_relu:
                     # If this is the last linear layer, and this linear layer
@@ -743,38 +744,59 @@ class ReLUFreePattern:
                             else:
                                 Wizi_lo[j] += layer.weight[j][k] * zi_up[k]
                                 Wizi_up[j] += layer.weight[j][k] * zi_lo[k]
-                        (A_pre, A_z_next, A_beta_i, rhs_i) =\
-                            utils.replace_binary_continuous_product(
+            elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
+                for j in range(len(self.relu_unit_index[layer_count])):
+                    if isinstance(layer, nn.ReLU):
+                        A_pre, A_z_next, A_beta_i, rhs_i = utils.\
+                            replace_binary_continuous_product(
                                 Wizi_lo[j], Wizi_up[j], dtype=self.dtype)
-                        if layer_count == 0:
-                            A_y[ineq_count:ineq_count+4] =\
-                                A_pre.reshape((-1, 1)) @\
-                                layer.weight[j].reshape((1, -1))
-                        else:
-                            A_z[ineq_count:ineq_count+4,
-                                self.relu_unit_index[layer_count - 1]] =\
-                                A_pre.reshape((-1, 1)) @\
-                                layer.weight[j].reshape((1, -1))
+                    else:
+                        A_pre, A_z_next, A_beta_i, rhs_i = utils.\
+                            leaky_relu_gradient_times_x(
+                                Wizi_lo[j], Wizi_up[j], layer.negative_slope,
+                                dtype=self.dtype)
+                    if layer_count == 0:
+                        A_y[ineq_count:ineq_count+4] =\
+                            A_pre.reshape((-1, 1)) @\
+                            Wi[j].reshape((1, -1))
+                    else:
                         A_z[ineq_count:ineq_count+4,
-                            self.relu_unit_index[layer_count][j]] =\
-                            A_z_next.squeeze()
-                        A_beta[ineq_count:ineq_count+4,
-                               self.relu_unit_index[layer_count][j]] =\
-                            A_beta_i.squeeze()
-                        rhs[ineq_count:ineq_count+4] = rhs_i
-                        ineq_count += 4
-            elif(isinstance(layer, nn.ReLU)):
-                zi_lo = torch.min(
-                    torch.zeros(len(self.relu_unit_index[layer_count]),
-                                dtype=self.dtype),
-                    Wizi_lo)
-                zi_up = torch.max(
-                    torch.zeros(len(self.relu_unit_index[layer_count]),
-                                dtype=self.dtype),
-                    Wizi_up)
+                            self.relu_unit_index[layer_count - 1]] =\
+                            A_pre.reshape((-1, 1)) @\
+                            Wi[j].reshape((1, -1))
+                    A_z[ineq_count:ineq_count+4,
+                        self.relu_unit_index[layer_count][j]] =\
+                        A_z_next.squeeze()
+                    A_beta[ineq_count:ineq_count+4,
+                           self.relu_unit_index[layer_count][j]] =\
+                        A_beta_i.squeeze()
+                    rhs[ineq_count:ineq_count+4] = rhs_i
+                    ineq_count += 4
+                if isinstance(layer, nn.ReLU):
+                    zi_lo = torch.min(
+                        torch.zeros(len(self.relu_unit_index[layer_count]),
+                                    dtype=self.dtype),
+                        Wizi_lo)
+                    zi_up = torch.max(
+                        torch.zeros(len(self.relu_unit_index[layer_count]),
+                                    dtype=self.dtype),
+                        Wizi_up)
+                else:
+                    zi_lo, _ = torch.min(torch.cat((
+                        Wizi_lo.reshape((1, -1)),
+                        layer.negative_slope * Wizi_lo.reshape((1, -1)),
+                        layer.negative_slope * Wizi_up.reshape((1, -1))),
+                        dim=0), axis=0)
+                    zi_up, _ = torch.max(torch.cat((
+                        Wizi_up.reshape((1, -1)),
+                        layer.negative_slope * Wizi_lo.reshape((1, -1)),
+                        layer.negative_slope * Wizi_up.reshape((1, -1))),
+                        dim=0), axis=0)
+
                 z_lo[self.relu_unit_index[layer_count]] = zi_lo
                 z_up[self.relu_unit_index[layer_count]] = zi_up
                 layer_count += 1
+
             else:
                 raise Exception("output_gradient_times_vector: we currently " +
                                 "only support linear and ReLU units.")

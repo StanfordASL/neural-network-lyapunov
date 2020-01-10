@@ -465,14 +465,23 @@ class TestReLU(unittest.TestCase):
             for layer in model:
                 if (isinstance(layer, nn.Linear)):
                     z_cur = layer.weight.data @ z_pre
-                elif (isinstance(layer, nn.ReLU)):
-                    z_cur = \
-                        beta[relu_free_pattern.relu_unit_index[layer_count]] *\
-                        z_cur
+                elif isinstance(layer, nn.ReLU) or \
+                        isinstance(layer, nn.LeakyReLU):
+                    if isinstance(layer, nn.ReLU):
+                        z_cur = beta[relu_free_pattern.relu_unit_index[
+                            layer_count]] * z_cur
+                    else:
+                        for i in range(len(relu_free_pattern.relu_unit_index[
+                                layer_count])):
+                            if activation_pattern[layer_count][i]:
+                                z_cur[i] = z_cur[i]
+                            else:
+                                z_cur[i] = layer.negative_slope * z_cur[i]
                     z_expected[relu_free_pattern.relu_unit_index[layer_count]]\
                         = z_cur
                     z_pre = z_cur
                     layer_count += 1
+
             # Now check that z_expected is within the bound.
             np.testing.assert_array_less(z_expected.detach().numpy(),
                                          z_up.detach().numpy() + 1E-10)
@@ -499,30 +508,27 @@ class TestReLU(unittest.TestCase):
                 z_var.value, z_expected.detach().numpy())
 
         # Check for different models and inputs.
-        test_model(self.model1, torch.tensor([2., 3.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 0.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
-        test_model(self.model1, torch.tensor([2.,  -1.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 0.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
-        test_model(self.model1, torch.tensor([-2.,  -1.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 1.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
-        test_model(self.model2, torch.tensor([2., 3.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 0.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
-        test_model(self.model2, torch.tensor([2.,  -1.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 0.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
-        test_model(self.model2, torch.tensor([-2.,  -1.], dtype=self.dtype),
-                   torch.tensor([1., 2.], dtype=self.dtype),
-                   torch.tensor([-1., 1.], dtype=self.dtype),
-                   torch.tensor([2., 3.], dtype=self.dtype))
+        for model in (self.model1, self.model2, self.model3):
+            test_model(model, torch.tensor([2., 3.], dtype=self.dtype),
+                       torch.tensor([1., 2.], dtype=self.dtype),
+                       torch.tensor([-1., 0.], dtype=self.dtype),
+                       torch.tensor([2., 3.], dtype=self.dtype))
+            test_model(model, torch.tensor([2.,  -1.], dtype=self.dtype),
+                       torch.tensor([1., 2.], dtype=self.dtype),
+                       torch.tensor([-1., 0.], dtype=self.dtype),
+                       torch.tensor([2., 3.], dtype=self.dtype))
+            test_model(model, torch.tensor([-2.,  -1.], dtype=self.dtype),
+                       torch.tensor([1., 2.], dtype=self.dtype),
+                       torch.tensor([-1., 1.], dtype=self.dtype),
+                       torch.tensor([2., 3.], dtype=self.dtype))
+            test_model(model, torch.tensor([-4.,  -2.], dtype=self.dtype),
+                       torch.tensor([1.5, -2.], dtype=self.dtype),
+                       torch.tensor([-1., -4.], dtype=self.dtype),
+                       torch.tensor([2., 3.], dtype=self.dtype))
+            test_model(model, torch.tensor([-4.,  2.5], dtype=self.dtype),
+                       torch.tensor([2.5, -2.], dtype=self.dtype),
+                       torch.tensor([-1., -4.], dtype=self.dtype),
+                       torch.tensor([4., 3.], dtype=self.dtype))
         # randomized test.
         torch.manual_seed(0)
         np.random.seed(0)

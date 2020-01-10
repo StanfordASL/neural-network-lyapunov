@@ -307,5 +307,49 @@ class TestLinearProgramCost(unittest.TestCase):
             torch.tensor([1], dtype=dtype))
 
 
+class TestLeakyReLUInterval(unittest.TestCase):
+    def test(self):
+        self.assertEqual(utils.leaky_relu_interval(0.1, 1., 2.), (1., 2.))
+        self.assertEqual(utils.leaky_relu_interval(
+            0.1, torch.tensor(1.), torch.tensor(2.)),
+            (torch.tensor(1.), torch.tensor(2.)))
+        self.assertEqual(
+            utils.leaky_relu_interval(0.1, -2., -1.), (-0.2, -0.1))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                0.1, torch.tensor(-2.), torch.tensor(-1.)),
+            (torch.tensor(-0.2), torch.tensor(-0.1)))
+        self.assertEqual(
+            utils.leaky_relu_interval(0.1, -2., 3.), (-0.2, 3.))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                0.1, torch.tensor(-2.), torch.tensor(3.)),
+            (torch.tensor(-0.2), torch.tensor(3.)))
+        self.assertEqual(
+            utils.leaky_relu_interval(-0.1, 1., 2.), (1., 2.))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                -0.1, torch.tensor(1.), torch.tensor(2.)),
+            (torch.tensor(1.), torch.tensor(2.)))
+        self.assertEqual(
+            utils.leaky_relu_interval(-0.1, -2., -1.), (0.1, 0.2))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                -0.1, torch.tensor(-2.), torch.tensor(-1.)),
+            (torch.tensor(0.1), torch.tensor(0.2)))
+        self.assertEqual(
+            utils.leaky_relu_interval(-0.1, -2., 1.), (0., 1.))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                -0.1, torch.tensor(-2.), torch.tensor(1.)),
+            (0., torch.tensor(1.)))
+        self.assertEqual(
+            utils.leaky_relu_interval(-0.1, -20., 1.), (0, 2.))
+        self.assertEqual(
+            utils.leaky_relu_interval(
+                -0.1, torch.tensor(-20.), torch.tensor(1.)),
+            (0., torch.tensor(2.)))
+
+
 if __name__ == "__main__":
     unittest.main()
