@@ -259,11 +259,12 @@ class HybridLinearSystem:
 
 class AutonomousHybridLinearSystem:
     """
-    This system models the autonomous hybrid linear system (switch linear
+    This system models the autonomous hybrid linear system (piecewise affine
     system)
-    ẋ = Aᵢx+gᵢ
-    if Pᵢx ≤ qᵢ
-    i = 1, ..., K
+    ẋ = Aᵢx+gᵢ if Pᵢx ≤ qᵢ
+    in continuous time, or
+    x[n+1] = Aᵢx[n]+gᵢ if Pᵢx[n] ≤ qᵢ
+    in discrete time. i = 1, ..., K
     Namely there are K different modes, each mode constraints the state to be
     within a polytope. Inside each mode, the continuous time dynamics is
     affine.

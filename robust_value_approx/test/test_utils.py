@@ -40,6 +40,33 @@ class test_replace_binary_continuous_product(unittest.TestCase):
         test_fun(-2, 1)
 
 
+class TestLeakyReLUGradientTimesX(unittest.TestCase):
+    def test(self):
+
+        def test_fun(x_lo, x_up, negative_slope, x, y, alpha, satisfied):
+            A_x, A_y, A_alpha, rhs = utils.leaky_relu_gradient_times_x(
+                x_lo, x_up, negative_slope)
+            self.assertEqual(
+                torch.all(A_x * x + A_y * y + A_alpha * alpha <= rhs),
+                satisfied)
+
+        test_fun(-0.5, 1.5, 0.1, 0., 0., 1., True)
+        test_fun(-0.5, 1.5, 0.1, 0., 0., 0., True)
+        test_fun(-0.5, 1.5, 0.1, 0.5, 0.5, 1, True)
+        test_fun(-0.5, 1.5, 0.1, -0.25, -0.25, 1, True)
+        test_fun(-0.5, 1.5, 0.1, 0.5, 0.05, 0, True)
+        test_fun(-0.5, 1.5, 0.1, 0.5, 0.5, 0, False)
+        test_fun(-0.5, 1.5, 0.1, -0.25, -0.025, 0, True)
+        test_fun(-0.5, 1.5, 0.1, -0.25, -0.25, 0, False)
+        test_fun(-0.5, 1.5, 0.1, -1.25, -1.25, 1, False)
+        test_fun(-0.5, 1.5, 0.1, 1.55, 1.55, 1, False)
+        test_fun(-0.5, 1.5, 0.1, 1.25, 0.125, 0, True)
+        test_fun(0.5, 1.5, 0.1, 1.25, 0.125, 0, True)
+        test_fun(0.5, 1.5, 0.1, 1.25, 1.25, 1, True)
+        test_fun(0.5, 1.5, 0.1, 1.25, 0.25, 1, False)
+        test_fun(0.5, 1.5, 0.1, 1.25, 0.25, 0, False)
+
+
 class test_replace_absolute_value_with_mixed_integer_constraint(
         unittest.TestCase):
     def test(self):
