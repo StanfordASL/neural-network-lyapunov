@@ -533,6 +533,79 @@ class ValueFunction:
 
         return(x_samples, v_samples)
 
+    def get_rolled_out_sample_grid(self, x_lo, x_up, num_breaks,
+                                   num_noisy_samples=0,
+                                   noisy_samples_var=1.,
+                                   update_progress=False):
+        """
+        generates a uniformly sampled grid of optimal cost-to-go samples
+        for this value function for points between x_lo, x_up.
+        Additionally, this function takes the resulting optimal trajectory
+        for each sample on the grid, and also computes the optimal
+        cost-to-go for these states as well. This generates more samples
+        than get_sample_grid, but the samples are heavily biased towards
+        the reachable set of the grid
+
+        @param x_lo the lower bound of the sample grid as a tensor
+        @param x_up the upper bound of the sample grid as a tensor
+        @param num_breaks the number of points along each axis
+        as a list of integers (of same dimension as x_lo and x_up)
+
+        @return x_samples a tensor with each row corresponding to an x sample
+        @return v_samples a tensor with each row corresponding to the value
+        associated with the matching row in x_samples
+        """
+        assert(len(x_lo) == len(x_up))
+        assert(len(x_lo) == len(num_breaks))
+
+        dim_samples = []
+        for i in range(len(x_lo)):
+            dim_samples.append(torch.linspace(
+                x_lo[i], x_up[i], num_breaks[i]).type(self.dtype))
+        grid = torch.meshgrid(dim_samples)
+        x_samples_all = torch.cat([g.reshape(-1, 1) for g in grid], axis=1)
+
+        x_samples = torch.zeros((0, len(x_lo)), dtype=self.dtype)
+        v_samples = torch.zeros((0, 1), dtype=self.dtype)
+
+        V = self.get_value_function()
+        for i in range(x_samples_all.shape[0]):
+            x = x_samples_all[i, :]
+            (obj_val, s_val, alpha_val) = V(x)
+            traj_val = torch.cat((x, s_val)).reshape(self.N, -1).t()
+            xtraj_val = traj_val[:self.sys.x_dim, :]
+            if not isinstance(obj_val, type(None)):
+                x_samples = torch.cat((x_samples, x.unsqueeze(0)), axis=0)
+                v_samples = torch.cat(
+                    (v_samples, torch.Tensor([[obj_val]]).type(self.dtype)),
+                    axis=0)
+                for j in range(1, self.N):
+                    x = xtraj_val[:, j]
+                    (obj_val, s_val, alpha_val) = V(x)
+                    if not isinstance(obj_val, type(None)):
+                        x_samples = torch.cat((x_samples,
+                                               x.unsqueeze(0)), axis=0)
+                        v_samples = torch.cat((v_samples,
+                            torch.Tensor([[obj_val]]).type(self.dtype)),
+                            axis=0)
+                    else:
+                        break
+                    for k in range(num_noisy_samples):
+                        x = xtraj_val[:, j] + (x_up - x_lo) *\
+                                noisy_samples_var *\
+                                    torch.randn(self.sys.x_dim)
+                        (obj_val, s_val, alpha_val) = V(x)
+                        if not isinstance(obj_val, type(None)):
+                            x_samples = torch.cat((x_samples,
+                                                   x.unsqueeze(0)), axis=0)
+                            v_samples = torch.cat((v_samples,
+                                torch.Tensor([[obj_val]]).type(self.dtype)),
+                                axis=0)
+            if update_progress:
+                utils.update_progress((i + 1) / x_samples_all.shape[0])
+
+        return(x_samples, v_samples)
+
     def get_q_sample_grid(self, x_lo, x_up, x_num_breaks,
                           u_lo, u_up, u_num_breaks, update_progress=False):
         """

@@ -43,7 +43,6 @@ if __name__ == "__main__":
     vf.set_cost(Q=Q, R=R)
     vf.set_terminal_cost(Qt=Qt, Rt=Rt)
     vf.set_traj(xtraj=xtraj)
-    # to make it easier we set the paddle angle to be constant
     V = vf.get_value_function()
 
     # # generate an initial state

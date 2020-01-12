@@ -434,9 +434,9 @@ def compute_bounds_from_polytope(P, q, i):
     x = cp.Variable(P.shape[1])
     con = [P_np @ x <= q_np]
     prob = cp.Problem(cp.Maximize(x[i]), con)
-    xi_up = prob.solve()
+    xi_up = prob.solve(solver=cp.GUROBI)
     prob = cp.Problem(cp.Minimize(x[i]), con)
-    xi_lo = prob.solve()
+    xi_lo = prob.solve(solver=cp.GUROBI)
     return (xi_lo, xi_up)
 
 
