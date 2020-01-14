@@ -395,6 +395,38 @@ class ValueToOptimizationTest(unittest.TestCase):
         obj_ = vf.traj_cost(xtraj[:, 1:], utraj, ztraj)
         self.assertAlmostEqual(obj.value, obj_.item(), places=6)
 
+    def test_step_cost(self):
+        dtype = torch.float64
+        dt = .1
+        x_lo = torch.Tensor(
+            [-1., -1., 0., -1e3, -1e3, -1e3]).type(dtype)
+        x_up = torch.Tensor(
+            [1., 10., 2., 1e3, 1e3, 1e3]).type(dtype)
+        u_lo = torch.Tensor([-np.pi / 2, -1e3]).type(dtype)
+        u_up = torch.Tensor([np.pi / 2, 1e3]).type(dtype)
+        sys = bphls.get_ball_paddle_hybrid_linear_system(
+            dtype, dt, x_lo, x_up, u_lo, u_up)
+        N = 10
+        vf = value_to_optimization.ValueFunction(
+            sys, N, x_lo, x_up, u_lo, u_up)
+        [Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt] = get_simple_trajopt_cost(
+            sys.x_dim, sys.u_dim, sys.num_modes, dtype)
+        vf.set_cost(Q=Q, R=R, Z=Z, q=q, r=r, z=z)
+        vf.set_terminal_cost(Qt=Qt, Rt=Rt, Zt=Zt, qt=qt, rt=rt, zt=zt)
+        xtraj_ = torch.rand((sys.x_dim, N-1), dtype=dtype)
+        utraj_ = torch.rand((sys.u_dim, N), dtype=dtype)
+        ztraj_ = torch.rand((sys.num_modes, N), dtype=dtype)
+        vf.set_traj(xtraj=xtraj_, utraj=utraj_, alphatraj=ztraj_)
+        # x = [ballx, bally, paddley, paddletheta, ballvx, ballvy, paddlevy]
+        xtraj = torch.rand((sys.x_dim, N), dtype=dtype)
+        utraj = torch.rand((sys.u_dim, N), dtype=dtype)
+        ztraj = torch.rand((sys.num_modes, N), dtype=dtype)
+        obj = vf.traj_cost(xtraj[:, 1:], utraj, ztraj)
+        obj_ = 0.
+        for n in range(N):
+            obj_ += vf.step_cost(n, xtraj[:, n], utraj[:, n], ztraj[:, n])
+        self.assertAlmostEqual(obj.item(), obj_.item(), places=6)
+
 
 if __name__ == '__main__':
     unittest.main()

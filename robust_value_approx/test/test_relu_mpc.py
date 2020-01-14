@@ -11,6 +11,7 @@ import unittest
 
 class TestReLUMPC(unittest.TestCase):
     def setUp(self):
+        torch.manual_seed(123)
         dtype = torch.float64
         self.dtype = dtype
         (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
@@ -21,8 +22,10 @@ class TestReLUMPC(unittest.TestCase):
         A = torch.eye(x_dim, dtype=dtype) + dt * A_c
         B = dt * B_c
         c = torch.zeros(x_dim, dtype=dtype)
-        self.x_lo = -2. * torch.ones(x_dim, dtype=dtype)
-        self.x_up = 2. * torch.ones(x_dim, dtype=dtype)
+        self.x0_lo = -2. * torch.ones(x_dim, dtype=dtype)
+        self.x0_up = 2. * torch.ones(x_dim, dtype=dtype)
+        self.x_lo = -4. * torch.ones(x_dim, dtype=dtype)
+        self.x_up = 4. * torch.ones(x_dim, dtype=dtype)
         self.u_lo = -1. * torch.ones(u_dim, dtype=dtype)
         self.u_up = 1. * torch.ones(u_dim, dtype=dtype)
         P = torch.cat((-torch.eye(x_dim+u_dim),
@@ -51,33 +54,46 @@ class TestReLUMPC(unittest.TestCase):
             "/data/double_integrator_model.pt")
 
     def test_random_shooting(self):
-        num_samples = 100
+        num_samples = 200
         ctrl = relu_mpc.RandomShootingMPC(self.vf, self.model, num_samples)
         for i in range(25):
             x0 = torch.rand(self.vf.sys.x_dim, dtype=self.dtype) *\
-                (self.x_up - self.x_lo) + self.x_lo
+                (self.x0_up - self.x0_lo) + self.x_lo
             u_opt = self.vf_value_fun(x0)[1]
             if isinstance(u_opt, type(None)):
                 continue
             u = ctrl.get_ctrl(x0)
             if ~isinstance(u_opt, type(None)):
-                self.assertLessEqual(abs(u.item() - u_opt[0]), .05)
+                self.assertLessEqual(abs(u.item() - u_opt[0]), .1)
 
     def test_relu_mpc(self):
         ctrl = relu_mpc.ReLUMPC(self.vf, self.model)
         for i in range(10):
             x0 = torch.rand(self.vf.sys.x_dim, dtype=self.dtype) *\
-                (self.x_up - self.x_lo) + self.x_lo
+                (self.x0_up - self.x0_lo) + self.x_lo
             u_opt = self.vf_value_fun(x0)[1]
             if isinstance(u_opt, type(None)):
                 continue
             u, x = ctrl.get_ctrl(x0)
             if ~isinstance(u_opt, type(None)):
-                self.assertLessEqual(abs(u.item() - u_opt[0]), .06)
+                self.assertLessEqual(abs(u.item() - u_opt[0]), .1)
+
+    def test_informed_search(self):
+        num_samples = 1000
+        ctrl = relu_mpc.InformedSearchMPC(self.vf, self.model, num_samples)
+        obj_val = None
+        while obj_val is None:
+            x0 = torch.rand(self.vf.sys.x_dim, dtype=self.dtype) * \
+                (self.x0_up - self.x0_lo) + self.x0_lo
+            (obj_val, s_val, alpha_val) = self.vf_value_fun(x0)
+        (u, x) = ctrl.get_ctrl(x0)
+        obj = self.vf.traj_cost(x[:, 1:], u)
+        self.assertLessEqual(abs(obj.item() - obj), .5)
 
 
 class TestQReLUMPC(unittest.TestCase):
     def setUp(self):
+        torch.manual_seed(123)
         dtype = torch.float64
         self.dtype = dtype
         (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
@@ -109,8 +125,8 @@ class TestQReLUMPC(unittest.TestCase):
         self.vf = vf
         self.vf_value_fun = vf.get_value_function()
         self.model = torch.load(
-           os.path.dirname(os.path.realpath(__file__)) +
-           "/data/double_integrator_q_model.pt")
+            os.path.dirname(os.path.realpath(__file__)) +
+            "/data/double_integrator_q_model.pt")
 
     def test_qrelu_mpc(self):
         x0_lo = -1. * torch.ones(self.vf.sys.x_dim, dtype=self.dtype)
@@ -126,7 +142,7 @@ class TestQReLUMPC(unittest.TestCase):
                 continue
             u_opt = u_opt[:self.vf.sys.u_dim]
             u = ctrl.get_ctrl(x0)
-            self.assertLessEqual(abs(u.item() - u_opt[0]), .2)
+            self.assertLessEqual(abs(u.item() - u_opt[0]), .5)
 
 
 if __name__ == "__main__":

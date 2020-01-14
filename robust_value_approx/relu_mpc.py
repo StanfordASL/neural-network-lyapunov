@@ -4,6 +4,8 @@ import robust_value_approx.utils as utils
 
 import torch
 import cvxpy as cp
+from heapq import heappush, heappop
+import copy
 
 
 class RandomShootingMPC:
@@ -253,3 +255,69 @@ class QReLUMPC:
             return None
         u0_opt = torch.Tensor(self.u0.value).type(self.dtype)
         return u0_opt
+
+
+class InformedSearchMPC:
+    def __init__(self, vf, model, num_samples):
+        """
+        Class that uses searh and a learned model in order to
+        compute a control action.
+        @param vf A ValueFunction object containing the optimization
+        representation that is approximated by model
+        @param model A pytorch model to be used to approximated the optimal
+        cost to go (model input is state, output is optimal cost to go)
+        @param num_samples The number of samples to take in the random
+        shooting. Note that infeasible samples (control action that take the
+        system outside of its state constraints) still count towards that total
+        """
+        self.vf = vf
+        self.model = model
+        self.num_samples = num_samples
+        self.u_range = (self.vf.u_up - self.vf.u_lo).repeat(num_samples, 1)
+        self.u_lo_samples = self.vf.u_lo.repeat(num_samples, 1)
+
+    def get_ctrl(self, x0):
+        """
+        Uses search in order to return the optimal control
+        @param x0 A tensor that is the current/starting state
+        """
+        search_nodes = []
+        # (hn = vn + cum_cost, cum_cost, n, x_traj, u_traj)
+        heappush(search_nodes, (self.model(x0), 0., 0, [x0], []))
+        x_traj = []
+        u_traj = []
+        while True:
+            hn, cum_cost, n, x_traj, u_traj = heappop(search_nodes)
+            if n == self.vf.N:
+                break
+            xn = x_traj[-1]
+            u_samples = torch.rand((self.num_samples, self.vf.sys.u_dim),
+                                   dtype=self.vf.dtype) * self.u_range +\
+                self.u_lo_samples
+            xn_ = torch.Tensor(
+                self.num_samples, self.vf.sys.x_dim).type(self.vf.dtype)
+            cost = torch.Tensor(self.num_samples).type(self.vf.dtype)
+            for k in range(self.num_samples):
+                (xn_k, mode_k) = self.vf.sys.step_forward(xn, u_samples[k, :])
+                if xn_k is None:
+                    cost[k] = torch.Tensor(float("inf")).type(self.vf.dtype)
+                else:
+                    alpha_k = torch.zeros(
+                        self.vf.sys.num_modes, dtype=self.vf.dtype)
+                    alpha_k[mode_k] = 1.
+                    cost[k] = self.vf.step_cost(
+                        n, xn, u_samples[k, :], alpha_k)
+                    xn_[k, :] = xn_k
+            with torch.no_grad():
+                vn_ = self.model(xn_)
+            for k in range(self.num_samples):
+                x_traj_ = copy.deepcopy(x_traj)
+                x_traj_.append(xn_[k, :])
+                u_traj_ = copy.deepcopy(u_traj)
+                u_traj_.append(u_samples[k, :])
+                node = (cum_cost + cost[k] + vn_[k, 0],
+                        cum_cost + cost[k], n + 1, x_traj_, u_traj_)
+                heappush(search_nodes, node)
+        x_opt = torch.cat([x.unsqueeze(1) for x in x_traj[:-1]], axis=1)
+        u_opt = torch.cat([u.unsqueeze(1) for u in u_traj], axis=1)
+        return (u_opt, x_opt)
