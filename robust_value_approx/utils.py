@@ -307,7 +307,7 @@ def torch_to_numpy(torch_array_list, squeeze=True):
 
 
 def train_model(model, inputs, labels, batch_size=100,
-                num_epoch=1000, learning_rate=1e-3):
+                num_epoch=1000, learning_rate=1e-3, print_loss=False):
     """
     trains a pytorch model with an L2 loss function using the
     Adam training algorithm
@@ -334,7 +334,7 @@ def train_model(model, inputs, labels, batch_size=100,
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if epoch % 10 == 0:
+            if epoch % 10 == 0 and print_loss:
                 print(loss)
 
     return model
