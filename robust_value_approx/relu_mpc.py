@@ -281,6 +281,8 @@ class InformedSearchMPC:
         Uses search in order to return the optimal control
         @param x0 A tensor that is the current/starting state
         """
+        assert(isinstance(x0, torch.Tensor))
+        assert(x0.shape[0] == self.vf.sys.x_dim)
         search_nodes = []
         # (hn = vn + cum_cost, cum_cost, n, x_traj, u_traj)
         heappush(search_nodes, (self.model(x0), 0., 0, [x0], []))

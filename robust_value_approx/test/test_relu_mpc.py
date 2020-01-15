@@ -88,7 +88,7 @@ class TestReLUMPC(unittest.TestCase):
             (obj_val, s_val, alpha_val) = self.vf_value_fun(x0)
         (u, x) = ctrl.get_ctrl(x0)
         obj = self.vf.traj_cost(x[:, 1:], u)
-        self.assertLessEqual(abs(obj.item() - obj), .5)
+        self.assertLessEqual(abs(obj.item() - obj_val), .75)
 
 
 class TestQReLUMPC(unittest.TestCase):
