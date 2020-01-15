@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import robust_value_approx.relu_to_optimization as relu_to_optimization
+import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 
 import torch
+import gurobipy
 
 
 class ModelBounds:
@@ -49,7 +51,7 @@ class ModelBounds:
         @param model: the ReLU network to verify
         @param x_lo: lower bound for the input to the neural net (x0)
         @param x_up: upper bound for the input to the neural net (x0)
-        @return Q1, Q2, q1, q2, k, A1, A2, b, G1, G2, h
+        @return Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b
         """
         (Pin1, Pin2, Pin3, qrhs_in,
          Peq1, Peq2, Peq3, qrhs_eq,
@@ -135,3 +137,78 @@ class ModelBounds:
         k = c - b_out
 
         return(Q1, Q2, q1, q2, k, G1, G2, h, A1, A2, b)
+
+    def bound_opt(self, model, x_lo, x_up):
+        """
+        This function returns an optimization problem (an MIQP in standard
+        form) such that given an x, solving that optimization problems
+        computes
+
+        ε(x) = V(x) - η(x)
+
+        where η is the output of the neural network, V is the optimal
+        cost-to-go
+
+        y = [s, z]
+        γ = [α, β]
+
+        min     .5 yᵀ Q1 y + .5 γᵀ Q2 γ + yᵀ q1 + γᵀ q2 + k
+        s.t.    A0 x + A1 y + A2 γ = b
+                G0 x + G1 y + G2 γ <= h
+                γ ∈ {0,1}
+
+        @param model: the ReLU network to verify
+        @param x_lo: lower bound for the input to the neural net (x0)
+        @param x_up: upper bound for the input to the neural net (x0)
+        @return Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b
+        """
+        (Q1_, Q2, q1_, q2, k,
+         G1_, G2, h,
+         A1_, A2, b) = self.upper_bound_opt(model, x_lo, x_up)
+
+        x_dim = self.value_fun.sys.x_dim
+
+        Q1 = Q1_[x_dim:, x_dim:]
+        q1 = q1_[x_dim:]
+        A0 = A1_[:, :x_dim]
+        A1 = A1_[:, x_dim:]
+        G0 = G1_[:, :x_dim]
+        G1 = G1_[:, x_dim:]
+
+        return(Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)
+
+    def bound_fun(self, model, x_lo, x_up, x, penalty=1e-8):
+        """
+        returns a function that take x as input and returns the value of ε,
+        everything returned should be a tensor, with the right gradients!
+
+        @param model: the ReLU network to verify
+        @param x_lo: lower bound for the input to the neural net (x0)
+        @param x_up: upper bound for the input to the neural net (x0)
+        """
+        (Q1, Q2, q1, q2, k,
+         G0, G1, G2, h_,
+         A0, A1, A2, b_) = self.bound_opt(model, x_lo, x_up)
+        b = b_ - A0@x
+        h = h_ - G0@x
+        prob = gurobi_torch_mip.GurobiTorchMIQP(x.dtype)
+        prob.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        y = prob.addVars(Q1.shape[0], lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS, name="y")
+        gamma = prob.addVars(Q2.shape[0], vtype=gurobipy.GRB.BINARY,
+                             name="gamma")
+        prob.setObjective([.5 * Q1, .5 * Q2],
+                          [(y, y), (gamma, gamma)],
+                          [q1, q2], [y, gamma], k,
+                          gurobipy.GRB.MINIMIZE)
+        for i in range(G1.shape[0]):
+            prob.addLConstr([G1[i, :], G2[i, :]], [y, gamma],
+                            gurobipy.GRB.LESS_EQUAL, h[i])
+        for i in range(A1.shape[0]):
+            prob.addLConstr([A1[i, :], A2[i, :]], [y, gamma],
+                            gurobipy.GRB.EQUAL, b[i])
+        prob.gurobi_model.update()
+        prob.gurobi_model.optimize()
+        epsilon = prob.compute_objective_from_mip_data_and_solution(
+            penalty=penalty)
+        return epsilon

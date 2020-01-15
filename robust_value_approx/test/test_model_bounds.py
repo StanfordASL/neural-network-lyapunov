@@ -2,6 +2,8 @@ import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.ball_paddle_hybrid_linear_system as bphls
 import robust_value_approx.model_bounds as model_bounds
 from robust_value_approx.utils import torch_to_numpy
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import double_integrator
 
 import numpy as np
 import unittest
@@ -12,6 +14,7 @@ import torch.nn as nn
 
 class ModelBoundsUpperBound(unittest.TestCase):
     def setUp(self):
+        torch.manual_seed(123)
         self.dtype = torch.float64
         self.linear1 = nn.Linear(6, 10)
         self.linear1.weight.data = torch.tensor(
@@ -101,6 +104,132 @@ class ModelBoundsUpperBound(unittest.TestCase):
                 z_nn_sub = self.model(x0_sub).item()
                 epsilon_sub = value_sub - z_nn_sub
                 self.assertGreaterEqual(epsilon_sub, epsilon)
+
+    def test_bound_fun(self):
+        dt = 1.
+        dtype = torch.float64
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
+        sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
+        c = torch.zeros(x_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        x_lo = -10. * torch.ones(x_dim, dtype=dtype)
+        x_up = 10. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up = 1. * torch.ones(u_dim, dtype=dtype)
+        q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
+        sys.add_mode(A, B, c, P, q)
+        R = torch.eye(sys.u_dim)
+        Q = torch.eye(sys.x_dim)
+        N = 5
+        vf = value_to_optimization.ValueFunction(sys, N,
+                                                 x_lo, x_up, u_lo, u_up)
+        vf.set_cost(Q=Q, R=R)
+        vf.set_terminal_cost(Qt=Q, Rt=R)
+        V = vf.get_value_function()
+
+        linear1 = nn.Linear(x_dim, 10)
+        linear1.weight.data = torch.tensor(
+            np.random.rand(10, x_dim), dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            np.random.rand(10), dtype=self.dtype)
+        linear2 = nn.Linear(10, 10)
+        linear2.weight.data = torch.tensor(
+            np.random.rand(10, 10),
+            dtype=self.dtype)
+        linear2.bias.data = torch.tensor(
+            np.random.rand(10), dtype=self.dtype)
+        linear3 = nn.Linear(10, 1)
+        linear3.weight.data = torch.tensor(
+            np.random.rand(1, 10), dtype=self.dtype)
+        linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        model = nn.Sequential(linear1, nn.ReLU(), linear2,
+                              nn.ReLU(), linear3)
+
+        mb = model_bounds.ModelBounds(model, vf)
+        x0_lo = -1. * torch.ones(x_dim, dtype=dtype)
+        x0_up = 1. * torch.ones(x_dim, dtype=dtype)
+
+        for i in range(10):
+            x0 = torch.rand(x_dim, dtype=dtype) * (x0_up - x0_lo) + x0_lo
+            eps = mb.bound_fun(model, x0_lo, x0_up, x0)
+            eps_expected = V(x0)[0] - model(x0)
+            self.assertAlmostEqual(eps.item(), eps_expected.item(), places=5)
+
+    def test_lower_bound(self):
+        dt = 1.
+        dtype = torch.float64
+        (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
+        x_dim = A_c.shape[1]
+        u_dim = B_c.shape[1]
+        A = torch.eye(x_dim, dtype=dtype) + dt * A_c
+        B = dt * B_c
+        sys = hybrid_linear_system.HybridLinearSystem(x_dim, u_dim, dtype)
+        c = torch.zeros(x_dim, dtype=dtype)
+        P = torch.cat((-torch.eye(x_dim+u_dim),
+                       torch.eye(x_dim+u_dim)), 0).type(dtype)
+        x_lo = -10. * torch.ones(x_dim, dtype=dtype)
+        x_up = 10. * torch.ones(x_dim, dtype=dtype)
+        u_lo = -1. * torch.ones(u_dim, dtype=dtype)
+        u_up = 1. * torch.ones(u_dim, dtype=dtype)
+        q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
+        sys.add_mode(A, B, c, P, q)
+        R = torch.eye(sys.u_dim)
+        Q = torch.eye(sys.x_dim)
+        N = 5
+        vf = value_to_optimization.ValueFunction(sys, N,
+                                                 x_lo, x_up, u_lo, u_up)
+        vf.set_cost(Q=Q, R=R)
+        vf.set_terminal_cost(Qt=Q, Rt=R)
+        V = vf.get_value_function()
+
+        linear1 = nn.Linear(x_dim, 10)
+        linear1.weight.data = torch.tensor(
+            np.random.rand(10, x_dim), dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            np.random.rand(10), dtype=self.dtype)
+        linear2 = nn.Linear(10, 10)
+        linear2.weight.data = torch.tensor(
+            np.random.rand(10, 10),
+            dtype=self.dtype)
+        linear2.bias.data = torch.tensor(
+            np.random.rand(10), dtype=self.dtype)
+        linear3 = nn.Linear(10, 1)
+        linear3.weight.data = torch.tensor(
+            np.random.rand(1, 10), dtype=self.dtype)
+        linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        model = nn.Sequential(linear1, nn.ReLU(), linear2,
+                              nn.ReLU(), linear3)
+
+        mb = model_bounds.ModelBounds(model, vf)
+        x0_lo = -1. * torch.ones(x_dim, dtype=dtype)
+        x0_up = 1. * torch.ones(x_dim, dtype=dtype)
+
+        x_adv = torch.Tensor([-.5, -.5]).type(dtype)
+        x_adv.requires_grad = True
+        optimizer = torch.optim.SGD([x_adv], lr=.01)
+
+        for i in range(10):
+            obj = -mb.bound_fun(model, x0_lo, x0_up,
+                                torch.max(torch.min(x_adv, x0_up), x0_lo))
+            optimizer.zero_grad()
+            obj.backward()
+            optimizer.step()
+        x_adv = torch.max(torch.min(x_adv, x0_up), x0_lo)
+
+        with torch.no_grad():
+            eps_adv = mb.bound_fun(model, x0_lo, x0_up, x_adv)
+            eps_expected = V(x_adv)[0] - model(x_adv)
+            self.assertAlmostEqual(eps_adv.item(), eps_expected.item(),
+                                   places=5)
+            for i in range(10):
+                x0 = torch.rand(x_dim, dtype=dtype) * (x0_up - x0_lo) + x0_lo
+                eps_sample = V(x0)[0] - model(x0)
+                self.assertGreaterEqual(eps_adv.item(), eps_sample.item())
 
 
 if __name__ == '__main__':
