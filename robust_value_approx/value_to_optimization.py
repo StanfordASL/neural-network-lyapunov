@@ -586,7 +586,8 @@ class ValueFunction:
                         x_samples = torch.cat((x_samples,
                                                x.unsqueeze(0)), axis=0)
                         v_samples = torch.cat((v_samples,
-                                               torch.Tensor([[obj_val]]).type(self.dtype)),
+                                               torch.Tensor(
+                                                [[obj_val]]).type(self.dtype)),
                                               axis=0)
                     else:
                         break
@@ -599,7 +600,9 @@ class ValueFunction:
                             x_samples = torch.cat((x_samples,
                                                    x.unsqueeze(0)), axis=0)
                             v_samples = torch.cat((v_samples,
-                                                   torch.Tensor([[obj_val]]).type(self.dtype)),
+                                                   torch.Tensor(
+                                                    [[obj_val]]).type(
+                                                    self.dtype)),
                                                   axis=0)
             if update_progress:
                 utils.update_progress((i + 1) / x_samples_all.shape[0])
