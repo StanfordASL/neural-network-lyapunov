@@ -61,11 +61,11 @@ class AdversarialSampleTest(unittest.TestCase):
         self.x0_lo = -1. * torch.ones(x_dim, dtype=dtype)
         self.x0_up = 1. * torch.ones(x_dim, dtype=dtype)
         self.as_generator = adversarial_sample.AdversarialSampleGenerator(
-            vf, self.model, self.x0_lo, self.x0_up)
+            vf, self.x0_lo, self.x0_up)
 
-    def test_upper_bound(self):
+    def test_upper_bound_global(self):
         for requires_grad in [True, False]:
-            (eps_adv, x_adv) = self.as_generator.get_upper_bound_sample(
+            (eps_adv, x_adv) = self.as_generator.get_upper_bound_global(
                 self.model, requires_grad=requires_grad)
             eps_expected = self.V(x_adv)[0] - self.model(x_adv)
             self.assertAlmostEqual(eps_adv.item(),
@@ -73,30 +73,41 @@ class AdversarialSampleTest(unittest.TestCase):
             self.assertTrue(torch.all(x_adv <= self.x0_up))
             self.assertTrue(torch.all(x_adv >= self.x0_lo))
         with torch.no_grad():
-            for i in range(50):
+            for i in range(20):
                 x0 = torch.rand(self.x_dim, dtype=self.dtype) *\
                     (self.x0_up - self.x0_lo) + self.x0_lo
                 eps_sample = self.V(x0)[0] - self.model(x0)
                 self.assertLessEqual(eps_adv.item(), eps_sample.item())
 
-    def test_lower_bound(self):
-        for requires_grad in [True, False]:
-            (eps_adv, x_adv) = self.as_generator.get_lower_bound_sample(
-                self.model, num_iter=10, learning_rate=.01,
-                x_adv0=torch.zeros(self.x_dim, dtype=self.dtype),
-                requires_grad=requires_grad, penalty=1e-8)
-            eps_expected = self.V(x_adv)[0] - self.model(x_adv)
-            self.assertAlmostEqual(eps_adv.item(),
-                                   eps_expected.item(), places=5)
-            self.assertTrue(torch.all(x_adv <= self.x0_up))
-            self.assertTrue(torch.all(x_adv >= self.x0_lo))
+    def test_setup_val_opt(self):
+        for i in range(10):
+            x0 = torch.rand(self.x_dim, dtype=self.dtype) * \
+                (self.x0_up - self.x0_lo) + self.x0_lo
+            v_exp = self.V(x0)[0]
+            (prob, x, s, alpha) = self.as_generator.setup_val_opt(x_val=x0)
+            prob.gurobi_model.optimize()
+            v = prob.gurobi_model.objVal
+            self.assertAlmostEqual(v, v_exp, places=5)
+
+    def test_upper_bound_sample(self):
+        (eps_glob, x_glob) = self.as_generator.get_upper_bound_global(
+            self.model, requires_grad=False)
+        (eps_adv, x_adv, V_adv) = self.as_generator.get_upper_bound_sample(
+            self.model, num_iter=15, learning_rate=.1)
+        self.assertAlmostEqual(eps_adv[-1, 0].item(), eps_glob.item(),
+                               places=5)
+
+    def test_lower_bound_sample(self):
+        (eps_adv, x_adv, V_adv) = self.as_generator.get_lower_bound_sample(
+            self.model, num_iter=15, learning_rate=.1)
         with torch.no_grad():
-            for i in range(50):
-                # not that the property is actually only guaranteed locally!
+            for i in range(20):
+                # note that the property is actually only guaranteed locally!
                 x0 = torch.rand(self.x_dim, dtype=self.dtype) *\
                     (self.x0_up - self.x0_lo) + self.x0_lo
                 eps_sample = self.V(x0)[0] - self.model(x0)
-                self.assertGreaterEqual(eps_adv.item(), eps_sample.item())
+                self.assertGreaterEqual(eps_adv[-1, 0].item(),
+                                        eps_sample.item())
 
 
 if __name__ == '__main__':
