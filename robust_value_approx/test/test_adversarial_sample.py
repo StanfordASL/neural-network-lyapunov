@@ -109,6 +109,18 @@ class AdversarialSampleTest(unittest.TestCase):
                 self.assertGreaterEqual(eps_adv[-1, 0].item(),
                                         eps_sample.item())
 
+    def test_squared_bound_sample(self):
+        (eps_adv, x_adv, V_adv) = self.as_generator.get_squared_bound_sample(
+            self.model, num_iter=15, learning_rate=.1)
+        with torch.no_grad():
+            for i in range(20):
+                # note that the property is actually only guaranteed locally!
+                x0 = torch.rand(self.x_dim, dtype=self.dtype) *\
+                    (self.x0_up - self.x0_lo) + self.x0_lo
+                eps_sample = torch.pow(self.V(x0)[0] - self.model(x0), 2)
+                self.assertGreaterEqual(eps_adv[-1, 0].item(),
+                                        eps_sample.item())
+
 
 if __name__ == '__main__':
     unittest.main()

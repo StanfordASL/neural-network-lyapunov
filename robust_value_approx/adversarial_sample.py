@@ -262,3 +262,58 @@ class AdversarialSampleGenerator:
                 x_adv = torch.max(torch.min(x_adv_params, self.x0_up),
                                   self.x0_lo)
         return(epsilon_buff, x_adv_buff, V_buff)
+
+    def get_squared_bound_sample(self, model, num_iter=10, learning_rate=.01,
+                                 x_adv0=None, penalty=1e-8):
+        """
+        Checks that the squared model error is upper bounded by some margin
+        around the true optimal cost-to-go, i.e. (V(x) - η(x))^2 ≤ ε
+        This is done by maximizing, (V(x) - n(x))^2 (over x), which is a
+        max-min problem that we solve using bilevel nonlinear optimization. 
+        Since this problem is always nonconvex, the bound returned is
+        valid LOCALLY
+
+        @param model the model to verify
+        @param num_iter (optional) Integer number of gradient ascent to do
+        @param learning_rate (optional) Float learning rate of the
+        gradient ascent
+        @param x_adv0 (optional) Tensor which is initial guess for the
+        adversarial example
+        @param penalty (optional) a float for the penalty when getting the
+        gradient of the eps opt problem (see
+        compute_objective_from_mip_data_and_solution)
+        @return epsilon_buff, the ε for each iterate
+        @return x_adv_buff, each iterate of the optimization
+        @return V_buff, the value of each iterate
+        # TODO(blandry) consider using BFGS
+        """
+        if x_adv0 is None:
+            x_adv_params = torch.zeros(self.vf.sys.x_dim, dtype=self.dtype)
+        else:
+            assert(isinstance(x_adv0, torch.Tensor))
+            assert(len(x_adv0) == self.vf.sys.x_dim)
+            x_adv_params = x_adv0.clone()
+        x_adv_params.requires_grad = True
+        x_adv = torch.max(torch.min(x_adv_params, self.x0_up), self.x0_lo)
+        optimizer = torch.optim.Adam([x_adv_params], lr=learning_rate)
+        epsilon_buff = torch.Tensor(num_iter, 1).type(self.dtype)
+        x_adv_buff = torch.Tensor(num_iter, self.vf.sys.x_dim).type(self.dtype)
+        V_buff = torch.Tensor(num_iter, 1).type(self.dtype)
+        for i in range(num_iter):
+            (prob, x, s, alpha) = self.setup_val_opt(x_val=x_adv)
+            prob.gurobi_model.optimize()
+            Vx = prob.compute_objective_from_mip_data_and_solution(
+                penalty=penalty)
+            nx = model(x_adv)
+            epsilon = torch.pow(Vx - nx, 2)
+            epsilon_buff[i, 0] = epsilon.clone().detach()
+            x_adv_buff[i, :] = x_adv.clone().detach()
+            V_buff[i, 0] = Vx.clone().detach()
+            if i < (num_iter-1):
+                objective = -epsilon
+                optimizer.zero_grad()
+                objective.backward()
+                optimizer.step()
+                x_adv = torch.max(torch.min(x_adv_params, self.x0_up),
+                                  self.x0_lo)
+        return(epsilon_buff, x_adv_buff, V_buff)
