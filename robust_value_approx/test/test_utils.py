@@ -244,7 +244,6 @@ class TestComputeBoundsFromPolytope(unittest.TestCase):
         self.assertEqual(utils.compute_bounds_from_polytope(P, q, 1),
                          (-3, 1.75))
 
-    @unittest.skip("Test fail because Inf has the wrong sing on the CI")
     def test2(self):
         P = np.array([[1., 1.], [0, -1]])
         q = np.array([2, 3.])
