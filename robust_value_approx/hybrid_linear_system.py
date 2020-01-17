@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import cvxpy as cp
 
 import robust_value_approx.utils as utils
 from robust_value_approx.utils import (
@@ -489,3 +490,25 @@ class AutonomousHybridLinearSystem:
             if torch.all(self.P[i] @ x <= self.q[i]):
                 next_states.append(self.A[i] @ x + self.g[i])
         return next_states
+
+    def mode_derivative_bounds(self, mode_index):
+        """
+        Return the bounds on Aᵢx s.t Pᵢx ≤ qᵢ
+        @param mode_index The mode index i
+        @return (lower, upper) The lower and upper bounds on  Aᵢx s.t Pᵢx≤ qᵢ
+        """
+        lower = np.empty(self.x_dim)
+        upper = np.empty(self.x_dim)
+        for j in range(self.x_dim):
+            x = cp.Variable(self.x_dim)
+            con = [
+                self.P[mode_index].detach().numpy() @ x <= self.q[mode_index]]
+            prob = cp.Problem(
+                cp.Maximize(self.A[mode_index][j].detach().numpy() @ x), con)
+            prob.solve()
+            upper[j] = prob.value
+            prob = cp.Problem(
+                cp.Minimize(self.A[mode_index][j].detach().numpy() @ x), con)
+            prob.solve()
+            lower[j] = prob.value
+        return (lower, upper)

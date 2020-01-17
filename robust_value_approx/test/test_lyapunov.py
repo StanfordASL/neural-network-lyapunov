@@ -608,5 +608,114 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             self.assertAlmostEqual(loss.item(), loss_expected.item())
 
 
+class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+        self.x_equilibrium1 = torch.tensor([0, 0], dtype=self.dtype)
+        self.system1 = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system1()
+
+    def test_add_relu_gradient_times_dynamics(self):
+        relu1 = setup_relu(self.dtype)
+        relu2 = setup_leaky_relu(self.dtype)
+
+        def test_fun(relu, system, x_val, Aisi_flag):
+            """
+            Setup a MILP with fixed x, if Aisi_flag = True, solve 
+            ∑ᵢ ∂ReLU(x)/∂x * Aᵢsᵢ
+            if Aisi_flag=False, solve
+            ∑ᵢ ∂ReLU(x)/∂x * gᵢγᵢ
+            """
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+                relu, system.dtype)
+            milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
+            (x, s, gamma, _, _) = dut.add_hybrid_system_constraint(milp)
+            (_, beta, _, _) = dut.add_relu_output_constraint(
+                relu, relu_free_pattern, milp, x)
+            if Aisi_flag:
+                (z, cost_z_coeff) = dut.add_relu_gradient_times_Aisi(
+                    relu, relu_free_pattern, milp, s, beta)
+            else:
+                (z, cost_z_coeff) = dut.add_relu_gradient_times_gigammai(
+                    relu, relu_free_pattern, milp, gamma, beta)
+            for i in range(system.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=system.dtype)], [[x[i]]],
+                    rhs=x_val[i], sense=gurobipy.GRB.EQUAL)
+            milp.setObjective(
+                cost_z_coeff, z, 0., gurobipy.GRB.MAXIMIZE)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            mode_index = system.mode(x_val)
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(relu, x_val)
+            (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+                relu, system.x_dim, activation_pattern, system.dtype)
+            if Aisi_flag:
+                self.assertAlmostEqual(
+                    (g.squeeze() @ (system.A[mode_index] @ x_val)).item(),
+                    milp.gurobi_model.ObjVal)
+            else:
+                self.assertAlmostEqual(
+                    (g.squeeze() @ (system.g[mode_index])).item(),
+                    milp.gurobi_model.ObjVal)
+
+        for relu in (relu1, relu2):
+            for Aisi_flag in (True, False):
+                test_fun(
+                    relu, self.system1,
+                    torch.tensor([0.5, 0.2], dtype=self.dtype), Aisi_flag)
+                test_fun(
+                    relu, self.system1,
+                    torch.tensor([-0.5, 0.2], dtype=self.dtype), Aisi_flag)
+                test_fun(
+                    relu, self.system1,
+                    torch.tensor([0.5, -0.2], dtype=self.dtype), Aisi_flag)
+                test_fun(
+                    relu, self.system1,
+                    torch.tensor([-0.5, -0.2], dtype=self.dtype), Aisi_flag)
+
+    def test_lyapunov_derivative_as_milp(self):
+        relu1 = setup_relu(self.dtype)
+        relu2 = setup_leaky_relu(self.dtype)
+        V_rho = 2.
+        epsilon = 0.1
+
+        def test_fun(relu, x_equilibrium, system, x_val):
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            (milp, x) = dut.lyapunov_derivative_as_milp(
+                relu, x_equilibrium, V_rho, epsilon, None, None)
+            for i in range(system.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=system.dtype)], [[x[i]]],
+                    sense=gurobipy.GRB.EQUAL, rhs=x_val[i])
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+            milp.gurobi_model.optimize()
+            if (milp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE):
+                milp.gurobi_model.computeIIS()
+                milp.gurobi_model.write("milp.ilp")
+
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(relu, x_val)
+            relu_gradient, _, _, _ = relu_to_optimization.\
+                ReLUGivenActivationPattern(
+                    relu, system.x_dim, activation_pattern, system.dtype)
+            lyapunov_gradient = relu_gradient + \
+                V_rho * torch.sign(x_val - x_equilibrium)
+            mode_index = system.mode(x_val)
+            Vdot = lyapunov_gradient @ (
+                system.A[mode_index] @ x_val + system.g[mode_index])
+            self.assertAlmostEqual(milp.gurobi_model.ObjVal, Vdot.item())
+
+        for relu in [relu1, relu2]:
+            test_fun(
+                relu, self.x_equilibrium1, self.system1,
+                torch.tensor([0.2, 0.3], dtype=self.dtype))
+
+
 if __name__ == "__main__":
     unittest.main()

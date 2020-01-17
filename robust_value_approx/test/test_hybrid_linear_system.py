@@ -89,6 +89,29 @@ def setup_transformed_trecate_system(theta, x_equilibrium):
     return system
 
 
+def setup_johansson_continuous_time_system1():
+    """
+    This is the simple example from section 3 of
+    Computation of piecewise quadratic Lyapunov functions for hybrid systems
+    by M. Johansson and A.Rantzer, 1997.
+    This system doesn't have a common quadratic Lyapunov function.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(
+        2, dtype)
+    system.add_mode(
+        torch.tensor([[-5, -4], [-1, -2]], dtype=dtype),
+        torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 1, 1], dtype=dtype))
+    system.add_mode(
+        torch.tensor([[-2, -4], [20, -2]], dtype=dtype),
+        torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 1, 1], dtype=dtype))
+    return system
+
+
 class HybridLinearSystemTest(unittest.TestCase):
     def setUp(self):
         pass
@@ -289,6 +312,9 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         np.testing.assert_array_almost_equal(dut.x_lo[0],
                                              np.array([-2.5, -2.5]))
         np.testing.assert_array_almost_equal(dut.x_up[0], np.array([2.5, 2.5]))
+        Ax_lower, Ax_upper = dut.mode_derivative_bounds(0)
+        np.testing.assert_allclose(Ax_lower, np.array([-4.5, -4.5]))
+        np.testing.assert_allclose(Ax_upper, np.array([4.5, 4.5]))
 
     def test_mixed_integer_constraints(self):
         dut = hybrid_linear_system.AutonomousHybridLinearSystem(
