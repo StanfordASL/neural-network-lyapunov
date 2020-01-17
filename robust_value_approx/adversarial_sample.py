@@ -269,7 +269,7 @@ class AdversarialSampleGenerator:
         Checks that the squared model error is upper bounded by some margin
         around the true optimal cost-to-go, i.e. (V(x) - η(x))^2 ≤ ε
         This is done by maximizing, (V(x) - n(x))^2 (over x), which is a
-        max-min problem that we solve using bilevel nonlinear optimization. 
+        max-min problem that we solve using bilevel nonlinear optimization.
         Since this problem is always nonconvex, the bound returned is
         valid LOCALLY
 
