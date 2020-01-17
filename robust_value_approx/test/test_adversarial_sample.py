@@ -110,8 +110,10 @@ class AdversarialSampleTest(unittest.TestCase):
                                         eps_sample.item())
 
     def test_squared_bound_sample(self):
+        max_iter = 20
         (eps_adv, x_adv, V_adv) = self.as_generator.get_squared_bound_sample(
-            self.model, num_iter=15, learning_rate=.1)
+            self.model, max_iter=max_iter, conv_tol=1e-4, learning_rate=.1)
+        self.assertLess(eps_adv.shape[0], max_iter)
         with torch.no_grad():
             for i in range(20):
                 # note that the property is actually only guaranteed locally!

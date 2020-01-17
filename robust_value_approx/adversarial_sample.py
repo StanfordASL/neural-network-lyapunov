@@ -263,8 +263,8 @@ class AdversarialSampleGenerator:
                                   self.x0_lo)
         return(epsilon_buff, x_adv_buff, V_buff)
 
-    def get_squared_bound_sample(self, model, num_iter=10, learning_rate=.01,
-                                 x_adv0=None, penalty=1e-8):
+    def get_squared_bound_sample(self, model, max_iter=10, conv_tol=1e-5,
+                                 learning_rate=.01, x_adv0=None, penalty=1e-8):
         """
         Checks that the squared model error is upper bounded by some margin
         around the true optimal cost-to-go, i.e. (V(x) - η(x))^2 ≤ ε
@@ -274,7 +274,10 @@ class AdversarialSampleGenerator:
         valid LOCALLY
 
         @param model the model to verify
-        @param num_iter (optional) Integer number of gradient ascent to do
+        @param max_iter (optional) Integer maximum number of gradient ascent
+        to do
+        @param conv_tol (optional) float when the change in x is lower
+        than this returns the samples
         @param learning_rate (optional) Float learning rate of the
         gradient ascent
         @param x_adv0 (optional) Tensor which is initial guess for the
@@ -296,24 +299,30 @@ class AdversarialSampleGenerator:
         x_adv_params.requires_grad = True
         x_adv = torch.max(torch.min(x_adv_params, self.x0_up), self.x0_lo)
         optimizer = torch.optim.Adam([x_adv_params], lr=learning_rate)
-        epsilon_buff = torch.Tensor(num_iter, 1).type(self.dtype)
-        x_adv_buff = torch.Tensor(num_iter, self.vf.sys.x_dim).type(self.dtype)
-        V_buff = torch.Tensor(num_iter, 1).type(self.dtype)
-        for i in range(num_iter):
+        epsilon_buff = torch.Tensor(0, 1).type(self.dtype)
+        x_adv_buff = torch.Tensor(0, self.vf.sys.x_dim).type(self.dtype)
+        V_buff = torch.Tensor(0, 1).type(self.dtype)
+        for i in range(max_iter):
             (prob, x, s, alpha) = self.setup_val_opt(x_val=x_adv)
             prob.gurobi_model.optimize()
             Vx = prob.compute_objective_from_mip_data_and_solution(
                 penalty=penalty)
             nx = model(x_adv)
             epsilon = torch.pow(Vx - nx, 2)
-            epsilon_buff[i, 0] = epsilon.clone().detach()
-            x_adv_buff[i, :] = x_adv.clone().detach()
-            V_buff[i, 0] = Vx.clone().detach()
-            if i < (num_iter-1):
-                objective = -epsilon
-                optimizer.zero_grad()
-                objective.backward()
-                optimizer.step()
-                x_adv = torch.max(torch.min(x_adv_params, self.x0_up),
-                                  self.x0_lo)
+            epsilon_buff = torch.cat((epsilon_buff,
+                epsilon.clone().detach().unsqueeze(1)), axis=0)
+            x_adv_buff = torch.cat((x_adv_buff,
+                x_adv.clone().detach().unsqueeze(0)), axis=0)
+            V_buff = torch.cat((V_buff,
+                Vx.clone().detach().unsqueeze(0).unsqueeze(1)), axis=0)
+            if i == (max_iter-1):
+                break
+            objective = -epsilon
+            optimizer.zero_grad()
+            objective.backward()
+            optimizer.step()
+            x_adv = torch.max(torch.min(x_adv_params, self.x0_up),
+                              self.x0_lo)
+            if torch.all(torch.abs(x_adv - x_adv_buff[-1, :]) <= conv_tol):
+                break
         return(epsilon_buff, x_adv_buff, V_buff)
