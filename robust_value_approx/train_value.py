@@ -38,14 +38,16 @@ class AdversarialWithBaseline:
         problems.
 
         @param vf an instance of ValueFunction class
+        @param x0_lo Tensor lower bound of model input
+        @param x0_up Tensor upper bound of model input
+        Data:
         @param x_samples_train, state input to train over
         @param v_samples_train, corresponding value functions
-
-
+        @param x_samples_validation, state input to validate over
+        @param v_samples_validation, corresponding value functions
         Model Params:
         @param nn_width Integer number of units per layers
         @param nn_depth Integer number of HIDDEN neural network layers
-
         Training Params:
         @param batch_size Integer batch size used duing training
         @param learning_rate Float learning rate (Adam is used)
