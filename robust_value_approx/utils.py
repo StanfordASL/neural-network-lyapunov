@@ -307,7 +307,7 @@ def torch_to_numpy(torch_array_list, squeeze=True):
 
 
 def train_model(model, inputs, labels, batch_size=100,
-                num_epoch=1000, learning_rate=1e-3):
+                num_epoch=1000, learning_rate=1e-3, print_loss=False):
     """
     trains a pytorch model with an L2 loss function using the
     Adam training algorithm
@@ -334,7 +334,7 @@ def train_model(model, inputs, labels, batch_size=100,
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if epoch % 10 == 0:
+            if epoch % 10 == 0 and print_loss:
                 print(loss)
 
     return model
@@ -434,9 +434,9 @@ def compute_bounds_from_polytope(P, q, i):
     x = cp.Variable(P.shape[1])
     con = [P_np @ x <= q_np]
     prob = cp.Problem(cp.Maximize(x[i]), con)
-    xi_up = prob.solve()
+    xi_up = prob.solve(solver=cp.GUROBI)
     prob = cp.Problem(cp.Minimize(x[i]), con)
-    xi_lo = prob.solve()
+    xi_lo = prob.solve(solver=cp.GUROBI)
     return (xi_lo, xi_up)
 
 
