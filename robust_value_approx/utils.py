@@ -431,12 +431,37 @@ def compute_bounds_from_polytope(P, q, i):
         q_np = q
     else:
         raise Exception("Unknown q")
-    x = cp.Variable(P.shape[1])
-    con = [P_np @ x <= q_np]
-    prob = cp.Problem(cp.Maximize(x[i]), con)
-    xi_up = prob.solve(solver=cp.GUROBI)
-    prob = cp.Problem(cp.Minimize(x[i]), con)
-    xi_lo = prob.solve(solver=cp.GUROBI)
+    model = gurobipy.Model()
+    x_vars = model.addVars(
+        P.shape[1], lb=-np.inf, vtype=gurobipy.GRB.CONTINUOUS)
+    x = [x_vars[i] for i in range(P.shape[1])]
+
+    for j in range(P.shape[0]):
+        model.addLConstr(
+            gurobipy.LinExpr(P_np[j].tolist(), x),
+            sense=gurobipy.GRB.LESS_EQUAL, rhs=q_np[j])
+    model.setObjective(gurobipy.LinExpr(1., x[i]), gurobipy.GRB.MAXIMIZE)
+    model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+    model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+    model.optimize()
+    if model.status == gurobipy.GRB.OPTIMAL:
+        xi_up = model.ObjVal
+    elif model.status == gurobipy.GRB.UNBOUNDED:
+        xi_up = np.inf
+    elif model.status == gurobipy.GRB.INFEASIBLE:
+        xi_up = -np.inf
+    else:
+        raise Exception("compute_bounds_from_polytope: unknown gurobi status.")
+    model.setObjective(gurobipy.LinExpr(1., x[i]), gurobipy.GRB.MINIMIZE)
+    model.optimize()
+    if model.status == gurobipy.GRB.OPTIMAL:
+        xi_lo = model.ObjVal
+    elif model.status == gurobipy.GRB.UNBOUNDED:
+        xi_lo = -np.inf
+    elif model.status == gurobipy.GRB.INFEASIBLE:
+        xi_lo = np.inf
+    else:
+        raise Exception("compute_bounds_from_polytope: unknown gurobi status.")
     return (xi_lo, xi_up)
 
 
