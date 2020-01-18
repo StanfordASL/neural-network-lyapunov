@@ -11,17 +11,17 @@ class AdversarialWithBaselineTrainingOptions:
         # number of pure l2 fit iteration to be done over the dataset
         self.num_l2_iter_desired = 1000
         # number of adversarial iteration to be done
-        self.num_robust_iter_desired = 1500
+        self.num_robust_iter_desired = 1000
         # loss is (1 - robust_weight)*MSE(data)+robust_weight*MSE(adversaries)
         self.robust_weight = .5
-        # number of iterations to find adversarial examples
-        self.x_adv_num_iter = 3
+        # maximum number of iterations to find adversarial examples
+        self.x_adv_max_iter = 10
+        # convergence tolerance for adversarial examples
+        self.x_adv_conv_tol = 1e-5
         # learning rate used to find adversarial examples
-        self.x_adv_lr = .25
-        # number of randomly generated samples per iteration for the baseline
-        self.num_x_rand = self.x_adv_num_iter
+        self.x_adv_lr = .1
         # size of the buffer to keep a few old adversarial examples
-        self.max_buffer_size = 5 * self.x_adv_num_iter
+        self.max_buffer_size = 5 * self.x_adv_max_iter
 
 
 class AdversarialWithBaseline:
@@ -127,46 +127,40 @@ class AdversarialWithBaseline:
                     training_done = True
                     break
                 if num_l2_iter_done < opt.num_l2_iter_desired:
+                    # robust
+                    y_pred_robust = self.robust_model(batch_data)
+                    robust_loss = self.robust_mse(y_pred_robust, batch_label)
                     # baseline
                     y_pred_baseline = self.baseline_model(batch_data)
                     baseline_loss = self.baseline_mse(
                         y_pred_baseline, batch_label)
-                    # robust
-                    y_pred_robust = self.robust_model(batch_data)
-                    robust_loss = self.robust_mse(y_pred_robust, batch_label)
                     num_l2_iter_done += 1
                 else:
-                    # baseline
-                    (rand_data_, rand_label_) = self.get_random_samples(
-                        opt.num_x_rand)
-                    self.rand_data_buffer = torch.cat(
-                        (self.rand_data_buffer, rand_data_), axis=0)
-                    self.rand_label_buffer = torch.cat(
-                        (self.rand_label_buffer, rand_label_), axis=0)
-                    rand_data_i = np.random.choice(
-                        self.rand_data_buffer.shape[0], opt.num_x_rand,
-                        replace=False)
-                    rand_data = self.rand_data_buffer[rand_data_i, :]
-                    rand_label = self.rand_label_buffer[rand_data_i, :]
-                    y_pred_rand = self.baseline_model(rand_data)
-                    y_pred_baseline = self.baseline_model(batch_data)
-                    baseline_loss = (1. - opt.robust_weight) *\
-                        self.baseline_mse(y_pred_baseline, batch_label) +\
-                        opt.robust_weight *\
-                        self.baseline_mse(y_pred_rand, rand_label)
                     # robust
+                    if self.adv_data_buffer.shape[0] > 0:
+                        x_adv0_i = np.random.choice(
+                            self.rand_data_buffer.shape[0], 1)
+                        x_adv0 = self.rand_data_buffer[
+                            x_adv0_i, :].squeeze() + torch.rand(
+                                self.x_dim, dtype=self.dtype) *\
+                            (self.x0_up - self.x0_lo) * .25
+                        x_adv0 = torch.max(
+                            torch.min(x_adv0, self.x0_up), self.x0_lo)
+                    else:
+                        x_adv0 = self.get_random_x0()
                     (epsilon_squ,
                      adv_data_,
                      adv_label_) = self.as_generator.get_squared_bound_sample(
-                        self.robust_model, num_iter=opt.x_adv_num_iter,
+                        self.robust_model, max_iter=opt.x_adv_max_iter,
+                        conv_tol=opt.x_adv_conv_tol,
                         learning_rate=opt.x_adv_lr,
-                        x_adv0=self.get_random_x0())
+                        x_adv0=x_adv0)
                     self.adv_data_buffer = torch.cat(
                         (self.adv_data_buffer, adv_data_), axis=0)
                     self.adv_label_buffer = torch.cat(
                         (self.adv_label_buffer, adv_label_), axis=0)
                     adv_data_i = np.random.choice(
-                        self.adv_data_buffer.shape[0], opt.x_adv_num_iter,
+                        self.adv_data_buffer.shape[0], adv_data_.shape[0],
                         replace=False)
                     adv_data = self.adv_data_buffer[adv_data_i, :]
                     adv_label = self.adv_label_buffer[adv_data_i, :]
@@ -176,6 +170,24 @@ class AdversarialWithBaseline:
                         self.robust_mse(y_pred_robust, batch_label) +\
                         opt.robust_weight *\
                         self.robust_mse(y_pred_adv, adv_label)
+                    # baseline
+                    (rand_data_, rand_label_) = self.get_random_samples(
+                        adv_data_.shape[0])
+                    self.rand_data_buffer = torch.cat(
+                        (self.rand_data_buffer, rand_data_), axis=0)
+                    self.rand_label_buffer = torch.cat(
+                        (self.rand_label_buffer, rand_label_), axis=0)
+                    rand_data_i = np.random.choice(
+                        self.rand_data_buffer.shape[0], adv_data_.shape[0],
+                        replace=False)
+                    rand_data = self.rand_data_buffer[rand_data_i, :]
+                    rand_label = self.rand_label_buffer[rand_data_i, :]
+                    y_pred_rand = self.baseline_model(rand_data)
+                    y_pred_baseline = self.baseline_model(batch_data)
+                    baseline_loss = (1. - opt.robust_weight) *\
+                        self.baseline_mse(y_pred_baseline, batch_label) +\
+                        opt.robust_weight *\
+                        self.baseline_mse(y_pred_rand, rand_label)
                     num_robust_iter_done += 1
                 self.baseline_optimizer.zero_grad()
                 baseline_loss.backward()
@@ -200,7 +212,7 @@ class AdversarialWithBaseline:
                                             {'baseline': baseline_loss.item(),
                                              'robust': robust_loss.item()},
                                             self.num_total_iter_done)
-                    if num_robust_iter_done > 0:
+                    if num_l2_iter_done >= opt.num_l2_iter_desired:
                         with torch.no_grad():
                             baseline_validation_loss = self.baseline_mse(
                                 self.baseline_model(self.x_samples_validation),
