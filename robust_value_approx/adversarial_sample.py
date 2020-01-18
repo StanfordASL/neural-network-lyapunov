@@ -309,12 +309,15 @@ class AdversarialSampleGenerator:
                 penalty=penalty)
             nx = model(x_adv)
             epsilon = torch.pow(Vx - nx, 2)
-            epsilon_buff = torch.cat((epsilon_buff,
-                epsilon.clone().detach().unsqueeze(1)), axis=0)
-            x_adv_buff = torch.cat((x_adv_buff,
-                x_adv.clone().detach().unsqueeze(0)), axis=0)
-            V_buff = torch.cat((V_buff,
-                Vx.clone().detach().unsqueeze(0).unsqueeze(1)), axis=0)
+            epsilon_buff = torch.cat(
+                (epsilon_buff, epsilon.clone().detach().unsqueeze(1)),
+                axis=0)
+            x_adv_buff = torch.cat(
+                (x_adv_buff, x_adv.clone().detach().unsqueeze(0)),
+                axis=0)
+            V_buff = torch.cat(
+                (V_buff, Vx.clone().detach().unsqueeze(0).unsqueeze(1)),
+                axis=0)
             if i == (max_iter-1):
                 break
             objective = -epsilon
