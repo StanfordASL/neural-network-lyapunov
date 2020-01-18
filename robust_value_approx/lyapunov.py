@@ -45,28 +45,34 @@ class LyapunovHybridLinearSystem:
             self.system.num_modes, lb=0., vtype=gurobipy.GRB.BINARY,
             name="gamma")
         # Now add the milp constraint to formulate the hybrid linear system.
-        (Aeq_s1, Aeq_gamma1, Ain_x1, Ain_s1, Ain_gamma1, rhs_in1) =\
+        (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in) =\
             self.system.mixed_integer_constraints()
 
         # Now add the constraint
-        # Ain_x1 * x + Ain_s1 * s + Ain_gamma1 * gamma <= rhs_in1
-        for i in range(Ain_x1.shape[0]):
+        # Ain_x * x + Ain_s * s + Ain_gamma * gamma <= rhs_in
+        for i in range(Ain_x.shape[0]):
             milp.addLConstr(
-                [Ain_x1[i], Ain_s1[i], Ain_gamma1[i]], [x, s, gamma],
-                sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in1[i])
+                [Ain_x[i], Ain_s[i], Ain_gamma[i]], [x, s, gamma],
+                sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in[i],
+                name="hybrid_linear_dynamics")
 
         # Now add the constraint that sum gamma = 1
         milp.addLConstr(
             [torch.ones((self.system.num_modes,))], [gamma],
             sense=gurobipy.GRB.EQUAL, rhs=1.)
-        return (x, s, gamma, Aeq_s1, Aeq_gamma1)
+        return (x, s, gamma, Aeq_s, Aeq_gamma)
 
     def add_relu_output_constraint(
-            self, relu_model, relu_free_pattern, milp, x):
+            self, relu_model, relu_free_pattern, milp, x, slack_name="relu_z",
+            binary_var_name="relu_beta"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         Add the relu output as mixed-integer linear constraint.
+        @return (z, beta, a_out, b_out) z is the continuous slack variable.
+        beta is the binary variable indicating whether a (leaky) ReLU unit is
+        active or not. The output of the network can be written as
+        a_out.dot(z) + b_out
         """
         assert(isinstance(
             relu_free_pattern, relu_to_optimization.ReLUFreePattern))
@@ -82,10 +88,10 @@ class LyapunovHybridLinearSystem:
         # activation binary variable beta and the network input x.
         relu_z = milp.addVars(
             Ain_relu_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="relu_z")
+            vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
         relu_beta = milp.addVars(
             Ain_relu_beta.shape[1], vtype=gurobipy.GRB.BINARY,
-            name="relu_beta")
+            name=binary_var_name)
         for i in range(Ain_relu_x.shape[0]):
             milp.addLConstr(
                 [Ain_relu_x[i], Ain_relu_z[i], Ain_relu_beta[i]],
@@ -105,6 +111,9 @@ class LyapunovHybridLinearSystem:
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         Add the L1 loss |x-x*|₁ as mixed-integer linear constraints.
+        return (s, alpha) s is the continuous slack variable,
+        s(i) = |x(i) - x*(i)|, alpha is the binary variable,
+        alpha(i) = 1 => x(i) >= x*(i), alpha(i) = 0 => x(i)<=x*(i).
         """
         if not torch.all(torch.from_numpy(self.system.x_lo_all) <
                          x_equilibrium) or\
@@ -512,7 +521,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                     torch.from_numpy(Aisi_upper[i]))
             z[i] = milp.addVars(
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name="z")
+                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
             A_si = A_Aisi @ self.system.A[i]
             for j in range(A_si.shape[0]):
                 milp.addLConstr(
@@ -521,6 +530,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                      beta], sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[j],
                     name="milp_relu_gradient_times_Aisi")
         return (z, a_out)
+
 
     def add_relu_gradient_times_gigammai(
         self, relu_model, relu_free_pattern, milp, gamma, beta,
@@ -574,6 +584,58 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                     sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[j],
                     name="milp_relu_gradient_times_gigammai")
         return (z, a_out)
+
+    def add_sign_state_error_times_Aisi(
+            self, milp, s, alpha, Aisi_lower, Aisi_upper, slack_name="z"):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(Aᵢsᵢ)(j) as mixed-integer linear
+        constraints.
+        @param s The slack variable representing x in each mode. This is
+        returned from add_hybrid_system_constraint().
+        @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
+        α(i)=0 => x(i)≤x*(i). This is returned from
+        add_state_error_l1_constraint()
+        @return (z, z_coeff, s_coeff). z is the continuous slack variable in
+        the mixed integer linear constraints. z[i][j] = α(j) *(Aᵢsᵢ)(j),
+        z_coeff[i].dot(z[i]) + s_coeff[i].dot(sᵢ) = sign(x(i)-x*(i))*Aᵢsᵢ
+        """
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert(isinstance(s, list))
+        assert(len(s) == self.system.x_dim * self.system.num_modes)
+        assert(isinstance(alpha, list))
+        assert(len(alpha) == self.system.x_dim)
+        assert(isinstance(Aisi_lower, list))
+        assert(isinstance(Aisi_upper, list))
+        assert(len(Aisi_lower) == self.system.num_modes)
+        assert(len(Aisi_upper) == self.system.num_modes)
+        z = [None] * self.system.num_modes
+        z_coeff = [None] * self.system.num_modes
+        s_coeff = [None] * self.system.num_modes
+        for i in range(self.system.num_modes):
+            # since sign(x(j) - x*(j)) = 2 * α(j) - 1
+            # sign(x(j)-x*(j)) * (Aᵢsᵢ)(j) = 2α(j)*(Aᵢsᵢ)(j) - (Aᵢsᵢ)(j)
+            z[i] = milp.addVars(
+                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+            z_coeff[i] = \
+                2 * torch.ones(self.system.x_dim, dtype=self.system.dtype)
+            s_coeff[i] = -torch.sum(self.system.A[i], dim=0)
+            for j in range(self.system.x_dim):
+                Ain_Aisi, Ain_z, Ain_alpha, rhs_in = utils.\
+                    replace_binary_continuous_product(
+                        Aisi_lower[i][j], Aisi_upper[i][j])
+                Ain_si = Ain_Aisi.reshape((-1, 1)) @ \
+                    self.system.A[i][j].reshape((1, -1))
+                for k in range(Ain_si.shape[0]):
+                    milp.addLConstr(
+                        [Ain_si[k], Ain_z[k].unsqueeze(0),
+                         Ain_alpha[k].unsqueeze(0)],
+                        [s[i*self.system.x_dim:(i+1)*self.system.x_dim],
+                         [z[i][j]], [alpha[j]]], sense=gurobipy.GRB.LESS_EQUAL,
+                        rhs=rhs_in[k])
+        return (z, z_coeff, s_coeff)
 
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
@@ -661,21 +723,20 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         # z1 in the objective.
         Aisi_lower = [None] * self.system.num_modes
         Aisi_upper = [None] * self.system.num_modes
-        for i in range(self.system.num_modes):
-            Aisi_lower[i], Aisi_upper[i] =\
-                self.system.mode_derivative_bounds(i)
-        z1, cost_z1_coef = self.add_relu_gradient_times_Aisi(
-            relu_model, relu_free_pattern, milp, s, relu_beta, Aisi_lower,
-            Aisi_upper, slack_name="z1")
         gigammai_lower = [None] * self.system.num_modes
         gigammai_upper = [None] * self.system.num_modes
         for i in range(self.system.num_modes):
+            Aisi_lower[i], Aisi_upper[i] =\
+                self.system.mode_derivative_bounds(i)
             gigammai_lower[i] = torch.min(
                 torch.zeros(self.system.x_dim, dtype=self.system.dtype),
                 self.system.g[i])
             gigammai_upper[i] = torch.max(
                 torch.zeros(self.system.x_dim, dtype=self.system.dtype),
                 self.system.g[i])
+        z1, cost_z1_coef = self.add_relu_gradient_times_Aisi(
+            relu_model, relu_free_pattern, milp, s, relu_beta, Aisi_lower,
+            Aisi_upper, slack_name="z1")
         z2, cost_z2_coef = self.add_relu_gradient_times_gigammai(
             relu_model, relu_free_pattern, milp, gamma, relu_beta,
             slack_name="z2")
