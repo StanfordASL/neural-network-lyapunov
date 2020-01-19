@@ -509,6 +509,10 @@ class TestReLU(unittest.TestCase):
 
         # Check for different models and inputs.
         for model in (self.model1, self.model2, self.model3):
+            test_model(model, torch.tensor([1.5, 2.], dtype=self.dtype),
+                       torch.tensor([0., 0.], dtype=self.dtype),
+                       torch.tensor([-1., -2.], dtype=self.dtype),
+                       torch.tensor([20., 3.], dtype=self.dtype))
             test_model(model, torch.tensor([2., 3.], dtype=self.dtype),
                        torch.tensor([1., 2.], dtype=self.dtype),
                        torch.tensor([-1., 0.], dtype=self.dtype),

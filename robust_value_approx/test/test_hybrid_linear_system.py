@@ -89,6 +89,167 @@ def setup_transformed_trecate_system(theta, x_equilibrium):
     return system
 
 
+def setup_johansson_continuous_time_system1():
+    """
+    This is the simple example from section 3 of
+    Computation of piecewise quadratic Lyapunov functions for hybrid systems
+    by M. Johansson and A.Rantzer, 1997.
+    This system doesn't have a common quadratic Lyapunov function.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(
+        2, dtype)
+    system.add_mode(
+        torch.tensor([[-5, -4], [-1, -2]], dtype=dtype),
+        torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 1, 1, 1], dtype=dtype))
+    system.add_mode(
+        torch.tensor([[-2, -4], [20, -2]], dtype=dtype),
+        torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
+        torch.tensor([1, 0, 1, 1], dtype=dtype))
+    return system
+
+
+def setup_johansson_continuous_time_system2():
+    """
+    This is the simple example from section 4 (equation 8, 9) of
+    Computation of piecewise quadratic Lyapunov functions for hybrid systems
+    by M. Johansson and A.Rantzer, 1997.
+    This system doesn't have a common quadratic Lyapunov function.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    alpha = 5.
+    omega = 1.
+    epsilon = 0.1
+    A1 = torch.tensor(
+        [[-epsilon, omega], [-alpha*omega, -epsilon]], dtype=dtype)
+    A2 = torch.tensor(
+        [[-epsilon, alpha*omega], [-omega, -epsilon]], dtype=dtype)
+    system.add_mode(
+        A1, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[1, -1], [-1, -1], [0, 1]], dtype=dtype),
+        torch.tensor([0, 0, 1], dtype=dtype))
+    system.add_mode(
+        A1, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 0, 1], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 1], [-1, -1], [1, 0]], dtype=dtype),
+        torch.tensor([0, 0, 1], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[1, -1], [1, 1], [-1, 0]], dtype=dtype),
+        torch.tensor([0, 0, 1], dtype=dtype))
+    return system
+
+
+def setup_johansson_continuous_time_system3(x_equilibrium):
+    """
+    This is the simple example from section 5 (equation 18~21) of
+    Computation of piecewise quadratic Lyapunov functions for hybrid systems
+    by M. Johansson and A.Rantzer, 1997.
+    """
+    dtype = torch.float64
+    assert(isinstance(x_equilibrium, torch.Tensor))
+    assert(x_equilibrium.shape == (2,))
+    A1 = torch.tensor([[-10, -10.5], [10.5, 9]], dtype=dtype)
+    A2 = torch.tensor([[-1, -2.5], [1, -1]], dtype=dtype)
+    A3 = torch.tensor([[-10, -10.5], [10.5, -20]], dtype=dtype)
+    g1 = -A1 @ x_equilibrium + torch.tensor([-11, 7.5], dtype=dtype)
+    g2 = -A2 @ x_equilibrium
+    g3 = -A3 @ x_equilibrium + torch.tensor([11, 50.5], dtype=dtype)
+    P1 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
+    q1 = torch.tensor([2, -1, 1, 1], dtype=dtype) + P1 @ x_equilibrium
+    P2 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
+    q2 = torch.tensor([1, 1, 1, 1], dtype=dtype) + P2 @ x_equilibrium
+    P3 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
+    q3 = torch.tensor([-1, 2, 1, 1], dtype=dtype) + P3 @ x_equilibrium
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    system.add_mode(A1, g1, P1, q1)
+    system.add_mode(A2, g2, P2, q2)
+    system.add_mode(A3, g3, P3, q3)
+    return system
+
+
+class TestJohanssonSystem3(unittest.TestCase):
+    def test(self):
+        x_equilibrium = torch.tensor([1., 2.], dtype=torch.float64)
+        system = setup_johansson_continuous_time_system3(x_equilibrium)
+        np.testing.assert_allclose(
+            (system.A[1] @ x_equilibrium + system.g[1]).detach().numpy(),
+            np.zeros(2))
+        for pt in ([-2, -1], [-2, 1], [-1, -1], [-1, 1],):
+            np.testing.assert_array_less(
+                (system.P[0] @ (torch.tensor(pt, dtype=torch.float64) +
+                                x_equilibrium)).detach().numpy(),
+                system.q[0].detach().numpy() + 1E-12)
+        for pt in ([-1, -1], [-1, 1], [1, -1], [1, 1]):
+            np.testing.assert_array_less(
+                (system.P[1] @ (torch.tensor(pt, dtype=torch.float64) +
+                                x_equilibrium)).detach().numpy(),
+                system.q[1].detach().numpy() + 1E-12)
+        for pt in ([1, -1], [1, 1], [2, -1], [2, 1]):
+            np.testing.assert_array_less(
+                (system.P[2] @ (torch.tensor(pt, dtype=torch.float64) +
+                                x_equilibrium)).detach().numpy(),
+                system.q[2].detach().numpy() + 1E-12)
+        np.testing.assert_allclose(
+            system.x_lo[0],
+            np.array([-2., -1.]) + x_equilibrium.detach().numpy(), atol=1e-6)
+        np.testing.assert_allclose(
+            system.x_up[0],
+            np.array([-1., 1.]) + x_equilibrium.detach().numpy(), atol=1e-6)
+        np.testing.assert_allclose(
+            system.x_lo[1],
+            np.array([-1., -1.]) + x_equilibrium.detach().numpy(), atol=1e-6)
+        np.testing.assert_allclose(
+            system.x_up[1],
+            np.array([1., 1.]) + x_equilibrium.detach().numpy(), atol=1e-6)
+        np.testing.assert_allclose(
+            system.x_lo[2],
+            np.array([1., -1.]) + x_equilibrium.detach().numpy(), atol=2e-6)
+        np.testing.assert_allclose(
+            system.x_up[2],
+            np.array([2., 1.]) + x_equilibrium.detach().numpy(), atol=2e-6)
+        np.testing.assert_allclose(
+            system.x_lo_all,
+            np.array([-2., -1.]) + x_equilibrium.detach().numpy(), atol=2e-6)
+        np.testing.assert_allclose(
+            system.x_up_all,
+            np.array([2., 1.]) + x_equilibrium.detach().numpy(), atol=2e-6)
+
+        Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in =\
+            system.mixed_integer_constraints()
+
+        def test_fun(mode, state, satisfied):
+            s_val = torch.zeros(6, dtype=torch.float64)
+            gamma_val = torch.zeros(3, dtype=torch.float64)
+            s_val[2 * mode: 2 * (mode+1)] = state
+            gamma_val[mode] = 1
+            if satisfied:
+                np.testing.assert_array_less(
+                    (Ain_x @ state + Ain_s @ s_val + Ain_gamma @ gamma_val).
+                    detach().numpy(), rhs_in.detach().numpy() + 1e-7)
+            else:
+                self.assertFalse(
+                    torch.all(Ain_x @ state + Ain_s @ s_val +
+                              Ain_gamma @ gamma_val <= rhs_in + 1e-7))
+
+        test_fun(
+            2, torch.tensor([1.5, 0.3], dtype=torch.float64) + x_equilibrium,
+            True)
+        test_fun(
+            1, torch.tensor([0.5, 0.3], dtype=torch.float64) + x_equilibrium,
+            True)
+        test_fun(
+            2, torch.tensor([0.5, 0.3], dtype=torch.float64) + x_equilibrium,
+            False)
+
+
 class HybridLinearSystemTest(unittest.TestCase):
     def setUp(self):
         pass
@@ -289,6 +450,9 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         np.testing.assert_array_almost_equal(dut.x_lo[0],
                                              np.array([-2.5, -2.5]))
         np.testing.assert_array_almost_equal(dut.x_up[0], np.array([2.5, 2.5]))
+        Ax_lower, Ax_upper = dut.mode_derivative_bounds(0)
+        np.testing.assert_allclose(Ax_lower, np.array([-4.5, -4.5]))
+        np.testing.assert_allclose(Ax_upper, np.array([4.5, 4.5]))
 
     def test_mixed_integer_constraints(self):
         dut = hybrid_linear_system.AutonomousHybridLinearSystem(
