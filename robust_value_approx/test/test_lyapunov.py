@@ -831,20 +831,20 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
 
         for relu in (relu1, relu2):
             for Aisi_flag in (True, False):
-                #for system in (self.system1, self.system2):
-                #    test_fun(
-                #        relu, system,
-                #        torch.tensor([0.5, 0.2], dtype=self.dtype), Aisi_flag)
-                #    test_fun(
-                #        relu, system,
-                #        torch.tensor([-0.5, 0.2], dtype=self.dtype), Aisi_flag)
-                #    test_fun(
-                #        relu, system,
-                #        torch.tensor([0.5, -0.2], dtype=self.dtype), Aisi_flag)
-                #    test_fun(
-                #        relu, system,
-                #        torch.tensor([-0.5, -0.2], dtype=self.dtype),
-                #        Aisi_flag)
+                for system in (self.system1, self.system2):
+                    test_fun(
+                        relu, system,
+                        torch.tensor([0.5, 0.2], dtype=self.dtype), Aisi_flag)
+                    test_fun(
+                        relu, system,
+                        torch.tensor([-0.5, 0.2], dtype=self.dtype), Aisi_flag)
+                    test_fun(
+                        relu, system,
+                        torch.tensor([0.5, -0.2], dtype=self.dtype), Aisi_flag)
+                    test_fun(
+                        relu, system,
+                        torch.tensor([-0.5, -0.2], dtype=self.dtype),
+                        Aisi_flag)
                 test_fun(
                     relu, self.system3,
                     torch.tensor([0.5, 0.3], dtype=self.dtype) +
@@ -862,21 +862,24 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     torch.tensor([-0.5, -0.3], dtype=self.dtype) +
                     self.x_equilibrium3, Aisi_flag)
 
-    def test_add_sign_state_error_times_Aisi(self):
+    def test_add_sign_state_error_times_dynamics(self):
+        """
+        test add_sign_state_error_times_Aisi() and
+        add_sign_state_error_times_gigammai()
+        """
 
-        def test_fun(system, x_equilibrium, x_val):
+        def test_fun(system, x_equilibrium, x_val, Aisi_flag):
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
             milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
             (x, s, gamma, _, _) = dut.add_hybrid_system_constraint(milp)
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
-            Aisi_lower = [None] * system.num_modes
-            Aisi_upper = [None] * system.num_modes
-            for i in range(system.num_modes):
-                Aisi_lower[i], Aisi_upper[i] = \
-                    system.mode_derivative_bounds(i)
-            (z, z_coeff, s_coeff) = dut.add_sign_state_error_times_Aisi(
-                milp, s, alpha, Aisi_lower, Aisi_upper)
+            if Aisi_flag:
+                (z, z_coeff, s_coeff) = dut.add_sign_state_error_times_Aisi(
+                    milp, s, alpha)
+            else:
+                (z, z_coeff, gamma_coeff) = dut.\
+                    add_sign_state_error_times_gigammai(milp, gamma, alpha)
             self.assertEqual(len(z), system.num_modes)
             for i in range(system.x_dim):
                 milp.addLConstr(
@@ -896,29 +899,73 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 alpha_expected.detach().numpy())
             z_sol = [None] * system.num_modes
             s_sol = torch.tensor([v.x for v in s], dtype=system.dtype)
+            gamma_sol = torch.tensor([v.x for v in gamma], dtype=system.dtype)
             for i in range(system.num_modes):
                 z_sol[i] = torch.tensor(
                     [v.x for v in z[i]], dtype=system.dtype)
-                np.testing.assert_allclose(
-                    z_sol[i].detach().numpy(),
-                    (system.A[i] @ s_sol[i*system.x_dim: (i+1) * system.x_dim])
-                    * alpha_expected)
+                if Aisi_flag:
+                    np.testing.assert_allclose(
+                        z_sol[i].detach().numpy(),
+                        (system.A[i] @ s_sol[
+                            i*system.x_dim: (i+1) * system.x_dim])
+                        * alpha_expected)
+                else:
+                    np.testing.assert_allclose(
+                        z_sol[i].detach().numpy(),
+                        (system.g[i] * gamma_sol[i]) * alpha_expected)
             mode_idx = system.mode(x_val)
-            self.assertAlmostEqual(
-                torch.sum(torch.sign(x_val - x_equilibrium) *
-                          (system.A[mode_idx] @ x_val)).item(),
-                (torch.cat(z_coeff) @ torch.cat(z_sol) +
-                 torch.cat(s_coeff) @ s_sol).item())
+            gamma_expected = torch.zeros(system.num_modes, dtype=system.dtype)
+            gamma_expected[mode_idx] = 1
+            np.testing.assert_allclose(
+                gamma_sol.detach().numpy(), gamma_expected.detach().numpy())
+            if Aisi_flag:
+                self.assertAlmostEqual(
+                    torch.sum(torch.sign(x_val - x_equilibrium) *
+                              (system.A[mode_idx] @ x_val)).item(),
+                    (torch.cat(z_coeff) @ torch.cat(z_sol) +
+                     torch.cat(s_coeff) @ s_sol).item())
+            else:
+                self.assertAlmostEqual(
+                    torch.sum(torch.sign(x_val - x_equilibrium) *
+                              (system.g[mode_idx])).item(),
+                    (torch.cat(z_coeff) @ torch.cat(z_sol) +
+                     torch.cat(gamma_coeff) @ gamma_sol).item())
 
-        test_fun(
-            self.system1, self.x_equilibrium1,
-            torch.tensor([0.2, -0.5], dtype=self.system1.dtype))
-        test_fun(
-            self.system1, self.x_equilibrium1,
-            torch.tensor([-0.2, -0.5], dtype=self.system1.dtype))
-        test_fun(
-            self.system1, self.x_equilibrium1,
-            torch.tensor([0.2, 0.5], dtype=self.system1.dtype))
+        for Aisi_flag in (True, False):
+            test_fun(
+                self.system1, self.x_equilibrium1,
+                torch.tensor([0.2, -0.5], dtype=self.system1.dtype),
+                Aisi_flag)
+            test_fun(
+                self.system1, self.x_equilibrium1,
+                torch.tensor([-0.2, -0.5], dtype=self.system1.dtype),
+                Aisi_flag)
+            test_fun(
+                self.system1, self.x_equilibrium1,
+                torch.tensor([0.2, 0.5], dtype=self.system1.dtype), Aisi_flag)
+            test_fun(
+                self.system2, self.x_equilibrium2,
+                torch.tensor([0.2, -0.5], dtype=self.system2.dtype),
+                Aisi_flag)
+            test_fun(
+                self.system2, self.x_equilibrium2,
+                torch.tensor([-0.2, -0.5], dtype=self.system2.dtype),
+                Aisi_flag)
+            test_fun(
+                self.system2, self.x_equilibrium2,
+                torch.tensor([0.2, 0.5], dtype=self.system2.dtype), Aisi_flag)
+            test_fun(
+                self.system3, self.x_equilibrium3,
+                torch.tensor([-1.2, -0.5], dtype=self.system3.dtype) +
+                self.x_equilibrium3, Aisi_flag)
+            test_fun(
+                self.system3, self.x_equilibrium3,
+                torch.tensor([0.2, -0.5], dtype=self.system3.dtype) +
+                self.x_equilibrium3, Aisi_flag)
+            test_fun(
+                self.system3, self.x_equilibrium3,
+                torch.tensor([1.2, 0.5], dtype=self.system3.dtype) +
+                self.x_equilibrium3, Aisi_flag)
 
     def test_lyapunov_derivative_as_milp(self):
         relu1 = setup_relu(self.dtype)
@@ -948,17 +995,41 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             relu_gradient, _, _, _ = relu_to_optimization.\
                 ReLUGivenActivationPattern(
                     relu, system.x_dim, activation_pattern, system.dtype)
-            lyapunov_gradient = relu_gradient + \
+            lyapunov_gradient = relu_gradient.squeeze() + \
                 V_rho * torch.sign(x_val - x_equilibrium)
             mode_index = system.mode(x_val)
             Vdot = lyapunov_gradient @ (
                 system.A[mode_index] @ x_val + system.g[mode_index])
-            self.assertAlmostEqual(milp.gurobi_model.ObjVal, Vdot.item())
+            V = dut.lyapunov_value(relu, x_val, x_equilibrium, V_rho)
+            self.assertAlmostEqual(
+                milp.gurobi_model.ObjVal,
+                (Vdot + epsilon * V).squeeze().item())
 
         for relu in [relu1, relu2]:
+            for (system, x_equilibrium) in zip(
+                (self.system1, self.system2),
+                    (self.x_equilibrium1, self.x_equilibrium2)):
+                test_fun(
+                    relu, x_equilibrium, system,
+                    torch.tensor([0.2, 0.3], dtype=self.dtype))
+                test_fun(
+                    relu, x_equilibrium, system,
+                    torch.tensor([0.2, -0.3], dtype=self.dtype))
+                test_fun(
+                    relu, x_equilibrium, system,
+                    torch.tensor([-0.2, -0.3], dtype=self.dtype))
             test_fun(
-                relu, self.x_equilibrium1, self.system1,
-                torch.tensor([0.2, 0.3], dtype=self.dtype))
+                relu, self.x_equilibrium3, self.system3,
+                torch.tensor([1.2, 0.5], dtype=self.dtype) +
+                self.x_equilibrium3)
+            test_fun(
+                relu, self.x_equilibrium3, self.system3,
+                torch.tensor([-.5, 0.5], dtype=self.dtype) +
+                self.x_equilibrium3)
+            test_fun(
+                relu, self.x_equilibrium3, self.system3,
+                torch.tensor([-1.5, 0.5], dtype=self.dtype) +
+                self.x_equilibrium3)
 
 
 if __name__ == "__main__":

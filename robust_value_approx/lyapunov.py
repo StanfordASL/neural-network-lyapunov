@@ -477,6 +477,42 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
     def __init__(self, system):
         super(LyapunovContinuousTimeHybridSystem, self).__init__(system)
 
+    def __compute_Aisi_bounds(self):
+        """
+        Compute the element-wise bounds on Aᵢsᵢ
+        Aᵢsᵢ = Aᵢx when the mode i is active. Otherwise Aᵢsᵢ= 0
+        return (Aisi_lower, Aisi_upper) Aisi_lower[i]/Aisi_upper[i] is the
+        lower/upper bound of Aᵢsᵢ.
+        """
+        Aisi_lower = [None] * self.system.num_modes
+        Aisi_upper = [None] * self.system.num_modes
+        for i in range(self.system.num_modes):
+            Aix_lower, Aix_upper = self.system.mode_derivative_bounds(i)
+            Aisi_lower[i] = torch.min(
+                torch.from_numpy(Aix_lower),
+                torch.zeros(self.system.x_dim, dtype=self.system.dtype))
+            Aisi_upper[i] = torch.max(
+                torch.from_numpy(Aix_upper),
+                torch.zeros(self.system.x_dim, dtype=self.system.dtype))
+        return (Aisi_lower, Aisi_upper)
+
+    def __compute_gigammai_bounds(self):
+        """
+        Compute the element-wise bounds on gᵢγᵢ
+        return (gigammai_lower, gigammai_upper)
+        gigammai_lower[i]/gigammai_upper[i] is the lower/upper bound of gᵢγᵢ.
+        """
+        gigammai_lower = [None] * self.system.num_modes
+        gigammai_upper = [None] * self.system.num_modes
+        for i in range(self.system.num_modes):
+            gigammai_lower[i] = torch.min(
+                torch.zeros(self.system.x_dim, dtype=self.system.dtype),
+                self.system.g[i])
+            gigammai_upper[i] = torch.max(
+                torch.zeros(self.system.x_dim, dtype=self.system.dtype),
+                self.system.g[i])
+        return (gigammai_lower, gigammai_upper)
+
     def add_relu_gradient_times_Aisi(
             self, relu_model, relu_free_pattern, milp, s, beta,
             Aisi_lower=None, Aisi_upper=None, slack_name="z"):
@@ -505,11 +541,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         z = [None] * self.system.num_modes
         a_out = [None] * self.system.num_modes
         if (Aisi_lower is None or Aisi_upper is None):
-            Aisi_lower = [None] * self.system.num_modes
-            Aisi_upper = [None] * self.system.num_modes
-            for i in range(self.system.num_modes):
-                Aisi_lower[i], Aisi_upper[i] = \
-                    self.system.mode_derivative_bounds(i)
+            Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
         else:
             assert(len(Aisi_lower) == self.system.num_modes)
             assert(len(Aisi_upper) == self.system.num_modes)
@@ -517,8 +549,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             # First write ∂ReLU(x)/∂x*Aᵢsᵢ
             a_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
                 relu_free_pattern.output_gradient_times_vector(
-                    relu_model, torch.from_numpy(Aisi_lower[i]),
-                    torch.from_numpy(Aisi_upper[i]))
+                    relu_model, Aisi_lower[i], Aisi_upper[i])
             z[i] = milp.addVars(
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
@@ -530,7 +561,6 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                      beta], sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[j],
                     name="milp_relu_gradient_times_Aisi")
         return (z, a_out)
-
 
     def add_relu_gradient_times_gigammai(
         self, relu_model, relu_free_pattern, milp, gamma, beta,
@@ -586,7 +616,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (z, a_out)
 
     def add_sign_state_error_times_Aisi(
-            self, milp, s, alpha, Aisi_lower, Aisi_upper, slack_name="z"):
+            self, milp, s, alpha, Aisi_lower=None, Aisi_upper=None,
+            slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -606,10 +637,13 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(len(s) == self.system.x_dim * self.system.num_modes)
         assert(isinstance(alpha, list))
         assert(len(alpha) == self.system.x_dim)
-        assert(isinstance(Aisi_lower, list))
-        assert(isinstance(Aisi_upper, list))
-        assert(len(Aisi_lower) == self.system.num_modes)
-        assert(len(Aisi_upper) == self.system.num_modes)
+        if Aisi_lower is None or Aisi_upper is None:
+            Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
+        else:
+            assert(isinstance(Aisi_lower, list))
+            assert(isinstance(Aisi_upper, list))
+            assert(len(Aisi_lower) == self.system.num_modes)
+            assert(len(Aisi_upper) == self.system.num_modes)
         z = [None] * self.system.num_modes
         z_coeff = [None] * self.system.num_modes
         s_coeff = [None] * self.system.num_modes
@@ -636,6 +670,64 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                          [z[i][j]], [alpha[j]]], sense=gurobipy.GRB.LESS_EQUAL,
                         rhs=rhs_in[k])
         return (z, z_coeff, s_coeff)
+
+    def add_sign_state_error_times_gigammai(
+            self, milp, gamma, alpha, gigammai_lower=None, gigammai_upper=None,
+            slack_name="z"):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(gᵢγᵢ)(j) as mixed-integer linear
+        constraints.
+        @param gamma The binary variable representing the active mode. This is
+        returned from add_hybrid_system_constraint().
+        @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
+        α(i)=0 => x(i)≤x*(i). This is returned from
+        add_state_error_l1_constraint()
+        @param gigammai_lower The lower bound of gᵢγᵢ, this is returned from
+        __compute_gigammai_bounds()
+        @param gigammai_upper The upper bound of gᵢγᵢ, this is returned from
+        __compute_gigammai_bounds()
+        @return (z, z_coeff, gamma_coeff). z is the continuous slack variable
+        in the mixed integer linear constraints. z[i][j] = α(j) *(gᵢγᵢ)(j),
+        z_coeff[i].dot(z[i]) + gamma_coeff[i].dot(γᵢ) = sign(x(i)-x*(i))*gᵢγᵢ
+        """
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert(isinstance(gamma, list))
+        assert(len(gamma) == self.system.num_modes)
+        assert(isinstance(alpha, list))
+        assert(len(alpha) == self.system.x_dim)
+        if gigammai_lower is None or gigammai_upper is None:
+            gigammai_lower, gigammai_upper = self.__compute_gigammai_bounds()
+        else:
+            assert(isinstance(gigammai_lower, list))
+            assert(isinstance(gigammai_upper, list))
+            assert(len(gigammai_lower) == self.system.num_modes)
+            assert(len(gigammai_upper) == self.system.num_modes)
+        z = [None] * self.system.num_modes
+        z_coeff = [None] * self.system.num_modes
+        gamma_coeff = [None] * self.system.num_modes
+        for i in range(self.system.num_modes):
+            z[i] = milp.addVars(
+                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
+            # ∑ⱼ sign(x(j)-x*(j))*(gᵢγᵢ)(j)
+            # = ∑ⱼ 2α(j)*(gᵢγᵢ)(j) - (gᵢγᵢ)(j)
+            z_coeff[i] = 2 * torch.ones(
+                self.system.x_dim, dtype=self.system.dtype)
+            gamma_coeff[i] = -torch.sum(self.system.g[i]).unsqueeze(0)
+            for j in range(self.system.x_dim):
+                Ain_gigammai, Ain_z, Ain_alpha, rhs = utils.\
+                    replace_binary_continuous_product(
+                        gigammai_lower[i][j], gigammai_upper[i][j])
+                Ain_gammai = Ain_gigammai * self.system.g[i][j]
+                for k in range(Ain_gammai.shape[0]):
+                    milp.addLConstr(
+                        [Ain_gammai[k].unsqueeze(0), Ain_z[k].unsqueeze(0),
+                         Ain_alpha[k].unsqueeze(0)],
+                        [[gamma[i]], [z[i][j]], [alpha[j]]],
+                        sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[k])
+        return (z, z_coeff, gamma_coeff)
 
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
@@ -703,7 +795,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # We first get the mixed-integer linear constraint, which encode the
         # activation of beta and the network input.
-        (relu_z1, relu_beta, a_relu_out, b_relu_out) = \
+        (relu_z, relu_beta, a_relu_out, b_relu_out) = \
             self.add_relu_output_constraint(
                 relu_model, relu_free_pattern, milp, x)
 
@@ -714,26 +806,20 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         # α(j) = 1 => x(j) - x*(j) >= 0
         # α(j) = 0 => x(j) - x*(j) <= 0
         # Hence sign(x(j) - x*(j)) = 2 * α - 1
-        (s3, alpha) = self.add_state_error_l1_constraint(
-                milp, x_equilibrium, x, slack_name="s3",
+        # t[i] = |x(i)-x*(i)|
+        (t, alpha) = self.add_state_error_l1_constraint(
+                milp, x_equilibrium, x, slack_name="t",
                 binary_var_name="alpha")
+        if lyapunov_lower is not None or lyapunov_upper is not None:
+            raise NotImplementedError(
+                "lyapunov_lower and lyapunov_upper should be None for the" +
+                " moment.")
 
         # z1[i] is the slack variable to write ∂ReLU(x)/∂x*Aᵢsᵢ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
         # z1 in the objective.
-        Aisi_lower = [None] * self.system.num_modes
-        Aisi_upper = [None] * self.system.num_modes
-        gigammai_lower = [None] * self.system.num_modes
-        gigammai_upper = [None] * self.system.num_modes
-        for i in range(self.system.num_modes):
-            Aisi_lower[i], Aisi_upper[i] =\
-                self.system.mode_derivative_bounds(i)
-            gigammai_lower[i] = torch.min(
-                torch.zeros(self.system.x_dim, dtype=self.system.dtype),
-                self.system.g[i])
-            gigammai_upper[i] = torch.max(
-                torch.zeros(self.system.x_dim, dtype=self.system.dtype),
-                self.system.g[i])
+        Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
+        gigammai_lower, gigammai_upper = self.__compute_gigammai_bounds()
         z1, cost_z1_coef = self.add_relu_gradient_times_Aisi(
             relu_model, relu_free_pattern, milp, s, relu_beta, Aisi_lower,
             Aisi_upper, slack_name="z1")
@@ -742,89 +828,53 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             slack_name="z2")
         # z3[i] is the slack variable to write sign(x-x*)*Aᵢsᵢ as mixed-integer
         # linear constraints.
-        z3 = [None] * self.system.num_modes
+        z3, z3_coef, s_coef = self.add_sign_state_error_times_Aisi(
+            milp, s, alpha, Aisi_lower, Aisi_upper, slack_name="z3")
+        # cost_z3_coef[i] is the coefficient of z3[i] in the cost function.
+        cost_z3_coef = [coef * V_rho for coef in z3_coef]
+        cost_s_coef = [coef * V_rho for coef in s_coef]
         # z4[i] is the slack variable to write sign(x-x*)*gᵢγᵢ as mixed-integer
         # linear constraints.
-        z4 = [None] * self.system.num_modes
-        # cost_z3_coef[i] is the coefficient of z3[i] in the cost function.
-        cost_z3_coef = [None] * self.system.num_modes
+        z4, z4_coef, gamma_coef = self.add_sign_state_error_times_gigammai(
+            milp, gamma, alpha, gigammai_lower, gigammai_upper,
+            slack_name="z4")
         # cost_z4_coef[i] is the coefficient of z4[i] in the cost function.
-        cost_z4_coef = [None] * self.system.num_modes
-        # cost_s_coeff[i] is the coefficient of s[i] in the cost function.
-        cost_s_coef = [None] * self.system.num_modes
-        # cost_gamma_coeff[i] is the coefficient of gamma[i] in the cost
+        cost_z4_coef = [coef * V_rho for coef in z3_coef]
+        # cost_gamma_coef[i] is the coefficient of gamma[i] in the cost
         # function.
-        cost_gamma_coef = [None] * self.system.num_modes
-        for i in range(self.system.num_modes):
-            # Now handle the part on ρ*sign(x-x*) * Aᵢsᵢ, ρ*sign(x-x*)*gᵢγᵢ
-            # We have the binary variable α, and sign(x-x*) = 2α-1
-            # so ρ*sign(x-x*) * Aᵢsᵢ = ρ*2α*Aᵢsᵢ - ρ*Aᵢsᵢ
-            # and ρ*sign(x-x*) * gᵢγᵢ = ρ*2α*gᵢγᵢ - ρ*gᵢγᵢ
-            # z3[i] = α*Aᵢsᵢ
-            z3[i] = milp.addVars(
-                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.BINARY, name="z3")
-            z4[i] = milp.addVars(
-                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.BINARY, name="z4")
-            for j in range(self.system.x_dim):
-                Ain_Aisi_sign, Ain_z3, Ain_alpha1, rhs_in_sign1 = utils.\
-                    replace_binary_continuous_product(
-                        Aisi_lower[j], Aisi_upper[j])
-                Ain_si_sign = Ain_Aisi_sign.reshape((-1, 1)) @ \
-                    self.system.A[i][j].reshape((1, -1))
-                for k in range(Ain_si_sign.shape[0]):
-                    milp.addLConstr(
-                        [Ain_si_sign[k], Ain_z3[k].unsqueeze(0),
-                         Ain_alpha1[k].unsqueeze(0)],
-                        [s[i * self.system.x_dim: (i+1) * self.system.x_dim],
-                         [z3[i][j]], [alpha[i]]],
-                        sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in_sign1[k])
-                Ain_gigammai_sign, Ain_z4, Ain_alpha2, rhs_in_sign2 = utils.\
-                    replace_binary_continuous_product(
-                        gigammai_lower[i][j], gigammai_upper[i][j])
-                Ain_gammai_sign = Ain_gigammai_sign * self.system.g[i][j]
-                for k in range(Ain_gammai_sign.shape[0]):
-                    milp.addLConstr(
-                        [Ain_gammai_sign[k].unsqueeze(0),
-                         Ain_z4[k].unsqueeze(0), Ain_alpha2[k].unsqueeze(0)],
-                        [[gamma[i]], [z4[i][j]], [alpha[i]]],
-                        sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in_sign2[k])
+        cost_gamma_coef = [coef * V_rho for coef in gamma_coef]
 
-            cost_z3_coef[i] = 2 * V_rho * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype)
-            cost_s_coef[i] =\
-                -V_rho * torch.sum(self.system.A[i], dim=0)
-            cost_z4_coef[i] = 2 * V_rho * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype)
-            cost_gamma_coef[i] = \
-                -V_rho * torch.sum(self.system.g[i]).unsqueeze(0)
-
-        cost_s_coef_flat = torch.cat(cost_s_coef)
-        cost_gamma_coef_flat = torch.cat(cost_gamma_coef)
-        cost_coeffs = [mode_coef for coef_list in [
-            cost_z1_coef, cost_z2_coef, cost_z3_coef, cost_z4_coef] for
-            mode_coef in coef_list]
-        cost_coeffs.append(cost_s_coef_flat)
-        cost_coeffs.append(cost_gamma_coef_flat)
-        cost_vars = [mode_var for var_list in [z1, z2, z3, z4] for mode_var
-                     in var_list]
-        cost_vars.append(s)
-        cost_vars.append(gamma)
-
-        cost_vars.append(relu_z1)
-        cost_coeffs.append(a_relu_out * epsilon)
-
-        cost_vars.append(s3)
-        cost_coeffs.append(
-            epsilon * V_rho * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype))
         # The cost is
         # max V̇ + εV
         #   = ∑ᵢ∂V/∂x(Aᵢsᵢ + gᵢγᵢ) + ε(ReLU(x) - ReLU(x*) + ρ|x-x*|₁)
+        # We know that ∂V/∂x = ∂ReLU(x)/∂x + ρ*sign(x-x*) and
+        # ∂ReLU(x)/∂x * Aᵢsᵢ = z1_coef[i].dot(z1)
+        # ∂ReLU(x)/∂x * gᵢγᵢ = z2_coef[i].dot(z2)
+        # ρ*sign(x-x*) * Aᵢsᵢ = z3_coeff[i].dot(z3) * s_coef[i].dot(sᵢ)
+        # ρ*sign(x-x*) * gᵢγᵢ = z4_coeff[i].dot(z4) * gamma_coef[i].dot(γᵢ)
+        # ReLU(x) = a_relu_out.dot(relu_z) + b_relu_out
+        # ρ|x-x*|₁ = ρ * sum(t)
+        cost_vars = [mode_var for var_list in [z1, z2, z3, z4] for mode_var
+                     in var_list]
+        cost_coeffs = [mode_coef for coef_list in [
+            cost_z1_coef, cost_z2_coef, cost_z3_coef, cost_z4_coef] for
+            mode_coef in coef_list]
+        cost_coeffs.append(torch.cat(cost_s_coef))
+        cost_vars.append(s)
+        cost_coeffs.append(torch.cat(cost_gamma_coef))
+        cost_vars.append(gamma)
+
+        cost_vars.append(relu_z)
+        cost_coeffs.append(a_relu_out * epsilon)
+
+        cost_vars.append(t)
+        cost_coeffs.append(
+            epsilon * V_rho * torch.ones(
+                self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
-            -epsilon * relu_model.forward(x_equilibrium).squeeze(),
+            epsilon * b_relu_out -
+            epsilon * relu_model.forward(x_equilibrium).squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
         return (milp, x)
