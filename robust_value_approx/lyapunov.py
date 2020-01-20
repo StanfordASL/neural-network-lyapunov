@@ -246,6 +246,43 @@ class LyapunovHybridLinearSystem:
                 relu_model, state_sample, x_equilibrium, V_rho,
                 relu_at_equilibrium), torch.tensor(-1.))
 
+    def add_lyapunov_bounds_constraint(
+        self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,
+            relu_x_equilibrium, relu_z, state_error_s):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Add constraint lower <= V(x) <= upper to @p milp, where the Lyapunov
+        function V(x) = ReLU(x) - ReLU(x*) + ρ |x-x*|₁.
+        Also we have ReLU(x) = a_relu.dot(relu_z) + b_relu.
+        |x-x*|₁ = sum(state_error_s).
+        @param lyapunov_lower The lower bound of the Lyapunov function. Set to
+        None if you don't want to impose a lower bound.
+        @param lyapunov_upper The upper bound of the Lyapunov function. Set to
+        None if you don't want to impose an upper bound.
+        @parm milp The GurobiTorchMIP instance.
+        @param a_relu The ReLU function can be written as
+        a_relu.dot(relu_z) + b_relu. a_relu, b_relu, relu_z are returned from
+        add_relu_output_constraint().
+        @param V_rho ρ.
+        @param relu_x_equilibrium ReLU(x*)
+        @param state_error_s The slack variable returned from
+        add_state_error_l1_constraint()
+        """
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        if lyapunov_lower is not None:
+            milp.addLConstr(
+                [a_relu, V_rho * torch.ones((self.system.x_dim,),
+                                            dtype=self.system.dtype)],
+                [relu_z, state_error_s], sense=gurobipy.GRB.GREATER_EQUAL,
+                rhs=lyapunov_lower - b_relu + relu_x_equilibrium)
+        if lyapunov_upper is not None:
+            milp.addLConstr(
+                [a_relu, V_rho * torch.ones((self.system.x_dim,),
+                                            dtype=self.system.dtype)],
+                [relu_z, state_error_s], sense=gurobipy.GRB.LESS_EQUAL,
+                rhs=lyapunov_upper - b_relu + relu_x_equilibrium)
+
 
 class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
     """
@@ -365,18 +402,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
-        if lyapunov_lower is not None:
-            milp.addLConstr(
-                [a_out, V_rho * torch.ones((self.system.x_dim,),
-                                           dtype=self.system.dtype)],
-                [z, s_x_norm], sense=gurobipy.GRB.GREATER_EQUAL,
-                rhs=lyapunov_lower - b_out + relu_x_equilibrium)
-        if lyapunov_upper is not None:
-            milp.addLConstr(
-                [a_out, V_rho * torch.ones((self.system.x_dim,),
-                                           dtype=self.system.dtype)],
-                [z, s_x_norm], sense=gurobipy.GRB.LESS_EQUAL,
-                rhs=lyapunov_upper - b_out + relu_x_equilibrium)
+        self.add_lyapunov_bounds_constraint(
+            lyapunov_lower, lyapunov_upper, milp, a_out, b_out, V_rho,
+            relu_x_equilibrium, z, s_x_norm)
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
@@ -810,10 +838,13 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         (t, alpha) = self.add_state_error_l1_constraint(
                 milp, x_equilibrium, x, slack_name="t",
                 binary_var_name="alpha")
-        if lyapunov_lower is not None or lyapunov_upper is not None:
-            raise NotImplementedError(
-                "lyapunov_lower and lyapunov_upper should be None for the" +
-                " moment.")
+
+        # Now add the constraint
+        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
+        relu_x_equilibrium = relu_model.forward(x_equilibrium)
+        self.add_lyapunov_bounds_constraint(
+            lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
+            V_rho, relu_x_equilibrium, relu_z, t)
 
         # z1[i] is the slack variable to write ∂ReLU(x)/∂x*Aᵢsᵢ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
@@ -873,8 +904,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
-            epsilon * b_relu_out -
-            epsilon * relu_model.forward(x_equilibrium).squeeze(),
+            epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
         return (milp, x)
