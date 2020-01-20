@@ -12,42 +12,74 @@ import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 
 
-def setup_relu(dtype):
+def setup_relu(dtype, params=None):
     # Construct a simple ReLU model with 2 hidden layers
+    # params is the value of weights/bias after concatenation.
+    if params is not None:
+        assert(isinstance(params, torch.Tensor))
+        assert(params.shape == (30,))
     linear1 = nn.Linear(2, 3)
-    linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
-                                       dtype=dtype)
-    linear1.bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
+    if params is None:
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=dtype)
+        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
+    else:
+        linear1.weight.data = params[:6].clone().reshape((3, 2))
+        linear1.bias.data = params[6:9].clone()
     linear2 = nn.Linear(3, 4)
-    linear2.weight.data = torch.tensor(
-            [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
-            dtype=dtype)
-    linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
+    if params is None:
+        linear2.weight.data = torch.tensor(
+                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+                dtype=dtype)
+        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
+    else:
+        linear2.weight.data = params[9:21].clone().reshape((4, 3))
+        linear2.bias.data = params[21:25].clone()
     linear3 = nn.Linear(4, 1)
-    linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=dtype)
-    linear3.bias.data = torch.tensor([-9], dtype=dtype)
+    if params is None:
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=dtype)
+        linear3.bias.data = torch.tensor([-9], dtype=dtype)
+    else:
+        linear3.weight.data = params[25:29].clone().reshape((1, 4))
+        linear3.bias.data = params[29].clone().reshape((1))
     relu1 = nn.Sequential(
         linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
     assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype)).item() == 0)
     return relu1
 
 
-def setup_leaky_relu(dtype):
+def setup_leaky_relu(dtype, params=None):
+    if params is not None:
+        assert(isinstance(params, torch.Tensor))
+        assert(params.shape == (30,))
     linear1 = nn.Linear(2, 3)
-    linear1.weight.data = torch.tensor(
-        [[-1.3405, -0.2602], [-0.9392, 0.9033], [-2.1063, 1.3141]],
-        dtype=dtype)
-    linear1.bias.data = torch.tensor([0.913, 0.6429, 0.0011], dtype=dtype)
+    if params is None:
+        linear1.weight.data = torch.tensor(
+            [[-1.3405, -0.2602], [-0.9392, 0.9033], [-2.1063, 1.3141]],
+            dtype=dtype)
+        linear1.bias.data = torch.tensor([0.913, 0.6429, 0.0011], dtype=dtype)
+    else:
+        linear1.weight.data = params[:6].clone().reshape((3, 2))
+        linear1.bias.data = params[6:9].clone()
     linear2 = nn.Linear(3, 4)
-    linear2.weight.data = torch.tensor(
-        [[-0.4209, -1.1947, 1.4353], [1.7519, -1.3908, 2.6274],
-         [-2.7574, 0.3764, -0.5544], [-0.3721, -1.0413, 0.52]], dtype=dtype)
-    linear2.bias.data = torch.tensor(
-        [-0.9802, 1.1129, 1.0941, 1.582], dtype=dtype)
+    if params is None:
+        linear2.weight.data = torch.tensor(
+            [[-0.4209, -1.1947, 1.4353], [1.7519, -1.3908, 2.6274],
+             [-2.7574, 0.3764, -0.5544], [-0.3721, -1.0413, 0.52]],
+            dtype=dtype)
+        linear2.bias.data = torch.tensor(
+            [-0.9802, 1.1129, 1.0941, 1.582], dtype=dtype)
+    else:
+        linear2.weight.data = params[9:21].clone().reshape((4, 3))
+        linear2.bias.data = params[21:25].clone()
     linear3 = nn.Linear(4, 1)
-    linear3.weight.data = torch.tensor(
-        [[-1.1727, 0.2846, 1.2452, 0.8230]], dtype=dtype)
-    linear3.bias.data = torch.tensor([0.4431], dtype=dtype)
+    if params is None:
+        linear3.weight.data = torch.tensor(
+            [[-1.1727, 0.2846, 1.2452, 0.8230]], dtype=dtype)
+        linear3.bias.data = torch.tensor([0.4431], dtype=dtype)
+    else:
+        linear3.weight.data = params[25:29].clone().reshape((1, 4))
+        linear3.bias.data = params[29].clone().reshape((1))
     relu = nn.Sequential(
         linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3,
         nn.LeakyReLU(0.1))
@@ -1030,6 +1062,62 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 relu, self.x_equilibrium3, self.system3,
                 torch.tensor([-1.5, 0.5], dtype=self.dtype) +
                 self.x_equilibrium3)
+
+    def test_lyapunov_derivative_as_milp_gradient(self):
+        """
+        Test if we can compute the gradient of maxₓ V̇+εV w.r.t the ReLU
+        network weights/bias.
+        """
+        V_rho = 2.
+        epsilon = 0.1
+
+        def compute_milp_cost_given_relu(
+                system, relu_index, x_equilibrium, params_val, requires_grad):
+            if relu_index == 1:
+                relu = setup_relu(system.dtype, params_val)
+            elif relu_index == 2:
+                relu = setup_leaky_relu(system.dtype, params_val)
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            milp = dut.lyapunov_derivative_as_milp(
+                relu, x_equilibrium, V_rho, epsilon, None, None)[0]
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            objective = milp.compute_objective_from_mip_data_and_solution(
+                penalty=0.)
+            if requires_grad:
+                objective.backward()
+                grad = np.concatenate(
+                    [p.grad.detach().numpy().reshape((-1,)) for p in
+                     relu.parameters()], axis=0)
+                return grad
+            else:
+                return milp.gurobi_model.ObjVal
+
+        def test_fun(system, relu_index, x_equilibrium, params_val):
+            grad = compute_milp_cost_given_relu(
+                system, relu_index, x_equilibrium, params_val, True)
+            grad_numerical = utils.compute_numerical_gradient(
+                lambda p: compute_milp_cost_given_relu(
+                    system, relu_index, x_equilibrium, torch.from_numpy(p),
+                    False), params_val, dx=1e-7)
+            np.testing.assert_allclose(grad, grad_numerical, atol=5e-6)
+
+        relu_params = []
+        relu_params.append(torch.tensor([
+            0.5, 1.2, 0.3, 2.5, 4.2, -1.5, -3.4, -12.1, 20.5, 32.1, 0.5, -.85,
+            0.33, 0.345, 0.54, 0.325, 0.8, 2.4, 1.5, 4.2, 1.4, 2.3, 4.1, -4.5,
+            3.2, 0.5, 4.6, 12.4, -0.05, 0.2], dtype=self.dtype))
+        relu_params.append(torch.tensor([
+            2.5, 1.7, 4.1, 3.1, -5.7, 1.7, 3.8, 12.8, -23.5, -2.1, 2.9, 1.85,
+            -.33, 2.645, 2.54, 3.295, 2.8, -.4, -.5, 2.2, 3.4, 1.3, 3.1, 1.5,
+            3.4, 0.9, 2.9, 1.2, -0.45, 0.8], dtype=self.dtype))
+        for relu_param in relu_params:
+            for relu_index in (1, 2):
+                for system, x_equilibrium in (
+                    (self.system1, self.x_equilibrium1),
+                    (self.system2, self.x_equilibrium2),
+                        (self.system3, self.x_equilibrium3)):
+                    test_fun(system, relu_index, x_equilibrium, relu_param)
 
 
 if __name__ == "__main__":
