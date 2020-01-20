@@ -79,8 +79,9 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                 loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
                     lyapunov_hybrid_system.\
                     lyapunov_derivative_loss_at_sample_and_next_state(
-                        relu, V_rho, state_samples_all[i], state_next_i,
-                        x_equilibrium, dut.lyapunov_derivative_sample_margin)
+                        relu, V_rho, dut.lyapunov_derivative_epsilon,
+                        state_samples_all[i], state_next_i, x_equilibrium,
+                        dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
                 relu, x_equilibrium, V_rho, dut.lyapunov_positivity_epsilon)

@@ -841,9 +841,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         margin = 0.1
         x_equilibrium = torch.tensor([0, 0], dtype=self.dtype)
         V_rho = 0.1
+        epsilon = 0.5
         for x_sample in x_samples:
             loss = dut.lyapunov_derivative_loss_at_sample(
-                relu1, V_rho, x_sample, x_equilibrium, margin)
+                relu1, V_rho, epsilon, x_sample, x_equilibrium, margin)
             is_in_mode = False
             for i in range(self.system1.num_modes):
                 if (torch.all(
@@ -856,9 +857,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 relu1, x_sample, x_equilibrium, V_rho)
             V_x_next = dut.lyapunov_value(
                 relu1, x_next, x_equilibrium, V_rho)
-            V_diff = V_x_next - V_x_sample
-            loss_expected = V_diff + margin if V_diff > margin else\
-                torch.tensor(0., dtype=self.dtype)
+            V_diff = V_x_next - V_x_sample + epsilon * V_x_sample
+            loss_expected = torch.max(
+                    V_diff + margin, torch.tensor(0., dtype=self.dtype))
             self.assertAlmostEqual(loss.item(), loss_expected.item())
 
 
@@ -1186,6 +1187,44 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     (self.system2, self.x_equilibrium2),
                         (self.system3, self.x_equilibrium3)):
                     test_fun(system, relu_index, x_equilibrium, relu_param)
+
+    def test_lyapunov_derivative_loss_at_sample(self):
+        V_rho = 2.
+        epsilon = 0.2
+
+        def test_fun(system, x_equilibrium, relu, x_val, margin):
+            xdot = system.step_forward(x_val)
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(relu, x_val)
+            (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+                relu, system.x_dim, activation_pattern, system.dtype)
+            dVdx = g.squeeze() + \
+                V_rho * torch.sign(x_val - x_equilibrium)
+            Vdot = dVdx @ xdot
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            V = dut.lyapunov_value(
+                relu, x_val, x_equilibrium, V_rho,
+                relu.forward(x_equilibrium))
+            loss_expected = torch.max(
+                Vdot + epsilon * V + margin,
+                torch.tensor(0., dtype=system.dtype))
+            self.assertAlmostEqual(
+                loss_expected.item(),
+                dut.lyapunov_derivative_loss_at_sample(
+                    relu, V_rho, epsilon, x_val,
+                    x_equilibrium, margin).item())
+
+        relu1 = setup_relu(torch.float64)
+        relu2 = setup_relu(torch.float64)
+        for relu in (relu1, relu2):
+            for system, x_equilibrium in (
+                (self.system1, self.x_equilibrium1),
+                    (self.system2, self.x_equilibrium2)):
+                for pt in ([0.1, 0.5], [-0.2, 0.4], [0.2, -0.6],
+                           [-0.8, -0.3]):
+                    test_fun(
+                        system, x_equilibrium, relu,
+                        torch.tensor(pt, dtype=torch.float64), 0.2)
 
 
 if __name__ == "__main__":
