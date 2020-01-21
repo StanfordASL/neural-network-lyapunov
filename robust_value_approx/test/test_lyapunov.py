@@ -207,6 +207,74 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             self.R2 @ torch.tensor([0.5, -0.3], dtype=self.dtype) +
             self.x_equilibrium2)
 
+    def test_add_lyapunov_bounds_constraint(self):
+        V_rho = 0.5
+
+        def test_fun(
+            lyapunov_lower, lyapunov_upper, system, relu, x_equilibrium,
+                x_val):
+            """
+            Set x = x_val, check if the MILP
+            lyapunov_lower <= V(x) <= lyapunov_upper is feasible or not.
+            """
+            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+                relu, system.dtype)
+            dut = lyapunov.LyapunovHybridLinearSystem(system)
+            milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
+            (relu_z, _, a_relu, b_relu) = dut.add_relu_output_constraint(
+                relu, relu_free_pattern, milp, x)
+            (s, _) = dut.add_state_error_l1_constraint(milp, x_equilibrium, x)
+            relu_x_equilibrium = relu.forward(x_equilibrium)
+            dut.add_lyapunov_bounds_constraint(
+                lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,
+                relu_x_equilibrium, relu_z, s)
+            for i in range(system.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=system.dtype)], [[x[i]]],
+                    sense=gurobipy.GRB.EQUAL, rhs=x_val[i])
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+            milp.gurobi_model.optimize()
+
+            V_val = dut.lyapunov_value(
+                relu, x_val, x_equilibrium, V_rho, relu_x_equilibrium)
+            is_satisfied = True
+            if lyapunov_lower is not None:
+                is_satisfied = is_satisfied and V_val >= lyapunov_lower
+            if lyapunov_upper is not None:
+                is_satisfied = is_satisfied and V_val <= lyapunov_upper
+            if is_satisfied:
+                self.assertEqual(
+                    milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+            else:
+                self.assertEqual(
+                    milp.gurobi_model.status, gurobipy.GRB.Status.INFEASIBLE)
+
+        relu1 = setup_relu(self.dtype)
+        relu2 = setup_leaky_relu(self.dtype)
+        for relu in (relu1, relu2):
+            test_fun(
+                None, None, self.system1, relu, self.x_equilibrium1,
+                torch.tensor([-0.5, 0.3], dtype=self.dtype))
+            test_fun(
+                0.5, None, self.system1, relu, self.x_equilibrium1,
+                torch.tensor([-0.5, 0.3], dtype=self.dtype))
+            test_fun(
+                None, 30., self.system1, relu, self.x_equilibrium1,
+                torch.tensor([-0.5, 0.3], dtype=self.dtype))
+            test_fun(
+                -2., 30., self.system1, relu, self.x_equilibrium1,
+                torch.tensor([-0.5, 0.3], dtype=self.dtype))
+            test_fun(
+                -2., 1., self.system1, relu, self.x_equilibrium1,
+                torch.tensor([-0.1, 0.4], dtype=self.dtype))
+            test_fun(
+                1., 3., self.system1, relu, self.x_equilibrium1,
+                torch.tensor([0.3, 0.4], dtype=self.dtype))
+
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
 
