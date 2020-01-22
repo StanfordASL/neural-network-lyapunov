@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import robust_value_approx.relu_to_optimization as relu_to_optimization
+import robust_value_approx.value_to_optimization as value_to_optimization
 
 import torch
 
@@ -14,6 +15,7 @@ class ModelBounds:
         @param vf An instance of ValueFunction that corresponds
         to the value function to be verified
         """
+        assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.model = model
         self.dtype = vf.dtype
@@ -22,13 +24,19 @@ class ModelBounds:
 
     def epsilon_opt(self, model, x_lo, x_up):
         """
-        This function returns an optimization problem (an MIQP in standard
-        form) such that solving it computes
+        This function returns the coefficients of an optimization problem
+        (an MIQP in standard form) such that solving its objective
+        corresponds to ε(x), where
 
-        ε = V - η
+        ε(x) = V(x) - η(x)
 
         where η is the output of the neural network, V is the optimal
-        cost-to-go
+        cost-to-go. Note that minimizing this problem with for a fixed
+        x results in evaluating the value of ε at that x. However x can
+        also be kept as a decision variable, and minimizing the resulting
+        problem gives a global lower bound on the error between the value
+        function and the neural network, which effectively bounds the neural
+        network to never be above V by more than ε for any x.
 
         x = input of nn, initial state of opt control problem
         y = [s, z]

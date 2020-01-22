@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import robust_value_approx.model_bounds as model_bounds
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
+import robust_value_approx.value_to_optimization as value_to_optimization
 
 import gurobipy
 import torch
@@ -16,9 +17,10 @@ class AdversarialSampleGenerator:
         @param x0_lo Tensor that is the lower bound of initial states to check
         @param x0_up Tensor that is the upper bound of initial states to check
         """
+        assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.V = vf.get_value_function()
-        self.val_coeffs = vf.traj_opt_constraint()
+        self.traj_opt_coeffs = vf.traj_opt_constraint()
         self.dtype = vf.dtype
         self.x0_lo = x0_lo
         self.x0_up = x0_up
@@ -119,7 +121,7 @@ class AdversarialSampleGenerator:
         """
         (G0, G1, G2, h,
          A0, A1, A2, b,
-         Q1, Q2, q1, q2, k) = self.val_coeffs
+         Q1, Q2, q1, q2, k) = self.traj_opt_coeffs
         prob = gurobi_torch_mip.GurobiTorchMIQP(self.dtype)
         prob.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         if x_val is None:
