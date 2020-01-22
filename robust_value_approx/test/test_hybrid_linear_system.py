@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+from scipy.integrate import solve_ivp
+import scipy.linalg
 import unittest
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import cvxpy as cp
@@ -518,34 +520,6 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             test_mode(mode, None, torch.tensor([-1, -1], dtype=dut.dtype))
             test_mode(mode, None, None)
 
-    def test_cost_to_go(self):
-        dut = setup_trecate_discrete_time_system()
-
-        def instantaneous_cost_fun(x):
-            return x @ x
-
-        def test_fun(x):
-            num_steps = 100
-            total_cost = dut.cost_to_go(x, instantaneous_cost_fun, num_steps)
-            total_cost_expected = instantaneous_cost_fun(x)
-            x_i = x.clone()
-            for i in range(num_steps):
-                for j in range(dut.num_modes):
-                    if (torch.all(dut.P[j] @ x_i <= dut.q[j])):
-                        x_i = dut.A[j] @ x_i + dut.g[j]
-                        break
-                total_cost_expected += instantaneous_cost_fun(x_i)
-            self.assertAlmostEqual(total_cost.item(),
-                                   total_cost_expected.item())
-
-        x_sample, y_sample = torch.meshgrid(
-            torch.linspace(-1., 1., 11).type(dut.dtype),
-            torch.linspace(-1., 1., 11).type(dut.dtype))
-        for i in range(x_sample.shape[0]):
-            for j in range(x_sample.shape[1]):
-                test_fun(torch.tensor(
-                    [x_sample[i, j], y_sample[i, j]], dtype=dut.dtype))
-
     def test_mode1(self):
         dut = setup_trecate_discrete_time_system()
         self.assertEqual(
@@ -641,6 +615,117 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         x = torch.tensor([1.5, 0], dtype=dut.dtype)
         next_states = dut.possible_next_states(x)
         self.assertEqual(len(next_states), 0)
+
+
+class TestComputeDiscreteTimeSystemCostToGo(unittest.TestCase):
+    def test_fun(self):
+        system = setup_trecate_discrete_time_system()
+
+        def instantaneous_cost_fun(x):
+            return x @ x
+
+        def test_fun(x):
+            num_steps = 100
+            total_cost = hybrid_linear_system.\
+                compute_discrete_time_system_cost_to_go(
+                    system, x, num_steps, instantaneous_cost_fun)
+            total_cost_expected = instantaneous_cost_fun(x)
+            x_i = x.clone()
+            for i in range(num_steps):
+                for j in range(system.num_modes):
+                    if (torch.all(system.P[j] @ x_i <= system.q[j])):
+                        x_i = system.A[j] @ x_i + system.g[j]
+                        break
+                total_cost_expected += instantaneous_cost_fun(x_i)
+            self.assertAlmostEqual(total_cost.item(),
+                                   total_cost_expected.item())
+
+        x_sample, y_sample = torch.meshgrid(
+            torch.linspace(-1., 1., 11).type(system.dtype),
+            torch.linspace(-1., 1., 11).type(system.dtype))
+        for i in range(x_sample.shape[0]):
+            for j in range(x_sample.shape[1]):
+                test_fun(torch.tensor(
+                    [x_sample[i, j], y_sample[i, j]], dtype=system.dtype))
+
+
+class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
+    def test_fun1(self):
+        system = setup_johansson_continuous_time_system1()
+        x0 = torch.tensor([0.3, 0.8], dtype=torch.float64)
+        (cost, sol) = hybrid_linear_system.\
+            compute_continuous_time_system_cost_to_go(
+                system, x0, 15., lambda x: torch.norm(x, p=2))
+        # The trajectory starts in mode 1, will first hit the mode boundary
+        # x[0] = 0, and then stay in mode 0.
+        A1_numpy = system.A[1].detach().numpy()
+        def hit_boundary(t, x): return x[0]
+        hit_boundary.terminal = True
+        sol1 = solve_ivp(
+            lambda t, x: A1_numpy @ x, (0, np.inf),
+            x0.detach().numpy(), events=[hit_boundary])
+        # t1 is the time to hit the mode boundary x[0] = 0
+        t1 = sol1.t[-1]
+        x1 = sol1.y[:, -1]
+        # The trajectory of x(t) is exp(A1*t) for 0 <= t <= t1
+        num_sample1 = 10000
+        t1_sample = np.linspace(0, t1, num_sample1)
+        cost1_sample = np.empty(num_sample1)
+        for i in range(num_sample1):
+            cost1_sample[i] = np.linalg.norm(
+                scipy.linalg.expm(A1_numpy * t1_sample[i]) @
+                x0.detach().numpy(), ord=2)
+        A0_numpy = system.A[0].detach().numpy()
+        def hit_origin(t, x): return np.linalg.norm(x, ord=2) - 1e-4
+        hit_origin.terminal = True
+        sol2 = solve_ivp(
+            lambda t, x: A0_numpy @ x, (0, np.inf), x1, events=[hit_origin])
+        num_sample2 = 10000
+        t2_sample = np.linspace(0, sol2.t[-1], num_sample2)
+        cost2_sample = np.empty(num_sample2)
+        for i in range(num_sample2):
+            cost2_sample[i] = np.linalg.norm(
+                scipy.linalg.expm(A0_numpy * t2_sample[i]) @ x1, ord=2)
+            cost_expected = np.sum(
+                (cost1_sample[:-1] + cost1_sample[1:])/2 *
+                (t1_sample[1:] - t1_sample[:-1])) +\
+                np.sum(
+                    (cost2_sample[:-1] + cost2_sample[1:])/2 *
+                    (t2_sample[1:] - t2_sample[:-1]))
+        # cost_expected is computed with low accuracy (because it uses
+        # trapezoidal integration), so only compare up to 4'th decimal place.
+        self.assertAlmostEqual(cost, cost_expected, places=4)
+
+
+class TestGenerateCostToGoSamples(unittest.TestCase):
+    def setUp(self):
+        dtype = torch.float64
+        samples_x, samples_y = torch.meshgrid(
+            torch.linspace(-1., 1., 10, dtype=dtype),
+            torch.linspace(-1., 1., 10, dtype=dtype))
+        self.x0_samples = [None] * (samples_x.shape[0] * samples_x.shape[1])
+        for i in range(samples_x.shape[0]):
+            for j in range(samples_x.shape[1]):
+                self.x0_samples[i * samples_x.shape[1] + j] = torch.tensor(
+                    [samples_x[i, j], samples_y[i, j]], dtype=dtype)
+
+    def test_continuous_time_system(self):
+        system = setup_johansson_continuous_time_system1()
+        T = 2.
+        x0_cost_pairs = hybrid_linear_system.generate_cost_to_go_samples(
+            system, self.x0_samples, T, lambda x: torch.norm(x, p=2), False)
+        self.assertIsInstance(x0_cost_pairs, list)
+        self.assertLessEqual(len(x0_cost_pairs), len(self.x0_samples))
+        self.assertGreater(len(x0_cost_pairs), 0)
+
+    def test_discrete_time_system(self):
+        system = setup_trecate_discrete_time_system()
+        N = 20
+        x0_cost_pairs = hybrid_linear_system.generate_cost_to_go_samples(
+            system, self.x0_samples, N, lambda x: torch.norm(x, p=2), True)
+        self.assertIsInstance(x0_cost_pairs, list)
+        self.assertLessEqual(len(x0_cost_pairs), len(self.x0_samples))
+        self.assertGreater(len(x0_cost_pairs), 0)
 
 
 if __name__ == "__main__":

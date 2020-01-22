@@ -1,5 +1,6 @@
 import torch
 import gurobipy
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 
 
 class TrainLyapunovReLU:
@@ -197,59 +198,63 @@ class TrainLyapunovReLU:
         return False
 
 
-class TrainValueApproximatorOptions:
+class TrainValueApproximator:
+    """
+    Given a piecewise affine system and some sampled initial state, compute the
+    cost-to-go for these sampled states, and then train a network to
+    approximate the cost-to-go, such that
+    network(x) - network(x*) + ρ |x-x*|₁ ≈ cost_to_go(x)
+    """
     def __init__(self):
         self.max_epochs = 100
-        # When the training error is less than this tolerance, stop the
-        # training.
         self.convergence_tolerance = 1e-3
         self.learning_rate = 0.02
-        # Number of steps for the cost-to-go horizon.
-        self.num_steps = 100
 
+    def train(
+        self, system, network, V_rho, x_equilibrium, instantaneous_cost_fun,
+            x0_samples, T, discrete_time_flag):
+        """
+        Train a network such that
+        network(x) - network(x*) + ρ*|x-x*|₁ ≈ cost_to_go(x)
+        @param system An AutonomousHybridLinearSystem instance.
+        @param network a pytorch neural network.
+        @param V_rho ρ.
+        @param x_equilibrium x*.
+        @param instantaneous_cost_fun A callable to evaluate the instantaneous
+        cost for a state.
+        @param x0_samples A list of torch tensors. x0_samples[i] is the i'th
+        sampled x0.
+        @param T The horizon to evaluate the cost-to-go. For a discrete time
+        system, T must be an integer, for a continuous time system, T must be a
+        float.
+        @param discrete_time_flag Whether the hybrid linear system is discrete
+        or continuous time.
+        """
+        assert(isinstance(
+            system, hybrid_linear_system.AutonomousHybridLinearSystem))
+        assert(isinstance(x_equilibrium, torch.Tensor))
+        assert(x_equilibrium.shape == (system.x_dim,))
+        assert(isinstance(V_rho, float))
+        assert(isinstance(x0_samples, list))
+        x0_value_samples = hybrid_linear_system.generate_cost_to_go_samples(
+            system, x0_samples, T, instantaneous_cost_fun, discrete_time_flag)
+        state_samples_all = torch.stack([
+            pair[0] for pair in x0_value_samples], dim=0)
+        value_samples_all = torch.stack([pair[1] for pair in x0_value_samples])
 
-def train_value_approximator(
-    hybrid_linear_system, relu, V_rho, x_equilibrium, instantaneous_cost_fun,
-        state_samples_all, options):
-    """
-    Train a ReLU network such that ReLU(x) - ReLU(x*) + ρ|x-x*|₁ approximates
-    the cost-to-go (value function) of a hybrid linear system.
-    @param hybrid_linear_system This system has to define a cost_to_go(x)
-    function, that computes the cost-to-go from a state x.
-    @param relu Both an input and an output paramter. As an input, it
-    represents the initial guess of the network. As an output, it represents
-    the trained network.
-    @param V_rho ρ in the documentation above.
-    @param x_equilibrium The equilibrium state x*.
-    @param instantaneous_cost_fun A function evaluates the instantaneous cost
-    of a state.
-    @param state_samples_all A list of state samples.
-    @param options A TrainValueApproximatorOptions instance.
-    @return is_converged Whether the training converged or not.
-    """
-    assert(isinstance(x_equilibrium, torch.Tensor))
-    assert(x_equilibrium.shape == (hybrid_linear_system.x_dim,))
-    assert(isinstance(V_rho, float))
-    assert(isinstance(state_samples_all, list))
-    assert(isinstance(options, TrainValueApproximatorOptions))
-    value_samples = [hybrid_linear_system.cost_to_go(
-        state, instantaneous_cost_fun, options.num_steps)
-        for state in state_samples_all]
-
-    optimizer = torch.optim.Adam(relu.parameters(), lr=options.learning_rate)
-    for epoch in range(options.max_epochs):
-        optimizer.zero_grad()
-        state_samples_all_torch = torch.stack(state_samples_all, dim=0)
-        relu_output = relu(state_samples_all_torch)
-        relu_x_equilibrium = relu.forward(x_equilibrium)
-        value_relu = relu_output.squeeze() - relu_x_equilibrium +\
-            V_rho * torch.norm(
-                state_samples_all_torch - x_equilibrium.reshape((1, -1)).
-                expand(state_samples_all_torch.shape[0], -1), dim=1, p=1)
-        loss = torch.nn.MSELoss()(
-            value_relu, torch.stack(value_samples, dim=0))
-        if (loss.item() <= options.convergence_tolerance):
-            return True
-        loss.backward()
-        optimizer.step()
-    return False
+        optimizer = torch.optim.Adam(
+            network.parameters(), lr=self.learning_rate)
+        for epoch in range(self.max_epochs):
+            optimizer.zero_grad()
+            relu_output = network(state_samples_all)
+            relu_x_equilibrium = network.forward(x_equilibrium)
+            value_relu = relu_output.squeeze() - relu_x_equilibrium +\
+                V_rho * torch.norm(
+                    state_samples_all - x_equilibrium.reshape((1, -1)).
+                    expand(state_samples_all.shape[0], -1), dim=1, p=1)
+            loss = torch.nn.MSELoss()(value_relu, value_samples_all)
+            if (loss.item() <= self.convergence_tolerance):
+                return True
+            loss.backward()
+            optimizer.step()
+        return False

@@ -1,5 +1,6 @@
 import robust_value_approx.lyapunov as lyapunov
 import robust_value_approx.train_lyapunov as train_lyapunov
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import torch
@@ -146,32 +147,38 @@ class TestTrainLyapunov(unittest.TestCase):
         self.relu = setup_relu()
 
     def test_train_value_approximator(self):
+        dut = train_lyapunov.TrainValueApproximator()
+        dut.max_epochs = 1000
+        dut.convergence_tolerance = 0.05
         state_samples_all = setup_state_samples_all((21, 21))
-        options = train_lyapunov.TrainValueApproximatorOptions()
-        options.max_epochs = 1000
-        options.convergence_tolerance = 0.05
         V_rho = 0.1
         x_equilibrium = torch.tensor([0., 0.], dtype=torch.float64)
-        result = train_lyapunov.train_value_approximator(
-            self.system, self.relu, V_rho, x_equilibrium, lambda x: x @ x,
-            state_samples_all, options)
+        N = 100
+
+        def instantaneous_cost(x):
+            return x @ x
+        result = dut.train(
+            self.system, self.relu, V_rho, x_equilibrium, instantaneous_cost,
+            state_samples_all, N, True)
         self.assertTrue(result)
         relu_at_equilibrium = self.relu.forward(x_equilibrium)
         # Now check the total loss.
         with torch.no_grad():
-            cost_to_go_samples = \
-                [self.system.cost_to_go(
-                 state, lambda x: x @ x, options.num_steps) for state in
-                 state_samples_all]
-            state_samples_all_torch = torch.stack(state_samples_all, dim=0)
-            relu_output = self.relu(state_samples_all_torch).squeeze()
+            state_cost_samples = hybrid_linear_system.\
+                generate_cost_to_go_samples(
+                    self.system, state_samples_all, N, instantaneous_cost,
+                    True)
+            x0_samples = torch.stack([
+                pair[0] for pair in state_cost_samples], dim=0)
+            cost_samples = torch.stack([
+                pair[1] for pair in state_cost_samples])
+            relu_output = self.relu(x0_samples).squeeze()
             error = relu_output.squeeze() - relu_at_equilibrium + \
                 V_rho * torch.norm(
-                    state_samples_all_torch - x_equilibrium.reshape((1, -1)).
-                    expand(state_samples_all_torch.shape[0], -1), dim=1, p=1)\
-                - torch.stack(cost_to_go_samples, dim=0)
-            loss = torch.sum(error * error) / len(cost_to_go_samples)
-            self.assertLessEqual(loss, options.convergence_tolerance)
+                    x0_samples - x_equilibrium.reshape((1, -1)).
+                    expand(x0_samples.shape[0], -1), dim=1, p=1) - cost_samples
+            loss = torch.sum(error * error) / len(cost_samples)
+            self.assertLessEqual(loss, dut.convergence_tolerance)
 
 
 if __name__ == "__main__":
