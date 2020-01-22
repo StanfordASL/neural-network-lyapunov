@@ -264,7 +264,8 @@ class AdversarialSampleGenerator:
         return(epsilon_buff, x_adv_buff, V_buff)
 
     def get_squared_bound_sample(self, model, max_iter=10, conv_tol=1e-5,
-                                 learning_rate=.01, x_adv0=None, penalty=1e-8):
+                                 learning_rate=.001, x_adv0=None, penalty=1e-8,
+                                 optimizer_state=None):
         """
         Checks that the squared model error is upper bounded by some margin
         around the true optimal cost-to-go, i.e. (V(x) - η(x))^2 ≤ ε
@@ -285,10 +286,12 @@ class AdversarialSampleGenerator:
         @param penalty (optional) a float for the penalty when getting the
         gradient of the eps opt problem (see
         compute_objective_from_mip_data_and_solution)
+        @param optimizer_state (optional) a dictionnary of optimizer states to
+        reinitialize the optimizer to
         @return epsilon_buff, the ε for each iterate
         @return x_adv_buff, each iterate of the optimization
         @return V_buff, the value of each iterate
-        # TODO(blandry) consider using BFGS
+        @return optimizer_state, the state of the optimizer at the end
         """
         if x_adv0 is None:
             x_adv_params = torch.zeros(self.vf.sys.x_dim, dtype=self.dtype)
@@ -299,6 +302,8 @@ class AdversarialSampleGenerator:
         x_adv_params.requires_grad = True
         x_adv = torch.max(torch.min(x_adv_params, self.x0_up), self.x0_lo)
         optimizer = torch.optim.Adam([x_adv_params], lr=learning_rate)
+        if optimizer_state is not None:
+            optimizer.load_state_dict(optimizer_state)
         epsilon_buff = torch.Tensor(0, 1).type(self.dtype)
         x_adv_buff = torch.Tensor(0, self.vf.sys.x_dim).type(self.dtype)
         V_buff = torch.Tensor(0, 1).type(self.dtype)
@@ -328,4 +333,5 @@ class AdversarialSampleGenerator:
                               self.x0_lo)
             if torch.all(torch.abs(x_adv - x_adv_buff[-1, :]) <= conv_tol):
                 break
-        return(epsilon_buff, x_adv_buff, V_buff)
+        optimizer_state = optimizer.state_dict()
+        return(epsilon_buff, x_adv_buff, V_buff, optimizer_state)

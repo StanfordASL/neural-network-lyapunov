@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 
-def get_value_function():
+def get_value_function(N=5):
     dt = 1.
     dtype = torch.float64
     (A_c, B_c) = double_integrator.double_integrator_dynamics(dtype)
@@ -27,8 +27,7 @@ def get_value_function():
     q = torch.cat((-x_lo, -u_lo, x_up, u_up), 0).type(dtype)
     sys.add_mode(A, B, c, P, q)
     R = torch.eye(sys.u_dim)
-    Q = torch.eye(sys.x_dim)
-    N = 5
+    Q = 10.*torch.eye(sys.x_dim)
     vf = value_to_optimization.ValueFunction(sys, N, x_lo, x_up, u_lo, u_up)
     vf.set_cost(Q=Q, R=R)
     vf.set_terminal_cost(Qt=Q, Rt=R)
