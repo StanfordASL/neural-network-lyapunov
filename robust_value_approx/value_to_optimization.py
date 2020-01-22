@@ -449,6 +449,27 @@ class ValueFunction:
 
         return V
 
+    def sol_to_traj(self, x0, s_val, alpha_val):
+        """
+        converts a solution to state and input trajectories
+
+        @param x0 Tensor that is the initial state
+        @param s_val Tensor solution of s (see traj_opt_constraint)
+        @param alpha_val Tensor solution of alpha (see traj_opt_constraint)
+        @return x_traj_val Tensor state trajectory
+        @return u_traj_val Tesnor input trajectory
+        @return alpha_traj_val Tensor discrete state trajectory
+        """
+        if s_val is None:
+            return (None, None, None)
+        traj_val = torch.cat((x0, s_val)).reshape(self.N, -1).t()
+        x_traj_val = traj_val[:self.sys.x_dim, :]
+        u_traj_val = traj_val[
+            self.sys.x_dim:self.sys.x_dim+self.sys.u_dim, :]
+        alpha_traj_val = alpha_val.reshape(self.N, -1).t()
+
+        return (x_traj_val, u_traj_val, alpha_traj_val)
+
     def get_q_function(self):
         """
         return a function that can be evaluated to get the optimal cost-to-go
