@@ -425,24 +425,26 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
 
     def lyapunov_derivative_loss_at_sample(
-            self, relu_model, V_rho, state_sample, x_equilibrium, margin=0.):
+            self, relu_model, V_rho, epsilon, state_sample, x_equilibrium,
+            margin=0.):
         """
         We will sample a state x̅[n], compute the next state x̅[n+1], and we
         would like the Lyapunov function to decrease on the sampled state
         x̅[n]. To do so, we define a loss as
-        max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        max(V(x̅[n+1]) - V(x̅[n]) + ε*V(x̅[n])+ margin, 0)
         @param relu_model The lyapunov function is
         ReLU(x) - ReLU(x*) + ρ|x-x*|₁
         @param V_rho ρ in the Lyapunov function.
+        @param epsilon ε in the Lyapunov function.
         @param state_sample The sampled state x̅[n]
         @param x_equilibrium x*.
         @param margin We might want to shift the margin for the Lyapunov
-        loss. For example, Lyapunov condition requires V(x[n+1]) - V(x[n]) to
-        be strictly negative for all x[n]. To do so, we can set margin to
-        be a positive number
-        @return loss The loss max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        loss.
+        @return loss The loss
+        max(V(x̅[n+1]) - V(x̅[n]) + ε*V(x̅[n]) + margin, 0)
         """
         assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
         assert(isinstance(state_sample, torch.Tensor))
         assert(state_sample.shape == (self.system.x_dim,))
         # First compute the next state x̅[n+1]
@@ -454,28 +456,30 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         state_next = self.system.step_forward(state_sample, mode)
 
         return self.lyapunov_derivative_loss_at_sample_and_next_state(
-            relu_model, V_rho, state_sample, state_next, x_equilibrium, margin)
+            relu_model, V_rho, epsilon, state_sample, state_next,
+            x_equilibrium, margin)
 
     def lyapunov_derivative_loss_at_sample_and_next_state(
-            self, relu_model, V_rho, state_sample, state_next, x_equilibrium,
-            margin=0.):
+            self, relu_model, V_rho, epsilon, state_sample, state_next,
+            x_equilibrium, margin=0.):
         """
         We will sample a state x̅[n], compute the next state x̅[n+1], and we
         would like the Lyapunov function to decrease on the sampled state
         x̅[n]. To do so, we define a loss as
-        max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        max(V(x̅[n+1]) - V(x̅[n]) + ε*V(x̅[n]) + margin, 0)
         @param relu_model The output of the ReLU model is the Lyapunov function
         value.
         @param V_rho ρ in Lyapunov function.
+        @param epsilon ε in the Lyapunov function.
         @param state_sample The sampled state x̅[n]
         @param state_next The next state x̅[n+1]
         @param margin We might want to shift the margin for the Lyapunov
-        loss. For example, Lyapunov condition requires V(x[n+1]) - V(x[n]) to
-        be strictly negative for all x[n]. To do so, we can set margin to
-        be a positive number
-        @return loss The loss max(V(x̅[n+1]) - V(x̅[n]) + margin, 0)
+        loss.
+        @return loss The loss
+        max(V(x̅[n+1]) - V(x̅[n]) + ε*V(x̅[n]) + margin, 0)
         """
         assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
         assert(isinstance(state_sample, torch.Tensor))
         assert(state_sample.shape == (self.system.x_dim,))
         assert(isinstance(state_next, torch.Tensor))
@@ -485,7 +489,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         v2 = relu_model.forward(state_next) + \
             V_rho * torch.norm(state_next - x_equilibrium, p=1)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
-            v1 - v2, torch.tensor(-1.))
+            -(v2 - v1 + epsilon * (v1 - relu_model.forward(x_equilibrium))),
+            torch.tensor(-1.))
 
 
 class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
@@ -908,3 +913,70 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             gurobipy.GRB.MAXIMIZE)
 
         return (milp, x)
+
+    def lyapunov_derivative_loss_at_sample(
+        self, relu_model, V_rho, epsilon, state_sample, x_equilibrium,
+            margin=0.):
+        """
+        We will sample a state x̅, and we would like the Lyapunov function to
+        decrease on the sampled state x̅. To do so, we define a loss as
+        max(V̇(x̅) + ε*V(x̅) + margin, 0)
+        @param relu_model The lyapunov function is
+        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
+        @param V_rho ρ in the Lyapunov function.
+        @param state_sample The sampled state x̅[n]
+        @param x_equilibrium x*.
+        @param margin We might want to shift the margin for the Lyapunov
+        loss.
+        @return loss The loss max(V̇(x̅) + ε*V(x̅) + margin, 0)
+        """
+        assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
+        assert(isinstance(state_sample, torch.Tensor))
+        assert(state_sample.shape == (self.system.x_dim,))
+        # First compute the next state x̅[n+1]
+        mode = self.system.mode(state_sample)
+        if mode is None:
+            raise Exception(
+                "lyapunov_derivative_loss_at_sample: the input state_sample" +
+                " is not in any mode of the hybrid system.")
+        xdot = self.system.step_forward(state_sample, mode)
+
+        return self.lyapunov_derivative_loss_at_sample_and_next_state(
+            relu_model, V_rho, epsilon, state_sample, xdot, x_equilibrium,
+            margin)
+
+    def lyapunov_derivative_loss_at_sample_and_next_state(
+            self, relu_model, V_rho, epsilon, state_sample, xdot_sample,
+            x_equilibrium, margin=0.):
+        """
+        We will sample a state x̅, and we would like the Lyapunov function to
+        decrease on the sampled state x̅. To do so, we define a loss as
+        max(V̇(x̅) + ε*V(x̅) + margin, 0)
+        @param relu_model The output of the ReLU model is the Lyapunov function
+        value.
+        @param V_rho ρ in Lyapunov function.
+        @param state_sample The sampled state x̅
+        @param xdot_sample The state derivative dx̅/dt
+        @param margin We might want to shift the margin for the Lyapunov
+        loss.
+        @return loss The loss max(V̇(x̅) + ε*V(x̅) + margin, 0)
+        """
+        assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
+        assert(isinstance(state_sample, torch.Tensor))
+        assert(state_sample.shape == (self.system.x_dim,))
+        assert(isinstance(xdot_sample, torch.Tensor))
+        assert(xdot_sample.shape == (self.system.x_dim,))
+        activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
+            relu_model, state_sample)
+        (g, h, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+            relu_model, self.system.x_dim, activation_pattern,
+            self.system.dtype)
+        dVdx = g.squeeze() + V_rho * torch.sign(state_sample - x_equilibrium)
+        Vdot = dVdx @ xdot_sample
+        V = self.lyapunov_value(
+            relu_model, state_sample, x_equilibrium, V_rho,
+            relu_model.forward(x_equilibrium))
+        return torch.nn.HingeEmbeddingLoss(margin=margin)(
+            -(Vdot + epsilon * V), torch.tensor(-1.))
