@@ -136,7 +136,7 @@ if __name__ == "__main__":
         '--learning_rate', type=float, default=1e-3,
         help='learning rate for the Lyapunov function.')
     parser.add_argument(
-        '--max_iterations', type=int, default=1000,
+        '--max_iterations', type=int, default=2000,
         help='max iteration for learning Lyapunov function.')
     args = parser.parse_args()
 
@@ -155,13 +155,13 @@ if __name__ == "__main__":
     state_samples_all1 = setup_state_samples_all(
         (51, 51), x_equilibrium, theta)
     # First train a ReLU to approximate the value function.
-    options1 = train_lyapunov.TrainValueApproximatorOptions()
-    options1.max_epochs = 1000
-    options1.convergence_tolerance = 0.01
-    result1 = train_lyapunov.train_value_approximator(
+    approximator = train_lyapunov.TrainValueApproximator()
+    approximator.max_epochs = 1000
+    approximator.convergence_tolerance = 0.01
+    result1 = approximator.train(
         system, relu, V_rho, x_equilibrium,
         lambda x: torch.norm(x - x_equilibrium, p=1),
-        state_samples_all1, options1)
+        state_samples_all1, 100, True)
     plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
 
     state_samples_all = state_samples_all1

@@ -79,12 +79,12 @@ if __name__ == "__main__":
     x_equilibrium = torch.tensor([0], dtype=torch.float64)
     state_samples_all = list(torch.linspace(-1, 1, 20).type(torch.float64).
                              reshape((-1, 1)))
-    options1 = train_lyapunov.TrainValueApproximatorOptions()
-    options1.max_epochs = 500
-    options1.convergence_tolerance = 0.001
-    result1 = train_lyapunov.train_value_approximator(
+    train_value_approximator = train_lyapunov.TrainValueApproximator()
+    train_value_approximator.max_epochs = 500
+    train_value_approximator.convergence_tolerance = 0.001
+    result1 = train_value_approximator.train(
         system, relu, V_rho, x_equilibrium, lambda x: torch.norm(x, p=1),
-        state_samples_all, options1)
+        state_samples_all, 100, True)
     plot_relu(relu, system, V_rho, x_equilibrium)
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
@@ -92,6 +92,6 @@ if __name__ == "__main__":
         lyapunov_hybrid_system, V_rho, x_equilibrium)
     dut.output_flag = True
     dut.max_iterations = 3000
-    dut.learning_rate = 1e-3
+    dut.learning_rate = 1e-4
     result = dut.train(relu, state_samples_all)
     plot_relu(relu, system, V_rho, x_equilibrium)

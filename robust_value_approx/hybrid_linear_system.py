@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import cvxpy as cp
+from scipy.integrate import solve_ivp
 
 import robust_value_approx.utils as utils
 from robust_value_approx.utils import (
@@ -418,30 +419,6 @@ class AutonomousHybridLinearSystem:
 
         return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
 
-    def cost_to_go(self, x_start, instantaneous_cost_fun, num_steps):
-        """
-        Compute the cost-to-go ∑ᵢ c(x[i]) starting from x_start
-        @param x_start The starting state.
-        @param instantaneous_cost_fun A function evaluator that takes a state
-        and evaluates the one-step cost c(x).
-        @param num_steps The length of horizon for the cost-to-go.
-        """
-        assert(isinstance(x_start, torch.Tensor))
-        assert(x_start.shape == (self.x_dim,))
-        total_cost = torch.tensor(0., dtype=self.dtype)
-        x_i = x_start.clone()
-        total_cost += instantaneous_cost_fun(x_i)
-        for i in range(num_steps):
-            mode = None
-            for j in range(self.num_modes):
-                if (torch.all(self.P[j] @ x_i <= self.q[j])):
-                    mode = j
-                    x_i = self.A[j] @ x_i + self.g[j]
-                    break
-            assert(mode is not None)
-            total_cost += instantaneous_cost_fun(x_i)
-        return total_cost
-
     def mode(self, x):
         """
         Returns the mode of state x. Namely P[mode] * x <= q[mode].
@@ -456,6 +433,9 @@ class AutonomousHybridLinearSystem:
                 return i
         return None
 
+    class StepForwardException(Exception):
+        pass
+
     def step_forward(self, x, mode_x=None):
         """
         Compute the one-step forward simulation x[n+1] = A[i] * x[n] + g[i]
@@ -467,10 +447,12 @@ class AutonomousHybridLinearSystem:
         """
         assert(isinstance(x, torch.Tensor))
         assert(x.shape == (self.x_dim,))
+
         if mode_x is None:
             mode_x = self.mode(x)
         if mode_x is None:
-            raise Exception("step_forward(): the state is not in any mode.")
+            raise self.StepForwardException(
+                    "step_forward(): x is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
 
     def possible_next_states(self, x):
@@ -512,3 +494,113 @@ class AutonomousHybridLinearSystem:
             prob.solve()
             lower[j] = prob.value
         return (lower, upper)
+
+
+def compute_discrete_time_system_cost_to_go(
+        system, x_start, num_steps, instantaneous_cost_fun):
+    """
+    Compute the cost-to-go ∑ᵢ c(x[i]) starting from x_start for the
+    discrete-time system.
+    @param system An AutonomousHybridLinearSystem instance.
+    @param x_start The starting state.
+    @param num_steps The length of horizon for the cost-to-go.
+    @param instantaneous_cost_fun A function evaluator that takes a state
+    and evaluates the one-step cost c(x).
+    """
+    assert(isinstance(x_start, torch.Tensor))
+    assert(x_start.shape == (system.x_dim,))
+    total_cost = torch.tensor(0., dtype=system.dtype)
+    x_i = x_start.clone()
+    total_cost += instantaneous_cost_fun(x_i)
+    for i in range(num_steps):
+        mode = None
+        for j in range(system.num_modes):
+            if (torch.all(system.P[j] @ x_i <= system.q[j])):
+                mode = j
+                x_i = system.A[j] @ x_i + system.g[j]
+                break
+        assert(mode is not None)
+        total_cost += instantaneous_cost_fun(x_i)
+    return total_cost
+
+
+def compute_continuous_time_system_cost_to_go(
+        system, x0, T, instantaneous_cost):
+    """
+    Compute the cost-to-go for a continuous time piecewise affine system.
+    The cost-to-go is defined as
+    V(x) = ∫ᵀ₀ cost(x(t))dt
+    We will first compute the system trajectory x(t), subjecto to the initial
+    value constraint x(0) = x0.
+    Mathematically, we solve the following initial value problem:
+    Define a state as [x(t), V(t)] with the ODE
+    ẋ = Aᵢx+gᵢ if Pᵢx≤ qᵢ
+    V̇ = cost(x)
+    We integrate this ODE from the initial value [x0, 0] until T.
+    @param system An AutonomousHybridLinearSystem representing the continuous
+    time piecewise affine system.
+    @param T The terminal time. Must be a positive float.
+    @param instantaneous_cost A callable. The function cost(x) that evaluates
+    the instantaneous cost on x.
+    @return (V, sol) V is the total cost-to-go from x0., sol is the return from
+    solve_ivp. Check
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.integrate.solve_ivp.html
+    """
+    assert(isinstance(system, AutonomousHybridLinearSystem))
+    assert(isinstance(T, float))
+    assert(T >= 0)
+    assert(isinstance(x0, torch.Tensor))
+    assert(x0.shape == (system.x_dim,))
+
+    def ivp_fun(t, y):
+        x = y[:system.x_dim]
+        ydot = np.empty(system.x_dim + 1)
+        with torch.no_grad():
+            x_torch = torch.from_numpy(x)
+            ydot[:system.x_dim] = system.step_forward(x_torch)
+            ydot[-1] = instantaneous_cost(x_torch)
+        return ydot
+
+    sol = solve_ivp(ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8)
+    return (sol.y[-1, -1], sol)
+
+
+def generate_cost_to_go_samples(
+        system, x0_samples, T, instantaneous_cost, discrete_time_flag):
+    """
+    Generate the mapping from the initial state to the cost-to-go, by
+    simulating the system for a given horizon.
+    @param system An AutonomousHybridLinearSystem instance.
+    @param x0_samples A list of pytorch tensors, x0_samples[i] is the i'th
+    sample
+    @param T The simulation horizon. T must be an int if
+    discrete_time_flag=True, otherwise T is a float.
+    @param instantaneous_cost A callable, evaluates the instantaneous cost for
+    a state.
+    @param discrete_time_flag A flag indicating whether @p system is
+    discrete time or continuous time.
+    @return state_cost_pairs A list of tuples. state_cost_pairs[i] contains
+    a tuple (state, cost). It only includes the states starting from which the
+    trajectory always stays within the domain Pᵢ x≤ qᵢ for some mode i.
+    """
+    assert(isinstance(system, AutonomousHybridLinearSystem))
+    assert(isinstance(x0_samples, list))
+    if discrete_time_flag:
+        assert(isinstance(T, int))
+    else:
+        assert(isinstance(T, float))
+    state_cost_pairs = [None] * len(x0_samples)
+    num_pairs = 0
+    for x0 in x0_samples:
+        try:
+            if discrete_time_flag:
+                cost_x0 = compute_discrete_time_system_cost_to_go(
+                    system, x0, T, instantaneous_cost)
+            else:
+                cost_x0 = compute_continuous_time_system_cost_to_go(
+                    system, x0, T, instantaneous_cost)
+            state_cost_pairs[num_pairs] = (x0, cost_x0)
+            num_pairs += 1
+        except AutonomousHybridLinearSystem.StepForwardException:
+            pass
+    return state_cost_pairs[:num_pairs]
