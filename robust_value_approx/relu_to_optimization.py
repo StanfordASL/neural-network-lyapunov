@@ -31,6 +31,64 @@ def ComputeReLUActivationPattern(model_relu, x):
     return activation_pattern
 
 
+def compute_all_relu_activation_patterns(relu, x):
+    """
+    Similar to ComputeReLUActionPattern(), but return a list of activation
+    patterns (when the input to a ReLU unit is 0, that ReLU unit could be
+    regarded as both active or inactive, which could give different gradient).
+    @param relu A (leaky) ReLU network.
+    @param x A pytorch tensor. The input to the relu network.
+    """
+    patterns = queue.Queue()
+    patterns.put([])
+    layer_x = x
+    for layer in relu:
+        if (isinstance(layer, nn.Linear)):
+            layer_x = layer.forward(layer_x)
+        elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
+            # layer_patterns include all possible activation pattern in this
+            # layer.
+            layer_patterns = queue.Queue()
+            layer_patterns.put([])
+            for i in range(layer_x.numel()):
+                layer_patterns_len = layer_patterns.qsize()
+                for _ in range(layer_patterns_len):
+                    front = layer_patterns.get()
+                    if layer_x[i] > 0:
+                        front_clone = front.copy()
+                        front_clone.append(True)
+                        layer_patterns.put(front_clone)
+                    elif layer_x[i] < 0:
+                        front_clone = front.copy()
+                        front_clone.append(False)
+                        layer_patterns.put(front_clone)
+                    else:
+                        front_clone = front.copy()
+                        front_clone.append(True)
+                        layer_patterns.put(front_clone)
+                        front_clone = front.copy()
+                        front_clone.append(False)
+                        layer_patterns.put(front_clone)
+
+            layer_x = layer.forward(layer_x)
+
+            patterns_len = patterns.qsize()
+            layer_patterns_len = layer_patterns.qsize()
+            for _ in range(patterns_len):
+                patterns_front = patterns.get()
+                for _ in range(layer_patterns_len):
+                    patterns_front_clone = patterns_front.copy()
+                    layer_patterns_front = layer_patterns.get()
+                    patterns_front_clone.append(layer_patterns_front)
+                    patterns.put(patterns_front_clone)
+                    layer_patterns.put(layer_patterns_front)
+    # convert patterns from queue to list.
+    patterns_list = [None] * patterns.qsize()
+    for i in range(len(patterns_list)):
+        patterns_list[i] = patterns.get()
+    return patterns_list
+
+
 def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
     """
     Given a ReLU network, and a given activation pattern, the ReLU network can

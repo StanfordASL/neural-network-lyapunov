@@ -98,6 +98,67 @@ class TestReLU(unittest.TestCase):
         test_fun(torch.tensor([4, 3], dtype=self.dtype))
         test_fun(torch.tensor([-10, -4], dtype=self.dtype))
 
+    def test_compute_all_relu_activation_patterns(self):
+        linear1 = nn.Linear(2, 3)
+        linear1.weight.data = torch.tensor(
+            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            [-11, 13, 4], dtype=self.dtype)
+        linear2 = nn.Linear(3, 3)
+        linear2.weight.data = torch.tensor(
+            [[3, -2, -1], [1, -4, 0], [0, 1, -2]], dtype=self.dtype)
+        linear2.bias.data = torch.tensor(
+            [-11, 13, 48], dtype=self.dtype)
+        relu = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU())
+
+        # For this input, all ReLU unit inputs are either > 0 or < 0
+        patterns = relu_to_optimization.compute_all_relu_activation_patterns(
+            relu, torch.tensor([1, 2], dtype=self.dtype))
+        self.assertEqual(len(patterns), 1)
+        self.assertEqual(
+            patterns[0], [[False, True, True], [False, False, True]])
+
+        # For this input, the input to first layer relu are [0, 36, 39], and
+        # the input to the second layer relu are [-122, -131, 6]. Note that
+        # one of the input is 0.
+        patterns = relu_to_optimization.compute_all_relu_activation_patterns(
+            relu, torch.tensor([1, 5], dtype=self.dtype))
+        self.assertEqual(len(patterns), 2)
+        self.assertEqual(
+            patterns[0], [[True, True, True], [False, False, True]])
+        self.assertEqual(
+            patterns[1], [[False, True, True], [False, False, True]])
+
+        # For this input, the input to first layer relu are [0, 0, -33], and
+        # the input to the second layer relu are [-11, 13, 38]. Note that
+        # two of the inputs are 0.
+        patterns = relu_to_optimization.compute_all_relu_activation_patterns(
+            relu, torch.tensor([-35, 23], dtype=self.dtype))
+        self.assertEqual(len(patterns), 4)
+        self.assertEqual(
+            patterns[0], [[True, True, False], [False, True, True]])
+        self.assertEqual(
+            patterns[1], [[True, False, False], [False, True, True]])
+        self.assertEqual(
+            patterns[2], [[False, True, False], [False, True, True]])
+        self.assertEqual(
+            patterns[3], [[False, False, False], [False, True, True]])
+
+        # For this input, the input to first layer relu are [0, 38, 43], and
+        # the input to the second layer relu are [-130, -139, 0]. Note that
+        # two of the inputs are 0.
+        patterns = relu_to_optimization.compute_all_relu_activation_patterns(
+            relu, torch.tensor([3, 4], dtype=self.dtype))
+        self.assertEqual(len(patterns), 4)
+        self.assertEqual(
+            patterns[0], [[True, True, True], [False, False, True]])
+        self.assertEqual(
+            patterns[1], [[True, True, True], [False, False, False]])
+        self.assertEqual(
+            patterns[2], [[False, True, True], [False, False, True]])
+        self.assertEqual(
+            patterns[3], [[False, True, True], [False, False, False]])
+
     def test_relu_given_activation_pattern(self):
         def test_relu_given_activation_pattern_util(self, model, x):
             activation_pattern = relu_to_optimization.\
