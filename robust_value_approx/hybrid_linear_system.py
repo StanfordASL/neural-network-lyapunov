@@ -597,9 +597,10 @@ def generate_cost_to_go_samples(
                 cost_x0 = compute_discrete_time_system_cost_to_go(
                     system, x0, T, instantaneous_cost)
             else:
-                cost_x0 = compute_continuous_time_system_cost_to_go(
+                cost_x0, _ = compute_continuous_time_system_cost_to_go(
                     system, x0, T, instantaneous_cost)
-            state_cost_pairs[num_pairs] = (x0, cost_x0)
+            state_cost_pairs[num_pairs] = (
+                x0, torch.tensor(cost_x0, dtype=system.dtype))
             num_pairs += 1
         except AutonomousHybridLinearSystem.StepForwardException:
             pass

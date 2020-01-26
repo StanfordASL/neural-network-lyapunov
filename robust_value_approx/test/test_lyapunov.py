@@ -307,6 +307,28 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                 1., 3., self.system1, relu, self.x_equilibrium1,
                 torch.tensor([0.3, 0.4], dtype=self.dtype))
 
+    def test_lyapunov_value(self):
+        dut1 = lyapunov.LyapunovHybridLinearSystem(self.system1)
+        dut2 = lyapunov.LyapunovHybridLinearSystem(self.system2)
+        relu = setup_leaky_relu(dut1.system.dtype)
+        V_rho = 0.1
+
+        def test_fun(x):
+            self.assertAlmostEqual(
+                (relu.forward(x) - relu.forward(self.x_equilibrium1) +
+                 V_rho * torch.norm(x - self.x_equilibrium1, p=1)).item(),
+                dut1.lyapunov_value(relu, x, self.x_equilibrium1, V_rho).
+                item())
+            self.assertAlmostEqual(
+                (relu.forward(x) - relu.forward(self.x_equilibrium2) +
+                 V_rho * torch.norm(x - self.x_equilibrium2, p=1)).item(),
+                dut2.lyapunov_value(relu, x, self.x_equilibrium2, V_rho).
+                item())
+
+        test_fun(torch.tensor([0., 0.], dtype=dut1.system.dtype))
+        test_fun(torch.tensor([1., 0.], dtype=dut1.system.dtype))
+        test_fun(torch.tensor([-0.2, 0.4], dtype=dut1.system.dtype))
+
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
 
@@ -331,27 +353,39 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             test_hybrid_linear_system.setup_transformed_trecate_system(
                 self.theta2, self.x_equilibrium2)
 
-    def test_lyapunov_value(self):
-        dut1 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
-        dut2 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system2)
-        relu = setup_leaky_relu(dut1.system.dtype)
-        V_rho = 0.1
+    def test_lyapunov_derivative(self):
+        relu = setup_relu(torch.float64)
+        V_rho = 2.
+        epsilon = 0.1
 
-        def test_fun(x):
-            self.assertAlmostEqual(
-                (relu.forward(x) - relu.forward(self.x_equilibrium1) +
-                 V_rho * torch.norm(x - self.x_equilibrium1, p=1)).item(),
-                dut1.lyapunov_value(relu, x, self.x_equilibrium1, V_rho).
-                item())
-            self.assertAlmostEqual(
-                (relu.forward(x) - relu.forward(self.x_equilibrium2) +
-                 V_rho * torch.norm(x - self.x_equilibrium2, p=1)).item(),
-                dut2.lyapunov_value(relu, x, self.x_equilibrium2, V_rho).
-                item())
+        def test_fun(system, x, x_equilibrium):
+            x_next_possible = system.possible_next_states(x)
+            relu_at_equilibrium = relu.forward(x_equilibrium)
+            dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
+            V_next_possible = [dut.lyapunov_value(
+                relu, x_next, x_equilibrium, V_rho, relu_at_equilibrium) for
+                x_next in x_next_possible]
+            V = dut.lyapunov_value(
+                relu, x, x_equilibrium, V_rho, relu_at_equilibrium)
+            lyapunov_derivative_expected = [
+                V_next - V + epsilon * V for V_next in V_next_possible]
+            lyapunov_derivative = dut.lyapunov_derivative(
+                x, relu, x_equilibrium, V_rho, epsilon)
+            self.assertEqual(
+                len(lyapunov_derivative), len(lyapunov_derivative_expected))
+            for i in range(len(lyapunov_derivative)):
+                self.assertAlmostEqual(
+                    lyapunov_derivative[i].item(),
+                    lyapunov_derivative_expected[i].item())
 
-        test_fun(torch.tensor([0., 0.], dtype=dut1.system.dtype))
-        test_fun(torch.tensor([1., 0.], dtype=dut1.system.dtype))
-        test_fun(torch.tensor([-0.2, 0.4], dtype=dut1.system.dtype))
+        for x in ([0.2, 0.5], [0.1, -0.4], [0., 0.5], [-0.2, 0.]):
+            test_fun(
+                self.system1, torch.tensor(x, dtype=self.system1.dtype),
+                self.x_equilibrium1)
+            test_fun(
+                self.system2,
+                self.R2 @ torch.tensor(x, dtype=self.system2.dtype) +
+                self.x_equilibrium2, self.x_equilibrium2)
 
     def test_lyapunov_positivity_as_milp(self):
         dut1 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
