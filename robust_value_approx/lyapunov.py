@@ -309,6 +309,29 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         """
         super(LyapunovDiscreteTimeHybridSystem, self).__init__(system)
 
+    def lyapunov_derivative(
+            self, x, relu_model, x_equilibrium, V_rho, epsilon):
+        """
+        Compute the Lyapunov derivative condition
+        V(x[n+1]) - V(x[n]) + εV(x[n])
+        Note that there might be multiple posible x[n+1] for a given x[n]
+        (when x[n] is on the boundary of two neighbouring modes), so we return
+        a list of values as all possible V(x[n+1]) - V(x[n]) + εV(x[n])
+        @param x The current state x[n].
+        @return V_derivative_possible A list of possible
+        V(x[n+1]) - V(x[n]) + εV(x[n])
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.system.x_dim,))
+        x_next_possible = self.system.possible_next_states(x)
+        relu_at_equilibrium = relu_model.forward(x_equilibrium)
+        V_next_possible = [self.lyapunov_value(
+            relu_model, x_next, x_equilibrium, V_rho, relu_at_equilibrium) for
+            x_next in x_next_possible]
+        V = self.lyapunov_value(
+            relu_model, x, x_equilibrium, V_rho, relu_at_equilibrium)
+        return [V_next - V + epsilon * V for V_next in V_next_possible]
+
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
