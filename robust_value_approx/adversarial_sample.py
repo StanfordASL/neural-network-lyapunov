@@ -312,6 +312,9 @@ class AdversarialSampleGenerator:
         for i in range(max_iter):
             (prob, x, s, alpha) = self.setup_val_opt(x_val=x_adv)
             prob.gurobi_model.optimize()
+            if prob.gurobi_model.solCount < 1:
+                print("Warning: adversarial sample became infeasible")
+                break
             Vx = prob.compute_objective_from_mip_data_and_solution(
                 penalty=penalty)
             nx = model(x_adv)
