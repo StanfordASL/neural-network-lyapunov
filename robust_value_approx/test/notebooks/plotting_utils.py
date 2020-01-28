@@ -3,6 +3,7 @@ import plotly.graph_objs as go
 import plotly.figure_factory as ff
 import torch
 import numpy as np
+import random
 
 
 ROBUST_COLOR = '#e32249'
@@ -335,6 +336,30 @@ def rollout_range(vf, x0_lo, x0_up, state_indices, names, n=10):
             continue
         x_traj_min = torch.min(x_traj_min, x_traj)
         x_traj_max = torch.max(x_traj_max, x_traj)
+    colors = [
+        ("#%06x" % random.randint(0, 0xFFFFFF)) for i in range(len(names))]
+    x0 = .5 * (x0_lo + x0_up)
+    (x_traj, u_traj, _) = vf.sol_to_traj(x0, *V(x0)[1:])
+    x_traj_min = torch.min(x_traj_min, x_traj)
+    x_traj_max = torch.max(x_traj_max, x_traj)
+    for i in state_indices:
+        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+            marker=dict(color=[colors[i]]*vf.N),
+            line=dict(color=colors[i])))
+    (x_traj, u_traj, _) = vf.sol_to_traj(x0_lo, *V(x0_lo)[1:])
+    x_traj_min = torch.min(x_traj_min, x_traj)
+    x_traj_max = torch.max(x_traj_max, x_traj)
+    for i in state_indices:
+        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+            marker=dict(color=[colors[i]]*vf.N),
+            line=dict(color=colors[i])))
+    (x_traj, u_traj, _) = vf.sol_to_traj(x0_up, *V(x0_up)[1:])
+    x_traj_min = torch.min(x_traj_min, x_traj)
+    x_traj_max = torch.max(x_traj_max, x_traj)
+    for i in state_indices:
+        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+            marker=dict(color=[colors[i]]*vf.N),
+            line=dict(color=colors[i])))
     for i in state_indices:
         fig.add_trace(go.Scatter(
             y=x_traj_min[i, :],
@@ -359,16 +384,6 @@ def rollout_range(vf, x0_lo, x0_up, state_indices, names, n=10):
             name=names[i],
             fill='tonexty',
             showlegend=False))
-    x0 = .5 * (x0_lo + x0_up)
-    (x_traj, u_traj, _) = vf.sol_to_traj(x0, *V(x0)[1:])
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i]))
-    (x_traj, u_traj, _) = vf.sol_to_traj(x0_lo, *V(x0_lo)[1:])
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i]))
-    (x_traj, u_traj, _) = vf.sol_to_traj(x0_up, *V(x0_up)[1:])
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i]))
     return fig
 
 
