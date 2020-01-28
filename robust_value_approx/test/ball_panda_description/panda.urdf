@@ -320,7 +320,9 @@
     <child link="panda_paddle"/>
     <origin rpy="1.570796 3.14159 1.570796" xyz="-.05 0 0.105"/>
   </joint>
-    <link name="panda_paddle_target">
+
+
+<!--     <link name="panda_paddle_target">
     <inertial>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <mass value="0"/>
@@ -339,5 +341,27 @@
     <parent link="panda_paddle"/>
     <child link="panda_paddle_target"/>
     <origin rpy="0 0 0" xyz="0 .005 .175"/>
+  </joint> -->
+
+  <link name="panda_paddle_target">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value="0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <sphere radius=".01"/>
+      </geometry>
+      <material name="paddle_target_yellow">
+        <color rgba="1. .5 0. 1."/>
+      </material>
+    </visual>
+  </link>
+  <joint name="panda_paddle_target_joint" type="fixed">
+    <parent link="panda_hand"/>
+    <child link="panda_paddle_target"/>
+    <origin rpy="-3.064 -0.021 0.034" xyz="0.129, 0.002, 0.128"/>
   </joint>
+
 </robot>
