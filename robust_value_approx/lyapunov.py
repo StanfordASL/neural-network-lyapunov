@@ -565,20 +565,14 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         possible_activation_patterns = relu_to_optimization.\
             compute_all_relu_activation_patterns(relu_model, x)
         dReLU_dx_all = [relu_to_optimization.ReLUGivenActivationPattern(
-            relu_model, self.system.x_dim, pattern, system.dtype) for pattern
-            in possible_activation_patterns]
-        dReLU_all = [None] * (len(dReLU_dx_all) * len(xdot_all))
-        for i in range(len(dReLU_dx_all)):
-            for j in range(len(xdot_all)):
-                dReLU_all[i * xdot_all + j] = dReLU_dx_all[i].squeeze() @\
-                    xdot_all[j].squeeze()
-
+            relu_model, self.system.x_dim, pattern, self.system.dtype)[0] for
+            pattern in possible_activation_patterns]
         # ∂|x-x*|₁/∂x can have different values if x(i) = x*(i).
         state_error_grad_queue = queue.Queue()
         state_error_grad_queue.put([])
         for i in range(self.system.x_dim):
             state_error_grad_queue_len = state_error_grad_queue.qsize()
-            for _ in range(state_error_grad_queue):
+            for _ in range(state_error_grad_queue_len):
                 queue_front = state_error_grad_queue.get()
                 if x[i] > x_equilibrium[i]:
                     queue_front_clone = queue_front.copy()
@@ -596,15 +590,22 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                     queue_front_clone.append(-1.)
                     state_error_grad_queue.put(queue_front_clone)
         state_error_grad = [None] * state_error_grad_queue.qsize()
-        for i in len(state_error_grad):
+        for i in range(len(state_error_grad)):
             state_error_grad[i] = torch.tensor(
                 state_error_grad_queue.get(), dtype=self.system.dtype)
-        V_derivative_all = [None] * (len(dReLU_all) * len(state_error_grad))
-        for i in range(len(dReLU_all)):
+
+        # First compute dV/dx, then compute Vdot = dV/dx * xdot
+        dV_dx = [None] * (len(dReLU_dx_all) * len(state_error_grad))
+        for i in range(len(dReLU_dx_all)):
             for j in range(len(state_error_grad)):
-                V_derivative_all[i * len(state_error_grad) + j] = dReLU_all[i]\
-                    + V_rho *state_error_grad[j] + epsilon * V
-        return V_derivative_all
+                dV_dx[i * len(state_error_grad) + j] = \
+                    dReLU_dx_all[i].squeeze() + \
+                    V_rho * state_error_grad[j].squeeze()
+        Vdot_all = [None] * (len(dV_dx) * len(xdot_all))
+        for i in range(len(dV_dx)):
+            for j in range(len(xdot_all)):
+                Vdot_all[i * len(xdot_all) + j] = dV_dx[i] @ xdot_all[j]
+        return [Vdot + epsilon * V for Vdot in Vdot_all]
 
     def __compute_Aisi_bounds(self):
         """

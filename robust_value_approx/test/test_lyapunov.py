@@ -359,7 +359,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         epsilon = 0.1
 
         def test_fun(system, x, x_equilibrium):
-            x_next_possible = system.possible_next_states(x)
+            x_next_possible = system.possible_dx(x)
             relu_at_equilibrium = relu.forward(x_equilibrium)
             dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
             V_next_possible = [dut.lyapunov_value(
@@ -909,6 +909,112 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         self.x_equilibrium3 = torch.tensor([1., 2.], dtype=self.dtype)
         self.system3 = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(self.x_equilibrium3)
+
+    def test_lyapunov_derivative(self):
+        linear1 = nn.Linear(2, 3)
+        linear1.weight.data = torch.tensor(
+            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            [-1, 13, 4], dtype=self.dtype)
+        linear2 = nn.Linear(3, 3)
+        linear2.weight.data = torch.tensor(
+            [[3, -2, -1], [1, -4, 0], [0, 1, -2]], dtype=self.dtype)
+        linear2.bias.data = torch.tensor(
+            [-11, 13, 48], dtype=self.dtype)
+        linear3 = nn.Linear(3, 1)
+        linear3.weight.data = torch.tensor([[1, 2, 3]], dtype=self.dtype)
+        linear3.bias.data = torch.tensor([1], dtype=self.dtype)
+        relu = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(), linear3)
+
+        V_rho = 2.
+        epsilon = 0.1
+        dut1 = lyapunov.LyapunovContinuousTimeHybridSystem(self.system1)
+        x = torch.tensor([0.5, 0.2], dtype=self.system1.dtype)
+        lyapunov_derivatives = dut1.lyapunov_derivative(
+            x, relu, self.x_equilibrium1, V_rho, epsilon)
+        self.assertEqual(len(lyapunov_derivatives), 1)
+        activation_pattern = relu_to_optimization.\
+            ComputeReLUActivationPattern(relu, x)
+        g, _, _, _ = relu_to_optimization.ReLUGivenActivationPattern(
+            relu, self.system1.x_dim, activation_pattern, self.dtype)
+        xdot = self.system1.step_forward(x)
+        Vdot = g.squeeze() @ xdot + V_rho * torch.tensor(
+            [1, 1], dtype=self.dtype) @ xdot
+        self.assertAlmostEqual(
+            lyapunov_derivatives[0].item(),
+            (Vdot + epsilon * dut1.lyapunov_value(
+                relu, x, self.x_equilibrium1, V_rho)).item())
+
+        # x has multiple activation patterns.
+        x = torch.tensor([0.5, 0.25], dtype=self.dtype)
+        lyapunov_derivatives = dut1.lyapunov_derivative(
+            x, relu, self.x_equilibrium1, V_rho, epsilon)
+        self.assertEqual(len(lyapunov_derivatives), 2)
+        activation_patterns = relu_to_optimization.\
+            compute_all_relu_activation_patterns(relu, x)
+        dReLU_dx_all = [relu_to_optimization.ReLUGivenActivationPattern(
+            relu, self.system1.x_dim, pattern, self.dtype)[0] for pattern in
+            activation_patterns]
+        dVdx_all = [
+            dReLU_dx.squeeze() +
+            V_rho * torch.tensor([1, 1], dtype=self.dtype) for dReLU_dx in
+            dReLU_dx_all]
+        xdot = self.system1.step_forward(x)
+        Vdot_all = [dV_dx @ xdot for dV_dx in dVdx_all]
+        V = dut1.lyapunov_value(relu, x, self.x_equilibrium1, V_rho)
+        self.assertAlmostEqual(
+            (lyapunov_derivatives[0]).item(),
+            (Vdot_all[0] + epsilon * V).item())
+        self.assertAlmostEqual(
+            (lyapunov_derivatives[1]).item(),
+            (Vdot_all[1] + epsilon * V).item())
+
+        # The gradient of |x-x*|₁ has multiple possible gradients.
+        x = torch.tensor([0.25, 0], dtype=self.dtype)
+        lyapunov_derivatives = dut1.lyapunov_derivative(
+            x, relu, self.x_equilibrium1, V_rho, epsilon)
+        self.assertEqual(len(lyapunov_derivatives), 2)
+        activation_pattern = relu_to_optimization.\
+            ComputeReLUActivationPattern(relu, x)
+        g, _, _, _ = relu_to_optimization.ReLUGivenActivationPattern(
+            relu, self.system1.x_dim, activation_pattern, self.dtype)
+        xdot = self.system1.step_forward(x)
+        Vdot0 = g.squeeze() @ xdot + V_rho * torch.tensor(
+            [1, 1], dtype=self.dtype) @ xdot
+        Vdot1 = g.squeeze() @ xdot + V_rho * torch.tensor(
+            [1, -1], dtype=self.dtype) @ xdot
+        self.assertAlmostEqual(
+            lyapunov_derivatives[0].item(),
+            (Vdot0 + epsilon * dut1.lyapunov_value(
+                relu, x, self.x_equilibrium1, V_rho)).item())
+        self.assertAlmostEqual(
+            lyapunov_derivatives[1].item(),
+            (Vdot1 + epsilon * dut1.lyapunov_value(
+                relu, x, self.x_equilibrium1, V_rho)).item())
+
+        # x is on the boundary of the hybrid modes, and the gradient of
+        # |x-x*|₁ has multiple values.
+        x = torch.tensor([0., 0.1], dtype=self.dtype)
+        lyapunov_derivatives = dut1.lyapunov_derivative(
+            x, relu, self.x_equilibrium1, V_rho, epsilon)
+        self.assertEqual(len(lyapunov_derivatives), 4)
+        activation_pattern = relu_to_optimization.\
+            ComputeReLUActivationPattern(relu, x)
+        g, _, _, _ = relu_to_optimization.ReLUGivenActivationPattern(
+            relu, self.system1.x_dim, activation_pattern, self.dtype)
+        xdot_all = self.system1.possible_dx(x)
+        dVdx0 = g.squeeze() + V_rho * torch.tensor([1, 1], dtype=self.dtype)
+        dVdx1 = g.squeeze() + V_rho * torch.tensor([-1, 1], dtype=self.dtype)
+        Vdot = [None] * 4
+        Vdot[0] = dVdx0 @ xdot_all[0]
+        Vdot[1] = dVdx0 @ xdot_all[1]
+        Vdot[2] = dVdx1 @ xdot_all[0]
+        Vdot[3] = dVdx1 @ xdot_all[1]
+        V = dut1.lyapunov_value(relu, x, self.x_equilibrium1, V_rho)
+        for i in range(4):
+            self.assertAlmostEqual(
+                lyapunov_derivatives[i].item(),
+                (Vdot[i] + epsilon * V).item())
 
     def test_add_relu_gradient_times_dynamics(self):
         """
