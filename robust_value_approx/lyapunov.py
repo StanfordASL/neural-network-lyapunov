@@ -2,6 +2,8 @@
 import gurobipy
 import torch
 
+import queue
+
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
@@ -534,7 +536,75 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         super(LyapunovContinuousTimeHybridSystem, self).__init__(system)
 
     def lyapunov_derivative(
-            self, x, relu_model, x-equilibrium, V_rho, epsilon):
+            self, x, relu_model, x_equilibrium, V_rho, epsilon):
+        """
+        Compute V̇(x) + εV(x) for a given x.
+        Notice that V̇(x) can have multiple values for a given x, for two
+        reasons:
+        1. When the input to a (leaky) ReLU unit is exactly 0, the gradient of
+           the ReLU output w.r.t ReLU unit input can be either 1 or 0.
+        2. When the state is at the boundary of two hybrid modes, ẋ could take
+           two values.
+        This function return a list of all possible values.
+        @param x The state to be evaluated at.
+        @param relu_model A (leaky) ReLU network.
+        @param x_equilbrium The equilibrium state.
+        @param V_rho ρ in defining Lyapunov as V(x)=ReLU(x) - ReLU(x*)+ρ|x-x*|₁
+        @param epsilon ε in V̇(x) + εV(x)
+        @return possible_lyapunov_derivatives A list of torch tensors
+        representing all possible V̇(x) + εV(x).
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.system.x_dim,))
+        assert(isinstance(x_equilibrium, torch.Tensor))
+        assert(x_equilibrium.shape == (self.system.x_dim,))
+        assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
+        V = self.lyapunov_value(relu_model, x, x_equilibrium, V_rho)
+        xdot_all = self.system.possible_dx(x)
+        possible_activation_patterns = relu_to_optimization.\
+            compute_all_relu_activation_patterns(relu_model, x)
+        dReLU_dx_all = [relu_to_optimization.ReLUGivenActivationPattern(
+            relu_model, self.system.x_dim, pattern, system.dtype) for pattern
+            in possible_activation_patterns]
+        dReLU_all = [None] * (len(dReLU_dx_all) * len(xdot_all))
+        for i in range(len(dReLU_dx_all)):
+            for j in range(len(xdot_all)):
+                dReLU_all[i * xdot_all + j] = dReLU_dx_all[i].squeeze() @\
+                    xdot_all[j].squeeze()
+
+        # ∂|x-x*|₁/∂x can have different values if x(i) = x*(i).
+        state_error_grad_queue = queue.Queue()
+        state_error_grad_queue.put([])
+        for i in range(self.system.x_dim):
+            state_error_grad_queue_len = state_error_grad_queue.qsize()
+            for _ in range(state_error_grad_queue):
+                queue_front = state_error_grad_queue.get()
+                if x[i] > x_equilibrium[i]:
+                    queue_front_clone = queue_front.copy()
+                    queue_front_clone.append(1.)
+                    state_error_grad_queue.put(queue_front_clone)
+                elif x[i] < x_equilibrium[i]:
+                    queue_front_clone = queue_front.copy()
+                    queue_front_clone.append(-1.)
+                    state_error_grad_queue.put(queue_front_clone)
+                else:
+                    queue_front_clone = queue_front.copy()
+                    queue_front_clone.append(1.)
+                    state_error_grad_queue.put(queue_front_clone)
+                    queue_front_clone = queue_front.copy()
+                    queue_front_clone.append(-1.)
+                    state_error_grad_queue.put(queue_front_clone)
+        state_error_grad = [None] * state_error_grad_queue.qsize()
+        for i in len(state_error_grad):
+            state_error_grad[i] = torch.tensor(
+                state_error_grad_queue.get(), dtype=self.system.dtype)
+        V_derivative_all = [None] * (len(dReLU_all) * len(state_error_grad))
+        for i in range(len(dReLU_all)):
+            for j in range(len(state_error_grad)):
+                V_derivative_all[i * len(state_error_grad) + j] = dReLU_all[i]\
+                    + V_rho *state_error_grad[j] + epsilon * V
+        return V_derivative_all
 
     def __compute_Aisi_bounds(self):
         """
