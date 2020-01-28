@@ -140,3 +140,7 @@ gurobi.log
 # pytorch logs
 robust_value_approx/test/notebooks/runs
 robust_value_approx/test/notebooks/*.p
+
+*.DS_Store
+
+robust_value_approx/test/notebooks/panda_traj.json
