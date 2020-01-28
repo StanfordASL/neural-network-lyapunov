@@ -340,26 +340,29 @@ def rollout_range(vf, x0_lo, x0_up, state_indices, names, n=10):
         ("#%06x" % random.randint(0, 0xFFFFFF)) for i in range(len(names))]
     x0 = .5 * (x0_lo + x0_up)
     (x_traj, u_traj, _) = vf.sol_to_traj(x0, *V(x0)[1:])
-    x_traj_min = torch.min(x_traj_min, x_traj)
-    x_traj_max = torch.max(x_traj_max, x_traj)
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
-            marker=dict(color=[colors[i]]*vf.N),
-            line=dict(color=colors[i])))
+    if x_traj is not None:
+        x_traj_min = torch.min(x_traj_min, x_traj)
+        x_traj_max = torch.max(x_traj_max, x_traj)
+        for i in state_indices:
+            fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+                marker=dict(color=[colors[i]]*vf.N),
+                line=dict(color=colors[i])))
     (x_traj, u_traj, _) = vf.sol_to_traj(x0_lo, *V(x0_lo)[1:])
-    x_traj_min = torch.min(x_traj_min, x_traj)
-    x_traj_max = torch.max(x_traj_max, x_traj)
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
-            marker=dict(color=[colors[i]]*vf.N),
-            line=dict(color=colors[i])))
+    if x_traj is not None:
+        x_traj_min = torch.min(x_traj_min, x_traj)
+        x_traj_max = torch.max(x_traj_max, x_traj)
+        for i in state_indices:
+            fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+                marker=dict(color=[colors[i]]*vf.N),
+                line=dict(color=colors[i])))
     (x_traj, u_traj, _) = vf.sol_to_traj(x0_up, *V(x0_up)[1:])
-    x_traj_min = torch.min(x_traj_min, x_traj)
-    x_traj_max = torch.max(x_traj_max, x_traj)
-    for i in state_indices:
-        fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
-            marker=dict(color=[colors[i]]*vf.N),
-            line=dict(color=colors[i])))
+    if x_traj is not None:
+        x_traj_min = torch.min(x_traj_min, x_traj)
+        x_traj_max = torch.max(x_traj_max, x_traj)
+        for i in state_indices:
+            fig.add_trace(go.Scatter(y=x_traj[i, :], name=names[i],
+                marker=dict(color=[colors[i]]*vf.N),
+                line=dict(color=colors[i])))
     for i in state_indices:
         fig.add_trace(go.Scatter(
             y=x_traj_min[i, :],
