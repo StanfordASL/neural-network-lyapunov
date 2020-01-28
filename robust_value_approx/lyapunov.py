@@ -533,6 +533,9 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
     def __init__(self, system):
         super(LyapunovContinuousTimeHybridSystem, self).__init__(system)
 
+    def lyapunov_derivative(
+            self, x, relu_model, x-equilibrium, V_rho, epsilon):
+
     def __compute_Aisi_bounds(self):
         """
         Compute the element-wise bounds on Aᵢsᵢ

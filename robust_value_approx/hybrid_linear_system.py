@@ -455,11 +455,11 @@ class AutonomousHybridLinearSystem:
                     "step_forward(): x is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
 
-    def possible_next_states(self, x):
+    def possible_dx(self, x):
         """
-        Optimization problem cannot impose strictly inequality constraint,
-        hence for the state on the boundary of the hybrid modes, in
-        optimization we need to think about multiple possible states.
+        For state on the boundary of two modes, we regard that both modes are
+        possible (because in numerical optimization we can't impose strict
+        inequality constraint). So we return all Aᵢx+gᵢ if Pᵢx≤ qᵢ
         @param x The state
         @return next_states A list. If x is on the boundary of the modes, then
         return multiple possible next states, otherwise return a list of single

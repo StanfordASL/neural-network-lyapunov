@@ -60,7 +60,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         relu = setup_relu()
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = \
-            [system.possible_next_states(xi) for xi in state_samples_all]
+            [system.possible_dx(xi) for xi in state_samples_all]
         torch.manual_seed(0)
         loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost =\
             dut.total_loss(relu, state_samples_all, state_samples_next)
