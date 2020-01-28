@@ -14,6 +14,9 @@ class AdversarialWithBaselineTrainingOptions:
         self.num_steps_between_sampling = 100
         # number of random samples to initialize the buffer with
         self.init_buffer_size = 0
+        # number of training step to do initially 
+        # (should have a nonzero init buffer size)
+        self.init_num_train_steps = 0
         # number of additional random samples generated each sampling
         self.num_rand_extra = 0
         # number of adversarial optimization run at each sampling
@@ -135,7 +138,8 @@ class AdversarialWithBaseline:
         adv_data_ = torch.Tensor(0, self.x_dim).type(self.dtype)
         adv_label_ = torch.Tensor(0, 1).type(self.dtype)
         self.x_adv_opt_log = []
-        for k in range(opt.num_x_adv_opt):
+        k = 0
+        while k < opt.num_x_adv_opt:
             x_adv0 = self.get_random_x0()
             adv = self.as_generator.get_squared_bound_sample(
                 self.robust_model,
@@ -144,7 +148,12 @@ class AdversarialWithBaseline:
                 learning_rate=opt.x_adv_lr,
                 x_adv0=x_adv0)
             (_, adv_data_k, adv_label_k, _) = adv
-            if adv_data_k.shape[0] <= 1:
+            if adv_data_k.shape[0] == 0:
+                print("Warning: Initial sample was infeasible")
+                continue
+            else:
+                k += 1
+            if adv_data_k.shape[0] <= 1 and adv_data_k.shape[0] > 0:
                 print("Warning: no descent on adversarial sample")
             adv_data_ = torch.cat((adv_data_, adv_data_k), axis=0)
             adv_label_ = torch.cat((adv_label_, adv_label_k), axis=0)
@@ -172,6 +181,33 @@ class AdversarialWithBaseline:
                 (self.rand_data_buffer, rand_data_), axis=0)
             self.rand_label_buffer = torch.cat(
                 (self.rand_label_buffer, rand_label_), axis=0)
+        if self.num_total_iter_done == 0:
+            if opt.init_num_train_steps > 0:
+                assert(self.adv_data_buffer.shape[0] > 0)
+                assert(self.adv_data_buffer.shape[0]
+                       == self.rand_data_buffer.shape[0])
+                assert(self.adv_label_buffer.shape[0]
+                       == self.rand_label_buffer.shape[0])
+                for init_iter_num in range(opt.init_num_train_steps):
+                    data_i = np.random.choice(
+                        self.adv_data_buffer.shape[0],
+                        min(self.adv_data_buffer.shape[0], opt.batch_size),
+                        replace=False)
+                    adv_data = self.adv_data_buffer[data_i, :]
+                    adv_label = self.adv_label_buffer[data_i, :]
+                    y_pred_adv = self.robust_model(adv_data)
+                    robust_loss = self.robust_mse(y_pred_adv, adv_label)
+                    self.robust_optimizer.zero_grad()
+                    robust_loss.backward()
+                    self.robust_optimizer.step()
+                    # pick batch size data from buffer randomly
+                    rand_data = self.rand_data_buffer[data_i, :]
+                    rand_label = self.rand_label_buffer[data_i, :]
+                    y_pred_rand = self.baseline_model(rand_data)
+                    baseline_loss = self.baseline_mse(y_pred_rand, rand_label)
+                    self.baseline_optimizer.zero_grad()
+                    baseline_loss.backward()
+                    self.baseline_optimizer.step()
         iter_num = 0
         while iter_num < opt.num_iter_desired:
             assert(self.adv_data_buffer.shape[0]
