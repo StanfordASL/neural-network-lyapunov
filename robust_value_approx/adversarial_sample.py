@@ -383,6 +383,8 @@ class AdversarialSampleGenerator:
         V_buff = torch.Tensor(0, 1).type(self.dtype)
         for i in range(max_iter):
             Vx = self.V_with_grad(x_adv)
+            if Vx is None:
+                break
             nx = model(x_adv)
             epsilon = torch.pow(Vx - nx, 2)
             epsilon_buff = torch.cat(
