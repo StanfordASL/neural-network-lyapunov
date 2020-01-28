@@ -21,13 +21,16 @@ def get_value_function(xf, N=3):
     slip = spring_loaded_inverted_pendulum.SLIP(mass, l0, k, gravity)
     # piecewise linear system
     dtype = torch.float64
-    x_lo = torch.Tensor([0., .1, 0.]).type(dtype)
-    x_up = torch.Tensor([5., 1.5, 5.]).type(dtype)
+    x_lo = torch.Tensor([0., .5, 2.5]).type(dtype)
+    x_up = torch.Tensor([100., 1.5, 10.]).type(dtype)
     u_lo = torch.Tensor([np.pi/9]).type(dtype)
     u_up = torch.Tensor([np.pi/3]).type(dtype)
-    num_breaks_x = [1, 5, 5]
-    num_breaks_u = [15]
-    u_scale_down = .45
+    num_breaks_x = [1, 2, 3]
+    num_breaks_u = [3]
+    # reduces the validity of the control input discretization
+    u_scale_down = .475
+    # increases the validity of the state space discretization
+    x_buff = np.array([0., .15, .15])
     x_dim = len(num_breaks_x)
     u_dim = len(num_breaks_u)
     slip_hls = slip_hybrid_linear_system.SlipHybridLinearSystem(
@@ -65,6 +68,10 @@ def get_value_function(xf, N=3):
         xu_lim = np.array([all_limits[i][s[i]] for i in range(x_dim+u_dim)])
         xu_lo = xu_lim[:, 0]
         xu_up = xu_lim[:, 1]
+        xu_lo[:x_dim] = np.minimum(np.maximum(
+            xu_lo[:x_dim] - x_buff , x_lo), x_up)
+        xu_up[:x_dim] = np.minimum(np.maximum(
+            xu_up[:x_dim] + x_buff , x_lo), x_up)
         (A, B, c,
          a_t, b_t, c_t,
          P, q) = slip_hls.apex_map_linear_approximation(
@@ -84,13 +91,12 @@ def get_value_function(xf, N=3):
             hls.add_mode(A, B, c, P, q, check_polyhedron_bounded=True)
         utils.update_progress((k + 1) / indeces_samples.shape[0])
     print(str(hls.num_modes) + " hybrid modes created")
-    R = torch.eye(u_dim)
+    # cost function
     Q = torch.diag(torch.Tensor([1., 1., 0.]).type(dtype))
-    Rt = torch.eye(u_dim)
     Qt = torch.diag(torch.Tensor([100., 100., 0.]).type(dtype))
     vf = value_to_optimization.ValueFunction(hls, N, x_lo, x_up, u_lo, u_up)
-    vf.set_cost(Q=Q, R=R)
-    vf.set_terminal_cost(Qt=Qt, Rt=Rt)
+    vf.set_cost(Q=Q)
+    vf.set_terminal_cost(Qt=Qt)
     xtraj = xf.type(dtype).unsqueeze(1).repeat(1, N-1)
     vf.set_traj(xtraj=xtraj)
     return vf, slip
