@@ -109,11 +109,24 @@ class AdversarialSampleTest(unittest.TestCase):
                 self.assertGreaterEqual(eps_adv[-1, 0].item(),
                                         eps_sample.item())
 
+    def test_v_with_grad(self):
+        x_adv0 = torch.rand(self.x_dim, dtype=self.dtype) *\
+            (self.x0_up - self.x0_lo) + self.x0_lo
+        (prob, x, s, alpha) = self.as_generator.setup_val_opt(x_val=x_adv0)
+        prob.gurobi_model.optimize()
+        Vx_expect = prob.compute_objective_from_mip_data_and_solution(
+            penalty=1e-6)
+        Vx = self.as_generator.V_with_grad(x_adv0)
+        self.assertAlmostEqual(Vx.item(), Vx_expect.item(), places=4)
+
     def test_squared_bound_sample(self):
+        x_adv0 = torch.rand(self.x_dim, dtype=self.dtype) *\
+            (self.x0_up - self.x0_lo) + self.x0_lo
         max_iter = 20
         (eps_adv, x_adv,
          V_adv, _) = self.as_generator.get_squared_bound_sample(
-            self.model, max_iter=max_iter, conv_tol=1e-4, learning_rate=.1)
+            self.model, max_iter=max_iter, conv_tol=1e-4, learning_rate=.1,
+            x_adv0=x_adv0)
         self.assertLess(eps_adv.shape[0], max_iter)
         with torch.no_grad():
             for i in range(20):

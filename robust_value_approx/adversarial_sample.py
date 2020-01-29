@@ -2,9 +2,46 @@
 import robust_value_approx.model_bounds as model_bounds
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import robust_value_approx.value_to_optimization as value_to_optimization
+import robust_value_approx.utils as utils
 
 import gurobipy
 import torch
+import cvxpy as cp
+
+
+class DiffValueFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, x0,
+                prob_mi, alpha_mi, obj_mi, con_mi,
+                prob_con, alpha_con, obj_con, con_con,
+                G0, A0):
+        x0.value = x.detach().numpy()
+        prob_mi.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
+        if obj_mi.value is None:
+            ctx.success = False
+            return torch.Tensor([float('nan')])
+        alpha_con.value = alpha_mi.value
+        prob_con.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
+        if obj_con.value is None:
+            ctx.success = False
+            return torch.Tensor([float('nan')])
+        assert(abs(obj_mi.value - obj_con.value) <= 1e-5)
+        ctx.success = True
+        ctx.lambda_G = torch.Tensor(con_con[0].dual_value).type(x.dtype)
+        ctx.lambda_A = torch.Tensor(con_con[1].dual_value).type(x.dtype)
+        ctx.G0 = G0
+        ctx.A0 = A0
+        return torch.Tensor([obj_con.value]).type(x.dtype)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if not ctx.success:
+            grad = grad_output.clone()
+            grad *= float('nan')
+            return grad
+        dy = (ctx.lambda_A.t()@ctx.A0 + ctx.lambda_G.t()@ctx.G0)
+        grad_input = (grad_output.unsqueeze(1) @ dy.unsqueeze(0)).squeeze()
+        return(grad_input, *([None]*11))
 
 
 class AdversarialSampleGenerator:
@@ -20,6 +57,41 @@ class AdversarialSampleGenerator:
         assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.V = vf.get_value_function()
+
+        self.vf = vf
+        (G0, G1, G2, h,
+         A0, A1, A2, b,
+         Q1, Q2, q1, q2, k) = utils.torch_to_numpy(vf.traj_opt_constraint())
+        self.G0_t = torch.Tensor(G0).type(vf.dtype)
+        self.A0_t = torch.Tensor(A0).type(vf.dtype)
+        self.x0 = cp.Parameter(G0.shape[1])
+        self.s = cp.Variable(G1.shape[1])
+        self.alpha_mi = cp.Variable(G2.shape[1], boolean=True)
+        self.obj_mi = cp.Minimize(.5 * cp.quad_form(self.s, Q1) +
+                                  .5 * cp.quad_form(self.alpha_mi, Q2) +
+                                  q1.T@self.s + q2.T@self.alpha_mi + k)
+        self.con_mi = [G1@self.s + G2@self.alpha_mi <= h - G0@self.x0,
+                       A1@self.s + A2@self.alpha_mi == b - A0@self.x0]
+        self.prob_mi = cp.Problem(self.obj_mi, self.con_mi)
+        self.alpha_con = cp.Parameter(G2.shape[1], boolean=False)
+        self.obj_con = cp.Minimize(.5 * cp.quad_form(self.s, Q1) +
+                                   .5 * cp.quad_form(self.alpha_con, Q2) +
+                                   q1.T@self.s + q2.T@self.alpha_con + k)
+        self.con_con = [G1@self.s + G2@self.alpha_con <= h - G0@self.x0,
+                        A1@self.s + A2@self.alpha_con == b - A0@self.x0]
+        self.prob_con = cp.Problem(self.obj_con, self.con_con)
+        self.V_with_grad = lambda x: DiffValueFunction.apply(x,
+                                                             self.x0,
+                                                             self.prob_mi,
+                                                             self.alpha_mi,
+                                                             self.obj_mi,
+                                                             self.con_mi,
+                                                             self.prob_con,
+                                                             self.alpha_con,
+                                                             self.obj_con,
+                                                             self.con_con,
+                                                             self.G0_t,
+                                                             self.A0_t)
         self.traj_opt_coeffs = vf.traj_opt_constraint()
         self.dtype = vf.dtype
         self.x0_lo = x0_lo
@@ -310,10 +382,7 @@ class AdversarialSampleGenerator:
         x_adv_buff = torch.Tensor(0, self.vf.sys.x_dim).type(self.dtype)
         V_buff = torch.Tensor(0, 1).type(self.dtype)
         for i in range(max_iter):
-            (prob, x, s, alpha) = self.setup_val_opt(x_val=x_adv)
-            prob.gurobi_model.optimize()
-            Vx = prob.compute_objective_from_mip_data_and_solution(
-                penalty=penalty)
+            Vx = self.V_with_grad(x_adv)
             nx = model(x_adv)
             epsilon = torch.pow(Vx - nx, 2)
             epsilon_buff = torch.cat(
@@ -323,7 +392,7 @@ class AdversarialSampleGenerator:
                 (x_adv_buff, x_adv.clone().detach().unsqueeze(0)),
                 axis=0)
             V_buff = torch.cat(
-                (V_buff, Vx.clone().detach().unsqueeze(0).unsqueeze(1)),
+                (V_buff, Vx.clone().detach().unsqueeze(1)),
                 axis=0)
             if i == (max_iter-1):
                 break
