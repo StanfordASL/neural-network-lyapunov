@@ -94,6 +94,14 @@ class SlipTest(unittest.TestCase):
                                                         vel_x, np.pi / 6)
         self.assertAlmostEqual(next_pos_x + 1, next_pos_x_shift, 5)
 
+    def test_simulate(self):
+        x0 = np.array([0., 1., 3., 0.])
+        sol = self.dut.simulate(x0, [np.pi/6, np.pi/7])
+        self.assertEqual(len(sol), 4)
+        x1 = self.dut.apex_map(x0[0], x0[1], x0[2], np.pi/6)
+        np.testing.assert_allclose(sol[2].y[:3, 0], x1[:3])
+        self.assertAlmostEqual(sol[2].t[0], x1[3])
+
         def check_failure_step(bad_pos_x, bad_apex_height, bad_vel_x,
                                bad_leg_angle):
             """

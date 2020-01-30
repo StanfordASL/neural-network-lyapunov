@@ -260,8 +260,15 @@ class SLIP:
                 break
             if (np.pi / 2 - sol_step_stance.y[1, -1] < 1E-5):
                 break
-            x_step_start = self.liftoff_transition(sol_step_stance.y[:, -1])
-            t_step_start = sol_step_stance.t[-1]
+            x_post_lo = self.liftoff_transition(sol_step_stance.y[:, -1])
+            t_post_lo = sol_step_stance.t[-1]
+            # The ascending phase, compute the next apex state.
+            t_lo_to_apex = x_post_lo[3] / self.g
+            next_apex_pos_x = x_post_lo[0] + x_post_lo[2] * t_lo_to_apex
+            next_apex_height = x_post_lo[1] + (x_post_lo[3] ** 2) / (2*self.g)
+            x_step_start = np.array([
+                next_apex_pos_x, next_apex_height, x_post_lo[2], 0])
+            t_step_start = t_post_lo + t_lo_to_apex
         return sol
 
     def time_to_touchdown(self, flight_state, stepping_stone, leg_angle):
