@@ -325,7 +325,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         """
         assert(isinstance(x, torch.Tensor))
         assert(x.shape == (self.system.x_dim,))
-        x_next_possible = self.system.possible_next_states(x)
+        x_next_possible = self.system.possible_dx(x)
         relu_at_equilibrium = relu_model.forward(x_equilibrium)
         V_next_possible = [self.lyapunov_value(
             relu_model, x_next, x_equilibrium, V_rho, relu_at_equilibrium) for

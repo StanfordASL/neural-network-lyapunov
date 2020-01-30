@@ -562,7 +562,7 @@ def compute_continuous_time_system_cost_to_go(
         return ydot
 
     sol = solve_ivp(ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8)
-    return (sol.y[-1, -1], sol)
+    return (torch.tensor(sol.y[-1, -1], dtype=system.dtype), sol)
 
 
 def generate_cost_to_go_samples(
@@ -599,8 +599,7 @@ def generate_cost_to_go_samples(
             else:
                 cost_x0, _ = compute_continuous_time_system_cost_to_go(
                     system, x0, T, instantaneous_cost)
-            state_cost_pairs[num_pairs] = (
-                x0, torch.tensor(cost_x0, dtype=system.dtype))
+            state_cost_pairs[num_pairs] = (x0, cost_x0)
             num_pairs += 1
         except AutonomousHybridLinearSystem.StepForwardException:
             pass

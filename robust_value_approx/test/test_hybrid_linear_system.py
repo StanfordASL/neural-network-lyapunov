@@ -694,7 +694,7 @@ class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
                     (t2_sample[1:] - t2_sample[:-1]))
         # cost_expected is computed with low accuracy (because it uses
         # trapezoidal integration), so only compare up to 4'th decimal place.
-        self.assertAlmostEqual(cost, cost_expected, places=4)
+        self.assertAlmostEqual(cost.item(), cost_expected, places=4)
 
 
 class TestGenerateCostToGoSamples(unittest.TestCase):
