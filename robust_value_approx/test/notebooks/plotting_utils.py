@@ -4,7 +4,7 @@ import plotly.figure_factory as ff
 import torch
 import numpy as np
 import random
-
+from robust_value_approx.test import slip_utils
 
 ROBUST_COLOR = '#e32249'
 BASELINE_COLOR = '#0f4c75'
@@ -15,10 +15,13 @@ BASELINE_BCK_COLOR = '#93BBD6'
 DELTA_COLOR = '#8cba51'
 DELTA_BCK_COLOR = '#D4E8A2'
 DELTA_ZERO_COLOR = '#586045'
+DELTA_OVERUNDER_BCK_COLOR = '#A8B2E6' 
+DELTA_OVERUNDER_COLOR = '#5f6caf'
 
 ROBUST_NAME = 'Sample-efficient'
 BASELINE_NAME = 'Baseline'
 
+FONT_SIZE = 18
 
 def buffer_plot(state_log, x0_lo, x0_up, ix, iy,
                 lim_eps=.1, cmax=1.):
@@ -258,27 +261,47 @@ def training_loss(state, window=100):
         )
     ))
     fig.update_layout(
-        title=dict(text="Trainning Batch Loss", xanchor='center', x=.5),
+        # title=dict(text="Trainning Batch Loss", xanchor='center', x=.5),
         xaxis_title="Training step",
         yaxis_title="MSE of sampled batch",
     )
-    fig.update_layout(width=900, height=800)
+    fig.update_layout(width=800, height=400)
+    fig.update_layout(
+        legend=dict(
+            x=.76,
+            y=.94,
+            traceorder="normal",
+        )
+    )
     return fig
 
 
-def validation_delta(states):
+def validation_delta(states, window=100):
     assert(len(states) > 0)
-    num_samples = len(states[0]["robust_val_loss_log"])
+
+    robust = []
+    baseline = []
+    for state in states:
+        raw_robust = np.array(state["robust_val_loss_log"])
+        raw_baseline = np.array(state["baseline_val_loss_log"])
+        moving_average_robust = []
+        moving_average_baseline = []
+        for i in range(1, len(raw_robust)):
+            start = max(0, i-window)
+            moving_average_robust.append(np.mean(raw_robust[start:i]))
+            moving_average_baseline.append(np.mean(raw_baseline[start:i]))
+        robust.append(np.array(moving_average_robust))
+        baseline.append(np.array(moving_average_baseline))
+
+    num_samples = len(robust[0])
     losses_delta = np.zeros((len(states), num_samples))
     for i in range(len(states)):
-        losses_delta[i, :] = (np.array(states[i]["baseline_val_loss_log"]) -
-                              np.array(states[i]["robust_val_loss_log"])) /\
-            np.abs(np.array(states[i]["baseline_val_loss_log"]))
+        losses_delta[i, :] = (baseline[i] - robust[i]) / np.abs(baseline[i])
     losses_delta_mean = np.mean(losses_delta, axis=0)
     losses_delta_std = np.std(losses_delta, axis=0)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        y=losses_delta_mean-losses_delta_std,
+        y=(losses_delta_mean-losses_delta_std)*100.,
         marker=dict(
             color=DELTA_BCK_COLOR,
         ),
@@ -288,7 +311,7 @@ def validation_delta(states):
         mode='lines',
         showlegend=False))
     fig.add_trace(go.Scatter(
-        y=losses_delta_mean+losses_delta_std,
+        y=(losses_delta_mean+losses_delta_std)*100.,
         marker=dict(
             color=DELTA_BCK_COLOR,
         ),
@@ -299,22 +322,105 @@ def validation_delta(states):
         fill='tonexty',
         showlegend=False))
     fig.add_trace(go.Scatter(
-        y=losses_delta_mean,
+        y=(losses_delta_mean)*100.,
         line=dict(
             width=5,
             color=DELTA_COLOR,
         ),
-        showlegend=False,
+        showlegend=True,
+        name="Percent improvement of MSE",
     ))
     fig.update_layout(
-        title=dict(text="Improvement from Sample-Efficient Method on Test Set",
-                   xanchor='center', x=.5),
-        xaxis_title="Training step",
+        # title=dict(
+        #     text="Improvement from Sample-Efficient Method on Test Set",
+        #            xanchor='center', x=.5),
+        # xaxis_title="Training step",
         yaxis_title="Percent decrease of MSE over test set",
     )
     fig.update_yaxes(zeroline=True, zerolinewidth=3,
                      zerolinecolor=DELTA_ZERO_COLOR)
     fig.update_layout(width=800, height=800)
+    fig.update_layout(
+        legend=dict(
+            x=.06,
+            y=.96,
+            traceorder="normal",
+        )
+    )
+    return fig
+
+
+def validation_delta_overunder(states, window=100):
+    assert(len(states) > 0)
+
+    robust = []
+    baseline = []
+    for state in states:
+        raw_robust = np.array(state["robust_val_loss_log"])
+        raw_baseline = np.array(state["baseline_val_loss_log"])
+        moving_average_robust = []
+        moving_average_baseline = []
+        for i in range(1, len(raw_robust)):
+            start = max(0, i-window)
+            moving_average_robust.append(np.mean(raw_robust[start:i]))
+            moving_average_baseline.append(np.mean(raw_baseline[start:i]))
+        robust.append(np.array(moving_average_robust))
+        baseline.append(np.array(moving_average_baseline))
+
+    num_samples = len(robust[0])
+    losses_delta = np.zeros((len(states), num_samples))
+    for i in range(len(states)):
+        losses_delta[i, :] = (baseline[i] - robust[i]) / np.abs(baseline[i])
+    losses_delta_mean = np.mean(losses_delta, axis=0)
+    losses_delta_std = np.std(losses_delta, axis=0)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        y=(losses_delta_mean-losses_delta_std)*100.,
+        marker=dict(
+            color=DELTA_OVERUNDER_BCK_COLOR,
+        ),
+        line=dict(
+            width=0
+        ),
+        mode='lines',
+        showlegend=False))
+    fig.add_trace(go.Scatter(
+        y=(losses_delta_mean+losses_delta_std)*100.,
+        marker=dict(
+            color=DELTA_OVERUNDER_BCK_COLOR,
+        ),
+        line=dict(
+            width=0
+        ),
+        mode='lines',
+        fill='tonexty',
+        showlegend=False))
+    fig.add_trace(go.Scatter(
+        y=(losses_delta_mean)*100.,
+        line=dict(
+            width=5,
+            color=DELTA_OVERUNDER_COLOR,
+        ),
+        showlegend=True,
+        name="Percent improvement of MSE",
+    ))
+    fig.update_layout(
+        # title=dict(
+        #     text="Improvement from Sample-Efficient Method on Test Set",
+        #            xanchor='center', x=.5),
+        # xaxis_title="Training step",
+        yaxis_title="Percent decrease of MSE",
+    )
+    fig.update_yaxes(zeroline=True, zerolinewidth=3,
+                     zerolinecolor=DELTA_ZERO_COLOR)
+    fig.update_layout(width=800, height=400)
+    fig.update_layout(
+        legend=dict(
+            x=.62,
+            y=.16,
+            traceorder="normal",
+        )
+    )
     return fig
 
 
@@ -390,19 +496,36 @@ def rollout_range(vf, x0_lo, x0_up, state_indices, names, n=10):
     return fig
 
 
-def control_perf(cost_opt, cost_baseline, cost_robust, nbin=100, bartop=None):
+def control_perf(cost_opt, cost_baseline, cost_robust, nbin=100, bartop=None, clamp_val=10000):
     if bartop is None:
         bartop = cost_opt.shape[0]
-    sub_opt_baseline = (cost_baseline - cost_opt).squeeze()
-    sub_opt_robust = (cost_robust - cost_opt).squeeze()
-    layout = go.Layout(annotations=[dict(showarrow=False, x=torch.mean(sub_opt_baseline), y=int(.9*bartop),
-                                         text=BASELINE_NAME+": mean", xanchor="left", xshift=4, opacity=.95, textangle=0),
-                                    dict(showarrow=False, x=torch.mean(sub_opt_robust), y=int(.8*bartop),
-                                         text=ROBUST_NAME+": mean", xanchor="left", xshift=4, opacity=.95, textangle=0),
-                                    dict(showarrow=False, x=torch.max(sub_opt_baseline), y=int(.65*bartop),
-                                         text=BASELINE_NAME+": max", xanchor="right", xshift=-4, opacity=.95, textangle=0),
-                                    dict(showarrow=False, x=torch.max(sub_opt_robust), y=int(.75*bartop),
-                                         text=ROBUST_NAME+": max", xanchor="right", xshift=-4, opacity=.95, textangle=0)])
+    sub_opt_baseline_ = (cost_baseline - cost_opt).squeeze()
+    sub_opt_robust_ = (cost_robust - cost_opt).squeeze()
+
+    if clamp_val is not None:
+        sub_opt_baseline = torch.clamp(sub_opt_baseline_, 0, clamp_val)
+        sub_opt_robust = torch.clamp(sub_opt_robust_, 0, clamp_val)
+
+    annotations = []
+    annotations.append(dict(showarrow=False, x=torch.mean(sub_opt_baseline), y=int(.65*bartop),
+                        text=BASELINE_NAME+": mean", xanchor="left", xshift=4, opacity=.95, textangle=0, font=dict(size=FONT_SIZE)))
+    annotations.append(dict(showarrow=False, x=torch.mean(sub_opt_robust), y=int(.45*bartop),
+                        text=ROBUST_NAME+": mean", xanchor="left", xshift=4, opacity=.95, textangle=0, font=dict(size=FONT_SIZE)))
+    if torch.max(sub_opt_baseline_) <= clamp_val:
+        annotations.append(dict(showarrow=False, x=torch.max(sub_opt_baseline), y=int(.65*bartop),
+                            text=BASELINE_NAME+": max", xanchor="left", xshift=4, opacity=.95, textangle=0., font=dict(size=FONT_SIZE)))
+    else:
+        annotations.append(dict(showarrow=False, x=torch.max(sub_opt_baseline), y=int(.65*bartop),
+                                    text=BASELINE_NAME+": max (" + str("%.1f" % torch.max(sub_opt_baseline_).item()) + ")", xanchor="right", xshift=-4, opacity=.95, textangle=0, font=dict(size=FONT_SIZE)))
+    if torch.max(sub_opt_robust_) <= clamp_val:
+        annotations.append(dict(showarrow=False, x=torch.max(sub_opt_robust), y=int(.45*bartop),
+                            text=ROBUST_NAME+": max", xanchor="left", xshift=4, opacity=.95, textangle=0, font=dict(size=FONT_SIZE)))
+    else:
+        annotations.append(dict(showarrow=False, x=torch.max(sub_opt_robust), y=int(.45*bartop),
+                                    text=ROBUST_NAME+": max (" + str("%.1f" % torch.max(sub_opt_robust_).item()) + ")", xanchor="right", xshift=-4, opacity=.95, textangle=0, font=dict(size=FONT_SIZE)))
+
+    layout = go.Layout(annotations=annotations)
+
     fig = go.Figure(layout=layout)
     fig.update_layout(barmode='overlay')
     fig.add_trace(go.Histogram(x=sub_opt_baseline, name=BASELINE_NAME,
@@ -416,11 +539,133 @@ def control_perf(cost_opt, cost_baseline, cost_robust, nbin=100, bartop=None):
     fig.add_shape(go.layout.Shape(type='line', xref='x', yref='y',
                                   x0=torch.mean(sub_opt_robust), y0=0, x1=torch.mean(sub_opt_robust), y1=bartop,
                                   line=dict(dash='dash', color='#d8c962'), opacity=1.))
-    fig.add_shape(go.layout.Shape(type='line', xref='x', yref='y',
-                                  x0=torch.max(sub_opt_baseline), y0=0, x1=torch.max(sub_opt_baseline), y1=bartop,
-                                  line=dict(dash='dash', color='#d8c962'), opacity=1.))
-    fig.add_shape(go.layout.Shape(type='line', xref='x', yref='y',
-                                  x0=torch.max(sub_opt_robust), y0=0, x1=torch.max(sub_opt_robust), y1=bartop,
-                                  line=dict(dash='dash', color='#d8c962'), opacity=1.))
-    fig.update_layout(width=900, height=800)
+    if torch.max(sub_opt_baseline_) <= clamp_val:
+        fig.add_shape(go.layout.Shape(type='line', xref='x', yref='y',
+                                      x0=torch.max(sub_opt_baseline), y0=0, x1=torch.max(sub_opt_baseline), y1=bartop,
+                                      line=dict(dash='dash', color='#d8c962'), opacity=1.))
+    if torch.max(sub_opt_robust_) <= clamp_val:
+        fig.add_shape(go.layout.Shape(type='line', xref='x', yref='y',
+                                      x0=torch.max(sub_opt_robust), y0=0, x1=torch.max(sub_opt_robust), y1=bartop,
+                                      line=dict(dash='dash', color='#d8c962'), opacity=1.))
+    fig.update_layout(width=800, height=600)
+    fig.update_layout(
+        legend=dict(
+            x=.65,
+            y=.96,
+            traceorder="normal",
+        font=dict(
+            size=18)
+        )
+    )
+    fig.update_layout(
+        # title=dict(text="Trainning Batch Loss", xanchor='center', x=.5),
+        yaxis_title="Number of rollouts",
+        xaxis_title="Suboptimality"
+    )
+    return fig
+
+def slip_traj(slip, x_traj, u_traj, xf):
+    x0 = x_traj[:,0]
+    x_traj_nonlinear, x_traj_apex_nonlinear = slip_utils.sim_slip(
+        slip, x0, u_traj)
+    fig = go.Figure()
+    x_goal = np.linspace(torch.min(x_traj_apex_nonlinear)-2,torch.max(
+        x_traj_apex_nonlinear)+2,35)
+    fig.add_trace(go.Scatter(
+        x = x_goal,
+        y = [xf[1]]*len(x_goal),
+        mode='markers',
+        name='Goal',
+        marker=dict(
+            size=20,
+            color=["#bbcfff"]*len(x_goal),
+            # color=["#484848"]*len(x_goal),
+            symbol=4,
+            opacity=.5,
+        line=dict(width=0,
+        color=['#35495e']*len(x_goal))),
+    ))
+    for i in range(u_traj.shape[1]):
+        x_com = x_traj[:,i]
+        x_foot = x_com[0] + slip.l0 * np.sin(u_traj[0,i])
+        y_foot = x_com[1] - slip.l0 * np.cos(u_traj[0,i])
+        fig.add_trace(go.Scatter(
+            x = [x_com[0],x_foot],
+            y = [x_com[1],y_foot],
+            showlegend=False,
+            line=dict(
+                width=6,
+                dash='dashdot',
+                color="#484848"),
+            ))
+        fig.add_trace(go.Scatter(
+            x = [x_foot],
+            y = [y_foot],
+            showlegend=False,
+            marker=dict(
+                size=15,
+                color=["#484848"],
+                symbol=0,
+                opacity=1.,)
+            ))
+    fig.add_trace(go.Scatter(
+        x=x_traj[0,:],
+        y=x_traj[1,:],
+        mode='markers',
+        name='Piecewise Affine SLIP',
+        marker=dict(
+            size=40,
+            color=["#c9485b"]*x_traj.shape[1],
+            line=dict(width=3,color='#35495e')),
+    ))
+    fig.add_trace(go.Scatter(
+        x=x_traj_nonlinear[0,:],
+        y=x_traj_nonlinear[1,:],
+        showlegend=False,
+        mode='markers',
+        marker=dict(
+            size=7,
+            color=["#96d1c7"]*x_traj_nonlinear.shape[1],
+                    line=dict(
+            color="#484848",
+            width=0,
+            ))
+        ))
+    fig.add_trace(go.Scatter(
+        x=x_traj_apex_nonlinear[0,:],
+        y=x_traj_apex_nonlinear[1,:],
+        name='Nonlinear SLIP',
+        mode='markers',
+        marker=dict(
+            size=20,
+            color=["#96d1c7"]*x_traj_apex_nonlinear.shape[1],
+        line=dict(
+            color="#484848",
+            width=1,
+            )),
+        ))
+
+    fig.update_yaxes(range=[0, 1.5])
+    fig.update_xaxes(
+        range=[torch.min(x_traj_apex_nonlinear)-1.,
+        torch.max(x_traj_apex_nonlinear)+1.])
+    fig.update_yaxes(showgrid=False, zeroline=True, zerolinewidth=5,
+    zerolinecolor="#484848")
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_layout(plot_bgcolor="#f0efef")
+    fig.update_layout(
+        legend=dict(
+            x=.68,
+            y=.08,
+            traceorder="normal",
+        ),
+        font=dict(
+          size=18)
+    )
+    fig.update_layout(
+        # title=dict(text="Trainning Batch Loss", xanchor='center', x=.5),
+        yaxis_title="y position (m)",
+        xaxis_title="x position (m)"
+    )
+
     return fig
