@@ -455,11 +455,11 @@ class AutonomousHybridLinearSystem:
                     "step_forward(): x is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
 
-    def possible_next_states(self, x):
+    def possible_dx(self, x):
         """
-        Optimization problem cannot impose strictly inequality constraint,
-        hence for the state on the boundary of the hybrid modes, in
-        optimization we need to think about multiple possible states.
+        For state on the boundary of two modes, we regard that both modes are
+        possible (because in numerical optimization we can't impose strict
+        inequality constraint). So we return all Aᵢx+gᵢ if Pᵢx≤ qᵢ
         @param x The state
         @return next_states A list. If x is on the boundary of the modes, then
         return multiple possible next states, otherwise return a list of single
@@ -562,7 +562,7 @@ def compute_continuous_time_system_cost_to_go(
         return ydot
 
     sol = solve_ivp(ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8)
-    return (sol.y[-1, -1], sol)
+    return (torch.tensor(sol.y[-1, -1], dtype=system.dtype), sol)
 
 
 def generate_cost_to_go_samples(
@@ -599,8 +599,7 @@ def generate_cost_to_go_samples(
             else:
                 cost_x0, _ = compute_continuous_time_system_cost_to_go(
                     system, x0, T, instantaneous_cost)
-            state_cost_pairs[num_pairs] = (
-                x0, torch.tensor(cost_x0, dtype=system.dtype))
+            state_cost_pairs[num_pairs] = (x0, cost_x0)
             num_pairs += 1
         except AutonomousHybridLinearSystem.StepForwardException:
             pass

@@ -176,7 +176,7 @@ class TrainLyapunovReLU:
     def train(self, relu, state_samples_all):
         assert(isinstance(state_samples_all, list))
         state_samples_next = \
-            [self.lyapunov_hybrid_system.system.possible_next_states(x) for x
+            [self.lyapunov_hybrid_system.system.possible_dx(x) for x
              in state_samples_all]
         iter_count = 0
         optimizer = torch.optim.Adam(

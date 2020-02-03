@@ -592,18 +592,18 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         test_fun(torch.tensor([-0.4, -0.5], dtype=torch.float64))
         test_fun(torch.tensor([0.4, -0.5], dtype=torch.float64))
 
-    def test_possible_next_states(self):
+    def test_possible_dx(self):
         dut = setup_trecate_discrete_time_system()
 
         x = torch.tensor([0.5, 0.6], dtype=dut.dtype)
-        next_states = dut.possible_next_states(x)
+        next_states = dut.possible_dx(x)
         self.assertEqual(len(next_states), 1)
         np.testing.assert_allclose(
             next_states[0].detach().numpy(),
             (dut.A[1] @ x + dut.g[1]).detach().numpy())
 
         x = torch.tensor([0.5, 0], dtype=dut.dtype)
-        next_states = dut.possible_next_states(x)
+        next_states = dut.possible_dx(x)
         self.assertEqual(len(next_states), 2)
         np.testing.assert_allclose(
             next_states[0].detach().numpy(),
@@ -613,7 +613,7 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             (dut.A[1] @ x + dut.g[1]).detach().numpy())
 
         x = torch.tensor([1.5, 0], dtype=dut.dtype)
-        next_states = dut.possible_next_states(x)
+        next_states = dut.possible_dx(x)
         self.assertEqual(len(next_states), 0)
 
 
@@ -694,7 +694,7 @@ class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
                     (t2_sample[1:] - t2_sample[:-1]))
         # cost_expected is computed with low accuracy (because it uses
         # trapezoidal integration), so only compare up to 4'th decimal place.
-        self.assertAlmostEqual(cost, cost_expected, places=4)
+        self.assertAlmostEqual(cost.item(), cost_expected, places=4)
 
 
 class TestGenerateCostToGoSamples(unittest.TestCase):
