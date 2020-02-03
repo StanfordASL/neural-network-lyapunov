@@ -14,7 +14,7 @@ class AdversarialWithBaselineTrainingOptions:
         self.num_steps_between_sampling = 100
         # number of random samples to initialize the buffer with
         self.init_buffer_size = 0
-        # number of training step to do initially 
+        # number of training step to do initially
         # (should have a nonzero init buffer size)
         self.init_num_train_steps = 0
         # number of additional random samples generated each sampling
@@ -376,29 +376,29 @@ class AdversarialWithBaseline:
             state["robust_val_loss_log"] = copy.deepcopy(
                 self.robust_val_loss_log)
             state["robust_buffer_loss"] = torch.pow(
-                self.adv_label_buffer.squeeze() -\
+                self.adv_label_buffer.squeeze() -
                 self.robust_model(self.adv_data_buffer).squeeze(), 2).clone()
             state["robust_val_loss"] = torch.pow(
-                self.v_samples_validation.squeeze() -\
+                self.v_samples_validation.squeeze() -
                 self.robust_model(
                     self.x_samples_validation).squeeze(), 2).clone()
             state["baseline_loss_log"] = copy.deepcopy(self.baseline_loss_log)
             state["baseline_val_loss_log"] = copy.deepcopy(
                 self.baseline_val_loss_log)
             state["baseline_buffer_loss"] = torch.pow(
-                self.rand_label_buffer.squeeze() -\
+                self.rand_label_buffer.squeeze() -
                 self.baseline_model(
                     self.rand_data_buffer).squeeze(), 2).clone()
             state["baseline_val_loss"] = torch.pow(
-                self.v_samples_validation.squeeze() -\
+                self.v_samples_validation.squeeze() -
                 self.baseline_model(
                     self.x_samples_validation).squeeze(), 2).clone()
             x_adv_opt_loss_log = []
             for (x, label) in self.x_adv_opt_log:
                 x_adv_opt_loss_log.append(
                     (x.clone(),
-                     torch.pow(label.squeeze() -\
-                        self.robust_model(x).squeeze(), 2).clone()))
+                     torch.pow(label.squeeze() -
+                               self.robust_model(x).squeeze(), 2).clone()))
             state["x_adv_opt_loss_log"] = x_adv_opt_loss_log
         return state
 

@@ -69,9 +69,9 @@ def get_value_function(xf, N=3):
         xu_lo = xu_lim[:, 0]
         xu_up = xu_lim[:, 1]
         xu_lo[:x_dim] = np.minimum(np.maximum(
-            xu_lo[:x_dim] - x_buff , x_lo), x_up)
+            xu_lo[:x_dim] - x_buff, x_lo), x_up)
         xu_up[:x_dim] = np.minimum(np.maximum(
-            xu_up[:x_dim] + x_buff , x_lo), x_up)
+            xu_up[:x_dim] + x_buff, x_lo), x_up)
         (A, B, c,
          a_t, b_t, c_t,
          P, q) = slip_hls.apex_map_linear_approximation(
@@ -161,9 +161,9 @@ def get_value_function_gait(xf, N=2):
         xu_lo = xu_lim[:, 0]
         xu_up = xu_lim[:, 1]
         xu_lo[:x_dim] = np.minimum(np.maximum(
-            xu_lo[:x_dim] - x_buff , x_lo), x_up)
+            xu_lo[:x_dim] - x_buff, x_lo), x_up)
         xu_up[:x_dim] = np.minimum(np.maximum(
-            xu_up[:x_dim] + x_buff , x_lo), x_up)
+            xu_up[:x_dim] + x_buff, x_lo), x_up)
         (A, B, c,
          a_t, b_t, c_t,
          P, q) = slip_hls.apex_map_linear_approximation(
@@ -208,11 +208,11 @@ def sim_slip(slip, x0, u_traj):
         slip_apex_y.append(next_y)
         slip_apex_xdot.append(next_xdot)
     sol = slip.simulate(np.concatenate((x0.numpy(), np.array([0.]))),
-        theta_step)
+                        theta_step)
     slip_x = []
     slip_y = []
     for step in range(int(len(sol)/2)):
-    # for step in range(int(len(theta_step)/2)):
+        # for step in range(int(len(theta_step)/2)):
         slip_x.extend(sol[2 * step].y[0])
         slip_y.extend(sol[2 * step].y[1])
         # slip_x.append(slip_apex_x[step])
@@ -223,7 +223,7 @@ def sim_slip(slip, x0, u_traj):
         slip_x.extend(list(slip_x_foot - slip_r * np.sin(slip_theta)))
         slip_y.extend(list(slip_r * np.cos(slip_theta)))
     x_traj = torch.Tensor([slip_x, slip_y]).type(x0.dtype)
-    x_traj_apex = torch.Tensor([slip_apex_x,slip_apex_y]).type(x0.dtype)
+    x_traj_apex = torch.Tensor([slip_apex_x, slip_apex_y]).type(x0.dtype)
     return x_traj, x_traj_apex
 
 
@@ -232,7 +232,7 @@ def slip_nonlinear_traj(slip, x0, utraj):
     x_traj_nl = torch.cat((x_traj_nl, x0.unsqueeze(0)), axis=0)
     for i in range(utraj.shape[1] - 1):
         (next_x, next_y, next_xdot, _) = slip.apex_map(
-            x_traj_nl[-1,0], x_traj_nl[-1,1], x_traj_nl[-1,2], utraj[0,i])
+            x_traj_nl[-1, 0], x_traj_nl[-1, 1], x_traj_nl[-1, 2], utraj[0, i])
         if next_x is None:
             return None
         x_traj_nl = torch.cat((x_traj_nl, torch.Tensor(
