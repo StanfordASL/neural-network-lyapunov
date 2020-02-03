@@ -79,6 +79,15 @@ class TrainLyapunovReLU:
         # This is ε in dV(x) ≤ -ε V(x)
         self.lyapunov_derivative_epsilon = 0.01
 
+        # The convergence tolerance for the training.
+        # When the lyapunov function
+        # minₓ V(x)-ε₂|x-x*|₁ > -lyapunov_positivity_convergence_tol
+        # and the lyapunov derivative satisfies
+        # maxₓ dV(x) + εV(x) < lyapunov_derivative_convergence_tol
+        # we regard that the Lyapunov function is found.
+        self.lyapunov_positivity_convergence_tol = 1E-6
+        self.lyapunov_derivative_convergence_tol = 3e-5
+
     def total_loss(self, relu, state_samples_all, state_samples_next):
         """
         Compute the total loss as the summation of
@@ -191,21 +200,33 @@ class TrainLyapunovReLU:
         iter_count = 0
         optimizer = torch.optim.Adam(
             relu.parameters(), lr=self.learning_rate)
+        lyapunov_positivity_mip_costs = [None] * self.max_iterations
+        lyapunov_derivative_mip_costs = [None] * self.max_iterations
+        losses = [None] * self.max_iterations
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
-            loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost \
+            loss, lyapunov_positivity_mip_costs[iter_count],\
+                lyapunov_derivative_mip_costs[iter_count] \
                 = self.total_loss(relu, state_samples_all, state_samples_next)
+            losses[iter_count] = loss.item()
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
-                      f"positivity cost {lyapunov_positivity_mip_cost}, " +
-                      f"derivative_cost {lyapunov_derivative_mip_cost}")
-            if lyapunov_positivity_mip_cost >= 0 and\
-                    lyapunov_derivative_mip_cost <= 0:
-                return True
+                      f"positivity cost " +
+                      f"{lyapunov_positivity_mip_costs[iter_count]}, " +
+                      f"derivative_cost " +
+                      f"{lyapunov_derivative_mip_costs[iter_count]}")
+            if lyapunov_positivity_mip_costs[iter_count] >=\
+                -self.lyapunov_positivity_convergence_tol and\
+                lyapunov_derivative_mip_costs[iter_count] <= \
+                    self.lyapunov_derivative_convergence_tol:
+                return (True, losses[:iter_count+1],
+                        lyapunov_positivity_mip_costs[:iter_count+1],
+                        lyapunov_derivative_mip_costs[:iter_count+1])
             loss.backward()
             optimizer.step()
             iter_count += 1
-        return False
+        return (False, losses, lyapunov_positivity_mip_costs,
+                lyapunov_derivative_mip_costs)
 
 
 class TrainValueApproximator:
