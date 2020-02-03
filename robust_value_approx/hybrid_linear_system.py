@@ -452,7 +452,7 @@ class AutonomousHybridLinearSystem:
             mode_x = self.mode(x)
         if mode_x is None:
             raise self.StepForwardException(
-                    "step_forward(): x is not in any mode.")
+                "step_forward(): x is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
 
     def possible_dx(self, x):
@@ -606,10 +606,32 @@ def generate_cost_to_go_samples(
     return state_cost_pairs[:num_pairs]
 
 
-def discretize_state_input_space(x_lo, x_up, u_lo, u_up, 
+def discretize_state_input_space(x_lo, x_up, u_lo, u_up,
                                  num_breaks_x, num_breaks_u,
                                  x_delta, u_delta):
     """
+    Generate a grid over a state and input space. This is useful to discretize
+    a continuous system around a number of linearization points. The points
+    are in the middle of bounding boxes
+    @param x_lo Tensor lower bound of the state space discretization
+    @param x_up Tensor upper bound of the state space discretization
+    @param u_lo Tensor lower bound of the input space discretization
+    @param u_up Tensor upper bound of the input space discretization
+    @param num_breaks_x Tensor of integer, number of discretization along
+    each axis
+    @param num_breaks_u Tensor of integer, number of discretization along
+    each axis
+    @param x_delta Tensor which says by how much to move the boundaries of each
+    discretization as a fraction of the discretization size i.e. a value of
+    [.1, .2] will increase the size of each cell by .1 of its current size
+    in the positive and negative directions for the first state (.2 for the
+    second state). Positive values means the cells will overlap, negative
+    values mean the cells will have gaps between them.
+    @param u_delta Tensor see x_delta
+    @return state_x, state_u Tensors with the states/inputs around which each
+    cell is centered (n X x_dim) and (n X u_dim)
+    @return states_x_lo, states_x_up, states_u_lo, states_u_up, Tensors with
+    the boundaries of each cell
     """
     assert(isinstance(x_lo, torch.Tensor))
     assert(isinstance(x_up, torch.Tensor))
@@ -677,12 +699,12 @@ def discretize_state_input_space(x_lo, x_up, u_lo, u_up,
         states_x = torch.cat((states_x, x_sample.unsqueeze(0)), axis=0)
         states_u = torch.cat((states_u, u_sample.unsqueeze(0)), axis=0)
         states_x_lo = torch.cat((states_x_lo, x_sample_lo.unsqueeze(0)),
-            axis=0)
+                                axis=0)
         states_x_up = torch.cat((states_x_up, x_sample_up.unsqueeze(0)),
-            axis=0)
+                                axis=0)
         states_u_lo = torch.cat((states_u_lo, u_sample_lo.unsqueeze(0)),
-            axis=0)
+                                axis=0)
         states_u_up = torch.cat((states_u_up, u_sample_up.unsqueeze(0)),
-            axis=0)
+                                axis=0)
     return(states_x, states_u,
-        states_x_lo, states_x_up, states_u_lo, states_u_up)
+           states_x_lo, states_x_up, states_u_lo, states_u_up)
