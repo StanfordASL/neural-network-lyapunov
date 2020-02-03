@@ -1291,9 +1291,9 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 relu, x_equilibrium, V_rho, epsilon, None, None)[0]
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
-            objective = milp.compute_objective_from_mip_data_and_solution(
-                penalty=0.)
             if requires_grad:
+                objective = milp.compute_objective_from_mip_data_and_solution(
+                    penalty=0.)
                 objective.backward()
                 grad = np.concatenate(
                     [p.grad.detach().numpy().reshape((-1,)) for p in
