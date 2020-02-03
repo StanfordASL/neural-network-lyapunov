@@ -19,12 +19,12 @@ class DiffValueFunction(torch.autograd.Function):
         prob_mi.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
         if obj_mi.value is None:
             ctx.success = False
-            return torch.Tensor([float('nan')])
+            return torch.Tensor([float('nan')]).type(x.dtype)
         alpha_con.value = alpha_mi.value
         prob_con.solve(solver=cp.GUROBI, verbose=False, warm_start=True)
         if obj_con.value is None:
             ctx.success = False
-            return torch.Tensor([float('nan')])
+            return torch.Tensor([float('nan')]).type(x.dtype)
         assert(abs(obj_mi.value - obj_con.value) <= 1e-5)
         ctx.success = True
         ctx.lambda_G = torch.Tensor(con_con[0].dual_value).type(x.dtype)
@@ -36,9 +36,8 @@ class DiffValueFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if not ctx.success:
-            grad = grad_output.clone()
-            grad *= float('nan')
-            return grad
+            return(torch.Tensor([float('nan'), float('nan')]).type(
+                grad_output.dtype), *([None]*11))
         dy = (ctx.lambda_A.t()@ctx.A0 + ctx.lambda_G.t()@ctx.G0)
         grad_input = (grad_output.unsqueeze(1) @ dy.unsqueeze(0)).squeeze()
         return(grad_input, *([None]*11))
@@ -383,6 +382,8 @@ class AdversarialSampleGenerator:
         V_buff = torch.Tensor(0, 1).type(self.dtype)
         for i in range(max_iter):
             Vx = self.V_with_grad(x_adv)
+            if torch.any(torch.isnan(Vx)):
+                break
             nx = model(x_adv)
             epsilon = torch.pow(Vx - nx, 2)
             epsilon_buff = torch.cat(
