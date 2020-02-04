@@ -606,13 +606,13 @@ def generate_cost_to_go_samples(
     return state_cost_pairs[:num_pairs]
 
 
-def discretize_state_input_space(x_lo, x_up, u_lo, u_up,
-                                 num_breaks_x, num_breaks_u,
-                                 x_delta, u_delta):
+def partition_state_input_space(x_lo, x_up, u_lo, u_up,
+                                num_breaks_x, num_breaks_u,
+                                x_delta, u_delta):
     """
-    Generate a grid over a state and input space. This is useful to discretize
-    a continuous system around a number of linearization points. The points
-    are in the middle of bounding boxes
+    Generate a grid over a state and input space. This is useful for
+    approximating a nonlinear system with a piecewise affine system, with
+    linear approximation in each cell of the partition.
     @param x_lo Tensor lower bound of the state space discretization
     @param x_up Tensor upper bound of the state space discretization
     @param u_lo Tensor lower bound of the input space discretization
@@ -623,7 +623,7 @@ def discretize_state_input_space(x_lo, x_up, u_lo, u_up,
     each axis
     @param x_delta Tensor which says by how much to move the boundaries of each
     discretization as a fraction of the discretization size i.e. a value of
-    [.1, .2] will increase the size of each cell by .1 of its current size
+    [.1, .2] will increase the size of each cell by 10% of its current size
     in the positive and negative directions for the first state (.2 for the
     second state). Positive values means the cells will overlap, negative
     values mean the cells will have gaps between them.

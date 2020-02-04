@@ -728,7 +728,7 @@ class TestGenerateCostToGoSamples(unittest.TestCase):
         self.assertGreater(len(x0_cost_pairs), 0)
 
 
-class TestDiscretizeStateInputSpace(unittest.TestCase):
+class TestPartitionStateInputSpace(unittest.TestCase):
     def test_one_per_mode(self):
         dtype = torch.float64
         x_lo = torch.Tensor([-1., -2.]).type(dtype)
@@ -739,12 +739,12 @@ class TestDiscretizeStateInputSpace(unittest.TestCase):
         num_breaks_u = torch.Tensor([2, 1]).type(torch.int)
         x_delta = torch.Tensor([0., 0.]).type(dtype)
         u_delta = torch.Tensor([0., 0.]).type(dtype)
-        ss = hybrid_linear_system.discretize_state_input_space(x_lo, x_up,
-                                                               u_lo, u_up,
-                                                               num_breaks_x,
-                                                               num_breaks_u,
-                                                               x_delta,
-                                                               u_delta)
+        ss = hybrid_linear_system.partition_state_input_space(x_lo, x_up,
+                                                              u_lo, u_up,
+                                                              num_breaks_x,
+                                                              num_breaks_u,
+                                                              x_delta,
+                                                              u_delta)
         (states_x, states_u,
          states_x_lo, states_x_up,
          states_u_lo, states_u_up) = ss
@@ -771,12 +771,12 @@ class TestDiscretizeStateInputSpace(unittest.TestCase):
         num_breaks_u = torch.Tensor([2, 1]).type(torch.int)
         x_delta = torch.Tensor([.5, .5]).type(dtype)
         u_delta = torch.Tensor([-.5, -.5]).type(dtype)
-        ss = hybrid_linear_system.discretize_state_input_space(x_lo, x_up,
-                                                               u_lo, u_up,
-                                                               num_breaks_x,
-                                                               num_breaks_u,
-                                                               x_delta,
-                                                               u_delta)
+        ss = hybrid_linear_system.partition_state_input_space(x_lo, x_up,
+                                                              u_lo, u_up,
+                                                              num_breaks_x,
+                                                              num_breaks_u,
+                                                              x_delta,
+                                                              u_delta)
         (states_x, states_u,
          states_x_lo, states_x_up,
          states_u_lo, states_u_up) = ss
