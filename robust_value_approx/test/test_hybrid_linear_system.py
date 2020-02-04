@@ -728,5 +728,71 @@ class TestGenerateCostToGoSamples(unittest.TestCase):
         self.assertGreater(len(x0_cost_pairs), 0)
 
 
+class TestPartitionStateInputSpace(unittest.TestCase):
+    def test_one_per_mode(self):
+        dtype = torch.float64
+        x_lo = torch.Tensor([-1., -2.]).type(dtype)
+        x_up = torch.Tensor([1., 3.]).type(dtype)
+        u_lo = torch.Tensor([-10., -5]).type(dtype)
+        u_up = torch.Tensor([10., 5]).type(dtype)
+        num_breaks_x = torch.Tensor([3, 5]).type(torch.int)
+        num_breaks_u = torch.Tensor([2, 1]).type(torch.int)
+        x_delta = torch.Tensor([0., 0.]).type(dtype)
+        u_delta = torch.Tensor([0., 0.]).type(dtype)
+        ss = hybrid_linear_system.partition_state_input_space(x_lo, x_up,
+                                                              u_lo, u_up,
+                                                              num_breaks_x,
+                                                              num_breaks_u,
+                                                              x_delta,
+                                                              u_delta)
+        (states_x, states_u,
+         states_x_lo, states_x_up,
+         states_u_lo, states_u_up) = ss
+
+        def num_of_modes(x, u):
+            num_of_modes = 0
+            for k in range(states_x_lo.shape[0]):
+                if (torch.all(x >= states_x_lo[k, :]) and
+                    torch.all(x <= states_x_up[k, :]) and
+                    torch.all(u >= states_u_lo[k, :]) and
+                        torch.all(u <= states_u_up[k, :])):
+                    num_of_modes += 1
+            return num_of_modes
+        for i in range(states_x.shape[0]):
+            self.assertEqual(num_of_modes(states_x[i, :], states_u[i, :]), 1)
+
+    def test_overlap(self):
+        dtype = torch.float64
+        x_lo = torch.Tensor([-1., -2.]).type(dtype)
+        x_up = torch.Tensor([1., 3.]).type(dtype)
+        u_lo = torch.Tensor([-10., -15]).type(dtype)
+        u_up = torch.Tensor([10., 15]).type(dtype)
+        num_breaks_x = torch.Tensor([3, 5]).type(torch.int)
+        num_breaks_u = torch.Tensor([2, 1]).type(torch.int)
+        x_delta = torch.Tensor([.5, .5]).type(dtype)
+        u_delta = torch.Tensor([-.5, -.5]).type(dtype)
+        ss = hybrid_linear_system.partition_state_input_space(x_lo, x_up,
+                                                              u_lo, u_up,
+                                                              num_breaks_x,
+                                                              num_breaks_u,
+                                                              x_delta,
+                                                              u_delta)
+        (states_x, states_u,
+         states_x_lo, states_x_up,
+         states_u_lo, states_u_up) = ss
+
+        def num_of_modes(x, u):
+            num_of_modes = 0
+            for k in range(states_x_lo.shape[0]):
+                if (torch.all(x >= states_x_lo[k, :]) and
+                    torch.all(x <= states_x_up[k, :]) and
+                    torch.all(u >= states_u_lo[k, :]) and
+                        torch.all(u <= states_u_up[k, :])):
+                    num_of_modes += 1
+            return num_of_modes
+        for i in range(states_x.shape[0]):
+            self.assertGreater(num_of_modes(states_x[i, :], states_u[i, :]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

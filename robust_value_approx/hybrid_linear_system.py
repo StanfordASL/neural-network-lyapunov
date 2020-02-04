@@ -452,7 +452,7 @@ class AutonomousHybridLinearSystem:
             mode_x = self.mode(x)
         if mode_x is None:
             raise self.StepForwardException(
-                    "step_forward(): x is not in any mode.")
+                "step_forward(): x is not in any mode.")
         return self.A[mode_x] @ x + self.g[mode_x]
 
     def possible_dx(self, x):
@@ -604,3 +604,107 @@ def generate_cost_to_go_samples(
         except AutonomousHybridLinearSystem.StepForwardException:
             pass
     return state_cost_pairs[:num_pairs]
+
+
+def partition_state_input_space(x_lo, x_up, u_lo, u_up,
+                                num_breaks_x, num_breaks_u,
+                                x_delta, u_delta):
+    """
+    Generate a grid over a state and input space. This is useful for
+    approximating a nonlinear system with a piecewise affine system, with
+    linear approximation in each cell of the partition.
+    @param x_lo Tensor lower bound of the state space discretization
+    @param x_up Tensor upper bound of the state space discretization
+    @param u_lo Tensor lower bound of the input space discretization
+    @param u_up Tensor upper bound of the input space discretization
+    @param num_breaks_x Tensor of integer, number of discretization along
+    each axis
+    @param num_breaks_u Tensor of integer, number of discretization along
+    each axis
+    @param x_delta Tensor which says by how much to move the boundaries of each
+    discretization as a fraction of the discretization size i.e. a value of
+    [.1, .2] will increase the size of each cell by 10% of its current size
+    in the positive and negative directions for the first state (.2 for the
+    second state). Positive values means the cells will overlap, negative
+    values mean the cells will have gaps between them.
+    @param u_delta Tensor see x_delta
+    @return state_x, state_u Tensors with the states/inputs around which each
+    cell is centered (n X x_dim) and (n X u_dim)
+    @return states_x_lo, states_x_up, states_u_lo, states_u_up, Tensors with
+    the boundaries of each cell
+    """
+    assert(isinstance(x_lo, torch.Tensor))
+    assert(isinstance(x_up, torch.Tensor))
+    assert(isinstance(u_lo, torch.Tensor))
+    assert(isinstance(u_up, torch.Tensor))
+    assert(isinstance(num_breaks_x, torch.Tensor))
+    assert(isinstance(num_breaks_u, torch.Tensor))
+    assert(isinstance(x_delta, torch.Tensor))
+    assert(isinstance(u_delta, torch.Tensor))
+    assert(num_breaks_x.dtype == torch.int)
+    assert(num_breaks_u.dtype == torch.int)
+    dtype = x_lo.dtype
+    x_dim = x_lo.shape[0]
+    u_dim = u_lo.shape[0]
+    grid_limits = []
+    grid_samples = []
+    grid_indices = []
+    x_delta_scaled = x_delta * (x_up - x_lo) / num_breaks_x.type(dtype)
+    u_delta_scaled = u_delta * (u_up - u_lo) / num_breaks_u.type(dtype)
+    for i in range(x_dim):
+        limits_ = np.linspace(x_lo[i], x_up[i], num_breaks_x[i] + 1)
+        limits = [(limits_[k], limits_[k+1]) for k in range(num_breaks_x[i])]
+        samples = [.5*(limits[k][0] + limits[k][1])
+                   for k in range(num_breaks_x[i])]
+        grid_limits.append(limits)
+        grid_samples.append(samples)
+        grid_indices.append(np.arange(num_breaks_x[i]))
+    for i in range(u_dim):
+        limits_ = np.linspace(u_lo[i], u_up[i], num_breaks_u[i] + 1)
+        limits = [(limits_[k], limits_[k+1]) for k in range(num_breaks_u[i])]
+        samples = [.5*(limits[k][0] + limits[k][1])
+                   for k in range(num_breaks_u[i])]
+        grid_limits.append(limits)
+        grid_samples.append(samples)
+        grid_indices.append(np.arange(num_breaks_u[i]))
+    grid = np.meshgrid(*grid_indices)
+    indices_cart_product = np.concatenate(
+        [g.reshape(-1, 1) for g in grid], axis=1)
+    states_x = torch.Tensor(0, x_dim).type(dtype)
+    states_u = torch.Tensor(0, u_dim).type(dtype)
+    states_x_lo = torch.Tensor(0, x_dim).type(dtype)
+    states_x_up = torch.Tensor(0, x_dim).type(dtype)
+    states_u_lo = torch.Tensor(0, u_dim).type(dtype)
+    states_u_up = torch.Tensor(0, u_dim).type(dtype)
+    for k in range(indices_cart_product.shape[0]):
+        indices = indices_cart_product[k, :]
+        sample = torch.Tensor(
+            [grid_samples[i][indices[i]] for i in range(x_dim+u_dim)]).type(
+            dtype)
+        x_sample = sample[:x_dim]
+        u_sample = sample[x_dim:x_dim+u_dim]
+        sample_limits = torch.Tensor(
+            [grid_limits[i][indices[i]] for i in range(x_dim+u_dim)]).type(
+            dtype)
+        sample_lo = sample_limits[:, 0]
+        sample_up = sample_limits[:, 1]
+        x_sample_lo = sample_lo[:x_dim] - x_delta_scaled
+        x_sample_up = sample_up[:x_dim] + x_delta_scaled
+        u_sample_lo = sample_lo[x_dim:x_dim+u_dim] - u_delta_scaled
+        u_sample_up = sample_up[x_dim:x_dim+u_dim] + u_delta_scaled
+        x_sample_lo = torch.min(torch.max(x_sample_lo, x_lo), x_up)
+        x_sample_up = torch.min(torch.max(x_sample_up, x_lo), x_up)
+        u_sample_lo = torch.min(torch.max(u_sample_lo, u_lo), u_up)
+        u_sample_up = torch.min(torch.max(u_sample_up, u_lo), u_up)
+        states_x = torch.cat((states_x, x_sample.unsqueeze(0)), axis=0)
+        states_u = torch.cat((states_u, u_sample.unsqueeze(0)), axis=0)
+        states_x_lo = torch.cat((states_x_lo, x_sample_lo.unsqueeze(0)),
+                                axis=0)
+        states_x_up = torch.cat((states_x_up, x_sample_up.unsqueeze(0)),
+                                axis=0)
+        states_u_lo = torch.cat((states_u_lo, u_sample_lo.unsqueeze(0)),
+                                axis=0)
+        states_u_up = torch.cat((states_u_up, u_sample_up.unsqueeze(0)),
+                                axis=0)
+    return(states_x, states_u,
+           states_x_lo, states_x_up, states_u_lo, states_u_up)
