@@ -445,7 +445,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
              (epsilon-1) * V_rho*torch.ones((self.system.x_dim,),
                                             dtype=self.system.dtype)],
             [z_next, z, s_x_next_norm, s_x_norm],
-            -epsilon * relu_x_equilibrium.squeeze(), gurobipy.GRB.MAXIMIZE)
+            epsilon * (b_out - relu_x_equilibrium.squeeze()),
+            gurobipy.GRB.MAXIMIZE)
 
         return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
 

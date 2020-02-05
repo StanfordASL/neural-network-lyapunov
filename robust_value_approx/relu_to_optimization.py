@@ -333,7 +333,7 @@ class ReLUFreePattern:
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
                         a_out[self.relu_unit_index[layer_count - 1][k]] =\
                             layer.weight[0][k]
-                    b_out = layer.bias.item()
+                    b_out = layer.bias[0]
 
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.

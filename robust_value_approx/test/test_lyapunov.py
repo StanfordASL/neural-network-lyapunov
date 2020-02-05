@@ -81,8 +81,7 @@ def setup_leaky_relu(dtype, params=None):
         linear3.weight.data = params[25:29].clone().reshape((1, 4))
         linear3.bias.data = params[29].clone().reshape((1))
     relu = nn.Sequential(
-        linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3,
-        nn.LeakyReLU(0.1))
+        linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3)
     return relu
 
 
@@ -466,13 +465,14 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         dut2 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system2)
 
         relu1 = setup_leaky_relu(self.dtype)
+        relu2 = setup_relu(self.dtype)
         V_rho = 2.
         dV_epsilon = 0.1
 
-        def test_milp(dut, x_equilibrium):
+        def test_milp(dut, x_equilibrium, relu):
             (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
                 dut.lyapunov_derivative_as_milp(
-                    relu1, x_equilibrium, V_rho, dV_epsilon)
+                    relu, x_equilibrium, V_rho, dV_epsilon)
             # First solve this MILP. The solution has to satisfy that
             # x_next = Ai * x + g_i where i is the active mode inferred from
             # gamma.
@@ -500,15 +500,17 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                         dut.system.g[mode].detach().numpy(),
                         x_next_sol, decimal=5)
             v_next = dut.lyapunov_value(
-                relu1, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
+                relu, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
             v = dut.lyapunov_value(
-                relu1, torch.from_numpy(x_sol), x_equilibrium, V_rho)
+                relu, torch.from_numpy(x_sol), x_equilibrium, V_rho)
             self.assertAlmostEqual(
                 milp.gurobi_model.objVal,
                 (v_next - v + dV_epsilon * v).item())
 
-        test_milp(dut1, self.x_equilibrium1)
-        test_milp(dut2, self.x_equilibrium2)
+        test_milp(dut1, self.x_equilibrium1, relu1)
+        test_milp(dut1, self.x_equilibrium1, relu2)
+        test_milp(dut2, self.x_equilibrium2, relu1)
+        test_milp(dut2, self.x_equilibrium2, relu2)
 
         # Now solve MILP to optimal for system1 and system2
         milp1 = dut1.lyapunov_derivative_as_milp(
