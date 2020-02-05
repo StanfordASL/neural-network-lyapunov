@@ -605,7 +605,7 @@ class ValueFunction:
                         v_samples = torch.cat((v_samples,
                                                torch.Tensor(
                                                    [[obj_val]]).type(
-                                                        self.dtype)), axis=0)
+                                                   self.dtype)), axis=0)
                     else:
                         break
                     for k in range(num_noisy_samples):

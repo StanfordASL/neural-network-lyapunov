@@ -52,7 +52,7 @@ class RandomSampleGenerator:
                  u_traj_val,
                  alpha_traj_val) = self.vf.sol_to_traj(
                     rand_x0, rand_s, rand_alpha)
-                x_traj_flat = x_traj_val[:,:-1].t().reshape((1, -1))
+                x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
                 step_costs = [self.vf.step_cost(
                     j,
                     x_traj_val[:, j],
