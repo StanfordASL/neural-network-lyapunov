@@ -37,6 +37,10 @@ class TestReLU(unittest.TestCase):
         self.model3 = nn.Sequential(
             self.linear1, self.leaky_relus[0], self.linear2,
             self.leaky_relus[1], self.linear3, self.leaky_relus[2])
+        # Model with leaky ReLU with no ReLU unit in the output layer.
+        self.model4 = nn.Sequential(
+            self.linear1, self.leaky_relus[0], self.linear2,
+            self.leaky_relus[1], self.linear3)
 
     def test_compute_relu_activation_pattern1(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
@@ -74,7 +78,7 @@ class TestReLU(unittest.TestCase):
             self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
 
     def test_compute_relu_activation_pattern3(self):
-        # Test with leakly relu.
+        # Test with leaky relu.
         def test_fun(x):
             activation_pattern = relu_to_optimization.\
                 ComputeReLUActivationPattern(self.model3, x)
@@ -313,8 +317,9 @@ class TestReLU(unittest.TestCase):
                         z_opt_var, z.squeeze().detach().numpy())
                     np.testing.assert_array_almost_equal(
                         beta_opt_var, beta.squeeze().detach().numpy())
-                    self.assertAlmostEqual(a_out @ z.squeeze() + b_out,
-                                           model.forward(x))
+                    self.assertAlmostEqual(
+                        (a_out @ z.squeeze() + b_out).item(),
+                        model.forward(x).item())
                 else:
                     self.assertEqual(prob.status, "infeasible")
 
@@ -392,6 +397,7 @@ class TestReLU(unittest.TestCase):
         test_model(self.model1)
         test_model(self.model2)
         test_model(self.model3)
+        test_model(self.model4)
 
     def test_compute_alpha_index1(self):
         relu_free_pattern = relu_to_optimization.\
@@ -569,7 +575,7 @@ class TestReLU(unittest.TestCase):
                 z_var.value, z_expected.detach().numpy())
 
         # Check for different models and inputs.
-        for model in (self.model1, self.model2, self.model3):
+        for model in (self.model1, self.model2, self.model3, self.model4):
             test_model(model, torch.tensor([1.5, 2.], dtype=self.dtype),
                        torch.tensor([0., 0.], dtype=self.dtype),
                        torch.tensor([-1., -2.], dtype=self.dtype),
