@@ -409,7 +409,7 @@ class ValueFunction:
                 rhs_eq = torch.cat(
                     (rhs_eq, torch.zeros(1, dtype=self.dtype)), 0)
         return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq,
-            Q1, Q2, Q3, q1, q2, q3, c)
+               Q1, Q2, Q3, q1, q2, q3, c)
 
     def get_value_function(self):
         """
@@ -426,13 +426,14 @@ class ValueFunction:
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
         x0 = cp.Parameter(Ain1.shape[1])
-        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(alpha, Q3) +\
+        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(alpha, Q3) +
                           q1.T@x0 + q2.T@s + q3.T@alpha + c)
         con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq]
         prob = cp.Problem(obj, con)
+
         def V(x):
             if isinstance(x, torch.Tensor):
                 x = x.detach().numpy()
@@ -483,14 +484,15 @@ class ValueFunction:
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
         x0 = cp.Parameter(Ain1.shape[1])
         u0 = cp.Parameter(self.sys.u_dim)
-        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(alpha, Q3) +\
+        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(alpha, Q3) +
                           q1.T@x0 + q2.T@s + q3.T@alpha + c)
         con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
                s[:self.sys.u_dim] == u0]
         prob = cp.Problem(obj, con)
+
         def Q(x, u):
             if isinstance(x, torch.Tensor):
                 x = x.detach().numpy()
@@ -602,8 +604,8 @@ class ValueFunction:
                                                x.unsqueeze(0)), axis=0)
                         v_samples = torch.cat((v_samples,
                                                torch.Tensor(
-                                                [[obj_val]]).type(self.dtype)),
-                                              axis=0)
+                                                   [[obj_val]]).type(
+                                                        self.dtype)), axis=0)
                     else:
                         break
                     for k in range(num_noisy_samples):
@@ -616,8 +618,8 @@ class ValueFunction:
                                                    x.unsqueeze(0)), axis=0)
                             v_samples = torch.cat((v_samples,
                                                    torch.Tensor(
-                                                    [[obj_val]]).type(
-                                                    self.dtype)),
+                                                       [[obj_val]]).type(
+                                                       self.dtype)),
                                                   axis=0)
             if update_progress:
                 utils.update_progress((i + 1) / x_samples_all.shape[0])
@@ -754,7 +756,7 @@ class ValueFunction:
         for n in range(self.N):
             if alpha_traj_val is not None:
                 obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n],
-                    alpha_traj_val[:, n])
+                                      alpha_traj_val[:, n])
             else:
                 obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n])
         return obj

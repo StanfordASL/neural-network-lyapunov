@@ -112,7 +112,7 @@ class AdversarialSampleGenerator:
         @return x, y, gamma, lists of variables of the problem (see
         ModelBounds for full description of those variables)
         """
-        (Q0, Q1, Q2, q0, q1, q2, k, 
+        (Q0, Q1, Q2, q0, q1, q2, k,
          G0, G1, G2, h, A0, A1, A2, b) = eps_opt_coeffs
         prob = gurobi_torch_mip.GurobiTorchMIQP(self.dtype)
         prob.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
@@ -131,11 +131,11 @@ class AdversarialSampleGenerator:
                               [q0, q1, q2], [x, y, gamma], k,
                               gurobipy.GRB.MINIMIZE)
         else:
-              prob.setObjective([.5 * Q1, .5 * Q2],
+            prob.setObjective([.5 * Q1, .5 * Q2],
                               [(y, y), (gamma, gamma)],
                               [q1, q2], [y, gamma],
                               k + 5 * x_val@Q0@x_val + x_val@q0,
-                              gurobipy.GRB.MINIMIZE)          
+                              gurobipy.GRB.MINIMIZE)
         if x_val is None:
             for i in range(G0.shape[0]):
                 prob.addLConstr([G0[i, :], G1[i, :], G2[i, :]], [x, y, gamma],
@@ -215,7 +215,7 @@ class AdversarialSampleGenerator:
         alpha = prob.addVars(G2.shape[1], vtype=gurobipy.GRB.BINARY,
                              name="alpha")
         if x_val is None:
-           prob.setObjective([.5 * Q1, .5 * Q2, .5 * Q3],
+            prob.setObjective([.5 * Q1, .5 * Q2, .5 * Q3],
                               [(x, x), (s, s), (alpha, alpha)],
                               [q1, q2, q3], [x, s, alpha], k,
                               gurobipy.GRB.MINIMIZE)

@@ -44,9 +44,9 @@ class ValueToOptimizationTest(unittest.TestCase):
         x = cp.Variable(Ain1.shape[1])
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(z, Q3) +\
+        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(z, Q3) +
                           q1.T@x + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x + Ain2@s + Ain3@z <= rhs_in,
@@ -116,8 +116,8 @@ class ValueToOptimizationTest(unittest.TestCase):
         obj_exp += alpha[:, i].t()@zt
         alpha_flat = alpha.t().reshape(-1)
         obj = .5 * x0@Q1@x0.t() + .5 * s@Q2@s.t() +\
-              .5 * alpha_flat@Q3@alpha_flat.t() +\
-              x0@q1 + s@q2 + alpha_flat@q3 + c
+            .5 * alpha_flat@Q3@alpha_flat.t() +\
+            x0@q1 + s@q2 + alpha_flat@q3 + c
         self.assertAlmostEqual(obj_exp.item(), obj.item())
 
     def test_trajopt_lim(self):
@@ -144,9 +144,9 @@ class ValueToOptimizationTest(unittest.TestCase):
         x = cp.Variable(Ain1.shape[1])
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(z, Q3) +\
+        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(z, Q3) +
                           q1@x + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x + Ain2@s + Ain3@z <= rhs_in,
@@ -230,9 +230,9 @@ class ValueToOptimizationTest(unittest.TestCase):
         obj_exp += (alpha[:, i] - alphatraj[:, i]).t()@zt
         alpha_flat = alpha.t().reshape(-1)
         obj = .5 * x0@Q1@x0 +\
-              .5 * s@Q2@s +\
-              .5 * alpha_flat@Q3@alpha_flat +\
-              x0@q1 + s@q2 + alpha_flat@q3 + c
+            .5 * s@Q2@s +\
+            .5 * alpha_flat@Q3@alpha_flat +\
+            x0@q1 + s@q2 + alpha_flat@q3 + c
         self.assertAlmostEqual(obj_exp.item(), obj.item())
 
     def test_trajopt_midpoint(self):
@@ -264,9 +264,9 @@ class ValueToOptimizationTest(unittest.TestCase):
          Q1, Q2, Q3, q1, q2, q3, c) = torch_to_numpy(traj_opt)
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-        obj = cp.Minimize(.5 * x0.detach().numpy()@Q1@x0.detach().numpy().T +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(z, Q3) +\
+        obj = cp.Minimize(.5 * x0.detach().numpy()@Q1@x0.detach().numpy().T +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(z, Q3) +
                           q1.T@x0.detach().numpy() + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x0.detach().numpy() + Ain2@s + Ain3@z <= rhs_in,
@@ -361,9 +361,9 @@ class ValueToOptimizationTest(unittest.TestCase):
         x = cp.Variable(Ain1.shape[1])
         s = cp.Variable(Ain2.shape[1])
         z = cp.Variable(Ain3.shape[1], boolean=True)
-        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +\
-                          .5 * cp.quad_form(s, Q2) +\
-                          .5 * cp.quad_form(z, Q3) +\
+        obj = cp.Minimize(.5 * cp.quad_form(x, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(z, Q3) +
                           q1.T@x + q2.T@s + q3.T@z + c)
         con = [
             Ain1@x + Ain2@s + Ain3@z <= rhs_in,
