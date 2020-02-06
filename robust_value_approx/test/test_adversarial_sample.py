@@ -1,6 +1,7 @@
 import robust_value_approx.value_to_optimization as value_to_optimization
 import robust_value_approx.adversarial_sample as adversarial_sample
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.model_bounds as model_bounds
 import double_integrator
 
 import numpy as np
@@ -39,6 +40,7 @@ class AdversarialSampleTest(unittest.TestCase):
                                                  x_lo, x_up, u_lo, u_up)
         vf.set_cost(Q=Q, R=R)
         vf.set_terminal_cost(Qt=Q, Rt=R)
+        self.vf = vf
         self.V = vf.get_value_function()
 
         linear1 = nn.Linear(x_dim, 10)
@@ -136,6 +138,21 @@ class AdversarialSampleTest(unittest.TestCase):
                 eps_sample = torch.pow(self.V(x0)[0] - self.model(x0), 2)
                 self.assertGreaterEqual(eps_adv[-1, 0].item(),
                                         eps_sample.item())
+
+    def test_setup_eps_opt(self):
+        mb = model_bounds.ModelBounds(self.vf, self.model)
+        eps_opt_coeffs = mb.epsilon_opt(self.model, self.x0_lo, self.x0_up)
+        (prob, x, y, gamma) = self.as_generator.setup_eps_opt(eps_opt_coeffs)
+        prob.gurobi_model.optimize()
+        epsilon1 = prob.compute_objective_from_mip_data_and_solution(
+            penalty=1e-8)
+        x_val = torch.Tensor([k.x for k in x]).type(self.dtype)
+        (prob, x, y, gamma) = self.as_generator.setup_eps_opt(eps_opt_coeffs,
+                                                              x_val=x_val)
+        prob.gurobi_model.optimize()
+        epsilon2 = prob.compute_objective_from_mip_data_and_solution(
+            penalty=1e-8)
+        self.assertAlmostEqual(epsilon1.item(), epsilon2.item(), places=5)
 
 
 if __name__ == '__main__':

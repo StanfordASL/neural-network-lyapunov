@@ -134,7 +134,7 @@ class AdversarialSampleGenerator:
             prob.setObjective([.5 * Q1, .5 * Q2],
                               [(y, y), (gamma, gamma)],
                               [q1, q2], [y, gamma],
-                              k + 5 * x_val@Q0@x_val + x_val@q0,
+                              k + .5 * x_val@Q0@x_val + x_val@q0,
                               gurobipy.GRB.MINIMIZE)
         if x_val is None:
             for i in range(G0.shape[0]):
