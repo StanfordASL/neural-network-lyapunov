@@ -165,37 +165,45 @@ class TestReLU(unittest.TestCase):
 
     def test_relu_given_activation_pattern(self):
         def test_relu_given_activation_pattern_util(self, model, x):
-            activation_pattern = relu_to_optimization.\
-                ComputeReLUActivationPattern(model, x)
-            (g, h, P, q) = relu_to_optimization.ReLUGivenActivationPattern(
-                model, 2, activation_pattern, self.dtype)
-            output_expected = model.forward(x).item()
-            output = (g.T @ x.reshape((2, 1)) + h).item()
-            self.assertAlmostEqual(output, output_expected, 10)
-            self.assertTrue(torch.all(torch.le(P @ (x.reshape((-1, 1))), q)))
-            # Randomly take 100 sample of inputs. If the sample shares the
-            # same activation path as x, then it should satisfy P * x <= q
-            # constraint. Otherwise it should violate the constraint.
-            for _ in range(100):
-                x_sample = torch.tensor(
-                    [np.random.uniform(-10, 10), np.random.uniform(-10, 10)],
-                    dtype=self.dtype)
-                activation_pattern_sample =\
-                    relu_to_optimization.ComputeReLUActivationPattern(model,
-                                                                      x_sample)
-                output_sample_expected = model.forward(x_sample)
-                if (activation_pattern_sample == activation_pattern):
-                    output_sample = g.T @ x_sample.reshape((2, 1)) + h
-                    self.assertAlmostEqual(
-                        output_sample.item(), output_sample_expected.item(),
-                        10)
-                    self.assertTrue(
-                        torch.all(torch.le(
-                            P @ (x_sample.reshape((-1, 1))), q)))
-                else:
-                    self.assertFalse(
-                        torch.all(torch.le(
-                            P @ (x_sample.reshape((-1, 1))), q)))
+            with torch.no_grad():
+                activation_pattern = relu_to_optimization.\
+                    ComputeReLUActivationPattern(model, x)
+                (g, h, P, q) = relu_to_optimization.ReLUGivenActivationPattern(
+                    model, 2, activation_pattern, self.dtype)
+            x.requires_grad = True
+            output_expected = model.forward(x)
+            output_expected.backward()
+            np.testing.assert_allclose(
+                x.grad.detach().numpy(), g.squeeze().detach().numpy())
+            with torch.no_grad():
+                output = (g.T @ x.reshape((2, 1)) + h).item()
+                self.assertAlmostEqual(output, output_expected.item(), 10)
+                self.assertTrue(torch.all(torch.le(
+                    P @ (x.reshape((-1, 1))), q)))
+                # Randomly take 100 sample of inputs. If the sample shares the
+                # same activation path as x, then it should satisfy P * x <= q
+                # constraint. Otherwise it should violate the constraint.
+                for _ in range(100):
+                    x_sample = torch.tensor(
+                        [np.random.uniform(-10, 10),
+                         np.random.uniform(-10, 10)],
+                        dtype=self.dtype)
+                    activation_pattern_sample =\
+                        relu_to_optimization.ComputeReLUActivationPattern(
+                            model, x_sample)
+                    output_sample_expected = model.forward(x_sample)
+                    if (activation_pattern_sample == activation_pattern):
+                        output_sample = g.T @ x_sample.reshape((2, 1)) + h
+                        self.assertAlmostEqual(
+                            output_sample.item(),
+                            output_sample_expected.item(), 10)
+                        self.assertTrue(
+                            torch.all(torch.le(
+                                P @ (x_sample.reshape((-1, 1))), q)))
+                    else:
+                        self.assertFalse(
+                            torch.all(torch.le(
+                                P @ (x_sample.reshape((-1, 1))), q)))
 
         test_relu_given_activation_pattern_util(
             self, self.model1, torch.tensor([-6, 4], dtype=self.dtype))
