@@ -42,7 +42,8 @@ class ModelBounds:
         y = [s, z]
         γ = [α, β]
 
-        min     .5 yᵀ Q1 y + .5 γᵀ Q2 γ + yᵀ q1 + γᵀ q2 + k
+        min     .5 xᵀ Q0 x + .5 yᵀ Q1 y + .5 γᵀ Q2 γ +
+                xᵀ q0 + yᵀ q1 + γᵀ q2 + k
         s.t.    A0 x + A1 y + A2 γ = b
                 G0 x + G1 y + G2 γ <= h
                 γ ∈ {0,1}
@@ -58,7 +59,7 @@ class ModelBounds:
          z_lo, z_up, _, _) = self.relu_opt.output_constraint(model, x_lo, x_up)
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q2_val, Q3_val, q2_val, q3_val, c) = self.traj_opt
+         Q1_val, Q2_val, Q3_val, q1_val, q2_val, q3_val, c) = self.traj_opt
 
         # x size equal in both program
         assert(Pin1.shape[1] == Ain1.shape[1])
@@ -122,11 +123,15 @@ class ModelBounds:
 
         b = torch.cat((rhs_eq, qrhs_eq.squeeze()), 0)
 
+        Q0 = Q1_val.clone()
+
         Q1 = torch.zeros(num_y, num_y, dtype=self.dtype)
         Q1[s_index_s:s_index_e, s_index_s:s_index_e] = Q2_val
 
         Q2 = torch.zeros(num_gamma, num_gamma, dtype=self.dtype)
         Q2[alpha_index_s:alpha_index_e, alpha_index_s:alpha_index_e] = Q3_val
+
+        q0 = q1_val.clone()
 
         q1 = torch.zeros(num_y, dtype=self.dtype)
         q1[s_index_s:s_index_e] = q2_val
@@ -137,4 +142,4 @@ class ModelBounds:
 
         k = c - b_out
 
-        return(Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)
+        return(Q0, Q1, Q2, q0, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)

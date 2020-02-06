@@ -159,22 +159,21 @@ class ValueFunction:
         easily be passed to verification functions.
         Letting x = x[0], and s = x[1]...x[N]
 
-        min .5 sᵀ Q2 s + .5 αᵀ Q3 α + q2ᵀ s + q3ᵀ α + c
+        min .5 xᵀ Q1 x + .5 sᵀ Q2 s + .5 αᵀ Q3 α + q1ᵀ x + q2ᵀ s + q3ᵀ α + c
         s.t. Ain1 x + Ain2 s + Ain3 α ≤ rhs_in
              Aeq1 x + Aeq2 s + Aeq3 α = rhs_eq
              α ∈ {0,1} (needs to be imposed externally)
 
-        @return Ain1, Ain2, Ain3, rhs_eq, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3,
-        q2, q3, c
+        @return Ain1, Ain2, Ain3, rhs_eq, Aeq1, Aeq2, Aeq3, rhs_eq, Q1, Q2, Q3,
+        q1, q2, q3, c
         """
         N = self.N
         if self.xtraj is not None:
-            assert(self.xtraj.shape[1] == N - 1)
+            assert(self.xtraj.shape[1] == N)
         if self.utraj is not None:
             assert(self.utraj.shape[1] == N)
         if self.alphatraj is not None:
             assert(self.alphatraj.shape[1] == N)
-
         (Aeq_slack,
          Aeq_alpha,
          Ain_x,
@@ -185,14 +184,12 @@ class ValueFunction:
                                                           self.x_up,
                                                           self.u_lo,
                                                           self.u_up)
-
         xdim = Ain_x.shape[1]
         udim = Ain_u.shape[1]
         slackdim = Ain_slack.shape[1]
         adim = Ain_alpha.shape[1]
         sdim = (xdim + udim + slackdim) * N - xdim
         alphadim = adim * N
-
         # dynamics inequality constraints
         num_in_dyn = rhs_in_dyn.shape[0]
         s_in_dyn = torch.cat((Ain_x, Ain_u, Ain_slack), 1)
@@ -217,7 +214,6 @@ class ValueFunction:
             rhs_in[i * num_in_dyn:(i + 1) * num_in_dyn] = rhs_in_dyn.squeeze()
         Ain1 = Ain[:, :xdim]
         Ain2 = Ain[:, xdim:]
-
         # dynamics equality constraints
         num_eq_dyn = xdim
         s_eq_dyn = torch.cat((torch.zeros(num_eq_dyn, xdim +
@@ -244,7 +240,6 @@ class ValueFunction:
                  adim:(i + 1) * adim] = Aeq_alpha
         Aeq1 = Aeq[:, :xdim]
         Aeq2 = Aeq[:, xdim:]
-
         # one mode at a time
         Aeq1 = torch.cat((Aeq1, torch.zeros(N, xdim, dtype=self.dtype)), 0)
         Aeq2 = torch.cat((Aeq2, torch.zeros(N, sdim, dtype=self.dtype)), 0)
@@ -255,15 +250,25 @@ class ValueFunction:
                                                               dtype=self.dtype)
         Aeq3 = torch.cat((Aeq3, Aeq_mode), 0)
         rhs_eq = torch.cat((rhs_eq, torch.ones(N, dtype=self.dtype)), 0)
-
         # costs
         # slack = [s_1,s_2,...,t_1,t_2,...] where s_i = alpha_i * x_i[n] so the
         # cost on the slack variables is implicit in the costs of alpha and s
+        Q1 = torch.zeros(xdim, xdim, dtype=self.dtype)
+        q1 = torch.zeros(xdim, dtype=self.dtype)
         Q2 = torch.zeros(sdim, sdim, dtype=self.dtype)
         q2 = torch.zeros(sdim, dtype=self.dtype)
         Q3 = torch.zeros(alphadim, alphadim, dtype=self.dtype)
         q3 = torch.zeros(alphadim, dtype=self.dtype)
         c = 0.
+        if self.Q is not None:
+            Q1 += self.Q
+            if self.xtraj is not None:
+                q1 -= self.xtraj[:, 0].T@self.Q
+                c += .5 * self.xtraj[:, 0].T@self.Q@self.xtraj[:, 0]
+        if self.q is not None:
+            q1 += self.q
+            if self.xtraj is not None:
+                c -= self.q.T@self.xtraj[:, 0]
         if self.R is not None:
             Q2[:udim, :udim] += self.R
             if self.utraj is not None:
@@ -281,8 +286,9 @@ class ValueFunction:
             if self.Q is not None:
                 Q2[Qi:Qip, Qi:Qip] += self.Q
                 if self.xtraj is not None:
-                    q2[Qi:Qip] -= self.xtraj[:, i].T@self.Q
-                    c += .5 * self.xtraj[:, i].T@self.Q@self.xtraj[:, i]
+                    q2[Qi:Qip] -= self.xtraj[:, i + 1].T@self.Q
+                    c += .5 *\
+                        self.xtraj[:, i + 1].T@self.Q@self.xtraj[:, i + 1]
             if self.R is not None:
                 Q2[Ri:Rip, Ri:Rip] += self.R
                 if self.utraj is not None:
@@ -292,7 +298,7 @@ class ValueFunction:
             if self.q is not None:
                 q2[Qi:Qip] += self.q
                 if self.xtraj is not None:
-                    c -= self.q.T@self.xtraj[:, i]
+                    c -= self.q.T@self.xtraj[:, i + 1]
             if self.r is not None:
                 q2[Ri:Rip] += self.r
                 if self.utraj is not None:
@@ -309,7 +315,6 @@ class ValueFunction:
                 q3[i * adim:(i + 1) * adim] += self.z
                 if self.alphatraj is not None:
                     c -= self.z.T@self.alphatraj[:, i]
-
         if self.Qt is not None:
             Q2[-(xdim + udim + slackdim):-(udim + slackdim), -
                (xdim + udim + slackdim):-(udim + slackdim)] += self.Qt
@@ -341,7 +346,6 @@ class ValueFunction:
             q3[-adim:] += self.zt
             if self.alphatraj is not None:
                 c -= self.zt.T@self.alphatraj[:, -1]
-
         # state and input constraints
         # x_lo ≤ x[n] ≤ x_up
         # u_lo ≤ u[n] ≤ u_up
@@ -355,7 +359,6 @@ class ValueFunction:
         rhs_up = torch.cat((self.x_up, self.u_up)).repeat(N)
         Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
                                             alphadim, dtype=self.dtype)), 0)
-
         Alo = -torch.eye(N * (xdim + udim + slackdim), N *
                          (xdim + udim + slackdim), dtype=self.dtype)
         Alo = Alo[torch.cat((torch.ones(xdim + udim),
@@ -364,11 +367,9 @@ class ValueFunction:
         rhs_lo = -torch.cat((self.x_lo, self.u_lo)).repeat(N)
         Ain3 = torch.cat((Ain3, torch.zeros(N * (xdim + udim),
                                             alphadim, dtype=self.dtype)), 0)
-
         Ain1 = torch.cat((Ain1, Aup[:, :xdim], Alo[:, :xdim]), 0)
         Ain2 = torch.cat((Ain2, Aup[:, xdim:], Alo[:, xdim:]), 0)
         rhs_in = torch.cat((rhs_in, rhs_up, rhs_lo))
-
         # initial state constraints
         # x[0] == x0
         if self.x0 is not None:
@@ -379,7 +380,6 @@ class ValueFunction:
             Aeq2 = torch.cat((Aeq2, Ax02[~torch.isnan(self.x0), :]), 0)
             Aeq3 = torch.cat((Aeq3, Ax03[~torch.isnan(self.x0), :]), 0)
             rhs_eq = torch.cat((rhs_eq, self.x0[~torch.isnan(self.x0)]))
-
         # final state constraint
         # x[N] == xN
         if self.xN is not None:
@@ -392,7 +392,6 @@ class ValueFunction:
             Aeq2 = torch.cat((Aeq2, AxN2[~torch.isnan(self.xN), :]), 0)
             Aeq3 = torch.cat((Aeq3, AxN3[~torch.isnan(self.xN), :]), 0)
             rhs_eq = torch.cat((rhs_eq, self.xN[~torch.isnan(self.xN)]))
-
         # constant control input for the whole trajectory
         # u[i,n] == u[i,n+1]
         for constant_control_index in self.constant_controls:
@@ -409,9 +408,8 @@ class ValueFunction:
                     (Aeq3, torch.zeros(1, alphadim, dtype=self.dtype)), 0)
                 rhs_eq = torch.cat(
                     (rhs_eq, torch.zeros(1, dtype=self.dtype)), 0)
-
-        return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q2, Q3, q2,
-               q3, c)
+        return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq,
+               Q1, Q2, Q3, q1, q2, q3, c)
 
     def get_value_function(self):
         """
@@ -424,14 +422,14 @@ class ValueFunction:
         traj_opt = self.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q2, Q3, q2, q3, c) = utils.torch_to_numpy(traj_opt)
-
+         Q1, Q2, Q3, q1, q2, q3, c) = utils.torch_to_numpy(traj_opt)
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
         x0 = cp.Parameter(Ain1.shape[1])
-
-        obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 *
-                          cp.quad_form(alpha, Q3) + q2.T@s + q3.T@alpha + c)
+        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(alpha, Q3) +
+                          q1.T@x0 + q2.T@s + q3.T@alpha + c)
         con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq]
         prob = cp.Problem(obj, con)
@@ -446,7 +444,6 @@ class ValueFunction:
                        torch.Tensor(alpha.value).type(self.dtype))
             else:
                 return (None, None, None)
-
         return V
 
     def sol_to_traj(self, x0, s_val, alpha_val):
@@ -482,15 +479,15 @@ class ValueFunction:
         traj_opt = self.traj_opt_constraint()
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q2, Q3, q2, q3, c) = utils.torch_to_numpy(traj_opt)
-
+         Q1, Q2, Q3, q1, q2, q3, c) = utils.torch_to_numpy(traj_opt)
         s = cp.Variable(Ain2.shape[1])
         alpha = cp.Variable(Ain3.shape[1], boolean=True)
         x0 = cp.Parameter(Ain1.shape[1])
         u0 = cp.Parameter(self.sys.u_dim)
-
-        obj = cp.Minimize(.5 * cp.quad_form(s, Q2) + .5 *
-                          cp.quad_form(alpha, Q3) + q2.T@s + q3.T@alpha + c)
+        obj = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                          .5 * cp.quad_form(s, Q2) +
+                          .5 * cp.quad_form(alpha, Q3) +
+                          q1.T@x0 + q2.T@s + q3.T@alpha + c)
         con = [Ain1@x0 + Ain2@s + Ain3@alpha <= rhs_in,
                Aeq1@x0 + Aeq2@s + Aeq3@alpha == rhs_eq,
                s[:self.sys.u_dim] == u0]
@@ -509,7 +506,6 @@ class ValueFunction:
                        torch.Tensor(alpha.value).type(self.dtype))
             else:
                 return (None, None, None)
-
         return Q
 
     def get_value_sample_grid(self, x_lo, x_up, num_breaks,
@@ -608,8 +604,8 @@ class ValueFunction:
                                                x.unsqueeze(0)), axis=0)
                         v_samples = torch.cat((v_samples,
                                                torch.Tensor(
-                                                [[obj_val]]).type(self.dtype)),
-                                              axis=0)
+                                                   [[obj_val]]).type(
+                                                        self.dtype)), axis=0)
                     else:
                         break
                     for k in range(num_noisy_samples):
@@ -622,8 +618,8 @@ class ValueFunction:
                                                    x.unsqueeze(0)), axis=0)
                             v_samples = torch.cat((v_samples,
                                                    torch.Tensor(
-                                                    [[obj_val]]).type(
-                                                    self.dtype)),
+                                                       [[obj_val]]).type(
+                                                       self.dtype)),
                                                   axis=0)
             if update_progress:
                 utils.update_progress((i + 1) / x_samples_all.shape[0])
@@ -683,104 +679,6 @@ class ValueFunction:
 
         return(x_samples, u_samples, v_samples)
 
-    def traj_cost(self, x_traj_val, u_traj_val, alpha_traj_val=None):
-        """
-        Computes the cost of a trajectory for this value function.
-        @param x_traj_val A tensor with the value of the state
-        @param u_traj_val A tensor with the value of the control input
-        @param alpha_traj_val A tensor with the value of the discrete variables
-        """
-        assert(x_traj_val.shape[1] == (self.N - 1))
-        assert(u_traj_val.shape[1] == self.N)
-        if alpha_traj_val is not None:
-            assert(alpha_traj_val.shape[1] == self.N)
-        obj = 0.
-        for i in range(self.N - 2):
-            if self.xtraj is not None:
-                if self.Q is not None:
-                    obj += .5 * (x_traj_val[:, i] - self.xtraj[:, i]
-                                 ).t()@self.Q@(x_traj_val[:, i] -
-                                               self.xtraj[:, i])
-                if self.q is not None:
-                    obj += (x_traj_val[:, i] - self.xtraj[:, i]).t()@self.q
-            else:
-                if self.Q is not None:
-                    obj += .5 * x_traj_val[:, i].t()@self.Q@x_traj_val[:, i]
-                if self.q is not None:
-                    obj += x_traj_val[:, i].t()@self.q
-        i = self.N - 2
-        if self.xtraj is not None:
-            if self.Qt is not None:
-                obj += .5 * (x_traj_val[:, i] - self.xtraj[:, i]
-                             ).t()@self.Qt@(x_traj_val[:, i] -
-                                            self.xtraj[:, i])
-            if self.qt is not None:
-                obj += (x_traj_val[:, i] - self.xtraj[:, i]).t()@self.qt
-        else:
-            if self.Qt is not None:
-                obj += .5 * x_traj_val[:, i].t()@self.Qt@x_traj_val[:, i]
-            if self.qt is not None:
-                obj += x_traj_val[:, i].t()@self.qt
-        for i in range(self.N - 1):
-            if self.utraj is not None:
-                if self.R is not None:
-                    obj += .5 * (u_traj_val[:, i] - self.utraj[:, i]
-                                 ).t()@self.R@(u_traj_val[:, i] -
-                                               self.utraj[:, i])
-                if self.r is not None:
-                    obj += (u_traj_val[:, i] - self.utraj[:, i]).t()@self.r
-            else:
-                if self.R is not None:
-                    obj += .5 * u_traj_val[:, i].t()@self.R@u_traj_val[:, i]
-                if self.r is not None:
-                    obj += u_traj_val[:, i].t()@self.r
-        i = self.N - 1
-        if self.utraj is not None:
-            if self.Rt is not None:
-                obj += .5 * (u_traj_val[:, i] - self.utraj[:, i]
-                             ).t()@self.Rt@(u_traj_val[:, i] -
-                                            self.utraj[:, i])
-            if self.rt is not None:
-                obj += (u_traj_val[:, i] - self.utraj[:, i]).t()@self.rt
-        else:
-            if self.Rt is not None:
-                obj += .5 * u_traj_val[:, i].t()@self.Rt@u_traj_val[:, i]
-            if self.rt is not None:
-                obj += u_traj_val[:, i].t()@self.rt
-        if alpha_traj_val is not None:
-            for i in range(self.N - 1):
-                if self.alphatraj is not None:
-                    if self.Z is not None:
-                        obj += .5 * (alpha_traj_val[:, i] -
-                                     self.alphatraj[:, i]).t()@self.Z@(
-                            alpha_traj_val[:, i] - self.alphatraj[:, i])
-                    if self.z is not None:
-                        obj += (alpha_traj_val[:, i] -
-                                self.alphatraj[:, i]).t()@self.z
-                else:
-                    if self.Z is not None:
-                        obj += .5 * \
-                            alpha_traj_val[:, i].t(
-                            )@self.Z@alpha_traj_val[:, i]
-                    if self.z is not None:
-                        obj += alpha_traj_val[:, i].t()@self.z
-            i = self.N - 1
-            if self.alphatraj is not None:
-                if self.Zt is not None:
-                    obj += .5 * (alpha_traj_val[:, i] -
-                                 self.alphatraj[:, i]).t()@self.Zt@(
-                        alpha_traj_val[:, i] - self.alphatraj[:, i])
-                if self.zt is not None:
-                    obj += (alpha_traj_val[:, i] -
-                            self.alphatraj[:, i]).t()@self.zt
-            else:
-                if self.Zt is not None:
-                    obj += .5 *\
-                        alpha_traj_val[:, i].t()@self.Zt@alpha_traj_val[:, i]
-                if self.zt is not None:
-                    obj += alpha_traj_val[:, i].t()@self.zt
-        return obj
-
     def step_cost(self, n, x_val, u_val, alpha_val=None):
         """
         Computes the cost of a time step for this value function.
@@ -788,90 +686,77 @@ class ValueFunction:
         @param x_val A tensor with the value of the state
         @param u_val A tensor with the value of the control input
         @param alpha_val A tensor with the value of the discrete variables
-        Note that n == 0 has no cost on x, in accordance with the
-        cost defined above
         """
         assert(n >= 0)
         assert(n <= self.N-1)
         obj = 0.
-        if n > 0:
-            if n < self.N-1:
-                if self.xtraj is not None:
-                    if self.Q is not None:
-                        obj += .5 * \
-                            (x_val - self.xtraj[:, n-1]
-                             ).t()@self.Q@(x_val - self.xtraj[:, n-1])
-                    if self.q is not None:
-                        obj += (x_val - self.xtraj[:, n-1]).t()@self.q
-                else:
-                    if self.Q is not None:
-                        obj += .5 * x_val.t()@self.Q@x_val
-                    if self.q is not None:
-                        obj += x_val.t()@self.q
-            else:
-                if self.xtraj is not None:
-                    if self.Qt is not None:
-                        obj += .5 * \
-                            (x_val - self.xtraj[:, n-1]
-                             ).t()@self.Qt@(x_val - self.xtraj[:, n-1])
-                    if self.qt is not None:
-                        obj += (x_val - self.xtraj[:, n-1]).t()@self.qt
-                else:
-                    if self.Qt is not None:
-                        obj += .5 * x_val.t()@self.Qt@x_val
-                    if self.qt is not None:
-                        obj += x_val.t()@self.qt
         if n < self.N-1:
-            if self.utraj is not None:
-                if self.R is not None:
-                    obj += .5 * \
-                        (u_val - self.utraj[:, n]
-                         ).t()@self.R@(u_val - self.utraj[:, n])
-                if self.r is not None:
-                    obj += (u_val - self.utraj[:, n]).t()@self.r
-            else:
-                if self.R is not None:
-                    obj += .5 * u_val.t()@self.R@u_val
-                if self.r is not None:
-                    obj += u_val.t()@self.r
+            Q = self.Q
+            R = self.R
+            Z = self.Z
+            q = self.q
+            r = self.r
+            z = self.z
         else:
-            if self.utraj is not None:
-                if self.Rt is not None:
-                    obj += .5 * \
-                        (u_val - self.utraj[:, n]
-                         ).t()@self.Rt@(u_val - self.utraj[:, n])
-                if self.rt is not None:
-                    obj += (u_val - self.utraj[:, n]).t()@self.rt
-            else:
-                if self.Rt is not None:
-                    obj += .5 * u_val.t()@self.Rt@u_val
-                if self.rt is not None:
-                    obj += u_val.t()@self.rt
+            Q = self.Qt
+            R = self.Rt
+            Z = self.Zt
+            q = self.qt
+            r = self.rt
+            z = self.zt
+        if self.xtraj is not None:
+            if Q is not None:
+                obj += .5 *\
+                    (x_val - self.xtraj[:, n])@Q@(x_val - self.xtraj[:, n])
+            if q is not None:
+                obj += (x_val - self.xtraj[:, n])@q
+        else:
+            if Q is not None:
+                obj += .5 * x_val@Q@x_val
+            if q is not None:
+                obj += x_val@q
+        if self.utraj is not None:
+            if R is not None:
+                obj += .5 * \
+                    (u_val - self.utraj[:, n])@R@(u_val - self.utraj[:, n])
+            if r is not None:
+                obj += (u_val - self.utraj[:, n])@r
+        else:
+            if R is not None:
+                obj += .5 * u_val@R@u_val
+            if r is not None:
+                obj += u_val@r
         if alpha_val is not None:
-            if n < self.N-1:
-                if self.alphatraj is not None:
-                    if self.Z is not None:
-                        obj += .5 * \
-                            (alpha_val - self.alphatraj[:, n]).t()@self.Z@(
-                                alpha_val - self.alphatraj[:, n])
-                    if self.z is not None:
-                        obj += (alpha_val - self.alphatraj[:, n]).t()@self.z
-                else:
-                    if self.Z is not None:
-                        obj += .5 * alpha_val.t()@self.Z@alpha_val
-                    if self.z is not None:
-                        obj += alpha_val.t()@self.z
+            if self.alphatraj is not None:
+                if Z is not None:
+                    obj += .5 * \
+                        (alpha_val - self.alphatraj[:, n])@Z@\
+                        (alpha_val - self.alphatraj[:, n])
+                if z is not None:
+                    obj += (alpha_val - self.alphatraj[:, n])@z
             else:
-                if self.alphatraj is not None:
-                    if self.Zt is not None:
-                        obj += .5 * \
-                            (alpha_val - self.alphatraj[:, n]).t()@self.Zt@(
-                                alpha_val - self.alphatraj[:, n])
-                    if self.zt is not None:
-                        obj += (alpha_val - self.alphatraj[:, n]).t()@self.zt
-                else:
-                    if self.Zt is not None:
-                        obj += .5 * alpha_val.t()@self.Zt@alpha_val
-                    if self.zt is not None:
-                        obj += alpha_val.t()@self.zt
+                if Z is not None:
+                    obj += .5 * alpha_val@Z@alpha_val
+                if z is not None:
+                    obj += alpha_val@z
+        return obj
+
+    def traj_cost(self, x_traj_val, u_traj_val, alpha_traj_val=None):
+        """
+        Computes the cost of a trajectory for this value function.
+        @param x_traj_val A tensor with the value of the state
+        @param u_traj_val A tensor with the value of the control input
+        @param alpha_traj_val A tensor with the value of the discrete variables
+        """
+        assert(x_traj_val.shape[1] == self.N)
+        assert(u_traj_val.shape[1] == self.N)
+        if alpha_traj_val is not None:
+            assert(alpha_traj_val.shape[1] == self.N)
+        obj = 0.
+        for n in range(self.N):
+            if alpha_traj_val is not None:
+                obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n],
+                                      alpha_traj_val[:, n])
+            else:
+                obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n])
         return obj

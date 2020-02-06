@@ -66,7 +66,7 @@ class ModelBoundsTest(unittest.TestCase):
         x0_up = 1. * torch.ones(x_dim, dtype=dtype)
 
         eps_opt_coeffs = mb.epsilon_opt(model, x0_lo, x0_up)
-        (Q1, Q2, q1, q2, k,
+        (Q0, Q1, Q2, q0, q1, q2, k,
          G0, G1, G2, h,
          A0, A1, A2, b) = torch_to_numpy(eps_opt_coeffs)
 
@@ -76,8 +76,10 @@ class ModelBoundsTest(unittest.TestCase):
         y = cp.Variable(num_y)
         gamma = cp.Variable(num_gamma, boolean=True)
 
-        obj = cp.Minimize(.5 * cp.quad_form(y, Q1) + .5 *
-                          cp.quad_form(gamma, Q2) + q1@y + q2@gamma + k)
+        obj = cp.Minimize(.5 * cp.quad_form(x, Q0) +
+                          .5 * cp.quad_form(y, Q1) +
+                          .5 * cp.quad_form(gamma, Q2) +
+                          q0@x + q1@y + q2@gamma + k)
         con = [
             A0@x + A1@y + A2@gamma == b,
             G0@x + G1@y + G2@gamma <= h,

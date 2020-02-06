@@ -56,26 +56,30 @@ class AdversarialSampleGenerator:
         assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.V = vf.get_value_function()
-
         self.vf = vf
         (G0, G1, G2, h,
          A0, A1, A2, b,
-         Q1, Q2, q1, q2, k) = utils.torch_to_numpy(vf.traj_opt_constraint())
+         Q1, Q2, Q3, q1, q2, q3, k) = utils.torch_to_numpy(
+            vf.traj_opt_constraint())
         self.G0_t = torch.Tensor(G0).type(vf.dtype)
         self.A0_t = torch.Tensor(A0).type(vf.dtype)
         self.x0 = cp.Parameter(G0.shape[1])
         self.s = cp.Variable(G1.shape[1])
         self.alpha_mi = cp.Variable(G2.shape[1], boolean=True)
-        self.obj_mi = cp.Minimize(.5 * cp.quad_form(self.s, Q1) +
-                                  .5 * cp.quad_form(self.alpha_mi, Q2) +
-                                  q1.T@self.s + q2.T@self.alpha_mi + k)
+        self.obj_mi = cp.Minimize(.5 * cp.quad_form(self.x0, Q1) +
+                                  .5 * cp.quad_form(self.s, Q2) +
+                                  .5 * cp.quad_form(self.alpha_mi, Q3) +
+                                  q1.T@self.x0 + q2.T@self.s +
+                                  q3.T@self.alpha_mi + k)
         self.con_mi = [G1@self.s + G2@self.alpha_mi <= h - G0@self.x0,
                        A1@self.s + A2@self.alpha_mi == b - A0@self.x0]
         self.prob_mi = cp.Problem(self.obj_mi, self.con_mi)
         self.alpha_con = cp.Parameter(G2.shape[1], boolean=False)
-        self.obj_con = cp.Minimize(.5 * cp.quad_form(self.s, Q1) +
-                                   .5 * cp.quad_form(self.alpha_con, Q2) +
-                                   q1.T@self.s + q2.T@self.alpha_con + k)
+        self.obj_con = cp.Minimize(.5 * cp.quad_form(self.x0, Q1) +
+                                   .5 * cp.quad_form(self.s, Q2) +
+                                   .5 * cp.quad_form(self.alpha_con, Q3) +
+                                   q1.T@self.x0 + q2.T@self.s +
+                                   q3.T@self.alpha_con + k)
         self.con_con = [G1@self.s + G2@self.alpha_con <= h - G0@self.x0,
                         A1@self.s + A2@self.alpha_con == b - A0@self.x0]
         self.prob_con = cp.Problem(self.obj_con, self.con_con)
@@ -108,7 +112,8 @@ class AdversarialSampleGenerator:
         @return x, y, gamma, lists of variables of the problem (see
         ModelBounds for full description of those variables)
         """
-        (Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b) = eps_opt_coeffs
+        (Q0, Q1, Q2, q0, q1, q2, k,
+         G0, G1, G2, h, A0, A1, A2, b) = eps_opt_coeffs
         prob = gurobi_torch_mip.GurobiTorchMIQP(self.dtype)
         prob.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         if x_val is None:
@@ -120,10 +125,17 @@ class AdversarialSampleGenerator:
                          vtype=gurobipy.GRB.CONTINUOUS, name="y")
         gamma = prob.addVars(Q2.shape[0], vtype=gurobipy.GRB.BINARY,
                              name="gamma")
-        prob.setObjective([.5 * Q1, .5 * Q2],
-                          [(y, y), (gamma, gamma)],
-                          [q1, q2], [y, gamma], k,
-                          gurobipy.GRB.MINIMIZE)
+        if x_val is None:
+            prob.setObjective([.5 * Q0, .5 * Q1, .5 * Q2],
+                              [(x, x), (y, y), (gamma, gamma)],
+                              [q0, q1, q2], [x, y, gamma], k,
+                              gurobipy.GRB.MINIMIZE)
+        else:
+            prob.setObjective([.5 * Q1, .5 * Q2],
+                              [(y, y), (gamma, gamma)],
+                              [q1, q2], [y, gamma],
+                              k + .5 * x_val@Q0@x_val + x_val@q0,
+                              gurobipy.GRB.MINIMIZE)
         if x_val is None:
             for i in range(G0.shape[0]):
                 prob.addLConstr([G0[i, :], G1[i, :], G2[i, :]], [x, y, gamma],
@@ -192,20 +204,27 @@ class AdversarialSampleGenerator:
         """
         (G0, G1, G2, h,
          A0, A1, A2, b,
-         Q1, Q2, q1, q2, k) = self.traj_opt_coeffs
+         Q1, Q2, Q3, q1, q2, q3, k) = self.traj_opt_coeffs
         prob = gurobi_torch_mip.GurobiTorchMIQP(self.dtype)
         prob.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         if x_val is None:
             x = prob.addVars(A0.shape[1], lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS, name="x")
-        s = prob.addVars(Q1.shape[0], lb=-gurobipy.GRB.INFINITY,
+        s = prob.addVars(G1.shape[1], lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS, name="s")
-        alpha = prob.addVars(Q2.shape[0], vtype=gurobipy.GRB.BINARY,
+        alpha = prob.addVars(G2.shape[1], vtype=gurobipy.GRB.BINARY,
                              name="alpha")
-        prob.setObjective([.5 * Q1, .5 * Q2],
-                          [(s, s), (alpha, alpha)],
-                          [q1, q2], [s, alpha], k,
-                          gurobipy.GRB.MINIMIZE)
+        if x_val is None:
+            prob.setObjective([.5 * Q1, .5 * Q2, .5 * Q3],
+                              [(x, x), (s, s), (alpha, alpha)],
+                              [q1, q2, q3], [x, s, alpha], k,
+                              gurobipy.GRB.MINIMIZE)
+        else:
+            prob.setObjective([.5 * Q2, .5 * Q3],
+                              [(s, s), (alpha, alpha)],
+                              [q2, q3], [s, alpha],
+                              k + .5 * x_val@Q1@x_val + x_val@q1,
+                              gurobipy.GRB.MINIMIZE)
         if x_val is None:
             for i in range(G0.shape[0]):
                 prob.addLConstr([G0[i, :], G1[i, :], G2[i, :]], [x, s, alpha],
