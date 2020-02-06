@@ -497,41 +497,66 @@ class AutonomousHybridLinearSystem:
 
 
 def compute_discrete_time_system_cost_to_go(
-        system, x_start, num_steps, instantaneous_cost_fun):
+        system, x_start, num_steps, instantaneous_cost_fun, x_goal=None):
     """
     Compute the cost-to-go ∑ᵢ c(x[i]) starting from x_start for the
-    discrete-time system.
+    discrete-time system. If the trajectory of x reaches x_goal, or after
+    simulating for num_steps, we terminate the simulation.
     @param system An AutonomousHybridLinearSystem instance.
     @param x_start The starting state.
     @param num_steps The length of horizon for the cost-to-go.
     @param instantaneous_cost_fun A function evaluator that takes a state
     and evaluates the one-step cost c(x).
+    @param x_goal If the trajectory reaches x_goal, then stop the simulation.
+    @return total_cost, x_steps, costs total_cost is the cost-to-go from x0.
+    x_steps[:,i] being the simulating of x after i steps.
+    costs[i] is the cost-to-go starting from x_steps[:, i]
     """
     assert(isinstance(x_start, torch.Tensor))
     assert(x_start.shape == (system.x_dim,))
-    total_cost = torch.tensor(0., dtype=system.dtype)
-    x_i = x_start.clone()
-    total_cost += instantaneous_cost_fun(x_i)
+    if x_goal is not None:
+        assert(isinstance(x_goal, torch.Tensor))
+        assert(x_goal.shape == (system.x_dim,))
+    total_cost = instantaneous_cost_fun(x_start)
+    costs_from_start = [None] * (num_steps + 1)
+    costs_from_start[0] = total_cost.clone()
+    cost_steps = [None] * (num_steps + 1)
+    cost_steps[0] = total_cost.clone()
+    x_steps = [None] * (num_steps + 1)
+    x_steps[0] = x_start.clone()
+    terminal_step = num_steps
     for i in range(num_steps):
+        if x_goal is not None and torch.norm(x_steps[i] - x_goal, p=2) < 1e-3:
+            terminal_step = i
+            break
         mode = None
         for j in range(system.num_modes):
-            if (torch.all(system.P[j] @ x_i <= system.q[j])):
+            if (torch.all(system.P[j] @ x_steps[i] <= system.q[j])):
                 mode = j
-                x_i = system.A[j] @ x_i + system.g[j]
+                x_steps[i+1] = system.A[j] @ x_steps[i] + system.g[j]
                 break
         assert(mode is not None)
-        total_cost += instantaneous_cost_fun(x_i)
-    return total_cost
+        cost_steps[i + 1] = instantaneous_cost_fun(x_steps[i + 1])
+        total_cost += cost_steps[i+1]
+        costs_from_start[i+1] = costs_from_start[i] + cost_steps[i+1]
+    x_steps = torch.stack(x_steps[:terminal_step+1], axis=1)
+    costs = torch.stack([
+        total_cost - costs_from_start[i] + cost_steps[i] for i in
+        range(terminal_step + 1)])
+    return total_cost, x_steps, costs
 
 
 def compute_continuous_time_system_cost_to_go(
-        system, x0, T, instantaneous_cost):
+        system, x0, T, instantaneous_cost, x_goal=None):
     """
     Compute the cost-to-go for a continuous time piecewise affine system.
     The cost-to-go is defined as
     V(x) = ∫ᵀ₀ cost(x(t))dt
-    We will first compute the system trajectory x(t), subjecto to the initial
+    We will first compute the system trajectory x(t), subject to the initial
     value constraint x(0) = x0.
+    @note If the trajectory x(t) reaches x_goal before t=T, we also stop the
+    simulation. This is useful for computing the infinite horizon cost to go,
+    when we want to stop the simulation when the trajectory converge.
     Mathematically, we solve the following initial value problem:
     Define a state as [x(t), V(t)] with the ODE
     ẋ = Aᵢx+gᵢ if Pᵢx≤ qᵢ
@@ -542,8 +567,12 @@ def compute_continuous_time_system_cost_to_go(
     @param T The terminal time. Must be a positive float.
     @param instantaneous_cost A callable. The function cost(x) that evaluates
     the instantaneous cost on x.
-    @return (V, sol) V is the total cost-to-go from x0., sol is the return from
-    solve_ivp. Check
+    @param x_goal If the trajectory x(t) reaches x_goal, then stop the
+    simulation.
+    @return (V, x_traj, cost_to_go_traj, sol) V is the total cost-to-go from
+    x0, x_traj is the trajectory starting from x0. cost_to_go_traj[i] is the
+    cost-to-go starting from x_traj[:, i], sol is the return from solve_ivp.
+    Check
     https://docs.scipy.org/doc/scipy/reference/generated/scipy.integrate.solve_ivp.html
     """
     assert(isinstance(system, AutonomousHybridLinearSystem))
@@ -561,12 +590,27 @@ def compute_continuous_time_system_cost_to_go(
             ydot[-1] = instantaneous_cost(x_torch)
         return ydot
 
-    sol = solve_ivp(ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8)
-    return (torch.tensor(sol.y[-1, -1], dtype=system.dtype), sol)
+    events = []
+    if x_goal is not None:
+        x_goal_np = x_goal.detach().numpy()
+
+        def reach_goal(t, x):
+            return np.linalg.norm(x[:-1]-x_goal_np) - 1e-3
+        reach_goal.terminal = True
+        events = [reach_goal]
+
+    sol = solve_ivp(
+        ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8, events=events)
+    total_cost = torch.tensor(sol.y[-1, -1], dtype=system.dtype)
+    x_traj = torch.tensor(sol.y[:-1, :], dtype=system.dtype)
+    cost_to_go_traj = total_cost - torch.tensor(
+        sol.y[-1, :], dtype=system.dtype)
+    return (total_cost, x_traj, cost_to_go_traj, sol)
 
 
 def generate_cost_to_go_samples(
-        system, x0_samples, T, instantaneous_cost, discrete_time_flag):
+        system, x0_samples, T, instantaneous_cost, discrete_time_flag,
+        x_goal=None, pruner=None):
     """
     Generate the mapping from the initial state to the cost-to-go, by
     simulating the system for a given horizon.
@@ -579,6 +623,13 @@ def generate_cost_to_go_samples(
     a state.
     @param discrete_time_flag A flag indicating whether @p system is
     discrete time or continuous time.
+    @param x_goal If the trajectory starting from x0 reaches x_goal, then
+    terminate simulating the trajectory. See
+    compute_discrete_time_system_cost_to_go() and
+    compute_continuous_time_system_cost_to_go() for more details.
+    @pruner A callable that returns True or False. We might want to prune
+    some state-value pairs. If pruner(state) returns True, then this
+    state-value pair is not included.
     @return state_cost_pairs A list of tuples. state_cost_pairs[i] contains
     a tuple (state, cost). It only includes the states starting from which the
     trajectory always stays within the domain Pᵢ x≤ qᵢ for some mode i.
@@ -589,21 +640,26 @@ def generate_cost_to_go_samples(
         assert(isinstance(T, int))
     else:
         assert(isinstance(T, float))
-    state_cost_pairs = [None] * len(x0_samples)
-    num_pairs = 0
+    if pruner is not None:
+        assert(callable(pruner))
+    state_cost_pairs = []
     for x0 in x0_samples:
         try:
             if discrete_time_flag:
-                cost_x0 = compute_discrete_time_system_cost_to_go(
-                    system, x0, T, instantaneous_cost)
+                cost_x0, x_traj, cost_to_go_traj = \
+                    compute_discrete_time_system_cost_to_go(
+                        system, x0, T, instantaneous_cost, x_goal)
             else:
-                cost_x0, _ = compute_continuous_time_system_cost_to_go(
-                    system, x0, T, instantaneous_cost)
-            state_cost_pairs[num_pairs] = (x0, cost_x0)
-            num_pairs += 1
+                cost_x0, x_traj, cost_to_go_traj, _ = \
+                    compute_continuous_time_system_cost_to_go(
+                        system, x0, T, instantaneous_cost, x_goal)
+            for i in range(x_traj.shape[1]):
+                if pruner is None or \
+                        (pruner is not None and not pruner(x_traj[:, i])):
+                    state_cost_pairs.append((x_traj[:, i], cost_to_go_traj[i]))
         except AutonomousHybridLinearSystem.StepForwardException:
             pass
-    return state_cost_pairs[:num_pairs]
+    return state_cost_pairs
 
 
 def partition_state_input_space(x_lo, x_up, u_lo, u_up,
