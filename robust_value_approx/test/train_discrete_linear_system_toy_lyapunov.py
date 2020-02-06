@@ -121,6 +121,7 @@ def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size, theta):
 
 
 if __name__ == "__main__":
+    plt.ion()
     parser = argparse.ArgumentParser(
         description='learning lyapunov for Trecate system parameters')
     parser.add_argument(
@@ -138,6 +139,11 @@ if __name__ == "__main__":
     parser.add_argument(
         '--max_iterations', type=int, default=2000,
         help='max iteration for learning Lyapunov function.')
+    parser.add_argument(
+        '--save_model', type=str, default=None,
+        help='save the Lyapunov function to a pickle file.')
+    parser.add_argument(
+        '--visualize', action='store_true', help='visualization flag')
     args = parser.parse_args()
 
     theta = args.theta
@@ -162,7 +168,8 @@ if __name__ == "__main__":
         system, relu, V_rho, x_equilibrium,
         lambda x: torch.norm(x - x_equilibrium, p=1),
         state_samples_all1, 100, True)
-    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
+    if (args.visualize):
+        plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
 
     state_samples_all = state_samples_all1
     dut = train_lyapunov.TrainLyapunovReLU(
@@ -176,4 +183,14 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_mip_cost_weight = 0.
     result = dut.train(relu, state_samples_all)
 
-    plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
+    if args.save_model is not None:
+        lyapunov = {
+            "relu": relu,
+            "V_rho": V_rho,
+            "x_equilibrium": x_equilibrium,
+            "theta": theta,
+            "lyapunov_positivity_epsilon": dut.lyapunov_positivity_epsilon,
+            "lyapunov_derivative_epsilon": dut.lyapunov_derivative_epsilon}
+        torch.save(lyapunov, args.save_model)
+    if (args.visualize):
+        plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)

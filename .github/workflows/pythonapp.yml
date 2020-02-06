@@ -24,3 +24,4 @@ jobs:
     - name: Test with python unittest
       run: |
         python3 -m unittest discover robust_value_approx/test
+        python3 robust_value_approx/test/train_discrete_linear_system_toy_lyapunov.py --max_iterations=2
