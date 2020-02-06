@@ -121,7 +121,6 @@ def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size, theta):
 
 
 if __name__ == "__main__":
-    plt.ion()
     parser = argparse.ArgumentParser(
         description='learning lyapunov for Trecate system parameters')
     parser.add_argument(
@@ -139,6 +138,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--max_iterations', type=int, default=2000,
         help='max iteration for learning Lyapunov function.')
+    parser.add_argument(
+        '--approximator_iterations', type=int, default=1000,
+        help="number of iterations to train the value function approximator")
     parser.add_argument(
         '--save_model', type=str, default=None,
         help='save the Lyapunov function to a pickle file.')
@@ -162,12 +164,13 @@ if __name__ == "__main__":
         (51, 51), x_equilibrium, theta)
     # First train a ReLU to approximate the value function.
     approximator = train_lyapunov.TrainValueApproximator()
-    approximator.max_epochs = 1000
-    approximator.convergence_tolerance = 0.01
+    approximator.max_epochs = args.approximator_iterations
+    approximator.convergence_tolerance = 0.003
     result1 = approximator.train(
         system, relu, V_rho, x_equilibrium,
         lambda x: torch.norm(x - x_equilibrium, p=1),
         state_samples_all1, 100, True)
+    print(f"value function approximation error {result1[1]}")
     if (args.visualize):
         plot_relu(relu, system, V_rho, x_equilibrium, (51, 51), theta)
 
