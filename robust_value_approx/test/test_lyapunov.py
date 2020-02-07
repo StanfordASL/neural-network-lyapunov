@@ -958,13 +958,15 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         lyapunov_derivatives = dut1.lyapunov_derivative(
             x, relu, self.x_equilibrium1, V_rho, epsilon)
         self.assertEqual(len(lyapunov_derivatives), 1)
+        x.requires_grad = True
+        V = dut1.lyapunov_value(relu, x, self.x_equilibrium1, V_rho)
+        V.backward()
         activation_pattern = relu_to_optimization.\
             ComputeReLUActivationPattern(relu, x)
         g, _, _, _ = relu_to_optimization.ReLUGivenActivationPattern(
             relu, self.system1.x_dim, activation_pattern, self.dtype)
         xdot = self.system1.step_forward(x)
-        Vdot = g.squeeze() @ xdot + V_rho * torch.tensor(
-            [1, 1], dtype=self.dtype) @ xdot
+        Vdot = x.grad @ xdot
         self.assertAlmostEqual(
             lyapunov_derivatives[0].item(),
             (Vdot + epsilon * dut1.lyapunov_value(
@@ -1256,17 +1258,10 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
 
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
-            activation_pattern = relu_to_optimization.\
-                ComputeReLUActivationPattern(relu, x_val)
-            relu_gradient, _, _, _ = relu_to_optimization.\
-                ReLUGivenActivationPattern(
-                    relu, system.x_dim, activation_pattern, system.dtype)
-            lyapunov_gradient = relu_gradient.squeeze() + \
-                V_rho * torch.sign(x_val - x_equilibrium)
-            mode_index = system.mode(x_val)
-            Vdot = lyapunov_gradient @ (
-                system.A[mode_index] @ x_val + system.g[mode_index])
+            x_val.requires_grad = True
             V = dut.lyapunov_value(relu, x_val, x_equilibrium, V_rho)
+            V.backward()
+            Vdot = x_val.grad @ system.step_forward(x_val)
             self.assertAlmostEqual(
                 milp.gurobi_model.ObjVal,
                 (Vdot + epsilon * V).squeeze().item())
