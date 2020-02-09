@@ -53,6 +53,10 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     @param (A_x, A_s, A_alpha, rhs) A_x, A_s, A_alpha, rhs are all arrays of
     length 4.
     """
+    if isinstance(x_lo, float):
+        x_lo = torch.tensor(x_lo, dtype=dtype)
+    if isinstance(x_up, float):
+        x_up = torch.tensor(x_up, dtype=dtype)
     assert(isinstance(x_lo, torch.Tensor))
     assert(x_lo <= x_up)
     A_x = torch.tensor([0, 0, 1, -1], dtype=dtype)
@@ -79,6 +83,10 @@ def leaky_relu_gradient_times_x(
     @param x_lo The lower bound of x.
     @param x_up The upper bound of x.
     """
+    if isinstance(x_lo, float):
+        x_lo = torch.tensor(x_lo, dtype=dtype)
+    if isinstance(x_up, float):
+        x_up = torch.tensor(x_up, dtype=dtype)
     assert(isinstance(x_lo, torch.Tensor))
     assert(x_up >= x_lo)
     dtype = x_up.dtype
@@ -113,6 +121,10 @@ def replace_absolute_value_with_mixed_integer_constraint(
     Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in
     @return (Ain_x, Ain_s, Ain_alpha, rhs_in)
     """
+    if isinstance(x_lo, float):
+        x_lo = torch.tensor(x_lo, dtype=dtype)
+    if isinstance(x_up, float):
+        x_up = torch.tensor(x_up, dtype=dtype)
     assert(isinstance(x_lo, torch.Tensor))
     assert(isinstance(x_up, torch.Tensor))
     assert(x_lo < 0)

@@ -237,16 +237,24 @@ class GurobiTorchMIP:
         """
         Return the matrices Ain_r, Ain_zeta, rhs_in as torch tensors.
         """
-        Ain_r = torch.sparse.DoubleTensor(torch.LongTensor(
-            [self.Ain_r_row, self.Ain_r_col]),
-            torch.stack(self.Ain_r_val).type(torch.float64),
-            torch.Size([len(self.rhs_in), len(self.r)])).type(self.dtype).\
-            to_dense()
-        Ain_zeta = torch.sparse.DoubleTensor(torch.LongTensor(
-            [self.Ain_zeta_row, self.Ain_zeta_col]),
-            torch.stack(self.Ain_zeta_val).type(torch.float64),
-            torch.Size([len(self.rhs_in), len(self.zeta)])).type(self.dtype).\
-            to_dense()
+        if len(self.Ain_r_row) != 0:
+            Ain_r = torch.sparse.DoubleTensor(torch.LongTensor(
+                [self.Ain_r_row, self.Ain_r_col]),
+                torch.stack(self.Ain_r_val).type(torch.float64),
+                torch.Size([len(self.rhs_in), len(self.r)])).type(self.dtype).\
+                to_dense()
+        else:
+            Ain_r = torch.zeros(
+                (len(self.rhs_in), len(self.r)), dtype=self.dtype)
+        if len(self.Ain_zeta_row) != 0:
+            Ain_zeta = torch.sparse.DoubleTensor(torch.LongTensor(
+                [self.Ain_zeta_row, self.Ain_zeta_col]),
+                torch.stack(self.Ain_zeta_val).type(torch.float64),
+                torch.Size([len(self.rhs_in), len(self.zeta)])).\
+                type(self.dtype).to_dense()
+        else:
+            Ain_zeta = torch.zeros(
+                (len(self.rhs_in), len(self.zeta)), dtype=self.dtype)
         rhs_in = torch.stack([s.squeeze() for s in self.rhs_in])
         return (Ain_r, Ain_zeta, rhs_in)
 
