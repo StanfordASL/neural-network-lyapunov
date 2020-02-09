@@ -210,18 +210,23 @@ class GurobiTorchMIP:
         # First fill in the equality constraints
         # The equality constraints are Aeq_r * r + Aeq_zeta * zeta_sol = beq,
         # equivalent to Aeq_r * r = beq - Aeq_zeta * zeta_sol
-        A_act1 = torch.sparse.DoubleTensor(
-            torch.LongTensor([self.Aeq_r_row, self.Aeq_r_col]),
-            torch.stack(self.Aeq_r_val).type(torch.float64),
-            torch.Size([len(self.rhs_eq), len(self.r)])).type(self.dtype).\
-            to_dense()
-        Aeq_zeta = torch.sparse.DoubleTensor(
-            torch.LongTensor([self.Aeq_zeta_row, self.Aeq_zeta_col]),
-            torch.stack(self.Aeq_zeta_val).type(torch.float64),
-            torch.Size([len(self.rhs_eq), len(self.zeta)])).type(self.dtype).\
-            to_dense()
-        b_act1 = torch.stack([s.squeeze() for s in self.rhs_eq]) -\
-            Aeq_zeta @ zeta_sol
+        if len(self.rhs_eq) != 0:
+            A_act1 = torch.sparse.DoubleTensor(
+                torch.LongTensor([self.Aeq_r_row, self.Aeq_r_col]),
+                torch.stack(self.Aeq_r_val).type(torch.float64),
+                torch.Size([len(self.rhs_eq), len(self.r)])).type(self.dtype).\
+                to_dense()
+            Aeq_zeta = torch.sparse.DoubleTensor(
+                torch.LongTensor([self.Aeq_zeta_row, self.Aeq_zeta_col]),
+                torch.stack(self.Aeq_zeta_val).type(torch.float64),
+                torch.Size([len(self.rhs_eq), len(self.zeta)]))\
+                .type(self.dtype).to_dense()
+            b_act1 = torch.stack([s.squeeze() for s in self.rhs_eq]) -\
+                Aeq_zeta @ zeta_sol
+        else:
+            A_act1 = torch.zeros(
+                (len(self.rhs_eq), len(self.r)), dtype=self.dtype)
+            b_act1 = torch.zeros(len(self.rhs_eq), dtype=self.dtype)
 
         # Now fill in the active inequality constraints
         (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
