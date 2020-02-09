@@ -237,16 +237,17 @@ class GurobiTorchMIP:
         """
         Return the matrices Ain_r, Ain_zeta, rhs_in as torch tensors.
         """
-        Ain_r = torch.zeros((len(self.rhs_in), len(self.r)), dtype=self.dtype)
-        Ain_zeta = torch.zeros((len(self.rhs_in), len(self.zeta)),
-                               dtype=self.dtype)
-        rhs_in = torch.tensor(self.rhs_in)
-        for row, col, val in zip(self.Ain_r_row, self.Ain_r_col,
-                                 self.Ain_r_val):
-            Ain_r[row, col] = val
-        for row, col, val in zip(self.Ain_zeta_row, self.Ain_zeta_col,
-                                 self.Ain_zeta_val):
-            Ain_zeta[row, col] = val
+        Ain_r = torch.sparse.DoubleTensor(torch.LongTensor(
+            [self.Ain_r_row, self.Ain_r_col]),
+            torch.stack(self.Ain_r_val).type(torch.float64),
+            torch.Size([len(self.rhs_in), len(self.r)])).type(self.dtype).\
+            to_dense()
+        Ain_zeta = torch.sparse.DoubleTensor(torch.LongTensor(
+            [self.Ain_zeta_row, self.Ain_zeta_col]),
+            torch.stack(self.Ain_zeta_val).type(torch.float64),
+            torch.Size([len(self.rhs_in), len(self.zeta)])).type(self.dtype).\
+            to_dense()
+        rhs_in = torch.stack([s.squeeze() for s in self.rhs_in])
         return (Ain_r, Ain_zeta, rhs_in)
 
     def compute_objective_from_mip_data_and_solution(
@@ -276,8 +277,8 @@ class GurobiTorchMIP:
         r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
         zeta_sol = torch.tensor([var.xn for var in self.zeta],
                                 dtype=self.dtype)
-        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
         with torch.no_grad():
+            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
             lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
         active_ineq_row_indices = np.arange(len(self.rhs_in))
         active_ineq_row_indices = set(active_ineq_row_indices[

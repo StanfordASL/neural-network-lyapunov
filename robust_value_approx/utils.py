@@ -53,17 +53,15 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     @param (A_x, A_s, A_alpha, rhs) A_x, A_s, A_alpha, rhs are all arrays of
     length 4.
     """
+    assert(isinstance(x_lo, torch.Tensor))
     assert(x_lo <= x_up)
     A_x = torch.tensor([0, 0, 1, -1], dtype=dtype)
     A_s = torch.tensor([-1, 1, -1, 1], dtype=dtype)
-    A_alpha = torch.zeros(4, dtype=dtype)
-    A_alpha[0] = x_lo
-    A_alpha[1] = -x_up
-    A_alpha[2] = x_up
-    A_alpha[3] = -x_lo
+    A_alpha = torch.stack((x_lo, -x_up, x_up, -x_lo))
     rhs = torch.zeros(4, dtype=dtype)
-    rhs[2] = x_up
-    rhs[3] = -x_lo
+    rhs = torch.stack((
+        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), x_up,
+        -x_lo))
     return (A_x, A_s, A_alpha, rhs)
 
 
@@ -81,31 +79,17 @@ def leaky_relu_gradient_times_x(
     @param x_lo The lower bound of x.
     @param x_up The upper bound of x.
     """
+    assert(isinstance(x_lo, torch.Tensor))
     assert(x_up >= x_lo)
-    A_x = torch.empty((4,), dtype=dtype)
-    A_y = torch.empty((4,), dtype=dtype)
-    A_alpha = torch.empty((4,), dtype=dtype)
-    rhs = torch.empty((4,), dtype=dtype)
-    A_x[0] = -1.
-    A_y[0] = 1.
-    A_alpha[0] = (negative_slope - 1.) * x_lo
-    rhs[0] = (negative_slope - 1.) * x_lo
-
-    A_x[1] = 1.
-    A_y[1] = -1.
-    A_alpha[1] = (1. - negative_slope) * x_up
-    rhs[1] = (1. - negative_slope) * x_up
-
-    A_x[2] = negative_slope
-    A_y[2] = -1.
-    A_alpha[2] = (1. - negative_slope) * x_lo
-    rhs[2] = 0.
-
-    A_x[3] = -negative_slope
-    A_y[3] = 1.
-    A_alpha[3] = (negative_slope - 1.) * x_up
-    rhs[3] = 0.
-
+    dtype = x_up.dtype
+    A_x = torch.tensor([-1, 1, negative_slope, -negative_slope], dtype=dtype)
+    A_y = torch.tensor([1, -1, -1, 1], dtype=dtype)
+    A_alpha = torch.stack((
+        (negative_slope-1.) * x_lo, (1. - negative_slope) * x_up,
+        (1. - negative_slope) * x_lo, (negative_slope - 1.) * x_up))
+    rhs = torch.stack((
+        (negative_slope - 1.) * x_lo, (1. - negative_slope) * x_up,
+        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype)))
     if negative_slope < 1.:
         return (A_x, A_y, A_alpha, rhs)
     else:
@@ -129,15 +113,18 @@ def replace_absolute_value_with_mixed_integer_constraint(
     Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in
     @return (Ain_x, Ain_s, Ain_alpha, rhs_in)
     """
+    assert(isinstance(x_lo, torch.Tensor))
+    assert(isinstance(x_up, torch.Tensor))
     assert(x_lo < 0)
     assert(x_up > 0)
     Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
     Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    Ain_alpha = torch.zeros(4, dtype=dtype)
-    Ain_alpha[2] = -2*x_lo
-    Ain_alpha[3] = -2*x_up
-    rhs_in = torch.zeros(4, dtype=dtype)
-    rhs_in[2] = -2*x_lo
+    Ain_alpha = torch.stack((
+        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2*x_lo,
+        -2*x_up))
+    rhs_in = torch.stack((
+        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2*x_lo,
+        torch.tensor(0, dtype=dtype)))
     return (Ain_x, Ain_s, Ain_alpha, rhs_in)
 
 

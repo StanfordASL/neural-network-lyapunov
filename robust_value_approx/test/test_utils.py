@@ -12,7 +12,8 @@ class test_replace_binary_continuous_product(unittest.TestCase):
     def test(self):
         def test_fun(x_lo, x_up):
             (A_x, A_s, A_alpha, rhs) = utils.replace_binary_continuous_product(
-                x_lo, x_up, torch.float64)
+                torch.tensor(x_lo, dtype=torch.float64),
+                torch.tensor(x_up, dtype=torch.float64), torch.float64)
             # Now test if the four vertices satisfy the constraints
             points = torch.tensor([[x_up, x_up, 1],
                                    [x_lo, x_lo, 1],
@@ -45,7 +46,8 @@ class TestLeakyReLUGradientTimesX(unittest.TestCase):
 
         def test_fun(x_lo, x_up, negative_slope, x, y, alpha, satisfied):
             A_x, A_y, A_alpha, rhs = utils.leaky_relu_gradient_times_x(
-                x_lo, x_up, negative_slope)
+                torch.tensor(x_lo, dtype=torch.float64),
+                torch.tensor(x_up, dtype=torch.float64), negative_slope)
             self.assertEqual(
                 torch.all(A_x * x + A_y * y + A_alpha * alpha <= rhs),
                 satisfied)
@@ -71,7 +73,9 @@ class test_replace_absolute_value_with_mixed_integer_constraint(
         unittest.TestCase):
     def test(self):
         Ain_x, Ain_s, Ain_alpha, rhs_in =\
-            utils.replace_absolute_value_with_mixed_integer_constraint(-2, 3)
+            utils.replace_absolute_value_with_mixed_integer_constraint(
+                torch.tensor(-2, dtype=torch.float64),
+                torch.tensor(3, dtype=torch.float64))
 
         def test_fun(x, s, alpha, satisfied):
             self.assertEqual(
