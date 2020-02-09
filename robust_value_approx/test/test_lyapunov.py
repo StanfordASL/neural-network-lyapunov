@@ -805,9 +805,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 lambda weight, bias: compute_milp_cost_given_relu(
                     weight, bias, False), weight_all, bias_all, dx=1e-6)
             np.testing.assert_allclose(
-                    weight_grad, grad_numerical[0].squeeze(), atol=5e-5)
+                    weight_grad, grad_numerical[0].squeeze(), atol=4e-6)
             np.testing.assert_allclose(
-                    bias_grad, grad_numerical[1].squeeze(), atol=1e-5)
+                    bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
 
     def test_lyapunov_positivity_loss_at_sample(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)

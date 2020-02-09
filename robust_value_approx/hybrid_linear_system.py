@@ -297,6 +297,10 @@ class AutonomousHybridLinearSystem:
         self.x_up_all = np.full((x_dim,), -np.inf)
         self.num_modes = 0
 
+        # The lower and upper bounds on Ai * x if Pi * x <= qi.
+        self.Ai_times_x_lower = []
+        self.Ai_times_x_upper = []
+
     def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
         """
         Add a new mode
@@ -330,6 +334,11 @@ class AutonomousHybridLinearSystem:
         self.x_lo_all = np.minimum(self.x_lo_all, x_lo)
         self.x_up_all = np.maximum(self.x_up_all, x_up)
         self.num_modes += 1
+
+        Ai_times_x_lower, Ai_times_x_upper = self.__compute_Ai_times_x_bounds(
+            self.num_modes - 1)
+        self.Ai_times_x_lower.append(Ai_times_x_lower)
+        self.Ai_times_x_upper.append(Ai_times_x_upper)
 
     def mixed_integer_constraints(self, x_lo=None, x_up=None):
         """
@@ -403,8 +412,10 @@ class AutonomousHybridLinearSystem:
                  Ain_s[ineq_count: ineq_count + 4, s_index(i, j)],
                  Ain_gamma[ineq_count:ineq_count + 4, i],
                  rhs_in[ineq_count:ineq_count + 4]) =\
-                    replace_binary_continuous_product(x_lo_all[j], x_up_all[j],
-                                                      self.dtype)
+                    replace_binary_continuous_product(
+                        torch.tensor(x_lo_all[j], dtype=self.dtype),
+                        torch.tensor(x_up_all[j], dtype=self.dtype),
+                        self.dtype)
                 ineq_count += 4
 
         # Add the constraint Pᵢγᵢx ≤ qᵢγᵢ
@@ -473,12 +484,7 @@ class AutonomousHybridLinearSystem:
                 next_states.append(self.A[i] @ x + self.g[i])
         return next_states
 
-    def mode_derivative_bounds(self, mode_index):
-        """
-        Return the bounds on Aᵢx s.t Pᵢx ≤ qᵢ
-        @param mode_index The mode index i
-        @return (lower, upper) The lower and upper bounds on  Aᵢx s.t Pᵢx≤ qᵢ
-        """
+    def __compute_Ai_times_x_bounds(self, mode_index):
         lower = np.empty(self.x_dim)
         upper = np.empty(self.x_dim)
         for j in range(self.x_dim):
@@ -493,6 +499,17 @@ class AutonomousHybridLinearSystem:
                 cp.Minimize(self.A[mode_index][j].detach().numpy() @ x), con)
             prob.solve()
             lower[j] = prob.value
+        return (lower, upper)
+
+    def mode_derivative_bounds(self, mode_index):
+        """
+        Return the bounds on Aᵢx s.t Pᵢx ≤ qᵢ
+        @param mode_index The mode index i
+        @return (lower, upper) The lower and upper bounds on  Aᵢx s.t Pᵢx≤ qᵢ
+        """
+        assert(mode_index < self.num_modes and mode_index >= 0)
+        lower = self.Ai_times_x_lower[mode_index]
+        upper = self.Ai_times_x_upper[mode_index]
         return (lower, upper)
 
 
