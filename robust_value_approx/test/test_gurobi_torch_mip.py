@@ -376,19 +376,25 @@ class TestGurobiTorchMILP(unittest.TestCase):
                 sense=gurobipy.GRB.MAXIMIZE)
             dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             dut.gurobi_model.optimize()
-            objective = dut.compute_objective_from_mip_data_and_solution(0)
+            objective = dut.compute_objective_from_mip_data_and_solution()
             if autograd_flag:
                 objective.backward()
                 return (objective, a.grad)
             else:
                 return objective.item()
 
-        (_, grad) = compute_milp_example_cost(np.array([1., 2., 3.]), True)
-        grad_numerical = utils.compute_numerical_gradient(
-            lambda a: compute_milp_example_cost(a, False),
-            np.array([1., 2., 3.]))
-        np.testing.assert_array_almost_equal(
-            grad.detach().numpy(), grad_numerical)
+        def compare_gradient(a_val):
+            (_, grad) = compute_milp_example_cost(np.array(a_val), True)
+            grad_numerical = utils.compute_numerical_gradient(
+                lambda a: compute_milp_example_cost(a, False),
+                np.array(a_val))
+            np.testing.assert_array_almost_equal(
+                grad.detach().numpy(), grad_numerical)
+
+        compare_gradient([1., 2., 3.])
+        compare_gradient([2., -2., 1.])
+        compare_gradient([0.5, 1.4, 0.3])
+        compare_gradient([0.2, 1.5, 0.3])
 
 
 class TestGurobiTorchMIQP(unittest.TestCase):

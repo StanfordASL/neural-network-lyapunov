@@ -60,8 +60,8 @@ class LyapunovHybridLinearSystem:
 
         # Now add the constraint that sum gamma = 1
         milp.addLConstr(
-            [torch.ones((self.system.num_modes,))], [gamma],
-            sense=gurobipy.GRB.EQUAL, rhs=1.)
+            [torch.ones((self.system.num_modes,), dtype=self.system.dtype)],
+            [gamma], sense=gurobipy.GRB.EQUAL, rhs=1.)
         return (x, s, gamma, Aeq_s, Aeq_gamma)
 
     def add_relu_output_constraint(

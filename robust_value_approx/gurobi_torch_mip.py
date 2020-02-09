@@ -207,30 +207,31 @@ class GurobiTorchMIP:
         """
         assert(isinstance(active_ineq_row_indices, set))
         assert(isinstance(zeta_sol, torch.Tensor))
-        A_act = torch.zeros(
-            (len(self.rhs_eq) + len(active_ineq_row_indices), len(self.r)),
-            dtype=self.dtype)
-        b_act = torch.zeros(
-            (len(self.rhs_eq) + len(active_ineq_row_indices),),
-            dtype=self.dtype)
         # First fill in the equality constraints
         # The equality constraints are Aeq_r * r + Aeq_zeta * zeta_sol = beq,
         # equivalent to Aeq_r * r = beq - Aeq_zeta * zeta_sol
-        for row, col, val in zip(self.Aeq_r_row, self.Aeq_r_col,
-                                 self.Aeq_r_val):
-            A_act[row, col] = val
-        for i in range(len(self.rhs_eq)):
-            b_act[i] = self.rhs_eq[i]
-        for row, col, val in zip(self.Aeq_zeta_row, self.Aeq_zeta_col,
-                                 self.Aeq_zeta_val):
-            b_act[row] -= val * zeta_sol[col]
+        A_act1 = torch.sparse.DoubleTensor(
+            torch.LongTensor([self.Aeq_r_row, self.Aeq_r_col]),
+            torch.stack(self.Aeq_r_val).type(torch.float64),
+            torch.Size([len(self.rhs_eq), len(self.r)])).type(self.dtype).\
+            to_dense()
+        Aeq_zeta = torch.sparse.DoubleTensor(
+            torch.LongTensor([self.Aeq_zeta_row, self.Aeq_zeta_col]),
+            torch.stack(self.Aeq_zeta_val).type(torch.float64),
+            torch.Size([len(self.rhs_eq), len(self.zeta)])).type(self.dtype).\
+            to_dense()
+        b_act1 = torch.stack([s.squeeze() for s in self.rhs_eq]) -\
+            Aeq_zeta @ zeta_sol
 
         # Now fill in the active inequality constraints
-        (Ain_r, Ain_zeta, _) = self.get_inequality_constraints()
-        for (i, row) in enumerate(active_ineq_row_indices):
-            A_act[len(self.rhs_eq) + i] = Ain_r[row]
-            b_act[len(self.rhs_eq) + i] = self.rhs_in[row] -\
-                Ain_zeta[row] @ zeta_sol
+        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+        active_ineq_row_indices_list = list(active_ineq_row_indices)
+        Ain_active_r = Ain_r[active_ineq_row_indices_list]
+        Ain_active_zeta = Ain_zeta[active_ineq_row_indices_list]
+        rhs_in_active = rhs_in[active_ineq_row_indices_list]
+        b_act2 = rhs_in_active - Ain_active_zeta @ zeta_sol
+        A_act = torch.cat((A_act1, Ain_active_r), dim=0)
+        b_act = torch.cat((b_act1, b_act2))
         return (A_act, b_act)
 
     def get_inequality_constraints(self):
@@ -283,7 +284,7 @@ class GurobiTorchMIP:
         self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
                                    solution_number)
         r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
-        zeta_sol = torch.tensor([var.xn for var in self.zeta],
+        zeta_sol = torch.tensor([round(var.xn) for var in self.zeta],
                                 dtype=self.dtype)
         with torch.no_grad():
             (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
