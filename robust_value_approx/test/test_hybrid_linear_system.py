@@ -91,12 +91,14 @@ def setup_transformed_trecate_system(theta, x_equilibrium):
     return system
 
 
-def setup_johansson_continuous_time_system1():
+def setup_johansson_continuous_time_system1(box_half_length=1.):
     """
     This is the simple example from section 3 of
     Computation of piecewise quadratic Lyapunov functions for hybrid systems
     by M. Johansson and A.Rantzer, 1997.
     This system doesn't have a common quadratic Lyapunov function.
+    We definte the domain of the system as
+    [-box_half_length, -box_half_length] x [box_half_length, box_half_length]
     """
     dtype = torch.float64
     system = hybrid_linear_system.AutonomousHybridLinearSystem(
@@ -105,12 +107,16 @@ def setup_johansson_continuous_time_system1():
         torch.tensor([[-5, -4], [-1, -2]], dtype=dtype),
         torch.tensor([0, 0], dtype=dtype),
         torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([0, 1, 1, 1], dtype=dtype))
+        torch.tensor(
+            [0, box_half_length, box_half_length, box_half_length],
+            dtype=dtype))
     system.add_mode(
         torch.tensor([[-2, -4], [20, -2]], dtype=dtype),
         torch.tensor([0, 0], dtype=dtype),
         torch.tensor([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=dtype),
-        torch.tensor([1, 0, 1, 1], dtype=dtype))
+        torch.tensor(
+            [box_half_length, 0, box_half_length, box_half_length],
+            dtype=dtype))
     return system
 
 
@@ -626,9 +632,12 @@ class TestComputeDiscreteTimeSystemCostToGo(unittest.TestCase):
 
         def test_fun(x):
             num_steps = 100
-            total_cost = hybrid_linear_system.\
+            total_cost, x_steps, costs = hybrid_linear_system.\
                 compute_discrete_time_system_cost_to_go(
                     system, x, num_steps, instantaneous_cost_fun)
+            np.testing.assert_allclose(
+                x.detach().numpy(), x_steps[:, 0].detach().numpy())
+            self.assertEqual(total_cost.item(), costs[0].item())
             total_cost_expected = instantaneous_cost_fun(x)
             x_i = x.clone()
             for i in range(num_steps):
@@ -636,6 +645,11 @@ class TestComputeDiscreteTimeSystemCostToGo(unittest.TestCase):
                     if (torch.all(system.P[j] @ x_i <= system.q[j])):
                         x_i = system.A[j] @ x_i + system.g[j]
                         break
+                np.testing.assert_allclose(
+                    x_i.detach().numpy(), x_steps[:, i + 1].detach().numpy())
+                self.assertAlmostEqual(
+                    (total_cost_expected + costs[i+1]).item(),
+                    total_cost.item())
                 total_cost_expected += instantaneous_cost_fun(x_i)
             self.assertAlmostEqual(total_cost.item(),
                                    total_cost_expected.item())
@@ -648,14 +662,46 @@ class TestComputeDiscreteTimeSystemCostToGo(unittest.TestCase):
                 test_fun(torch.tensor(
                     [x_sample[i, j], y_sample[i, j]], dtype=system.dtype))
 
+        # With a goal state
+        x = torch.tensor([0.5, 0.4], dtype=system.dtype)
+        x_next = system.step_forward(x)
+        total_cost, x_steps, costs = \
+            hybrid_linear_system.compute_discrete_time_system_cost_to_go(
+                system, x, 100, lambda x: torch.norm(x), x_goal=x_next)
+        self.assertEqual(x_steps.shape, (2, 2))
+        self.assertEqual(costs.shape, (2,))
+        np.testing.assert_allclose(
+            x_steps[:, 0].detach().numpy(), x.detach().numpy())
+        np.testing.assert_allclose(
+            x_steps[:, 1].detach().numpy(), x_next.detach().numpy())
+        self.assertAlmostEqual(
+            costs[0].item(), (torch.norm(x) + torch.norm(x_next)).item())
+        self.assertAlmostEqual(
+            costs[1].item(), torch.norm(x_next).item())
+        self.assertAlmostEqual(total_cost.item(), costs[0].item())
+
 
 class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
     def test_fun1(self):
         system = setup_johansson_continuous_time_system1()
         x0 = torch.tensor([0.3, 0.8], dtype=torch.float64)
-        (cost, sol) = hybrid_linear_system.\
+        (cost, x_traj, cost_to_go_traj, sol) = hybrid_linear_system.\
             compute_continuous_time_system_cost_to_go(
                 system, x0, 15., lambda x: torch.norm(x, p=2))
+        np.testing.assert_allclose(
+            x_traj[:, -1].detach().numpy(), np.zeros(2), atol=1e-6)
+        self.assertAlmostEqual(cost_to_go_traj[-1], 0)
+        self.assertTrue(torch.all(
+            cost_to_go_traj[:-1] - cost_to_go_traj[1:] > 0))
+        self.assertAlmostEqual(cost.item(), cost_to_go_traj[0].item())
+        np.testing.assert_allclose(
+            cost_to_go_traj.detach().numpy() + sol.y[-1, :], cost)
+        (cost_next, x_traj_next, cost_to_go_traj_next, sol_next) = \
+            hybrid_linear_system.compute_continuous_time_system_cost_to_go(
+                system, x_traj[:, 1], sol.t[-1] - sol.t[1],
+                lambda x: torch.norm(x, p=2))
+        self.assertAlmostEqual(
+            cost_to_go_traj[1].item(), cost_next.item(), places=4)
         # The trajectory starts in mode 1, will first hit the mode boundary
         # x[0] = 0, and then stay in mode 0.
         A1_numpy = system.A[1].detach().numpy()
@@ -696,13 +742,21 @@ class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
         # trapezoidal integration), so only compare up to 4'th decimal place.
         self.assertAlmostEqual(cost.item(), cost_expected, places=4)
 
+        x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
+        cost_inf, x_inf_traj, cost_to_go_inf_traj, sol_inf = \
+            hybrid_linear_system.compute_continuous_time_system_cost_to_go(
+                system, x0, np.inf,
+                lambda x: torch.norm(x, p=2), x_goal=x_equilibrium)
+        self.assertLessEqual(
+            np.linalg.norm(sol_inf.y[:2, -1]), 2e-3)
+
 
 class TestGenerateCostToGoSamples(unittest.TestCase):
     def setUp(self):
         dtype = torch.float64
         samples_x, samples_y = torch.meshgrid(
-            torch.linspace(-1., 1., 10, dtype=dtype),
-            torch.linspace(-1., 1., 10, dtype=dtype))
+            torch.linspace(-1., 1., 5, dtype=dtype),
+            torch.linspace(-1., 1., 5, dtype=dtype))
         self.x0_samples = [None] * (samples_x.shape[0] * samples_x.shape[1])
         for i in range(samples_x.shape[0]):
             for j in range(samples_x.shape[1]):
@@ -710,22 +764,34 @@ class TestGenerateCostToGoSamples(unittest.TestCase):
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
 
     def test_continuous_time_system(self):
-        system = setup_johansson_continuous_time_system1()
-        T = 2.
+        system = setup_johansson_continuous_time_system1(5)
+        x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
+        T = 15.
+
+        def pruner(x):
+            return torch.norm(x - x_equilibrium, p=2) < 0.01
         x0_cost_pairs = hybrid_linear_system.generate_cost_to_go_samples(
-            system, self.x0_samples, T, lambda x: torch.norm(x, p=2), False)
+            system, self.x0_samples, T, lambda x: torch.norm(x, p=2), False,
+            x_equilibrium, pruner)
         self.assertIsInstance(x0_cost_pairs, list)
-        self.assertLessEqual(len(x0_cost_pairs), len(self.x0_samples))
-        self.assertGreater(len(x0_cost_pairs), 0)
+        self.assertGreater(len(x0_cost_pairs), len(self.x0_samples))
+        for x0_cost_pair in x0_cost_pairs:
+            self.assertFalse(pruner(x0_cost_pair[0]))
 
     def test_discrete_time_system(self):
         system = setup_trecate_discrete_time_system()
+        x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
+
+        def pruner(x):
+            return torch.norm(x - x_equilibrium, p=2) < 0.01
         N = 20
         x0_cost_pairs = hybrid_linear_system.generate_cost_to_go_samples(
-            system, self.x0_samples, N, lambda x: torch.norm(x, p=2), True)
+            system, self.x0_samples, N, lambda x: torch.norm(x, p=2), True,
+            x_equilibrium, pruner)
         self.assertIsInstance(x0_cost_pairs, list)
-        self.assertLessEqual(len(x0_cost_pairs), len(self.x0_samples))
-        self.assertGreater(len(x0_cost_pairs), 0)
+        self.assertGreater(len(x0_cost_pairs), len(self.x0_samples))
+        for x0_cost_pair in x0_cost_pairs:
+            self.assertFalse(pruner(x0_cost_pair[0]))
 
 
 class TestPartitionStateInputSpace(unittest.TestCase):

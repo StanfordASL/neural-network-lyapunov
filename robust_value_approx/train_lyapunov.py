@@ -210,9 +210,35 @@ class TrainValueApproximator:
         self.convergence_tolerance = 1e-3
         self.learning_rate = 0.02
 
+    def train_with_cost_to_go(
+            self, network, x0_value_samples, V_rho, x_equilibrium):
+        """
+        Similar to train() function, but with given samples on initial_state
+        and cost-to-go.
+        """
+        state_samples_all = torch.stack([
+            pair[0] for pair in x0_value_samples], dim=0)
+        value_samples_all = torch.stack([pair[1] for pair in x0_value_samples])
+        optimizer = torch.optim.Adam(
+            network.parameters(), lr=self.learning_rate)
+        for epoch in range(self.max_epochs):
+            optimizer.zero_grad()
+            relu_output = network(state_samples_all)
+            relu_x_equilibrium = network.forward(x_equilibrium)
+            value_relu = relu_output.squeeze() - relu_x_equilibrium +\
+                V_rho * torch.norm(
+                    state_samples_all - x_equilibrium.reshape((1, -1)).
+                    expand(state_samples_all.shape[0], -1), dim=1, p=1)
+            loss = torch.nn.MSELoss()(value_relu, value_samples_all)
+            if (loss.item() <= self.convergence_tolerance):
+                return True, loss.item()
+            loss.backward()
+            optimizer.step()
+        return False, loss.item()
+
     def train(
         self, system, network, V_rho, x_equilibrium, instantaneous_cost_fun,
-            x0_samples, T, discrete_time_flag):
+            x0_samples, T, discrete_time_flag, x_goal=None, pruner=None):
         """
         Train a network such that
         network(x) - network(x*) + ρ*|x-x*|₁ ≈ cost_to_go(x)
@@ -229,6 +255,12 @@ class TrainValueApproximator:
         float.
         @param discrete_time_flag Whether the hybrid linear system is discrete
         or continuous time.
+        @param x_goal The goal position to stop simulating the trajectory when
+        computing cost-to-go. Check compute_continuous_time_system_cost_to_go()
+        and compute_discrete_time_system_cost_to_go() for more details.
+        @param pruner A callable to decide whether to keep a state in the
+        training set or not. Check generate_cost_to_go_samples() for more
+        details.
         """
         assert(isinstance(
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
@@ -237,24 +269,7 @@ class TrainValueApproximator:
         assert(isinstance(V_rho, float))
         assert(isinstance(x0_samples, list))
         x0_value_samples = hybrid_linear_system.generate_cost_to_go_samples(
-            system, x0_samples, T, instantaneous_cost_fun, discrete_time_flag)
-        state_samples_all = torch.stack([
-            pair[0] for pair in x0_value_samples], dim=0)
-        value_samples_all = torch.stack([pair[1] for pair in x0_value_samples])
-
-        optimizer = torch.optim.Adam(
-            network.parameters(), lr=self.learning_rate)
-        for epoch in range(self.max_epochs):
-            optimizer.zero_grad()
-            relu_output = network(state_samples_all)
-            relu_x_equilibrium = network.forward(x_equilibrium)
-            value_relu = relu_output.squeeze() - relu_x_equilibrium +\
-                V_rho * torch.norm(
-                    state_samples_all - x_equilibrium.reshape((1, -1)).
-                    expand(state_samples_all.shape[0], -1), dim=1, p=1)
-            loss = torch.nn.MSELoss()(value_relu, value_samples_all)
-            if (loss.item() <= self.convergence_tolerance):
-                return True
-            loss.backward()
-            optimizer.step()
-        return False
+            system, x0_samples, T, instantaneous_cost_fun, discrete_time_flag,
+            x_goal, pruner)
+        return self.train_with_cost_to_go(
+            network, x0_value_samples, V_rho, x_equilibrium)
