@@ -349,20 +349,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         max V(x[n+1]) - V(x[n]) + ε * V(x[n])
         s.t lower <= V(x[n]) <= upper
         We would formulate this optimization problem as an MILP.
-
-        This function returns the MILP formulation.
-        max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
-        s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
-            Aeq_r * r + Aeq_zeta * ζ = rhs_eq
-        where r includes all continuous variables, and ζ includes all binary
-        variables.
-        @param relu_model A pytorch ReLU network. Notice that we want the last
-        layer to be a ReLU activation layer, so as to guarantee the Lyapunov
-        function to be non-negative.
-        return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
-        where milp is a GurobiTorchMILP object.
-        The decision variables of the MILP are
-        (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
+        @param relu_model A pytorch ReLU network.
         @param V_rho ρ in the documentation above.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
@@ -371,6 +358,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
+        @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
+        where milp is a GurobiTorchMILP object.
+        The decision variables of the MILP are
+        (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
@@ -876,29 +867,23 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         s.t lower <= V(x) <= upper
         We would formulate this optimization problem as an MILP.
 
-        This function returns the MILP formulation.
-        max cᵣᵀ * r + c_zetaᵀ * ζ + c_constant
-        s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
-            Aeq_r * r + Aeq_zeta * ζ = rhs_eq
-        where r includes all continuous variables, and ζ includes all binary
-        variables.
-        @param relu_model A pytorch ReLU network. Notice that we want the last
-        layer to be a ReLU activation layer, so as to guarantee the Lyapunov
-        function to be non-negative.
-        return (milp, x, s, gamma, z, beta)
-        where milp is a GurobiTorchMILP object.
-        The decision variables of the MILP are
-        (x, s, gamma, z, beta)
+        @param relu_model A pytorch ReLU network.
         @param x_equilibrium The equilibrium state.
         @param V_rho ρ in the documentation above.
         @param epsilon The exponential convergence rate.
         @param lyapunov_lower the "lower" bound in the documentation above. If
-        lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
+        lyapunov_lower = None, then we ignore the lower bound on V(x).
         @param lyapunov_upper the "upper" bound in the documentation above. If
-        lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
+        lyapunov_upper = None, then we ignore the upper bound on V(x).
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
+        @return (milp, x, relu_beta) milp is the GurobiTorchMILP object such
+        that if the maximal of this MILP is 0, the condition V̇(x) ≤ -ε V(x) is
+        satisfied. x is the decision variable in the milp as the adversarial
+        state (the state with the maximal violation of Lyapunov condition
+        V̇(x) ≤ -ε V(x), and relu_beta is the binary variable representing the
+        activation pattern of the ReLU network.
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
@@ -1010,7 +995,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
-        return (milp, x)
+        return (milp, x, relu_beta)
 
     def lyapunov_derivative_loss_at_sample(
         self, relu_model, V_rho, epsilon, state_sample, x_equilibrium,
