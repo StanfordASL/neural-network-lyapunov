@@ -27,7 +27,7 @@ class SimplePWLLyapunov:
     cᵢᵀuᵢ,ⱼ+dᵢ = cⱼᵀuᵢ,ⱼ+dⱼ                                  (5)
     In order to find such a Lyapunov function, we introduce the slack variable
     s1 and s2, and solve the following LP
-    min s1 + weight * s2
+    min (1-weight) * s1 + weight * s2
     s1 >= (cᵢᵀAᵢ+εcᵢᵀ)vᵢʲ+cᵢᵀgᵢ+εdᵢ ∀ i                         (6)
     s2 >= -(cᵢᵀ-ρ*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ρ*sign(v̅ᵢʲ-x*)x*      (7)
     cᵢᵀuᵢ,ⱼ+dᵢ = cⱼᵀuᵢ,ⱼ+dⱼ                                     (8)
@@ -150,12 +150,14 @@ class SimplePWLLyapunov:
         Solve the optimization in the documentation above. If the optimal cost
         is 0, then we find a Lyapunov function. Otherwise we minimizes the
         violation of the Lyapunov condition.
-        @param weight The cost is s1 + weight * s2.
+        @param weight The cost is (1-weight) * s1 + weight * s2.
         @return c_val, d_val, s1_val, s2_val.
         """
         assert(isinstance(weight, float))
         assert(weight > 0)
+        assert(weight < 1)
         prob = cp.Problem(
-            cp.Minimize(self.s1 + weight * self.s2), self.constraints)
+            cp.Minimize((1-weight) * self.s1 + weight * self.s2),
+            self.constraints)
         prob.solve()
         return self.c.value, self.d.value, self.s1[0].value, self.s2[0].value

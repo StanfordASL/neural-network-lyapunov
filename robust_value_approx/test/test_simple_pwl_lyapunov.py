@@ -27,7 +27,7 @@ class TestSimplePWLLyapunov(unittest.TestCase):
             1, np.array([[0.], [-1.]]), np.array([-1]))
         dut.add_continuity_constraint(0, 1, np.array([[0.]]))
 
-        c_val, d_val, s1_val, s2_val = dut.solve(1.)
+        c_val, d_val, s1_val, s2_val = dut.solve(0.3)
         # Now check constraint
         self.assertAlmostEqual(s1_val, 0, places=5)
         self.assertAlmostEqual(s2_val, 0, places=5)
@@ -103,7 +103,7 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         for args in continuity_args:
             dut.add_continuity_constraint(args[0], args[1], args[2])
 
-        c_val, d_val, s1_val, s2_val = dut.solve(2.)
+        c_val, d_val, s1_val, s2_val = dut.solve(0.5)
         # This system does not have a simple piecewise linear lyapunov
         # function.
         self.assertTrue(np.abs(s1_val) > 1e-6 or np.abs(s2_val) > 1e-6)
