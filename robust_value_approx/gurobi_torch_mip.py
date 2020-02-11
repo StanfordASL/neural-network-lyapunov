@@ -235,12 +235,16 @@ class GurobiTorchMIP:
             b_act1 = torch.zeros(len(self.rhs_eq), dtype=self.dtype)
 
         # Now fill in the active inequality constraints
-        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
-        active_ineq_row_indices_list = list(active_ineq_row_indices)
-        Ain_active_r = Ain_r[active_ineq_row_indices_list]
-        Ain_active_zeta = Ain_zeta[active_ineq_row_indices_list]
-        rhs_in_active = rhs_in[active_ineq_row_indices_list]
-        b_act2 = rhs_in_active - Ain_active_zeta @ zeta_sol
+        if len(active_ineq_row_indices) != 0:
+            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+            active_ineq_row_indices_list = list(active_ineq_row_indices)
+            Ain_active_r = Ain_r[active_ineq_row_indices_list]
+            Ain_active_zeta = Ain_zeta[active_ineq_row_indices_list]
+            rhs_in_active = rhs_in[active_ineq_row_indices_list]
+            b_act2 = rhs_in_active - Ain_active_zeta @ zeta_sol
+        else:
+            Ain_active_r = torch.zeros((0, len(self.r)), dtype=self.dtype)
+            b_act2 = torch.zeros(0, dtype=self.dtype)
         A_act = torch.cat((A_act1, Ain_active_r), dim=0)
         b_act = torch.cat((b_act1, b_act2))
         return (A_act, b_act)
