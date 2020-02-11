@@ -89,6 +89,38 @@ def compute_all_relu_activation_patterns(relu, x):
     return patterns_list
 
 
+def relu_activation_binary_to_pattern(relu_network, activation_binary):
+    """
+    Given a numpy array of 0 and 1 representing the activation of each ReLU
+    unit in the network, returns a list of lists as the activation pattern.
+    The returned activation pattern can be used in ReLUGivenActivationPattern
+    @param relu_network A fully connected network with ReLU units.
+    @param activation_binary A numpy array. The length of this array is the
+    same as the number of ReLU units in the network.
+    @return activation pattern activation_pattern[i][j] is True if the j'th
+    unit on the i'th layer is actived, False otherwise.
+    """
+    assert(isinstance(relu_network, nn.Sequential))
+    assert(isinstance(activation_binary, np.ndarray))
+    assert(np.all(np.logical_or(
+        activation_binary == 1,  activation_binary == 0)))
+    last_layer_is_relu = isinstance(relu_network[-1], nn.ReLU) or\
+        isinstance(relu_network[-1], nn.LeakyReLU)
+    num_relu_layers = int(len(relu_network) / 2) if last_layer_is_relu else\
+        int((len(relu_network) - 1) / 2)
+    total_relu_units = np.sum(np.array(
+        [relu_network[2*i].out_features for i in range(num_relu_layers)]))
+    assert(activation_binary.shape == (total_relu_units, ))
+    activation_pattern = [None] * num_relu_layers
+    relu_unit_count = 0
+    for i in range(num_relu_layers):
+        num_relu_in_layer = relu_network[2*i].out_features
+        activation_pattern[i] = list(activation_binary[
+            relu_unit_count:relu_unit_count + num_relu_in_layer] == 1)
+        relu_unit_count += num_relu_in_layer
+    return activation_pattern
+
+
 def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
     """
     Given a ReLU network, and a given activation pattern, the ReLU network can

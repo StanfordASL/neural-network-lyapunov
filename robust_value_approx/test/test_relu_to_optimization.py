@@ -163,6 +163,22 @@ class TestReLU(unittest.TestCase):
         self.assertEqual(
             patterns[3], [[False, True, True], [False, False, False]])
 
+    def test_relu_activation_binary_to_pattern(self):
+        for model in (self.model1, self.model3):
+            activation_pattern = \
+                relu_to_optimization.relu_activation_binary_to_pattern(
+                    model, np.array([1, 1, 0, 0, 1, 0, 0, 1]))
+            self.assertEqual(
+                activation_pattern,
+                [[True, True, False], [False, True, False, False], [True]])
+        for model in (self.model2, self.model4):
+            activation_pattern = \
+                relu_to_optimization.relu_activation_binary_to_pattern(
+                    model, np.array([1, 1, 0, 0, 1, 0, 0]))
+            self.assertEqual(
+                activation_pattern,
+                [[True, True, False], [False, True, False, False]])
+
     def test_relu_given_activation_pattern(self):
         def test_relu_given_activation_pattern_util(self, model, x):
             with torch.no_grad():
