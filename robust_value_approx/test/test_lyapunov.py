@@ -1218,7 +1218,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
 
         def test_fun(relu, x_equilibrium, system, x_val):
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
-            (milp, x) = dut.lyapunov_derivative_as_milp(
+            (milp, x, beta) = dut.lyapunov_derivative_as_milp(
                 relu, x_equilibrium, V_rho, epsilon, None, None)
             for i in range(system.x_dim):
                 milp.addLConstr(
