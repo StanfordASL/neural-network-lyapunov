@@ -52,3 +52,17 @@ class FiniteHorizonValueFunctionApproximation:
             self.optimizers[n].step()
             loss_log.append(loss.item())
         return torch.Tensor(loss_log).type(self.dtype)
+
+    def validation_loss(self, x_traj_samples, v_labels):
+        assert(isinstance(x_traj_samples, torch.Tensor))
+        assert(isinstance(v_labels, torch.Tensor))
+        assert(x_traj_samples.shape[1] == self.x_dim*(self.N-1))
+        loss_log = []
+        with torch.no_grad():
+            for n in range(self.N-1):
+                v_predicted = self.eval(
+                    n, x_traj_samples[:, n*self.x_dim:(n+1)*self.x_dim])
+                loss = torch.nn.functional.mse_loss(
+                    v_predicted.squeeze(), v_labels[:, n])
+                loss_log.append(loss.item())
+        return torch.Tensor(loss_log).type(self.dtype)
