@@ -361,7 +361,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
-        (x[n], x[n+1], s[n], gamma[n], z[n], z[n+1], beta[n], beta[n+1])
+        (x[n], beta[n], gamma[n], x[n+1], s[n], z[n], z[n+1], beta[n+1])
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
@@ -439,7 +439,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             epsilon * (b_out - relu_x_equilibrium.squeeze()),
             gurobipy.GRB.MAXIMIZE)
 
-        return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
+        return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
 
     def lyapunov_derivative_loss_at_sample(
             self, relu_model, V_rho, epsilon, state_sample, x_equilibrium,
@@ -878,12 +878,14 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
-        @return (milp, x, relu_beta) milp is the GurobiTorchMILP object such
-        that if the maximal of this MILP is 0, the condition V̇(x) ≤ -ε V(x) is
-        satisfied. x is the decision variable in the milp as the adversarial
-        state (the state with the maximal violation of Lyapunov condition
-        V̇(x) ≤ -ε V(x), and relu_beta is the binary variable representing the
-        activation pattern of the ReLU network.
+        @return (milp, x, relu_beta, gamma) milp is the GurobiTorchMILP
+        object such that if the maximal of this MILP is 0, the condition
+        V̇(x) ≤ -ε V(x) is satisfied. x is the decision variable in the milp
+        as the adversarial state (the state with the maximal violation of
+        Lyapunov condition V̇(x) ≤ -ε V(x), and relu_beta is the binary
+        variable representing the activation pattern of the ReLU network.
+        gamma is the binary variable representing the active hybrid mode
+        for the adversarial state x.
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
@@ -995,7 +997,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
-        return (milp, x, relu_beta)
+        return (milp, x, relu_beta, gamma)
 
     def lyapunov_derivative_loss_at_sample(
         self, relu_model, V_rho, epsilon, state_sample, x_equilibrium,
