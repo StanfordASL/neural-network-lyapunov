@@ -1,4 +1,4 @@
-import robust_value_approx.random_sample as random_sample
+import robust_value_approx.samples_generator as samples_generator
 import robust_value_approx.value_approximation as value_approximation
 import double_integrator_utils
 
@@ -12,8 +12,8 @@ class ValueApproximationTest(unittest.TestCase):
         vf = double_integrator_utils.get_value_function(N=N)
         x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
-        rs_gen = random_sample.RandomSampleGenerator(vf, x0_lo, x0_up)
-        (rand_data, rand_label) = rs_gen.get_random_samples(10)
+        rs_gen = samples_generator.RandomSampleGenerator(vf, x0_lo, x0_up)
+        (rand_data, rand_label) = rs_gen.generate_samples(10)
         va = value_approximation.FiniteHorizonValueFunctionApproximation(
             vf, x0_lo, x0_up, 16, 1)
         val = va.eval(0, rand_data[:, :vf.sys.x_dim])
@@ -25,8 +25,8 @@ class ValueApproximationTest(unittest.TestCase):
         vf = double_integrator_utils.get_value_function(N=N)
         x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
-        rs_gen = random_sample.RandomSampleGenerator(vf, x0_lo, x0_up)
-        (rand_data, rand_label) = rs_gen.get_random_samples(10)
+        rs_gen = samples_generator.RandomSampleGenerator(vf, x0_lo, x0_up)
+        (rand_data, rand_label) = rs_gen.generate_samples(10)
         va = value_approximation.FiniteHorizonValueFunctionApproximation(
             vf, x0_lo, x0_up, 16, 1)
         losses0 = va.train_step(rand_data, rand_label)

@@ -8,6 +8,15 @@ import robust_value_approx.utils as utils
 
 class SampleGenerator:
     def __init__(self, vf, x0_lo, x0_up):
+        """
+        Super class to generate samples from a value function
+        @param vf ValueFunction instance from which to generate the samples
+        @param x0_lo tensor size x_dim lower bound on initial state for the
+        samples generation
+        @param x0_up tensor size x_dim upper bound on initial state for the
+        samples generation
+        """
+        assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.x0_lo = x0_lo
         self.x0_up = x0_up
@@ -75,6 +84,39 @@ class RandomSampleGenerator(SampleGenerator):
 class DiffFiniteHorizonValueFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, args):
+        """
+        Computes the value function for a finite horizon value function
+        that is expressed as an MIQP. The derivative is recovered by looking
+        at the dual variables at the solution. For now this solves a second
+        QP so that cvx returns dual variable. Assuming the following
+        problem
+        min .5 xᵀ Q1 x + .5 sᵀ Q2 s + .5 αᵀ Q3 α + q1ᵀ x + q2ᵀ s + q3ᵀ α + c
+        s.t. Ain1 x + Ain2 s + Ain3 α ≤ rhs_in
+             Aeq1 x + Aeq2 s + Aeq3 α = rhs_eq
+             α ∈ {0,1}
+        we fix both α and x, and we can compute the derivative of the value
+        function by computing
+        ∂y/∂x = λ₁ᵀAin1 + λ₂ᵀAeq1 + xᵀ Q1 + q1ᵀ
+
+        @param x Tensor representing x0
+        @param args dictionnary containing the variables of the problem as
+        either cvx variables, parameters or tensor
+            -vf (ValueFunction)
+            -x0 (Parameter)
+            -s (Variable)
+            -alpha_mi (Discrete Variable)
+            -alpha_con (Variable)
+            -obj_mi (Objective)
+            -con_mi (list of Constraints)
+            -prob_mi (Problem)
+            -obj_con (Objective)
+            -con_con (list of Constraints)
+            -prob_con (Problem)
+            -G0 (tensor)
+            -A0 (tensor)
+            -Q1 (tensor)
+            -q1 (tensor)
+        """
         ctx.x = x
         x_traj_flat_dim = (1, args['vf'].sys.x_dim*(args['vf'].N-1))
         cost_to_go_dim = args['vf'].N-1
