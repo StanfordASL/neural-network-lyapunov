@@ -210,31 +210,41 @@ class GurobiTorchMIP:
         # First fill in the equality constraints
         # The equality constraints are Aeq_r * r + Aeq_zeta * zeta_sol = beq,
         # equivalent to Aeq_r * r = beq - Aeq_zeta * zeta_sol
-        if len(self.rhs_eq) != 0:
+        if len(self.Aeq_r_row) != 0:
             A_act1 = torch.sparse.DoubleTensor(
                 torch.LongTensor([self.Aeq_r_row, self.Aeq_r_col]),
                 torch.stack(self.Aeq_r_val).type(torch.float64),
                 torch.Size([len(self.rhs_eq), len(self.r)])).type(self.dtype).\
                 to_dense()
+        else:
+            A_act1 = torch.zeros(
+                (len(self.rhs_eq), len(self.r)), dtype=self.dtype)
+        if len(self.Aeq_zeta_row) != 0:
             Aeq_zeta = torch.sparse.DoubleTensor(
                 torch.LongTensor([self.Aeq_zeta_row, self.Aeq_zeta_col]),
                 torch.stack(self.Aeq_zeta_val).type(torch.float64),
                 torch.Size([len(self.rhs_eq), len(self.zeta)]))\
                 .type(self.dtype).to_dense()
+        else:
+            Aeq_zeta = torch.zeros(
+                (len(self.rhs_eq), len(self.zeta)), dtype=self.dtype)
+        if len(self.rhs_eq) != 0:
             b_act1 = torch.stack([s.squeeze() for s in self.rhs_eq]) -\
                 Aeq_zeta @ zeta_sol
         else:
-            A_act1 = torch.zeros(
-                (len(self.rhs_eq), len(self.r)), dtype=self.dtype)
             b_act1 = torch.zeros(len(self.rhs_eq), dtype=self.dtype)
 
         # Now fill in the active inequality constraints
-        (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
-        active_ineq_row_indices_list = list(active_ineq_row_indices)
-        Ain_active_r = Ain_r[active_ineq_row_indices_list]
-        Ain_active_zeta = Ain_zeta[active_ineq_row_indices_list]
-        rhs_in_active = rhs_in[active_ineq_row_indices_list]
-        b_act2 = rhs_in_active - Ain_active_zeta @ zeta_sol
+        if len(active_ineq_row_indices) != 0:
+            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+            active_ineq_row_indices_list = list(active_ineq_row_indices)
+            Ain_active_r = Ain_r[active_ineq_row_indices_list]
+            Ain_active_zeta = Ain_zeta[active_ineq_row_indices_list]
+            rhs_in_active = rhs_in[active_ineq_row_indices_list]
+            b_act2 = rhs_in_active - Ain_active_zeta @ zeta_sol
+        else:
+            Ain_active_r = torch.zeros((0, len(self.r)), dtype=self.dtype)
+            b_act2 = torch.zeros(0, dtype=self.dtype)
         A_act = torch.cat((A_act1, Ain_active_r), dim=0)
         b_act = torch.cat((b_act1, b_act2))
         return (A_act, b_act)
@@ -261,8 +271,40 @@ class GurobiTorchMIP:
         else:
             Ain_zeta = torch.zeros(
                 (len(self.rhs_in), len(self.zeta)), dtype=self.dtype)
-        rhs_in = torch.stack([s.squeeze() for s in self.rhs_in])
+        if len(self.rhs_in) != 0:
+            rhs_in = torch.stack([s.squeeze() for s in self.rhs_in])
+        else:
+            rhs_in = torch.zeros(len(self.rhs_in), dtype=self.dtype)
         return (Ain_r, Ain_zeta, rhs_in)
+
+    def get_active_constraint_indices_and_binary_val(
+            self, solution_number=0, active_constraint_tolerance=1e-6):
+        """
+        Given the MIP is solved to optimality, get the indices of the active
+        constraints.
+        @param solution_number The index of the suboptimal solution. Should be
+        in the range of [0, gurobi_model.solCount). Setting solution_number to
+        0 means the optimal solution.
+        @param active_constraint_tolerance If the constraint violation is less
+        than this tolerance at the solution, then we think this constraint is
+        active at the solution.
+        """
+        assert(solution_number >= 0 and
+               solution_number < self.gurobi_model.solCount)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
+                                   solution_number)
+        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
+        zeta_sol = torch.tensor([round(var.xn) for var in self.zeta],
+                                dtype=self.dtype)
+        with torch.no_grad():
+            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
+        active_ineq_row_indices = np.arange(len(self.rhs_in))
+        active_ineq_row_indices = set(active_ineq_row_indices[
+            np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
+            active_constraint_tolerance])
+        return active_ineq_row_indices, zeta_sol
 
     def compute_objective_from_mip_data_and_solution(
             self, solution_number=0, active_constraint_tolerance=1e-6,
@@ -283,21 +325,9 @@ class GurobiTorchMIP:
         details. For MIQP, please set the penalty to a strictly positive
         number.
         """
-        assert(solution_number >= 0 and
-               solution_number < self.gurobi_model.solCount)
-        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
-                                   solution_number)
-        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
-        zeta_sol = torch.tensor([round(var.xn) for var in self.zeta],
-                                dtype=self.dtype)
-        with torch.no_grad():
-            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
-            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
-        active_ineq_row_indices = np.arange(len(self.rhs_in))
-        active_ineq_row_indices = set(active_ineq_row_indices[
-            np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
-            active_constraint_tolerance])
+        active_ineq_row_indices, zeta_sol = \
+            self.get_active_constraint_indices_and_binary_val(
+                solution_number, active_constraint_tolerance)
         return self.compute_objective_from_mip_data(
             active_ineq_row_indices, zeta_sol, penalty)
 

@@ -212,7 +212,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
             dut.rhs_eq, [torch.tensor(2, dtype=torch.float64),
                          torch.tensor(3, dtype=torch.float64)])
 
-    def test_get_active_constraints(self):
+    def test_get_active_constraints1(self):
         dtype = torch.float64
         dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
         x, alpha = setup_mip1(dut)
@@ -236,6 +236,57 @@ class TestGurobiTorchMIP(unittest.TestCase):
                                       requires_grad=True)))
         self.assertTrue(torch.all(b_act == torch.tensor(
             [0, 1, 0, 0, 1], dtype=dtype, requires_grad=True)))
+
+    def test_get_active_constraints2(self):
+        """
+        Test with no equality constraint
+        """
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x = dut.addVars(1, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
+        zeta = dut.addVars(1, vtype=gurobipy.GRB.BINARY)
+        dut.addLConstr(
+            [torch.tensor([1, 1], dtype=dtype)], [[x[0], zeta[0]]],
+            sense=gurobipy.GRB.LESS_EQUAL, rhs=1.5)
+        dut.setObjective(
+            [torch.tensor([1], dtype=dtype)], [x], 0., gurobipy.GRB.MAXIMIZE)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        dut.gurobi_model.optimize()
+        # The active constraint is x[0] + zeta[0] <= 1.5
+        active_ineq_row_indices, zeta_sol = \
+            dut.get_active_constraint_indices_and_binary_val()
+        self.assertEqual(active_ineq_row_indices, {1})
+        np.testing.assert_allclose(zeta_sol, np.array([0.]), atol=1e-12)
+        A_act, b_act = dut.get_active_constraints(
+            active_ineq_row_indices, zeta_sol)
+        np.testing.assert_allclose(A_act, np.array([[1.]]))
+        np.testing.assert_allclose(b_act, np.array([1.5]))
+
+    def test_get_active_constraints3(self):
+        """
+        MILP with inequality constraints, but the inequality constraints are
+        not active.
+        """
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x = dut.addVars(1, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
+        zeta = dut.addVars(1, vtype=gurobipy.GRB.BINARY)
+        dut.addLConstr(
+            [torch.tensor([1, 1], dtype=dtype)], [[x[0], zeta[0]]], rhs=2.,
+            sense=gurobipy.GRB.EQUAL)
+        dut.setObjective(
+            [torch.tensor([1.], dtype=dtype)], [x], 0.,
+            sense=gurobipy.GRB.MINIMIZE)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        dut.gurobi_model.optimize()
+        active_ineq_row_indices, zeta_sol = \
+            dut.get_active_constraint_indices_and_binary_val()
+        self.assertEqual(len(active_ineq_row_indices), 0)
+        np.testing.assert_allclose(zeta_sol, np.array([1.]), atol=1e-12)
+        A_act, b_act = dut.get_active_constraints(
+            active_ineq_row_indices, zeta_sol)
+        np.testing.assert_allclose(A_act, np.array([[1.]]))
+        np.testing.assert_allclose(b_act, np.array([1.]))
 
     def test_get_inequality_constraints(self):
         dtype = torch.float64
@@ -268,6 +319,23 @@ class TestGurobiTorchMIP(unittest.TestCase):
                  [0, 0, 2.5, 0.3, 2], [0, 0, -0.2, -1.5, -3]], dtype=dtype)))
         self.assertTrue(
             torch.all(rhs_in == torch.tensor([1, 1, 1, 3, -0.5], dtype=dtype)))
+
+    def test_get_active_constraint_indices_and_binary_val(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x, alpha = setup_mip1(dut)
+        # If the objective is max x[0] + 1, then the active constraints are
+        # x[1] >= 0, x[2] >= 0, x[0] + x[1] <= alpha[0],
+        # x[1] + x[2] <= alpha[1], the binary variable solution is
+        # alpha = [1, 0]
+        dut.setObjective([torch.tensor([1], dtype=dtype)], [[x[0]]], 1.,
+                         gurobipy.GRB.MAXIMIZE)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        dut.gurobi_model.optimize()
+        active_ineq_row_indices, zeta_sol = \
+            dut.get_active_constraint_indices_and_binary_val()
+        self.assertEqual(active_ineq_row_indices, {1, 2, 3, 4})
+        np.testing.assert_allclose(zeta_sol, np.array([1, 0]), atol=1e-12)
 
 
 class TestGurobiTorchMILP(unittest.TestCase):
