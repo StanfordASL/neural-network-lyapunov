@@ -13,10 +13,11 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         ẋ = -2x if x <= 0
         there exists piecewise linear Lyapunov function.
         """
-        rho = 0.1
-        epsilon = 0.01
+        lyapunov_positivity_epsilon = 0.1
+        lyapunov_derivative_epsilon = 0.01
         dut = simple_pwl_lyapunov.SimplePWLLyapunov(
-            1, 2, rho, epsilon, np.array([0.]), 0)
+            1, 2, lyapunov_positivity_epsilon, lyapunov_derivative_epsilon,
+            np.array([0.]), 0)
         dut.add_lyapunov_derivative_in_mode(
             0, np.array([[0.], [1.]]), np.array([[-1.]]), np.array([0.]))
         dut.add_lyapunov_derivative_in_mode(
@@ -35,22 +36,27 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         np.testing.assert_allclose(d_val, np.array([0., 0.]), atol=1e-6)
         # Check Vdot <= -epsilon * V
         self.assertLessEqual(
-            c_val[0, 0] * -1, -epsilon * c_val[0, 0] + 1e-6)
+            c_val[0, 0] * -1, -lyapunov_derivative_epsilon * c_val[0, 0] +
+            1e-6)
         self.assertLessEqual(
-            c_val[0, 1] * -2 * -1, -epsilon * c_val[0, 1] * -1 + 1e-6)
-        # Check V >= rho * 1_norm(x - x*)
-        self.assertGreaterEqual(c_val[0, 0] * 1, rho * 1)
-        self.assertGreaterEqual(c_val[0, 1] * -1, rho * 1)
+            c_val[0, 1] * -2 * -1, -lyapunov_derivative_epsilon * c_val[0, 1]
+            * -1 + 1e-6)
+        # Check V >= lyapunov_positivity_epsilon * 1_norm(x - x*)
+        self.assertGreaterEqual(
+            c_val[0, 0] * 1, lyapunov_positivity_epsilon * 1)
+        self.assertGreaterEqual(
+            c_val[0, 1] * -1, lyapunov_positivity_epsilon * 1)
 
     def test2(self):
         """
         This is the system in Example 2 of Computation of piecewise quadratic
         Lyapunov functions for hybrid systems By M. Johansson and A. Rantzer.
         """
-        rho = 0.1
-        epsilon = 0.01
+        lyapunov_positivity_epsilon = 0.1
+        lyapunov_derivative_epsilon = 0.01
         dut = simple_pwl_lyapunov.SimplePWLLyapunov(
-            2, 3, rho, epsilon, np.array([0., 0.]), 1)
+            2, 3, lyapunov_positivity_epsilon, lyapunov_derivative_epsilon,
+            np.array([0., 0.]), 1)
         mode_vertices = [None] * 3
         A = [None] * 3
         g = [None] * 3
@@ -118,14 +124,15 @@ class TestSimplePWLLyapunov(unittest.TestCase):
             for j in range(mode_vertices[i].shape[0]):
                 self.assertGreaterEqual(
                     s1_val, c_val[:, i] @ (A[i]@mode_vertices[i][j] + g[i]) +
-                    epsilon * (c_val[:, i] @ mode_vertices[i][j] + d_val[i])
-                    - 1e-5)
+                    lyapunov_derivative_epsilon *
+                    (c_val[:, i] @ mode_vertices[i][j] + d_val[i]) - 1e-5)
         # Check the Lyapunov positivity constraint
         for args in lyapunov_positivity_args:
             for j in range(args[1].shape[0]):
                 self.assertGreaterEqual(
                     c_val[:, args[0]] @ args[1][j] + d_val[args[0]] -
-                    rho * np.linalg.norm(args[1][j], ord=1), -s2_val - 1e-5)
+                    lyapunov_positivity_epsilon * np.linalg.norm(
+                        args[1][j], ord=1), -s2_val - 1e-5)
 
 
 if __name__ == "__main__":
