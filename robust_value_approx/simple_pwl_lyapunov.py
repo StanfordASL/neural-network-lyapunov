@@ -13,23 +13,23 @@ class SimplePWLLyapunov:
     ẋ = Aᵢx+gᵢ if x in ConvexHull(vᵢ¹, ..., vᵢᵐ) where vᵢʲ is the j'th vertex
     of the polytope.
     The Lyapunov condition requires
-    V-ρ|x-x*|₁ ≥ 0 ∀x     (1)
-    V̇+εV ≤ 0 ∀x           (2)
+    V-ε₁|x-x*|₁ ≥ 0 ∀x     (1)
+    V̇+ε₂V ≤ 0 ∀x           (2)
     Suppose the Lyapunov function in mode i is V(x)=cᵢᵀx+dᵢ
     Then the constraint (2) is equivalent to
-    maxₓ V̇+εV = maxⱼ (cᵢᵀAᵢ+εcᵢᵀ)vᵢʲ+cᵢᵀgᵢ+εdᵢ <= 0 ∀ i      (3)
+    maxₓ V̇+εV = maxⱼ (cᵢᵀAᵢ+ε₂cᵢᵀ)vᵢʲ+cᵢᵀgᵢ+ε₂dᵢ <= 0 ∀ i      (3)
     For constraint (1), we consider the intersection of mode i with each box
     region x(j) - x*(j) >=0 or <= 0, and denote the vertices of the
     intersection region as v̅ᵢʲ, then the constraint (1) is
-    (cᵢᵀ-ρ*sign(v̅ᵢʲ-x*))v̅ᵢʲ+dᵢ+ρ*sign(v̅ᵢʲ-x*)x*>=0           (4)
+    (cᵢᵀ-ε₁*sign(v̅ᵢʲ-x*))v̅ᵢʲ+dᵢ+ε₁*sign(v̅ᵢʲ-x*)x*>=0           (4)
     Also if we denote the vertices on the boundary of mode i and mode j as
     uᵢ,ⱼ, then the continuity constraint of the Lyapunov function requires
     cᵢᵀuᵢ,ⱼ+dᵢ = cⱼᵀuᵢ,ⱼ+dⱼ                                  (5)
     In order to find such a Lyapunov function, we introduce the slack variable
     s1 and s2, and solve the following LP
     min (1-weight) * s1 + weight * s2
-    s1 >= (cᵢᵀAᵢ+εcᵢᵀ)vᵢʲ+cᵢᵀgᵢ+εdᵢ ∀ i                         (6)
-    s2 >= -(cᵢᵀ-ρ*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ρ*sign(v̅ᵢʲ-x*)x*      (7)
+    s1 >= (cᵢᵀAᵢ+ε₂cᵢᵀ)vᵢʲ+cᵢᵀgᵢ+ε₂dᵢ ∀ i                         (6)
+    s2 >= -(cᵢᵀ-ε₁*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ε₁*sign(v̅ᵢʲ-x*)x*      (7)
     cᵢᵀuᵢ,ⱼ+dᵢ = cⱼᵀuᵢ,ⱼ+dⱼ                                     (8)
     cᵢᵀx* + dᵢ = 0                                              (9)
     s1 >= 0, s2 >= 0
@@ -42,25 +42,26 @@ class SimplePWLLyapunov:
     """
 
     def __init__(
-        self, x_dim, num_modes, rho, epsilon, x_equilibrium,
-            equilibrium_mode):
+        self, x_dim, num_modes, lyapunov_positivity_epsilon,
+            lyapunov_derivative_epsilon, x_equilibrium, equilibrium_mode):
         """
         @param x_dim The dimension of x.
         @param num_modes The number of hybrid modes.
-        @param rho ρ in the documentation above.
+        @param lyapunov_positivity_epsilon ε₁ in the documentation above.
+        @param lyapunov_derivative_epsilon ε₂ in the documentation above.
         @param x_equilibrium x* in the documentation above.
         @param equilibrium_mode The mode in which x* is in.
         """
         assert(isinstance(x_dim, int))
         assert(isinstance(num_modes, int))
-        assert(isinstance(rho, float))
-        assert(isinstance(epsilon, float))
+        assert(isinstance(lyapunov_positivity_epsilon, float))
+        assert(isinstance(lyapunov_derivative_epsilon, float))
         assert(isinstance(x_equilibrium, np.ndarray))
         assert(isinstance(equilibrium_mode, int))
         self.x_dim = x_dim
         self.num_modes = num_modes
-        self.rho = rho
-        self.epsilon = epsilon
+        self.lyapunov_positivity_epsilon = lyapunov_positivity_epsilon
+        self.lyapunov_derivative_epsilon = lyapunov_derivative_epsilon
         self.x_equilibrium = x_equilibrium
         self.c = cp.Variable((self.x_dim, self.num_modes))
         self.d = cp.Variable(self.num_modes)
@@ -76,7 +77,7 @@ class SimplePWLLyapunov:
             self, mode_index,  mode_vertices, Ai, gi):
         """
         Add the constraint (6) in the documentation above.
-        s1 >= (cᵢᵀAᵢ+εcᵢᵀ)vᵢʲ+cᵢᵀgᵢ+εdᵢ
+        s1 >= (cᵢᵀAᵢ+ε₂cᵢᵀ)vᵢʲ+cᵢᵀgᵢ+ε₂dᵢ
         @param mode_vertices mode_vertices[j] is vᵢʲ.
         @param Ai The dynamics in mode i in Ai*x+gi
         @param gi The dynamics in mode i in Ai*x+gi
@@ -90,15 +91,16 @@ class SimplePWLLyapunov:
         assert(gi.shape == (self.x_dim,))
         self.constraints.extend(
             [self.s1 >= self.c[:, mode_index] @
-             ((Ai + self.epsilon * np.eye(self.x_dim)) @ mode_vertices[j] + gi)
-             + self.epsilon * self.d[mode_index] for j in
+             ((Ai + self.lyapunov_derivative_epsilon * np.eye(self.x_dim)) @
+              mode_vertices[j] + gi)
+             + self.lyapunov_derivative_epsilon * self.d[mode_index] for j in
              range(mode_vertices.shape[0])])
 
     def add_lyapunov_positivity_in_mode(
             self, mode_index, mode_vertices, sign_v_minus_xstar):
         """
         Add constraint (7) in the documentation above.
-        s2 >= -(cᵢᵀ-ρ*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ρ*sign(v̅ᵢʲ-x*)x*
+        s2 >= -(cᵢᵀ-ε₁*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ε₁*sign(v̅ᵢʲ-x*)x*
         @param mode_index i in the equation.
         @param mode_vertices The vertices of the intersection region of the
         mode domain and the box region sign(x - x*) = sign_v_minus_xstar.
@@ -122,10 +124,10 @@ class SimplePWLLyapunov:
                     + f"has to be either 1 or -1")
         self.constraints.extend(
             [self.s2[0] >= -(self.c[:, mode_index] -
-             self.rho * sign_v_minus_xstar) @ mode_vertices[j] -
-             self.d[mode_index] -
-             self.rho * sign_v_minus_xstar @ self.x_equilibrium for j in
-             range(mode_vertices.shape[0])])
+             self.lyapunov_positivity_epsilon * sign_v_minus_xstar) @
+             mode_vertices[j] - self.d[mode_index] -
+             self.lyapunov_positivity_epsilon * sign_v_minus_xstar @
+             self.x_equilibrium for j in range(mode_vertices.shape[0])])
 
     def add_continuity_constraint(self, mode_i, mode_j, common_vertices):
         """
