@@ -470,7 +470,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         dV_epsilon = 0.1
 
         def test_milp(dut, x_equilibrium, relu):
-            (milp, x, x_next, s, gamma, z, z_next, beta, beta_next) =\
+            (milp, x, beta, gamma, x_next, s, z, z_next, beta_next) =\
                 dut.lyapunov_derivative_as_milp(
                     relu, x_equilibrium, V_rho, dV_epsilon)
             # First solve this MILP. The solution has to satisfy that
@@ -1218,7 +1218,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
 
         def test_fun(relu, x_equilibrium, system, x_val):
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
-            (milp, x, beta) = dut.lyapunov_derivative_as_milp(
+            (milp, x, beta, gamma) = dut.lyapunov_derivative_as_milp(
                 relu, x_equilibrium, V_rho, epsilon, None, None)
             for i in range(system.x_dim):
                 milp.addLConstr(
