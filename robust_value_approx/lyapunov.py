@@ -162,8 +162,15 @@ class LyapunovHybridLinearSystem:
         """
         if relu_at_equilibrium is None:
             relu_at_equilibrium = relu_model.forward(x_equilibrium)
-        return relu_model.forward(x) - relu_at_equilibrium +\
-            V_rho * torch.norm(x - x_equilibrium, p=1)
+        if x.shape == (self.system.x_dim,):
+            # A single state.
+            return relu_model.forward(x) - relu_at_equilibrium +\
+                V_rho * torch.norm(x - x_equilibrium, p=1)
+        else:
+            # A batch of states.
+            assert(x.shape[1] == self.system.x_dim)
+            return relu_model(x).squeeze() - relu_at_equilibrium + \
+                V_rho * torch.norm(x - x_equilibrium, p=1, dim=1)
 
     def lyapunov_positivity_as_milp(
             self, relu_model, x_equilibrium, V_rho, V_epsilon):
@@ -221,32 +228,33 @@ class LyapunovHybridLinearSystem:
             sense=gurobipy.GRB.MINIMIZE)
         return (milp, x)
 
-    def lyapunov_positivity_loss_at_sample(
-            self, relu_model, relu_at_equilibrium, x_equilibrium, state_sample,
-            V_rho, margin=0.):
+    def lyapunov_positivity_loss_at_samples(
+            self, relu_model, relu_at_equilibrium, x_equilibrium,
+            state_samples, V_rho, margin=0.):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
-        max(-V(xⁱ) + margin, 0)
+        mean(max(-V(xⁱ) + margin, 0))
         @param relu_model  The Lyapunov function is
         ReLU(x) - ReLU(x*) + ρ|x-x*|₁
         @param relu_at_equilibrium A 0-D tensor. ReLU(x*)
         @param x_equilibrium x* in the documentation above.
-        @param state_sample The sampled state xⁱ.
+        @param state_samples A batch of sampled states, state_samples[i] is
+        the i'th sample xⁱ.
         @param V_rho ρ in the documentation above.
         @param margin The margin used in the hinge loss.
         """
         assert(isinstance(relu_at_equilibrium, torch.Tensor))
-        assert(isinstance(state_sample, torch.Tensor))
-        assert(state_sample.shape == (self.system.x_dim,))
-        assert(isinstance(state_sample, torch.Tensor))
+        assert(isinstance(state_samples, torch.Tensor))
+        assert(state_samples.shape[1] == self.system.x_dim)
+        assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
         assert(isinstance(V_rho, float))
         assert(isinstance(margin, float))
-        return torch.nn.HingeEmbeddingLoss(margin=margin)(
+        return torch.mean(torch.nn.HingeEmbeddingLoss(margin=margin)(
             self.lyapunov_value(
-                relu_model, state_sample, x_equilibrium, V_rho,
-                relu_at_equilibrium), torch.tensor(-1.))
+                relu_model, state_samples, x_equilibrium, V_rho,
+                relu_at_equilibrium), torch.tensor(-1.)))
 
     def add_lyapunov_bounds_constraint(
         self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,
