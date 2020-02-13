@@ -1350,9 +1350,28 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                         (self.system3, self.x_equilibrium3)):
                     test_fun(system, relu_index, x_equilibrium, relu_param)
 
-    def test_lyapunov_derivative_loss_at_sample(self):
+    def test_lyapunov_derivative_loss_at_samples(self):
         V_rho = 2.
         epsilon = 0.2
+
+        def compute_loss_single_sample(
+                system, x_equilibrium, relu, x_val, margin):
+            xdot = system.step_forward(x_val)
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(relu, x_val)
+            (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+                relu, system.x_dim, activation_pattern, system.dtype)
+            dVdx = g.squeeze() + \
+                V_rho * torch.sign(x_val - x_equilibrium)
+            Vdot = dVdx @ xdot
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            V = dut.lyapunov_value(
+                relu, x_val, x_equilibrium, V_rho,
+                relu.forward(x_equilibrium))
+            loss_expected = torch.max(
+                Vdot + epsilon * V + margin,
+                torch.tensor(0., dtype=system.dtype))
+            return loss_expected
 
         def test_fun(system, x_equilibrium, relu, x_val, margin):
             xdot = system.step_forward(x_val)
@@ -1377,16 +1396,130 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     x_equilibrium, margin).item())
 
         relu1 = setup_relu(torch.float64)
-        relu2 = setup_relu(torch.float64)
+        relu2 = setup_leaky_relu(torch.float64)
         for relu in (relu1, relu2):
+            num_full_connected_layers = int(len(relu) / 2) if \
+                isinstance(relu[-1], torch.nn.ReLU) or \
+                isinstance(relu[-1], torch.nn.LeakyReLU) else \
+                int((len(relu)-1)/2)
             for system, x_equilibrium in (
                 (self.system1, self.x_equilibrium1),
                     (self.system2, self.x_equilibrium2)):
-                for pt in ([0.1, 0.5], [-0.2, 0.4], [0.2, -0.6],
-                           [-0.8, -0.3]):
-                    test_fun(
+                dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+                margin = 0.1
+                # First compute the loss for each single point.
+                for pt in ([0.1, 0.3], [-0.2, 0.4], [0.5, 0.6],
+                           [0.1, -0.4]):
+                    loss_expected = compute_loss_single_sample(
                         system, x_equilibrium, relu,
-                        torch.tensor(pt, dtype=torch.float64), 0.2)
+                        torch.tensor(pt, dtype=torch.float64), margin)
+                    loss = dut.lyapunov_derivative_loss_at_samples(
+                        relu, V_rho, epsilon,
+                        torch.tensor([pt], dtype=torch.float64), x_equilibrium,
+                        margin)
+                    self.assertAlmostEqual(loss_expected.item(), loss.item())
+
+                # Now compute the loss for a batch of points.
+                points = torch.tensor([
+                    [0.1, 0.3], [-0.2, 0.4], [0.5, 0.6], [0.1, -0.4]],
+                    dtype=system.dtype)
+                relu.zero_grad()
+                loss = dut.lyapunov_derivative_loss_at_samples(
+                    relu, V_rho, epsilon, points, x_equilibrium, margin)
+                loss.backward()
+                loss_grad = [
+                    relu[2*i].weight.grad.data.clone() for i in
+                    range(num_full_connected_layers)]
+
+                relu.zero_grad()
+                loss_expected = 0
+                for i in range(points.shape[0]):
+                    loss_expected += compute_loss_single_sample(
+                        system, x_equilibrium, relu, points[i], margin)
+                loss_expected = loss_expected / points.shape[0]
+                loss_expected.backward()
+                loss_grad_expected = [
+                    relu[2*i].weight.grad.data.clone() for i in
+                    range(num_full_connected_layers)]
+                self.assertAlmostEqual(loss.item(), loss_expected.item())
+                for i in range(len(loss_grad)):
+                    np.testing.assert_allclose(
+                        loss_grad[i].detach().numpy(),
+                        loss_grad_expected[i].detach().numpy())
+
+    def test_lyapunov_derivative_loss_at_samples_gradient(self):
+        # Check the gradient of lyapunov_derivative_loss_at_samples computed
+        # from autodiff and numerical gradient
+        V_rho = 0.1
+        epsilon = 0.01
+
+        def compute_loss_single_sample(
+                system, x_equilibrium, relu, x_val, margin):
+            xdot = system.step_forward(x_val)
+            activation_pattern = relu_to_optimization.\
+                ComputeReLUActivationPattern(relu, x_val)
+            (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
+                relu, system.x_dim, activation_pattern, system.dtype)
+            dVdx = g.squeeze() + \
+                V_rho * torch.sign(x_val - x_equilibrium)
+            Vdot = dVdx @ xdot
+            dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+            V = dut.lyapunov_value(
+                relu, x_val, x_equilibrium, V_rho,
+                relu.forward(x_equilibrium))
+            loss_expected = torch.max(
+                Vdot + epsilon * V + margin,
+                torch.tensor(0., dtype=system.dtype))
+            return loss_expected
+
+        def compute_loss_batch_sample(relu_params, points_test, requires_grad):
+            margin = 0.1
+            if isinstance(relu_params, np.ndarray):
+                relu_params_torch = torch.from_numpy(relu_params)
+            else:
+                relu_params_torch = relu_params
+            relu_test = setup_leaky_relu(torch.float64, relu_params_torch)
+            if requires_grad:
+                dut = lyapunov.LyapunovContinuousTimeHybridSystem(self.system1)
+                loss = dut.lyapunov_derivative_loss_at_samples(
+                    relu_test, V_rho, epsilon, points_test,
+                    self.x_equilibrium1, margin)
+                loss.backward()
+                grad = np.concatenate(
+                    [p.grad.detach().numpy().reshape((-1,)) for p in
+                     relu_test.parameters()], axis=0)
+                return grad
+            else:
+                with torch.no_grad():
+                    loss = 0
+                    for i in range(points_test.shape[0]):
+                        loss += compute_loss_single_sample(
+                            self.system1, self.x_equilibrium1, relu_test,
+                            points[i], margin)
+                    loss = loss / points_test.shape[0]
+                    return np.array([loss.item()])
+        relu_params = []
+        relu_params.append(torch.tensor([
+            0.1, 0.2, -0.3, 0.15, 0.32, 1.5, 0.45, 2.35, 0.35, 4.09, -2.14,
+            -4.51, 0.99, 1.5, 4.2, 3.1, 0.45, 0.09, 5.43, 2.35, 0.34, 0.44,
+            5.42, -3.43, -4.51, -4.53, 2.09, 4.90, 0.55, 6.5],
+            dtype=torch.float64, requires_grad=True))
+        relu_params.append(torch.tensor([
+            2.1, 2.2, -4.3, -0.45, 0.32, 1.9, 2.43, 2.45, 1.35, 4.09, -2.14,
+            -14.51, 3.91, 1.9, 2.2, 3.1, 0.45, -0.9, -3.43, -2.35, 2.31, 2.41,
+            -5.42, -13.43, -4.11, 3.53, -2.59, -4.9, 0.55, -3.5],
+            dtype=torch.float64, requires_grad=True))
+        points = torch.tensor([
+            [0.1, 0.3], [-0.2, 0.4], [0.5, 0.6], [0.1, -0.4]],
+            dtype=torch.float64)
+
+        for relu_param in relu_params:
+            grad = compute_loss_batch_sample(relu_param, points, True)
+            grad_numerical = utils.compute_numerical_gradient(
+                lambda p: compute_loss_batch_sample(p, points, False),
+                relu_param.detach().numpy())
+            np.testing.assert_allclose(
+                grad, grad_numerical.squeeze(), atol=1e-7)
 
 
 if __name__ == "__main__":
