@@ -328,6 +328,65 @@ class TestLyapunovHybridSystem(unittest.TestCase):
         test_fun(torch.tensor([1., 0.], dtype=dut1.system.dtype))
         test_fun(torch.tensor([-0.2, 0.4], dtype=dut1.system.dtype))
 
+        def test_batch_fun(dut, x_equilibrium, x):
+            # Test a batch of x.
+            expected = torch.empty((x.shape[0],), dtype=x.dtype)
+            for i in range(x.shape[0]):
+                expected[i] = dut.lyapunov_value(
+                    relu, x[i], x_equilibrium, V_rho)
+            val = dut.lyapunov_value(relu, x, x_equilibrium, V_rho)
+            np.testing.assert_allclose(
+                expected.detach().numpy(), val.detach().numpy())
+        for dut, x_equilibrium in \
+                ((dut1, self.x_equilibrium1), (dut2, self.x_equilibrium2)):
+            test_batch_fun(
+                dut, x_equilibrium, torch.tensor([
+                    [0., 0.], [1., 0.], [0., 1.], [0.2, 0.4], [0.5, -0.8]],
+                    dtype=dut.system.dtype))
+
+    def test_lyapunov_positivity_loss_at_samples(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
+        # Construct a simple ReLU model with 2 hidden layers
+        linear1 = nn.Linear(2, 3)
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=self.dtype)
+        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=self.dtype)
+        linear2 = nn.Linear(3, 4)
+        linear2.weight.data = torch.tensor(
+                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+                dtype=self.dtype)
+        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=self.dtype)
+        linear3 = nn.Linear(4, 1)
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
+        linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
+        relu1 = nn.Sequential(
+            linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        relu_at_equilibrium = relu1.forward(x_equilibrium)
+
+        V_rho = 0.01
+        margin = 2.
+
+        def test_fun(x_samples):
+            loss = 0
+            for i in range(x_samples.shape[0]):
+                relu_x = relu1.forward(x_samples[i])
+                v = (relu_x - relu_at_equilibrium) + V_rho * torch.norm(
+                    x_samples[i] - x_equilibrium, p=1)
+                loss += 0 if v > margin else margin - v
+            loss = loss / x_samples.shape[0]
+            self.assertAlmostEqual(
+                loss.item(), dut.lyapunov_positivity_loss_at_samples(
+                    relu1, relu_at_equilibrium, x_equilibrium, x_samples,
+                    V_rho, margin=margin).item())
+
+        test_fun(torch.tensor([[0, 0]], dtype=self.dtype))
+        test_fun(torch.tensor([[0, 0], [0, 1]], dtype=self.dtype))
+        test_fun(torch.tensor([
+            [0, 0], [0, 1], [1, 0], [0.5, 0.4], [0.2, -0.1], [0.4, 0.3],
+            [-0.2, 0.3]], dtype=self.dtype))
+
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
 
@@ -808,45 +867,6 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     weight_grad, grad_numerical[0].squeeze(), atol=4e-6)
             np.testing.assert_allclose(
                     bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
-
-    def test_lyapunov_positivity_loss_at_sample(self):
-        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
-        # Construct a simple ReLU model with 2 hidden layers
-        linear1 = nn.Linear(2, 3)
-        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
-                                           dtype=self.dtype)
-        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=self.dtype)
-        linear2 = nn.Linear(3, 4)
-        linear2.weight.data = torch.tensor(
-                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
-                dtype=self.dtype)
-        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=self.dtype)
-        linear3 = nn.Linear(4, 1)
-        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
-        linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
-        relu1 = nn.Sequential(
-            linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
-
-        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
-        relu_at_equilibrium = relu1.forward(x_equilibrium)
-
-        V_rho = 0.01
-        margin = 2.
-
-        def test_fun(x_sample):
-            relu_x = relu1.forward(x_sample)
-            v = (relu_x - relu_at_equilibrium).item() + V_rho * torch.norm(
-                x_sample - x_equilibrium, p=1).item()
-            loss = 0 if v > margin else margin - v
-            self.assertAlmostEqual(
-                loss, dut.lyapunov_positivity_loss_at_sample(
-                    relu1, relu_at_equilibrium, x_equilibrium, x_sample, V_rho,
-                    margin=margin).item())
-
-        test_fun(torch.tensor([0, 0], dtype=self.dtype))
-        test_fun(torch.tensor([0, 1], dtype=self.dtype))
-        test_fun(torch.tensor([1, 0], dtype=self.dtype))
-        test_fun(torch.tensor([0.5, 0.3], dtype=self.dtype))
 
     def test_lyapunov_derivative_loss_at_sample(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)

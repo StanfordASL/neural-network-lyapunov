@@ -29,7 +29,8 @@ class TrainLyapunovReLU:
         interface
         lyapunov_positivity_as_milp() (which represents
         minₓ V(x) - ε₂ |x - x*|₁)
-        lyapunov_positivity_loss_at_sample() (which represents hinge(-V(xⁱ)))
+        lyapunov_positivity_loss_at_samples() (which represents
+        mean(hinge(-V(xⁱ))))
         lyapunov_derivative_as_milp() (which represents maxₓ dV(x) + ε V(x))
         lyapunov_derivative_loss_at_sample() (which represents
         hinge(dV(xⁱ) + ε V(xⁱ)).
@@ -132,6 +133,13 @@ class TrainLyapunovReLU:
         state_sample_indices = torch.randint(
             0, len(state_samples_all), (self.batch_size,))
         relu_at_equilibrium = relu.forward(self.x_equilibrium)
+        if self.lyapunov_positivity_sample_cost_weight != 0:
+            loss += self.lyapunov_positivity_sample_cost_weight *\
+                self.lyapunov_hybrid_system.\
+                lyapunov_positivity_loss_at_samples(
+                    relu, relu_at_equilibrium, self.x_equilibrium,
+                    torch.stack(state_samples_all, dim=0), self.V_rho,
+                    margin=self.lyapunov_positivity_sample_margin)
         for i in state_sample_indices:
             for state_sample_next_i in state_samples_next[i]:
                 loss += self.lyapunov_derivative_sample_cost_weight *\
@@ -141,11 +149,6 @@ class TrainLyapunovReLU:
                         state_samples_all[i], state_sample_next_i,
                         self.x_equilibrium,
                         margin=self.lyapunov_derivative_sample_margin)
-            loss += self.lyapunov_positivity_sample_cost_weight *\
-                self.lyapunov_hybrid_system.lyapunov_positivity_loss_at_sample(
-                    relu, relu_at_equilibrium, self.x_equilibrium,
-                    state_samples_all[i], self.V_rho,
-                    margin=self.lyapunov_positivity_sample_margin)
 
         for mip_sol_number in range(
                 self.lyapunov_positivity_mip_pool_solutions):

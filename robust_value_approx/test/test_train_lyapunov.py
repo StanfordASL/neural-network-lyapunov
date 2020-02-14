@@ -70,12 +70,12 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         torch.manual_seed(0)
         state_sample_indices = torch.randint(
             0, len(state_samples_all), (dut.batch_size,))
+        loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
+            lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
+                relu, relu_at_equilibrium, x_equilibrium,
+                torch.stack(state_samples_all, dim=0), V_rho,
+                dut.lyapunov_positivity_sample_margin)
         for i in state_sample_indices:
-            loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
-                lyapunov_hybrid_system.lyapunov_positivity_loss_at_sample(
-                    relu, relu_at_equilibrium, x_equilibrium,
-                    state_samples_all[i], V_rho,
-                    dut.lyapunov_positivity_sample_margin)
             for state_next_i in state_samples_next[i]:
                 loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
                     lyapunov_hybrid_system.\
