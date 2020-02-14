@@ -1401,10 +1401,6 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         relu1 = setup_relu(torch.float64)
         relu2 = setup_leaky_relu(torch.float64)
         for relu in (relu1, relu2):
-            num_full_connected_layers = int(len(relu) / 2) if \
-                isinstance(relu[-1], torch.nn.ReLU) or \
-                isinstance(relu[-1], torch.nn.LeakyReLU) else \
-                int((len(relu)-1)/2)
             for system, x_equilibrium in (
                 (self.system1, self.x_equilibrium1),
                     (self.system2, self.x_equilibrium2)):

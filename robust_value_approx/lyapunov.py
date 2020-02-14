@@ -251,10 +251,10 @@ class LyapunovHybridLinearSystem:
         assert(x_equilibrium.shape == (self.system.x_dim,))
         assert(isinstance(V_rho, float))
         assert(isinstance(margin, float))
-        return torch.mean(torch.nn.HingeEmbeddingLoss(margin=margin)(
+        return torch.nn.HingeEmbeddingLoss(margin=margin)(
             self.lyapunov_value(
                 relu_model, state_samples, x_equilibrium, V_rho,
-                relu_at_equilibrium), torch.tensor(-1.)))
+                relu_at_equilibrium), torch.tensor(-1.))
 
     def add_lyapunov_bounds_constraint(
         self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,
@@ -461,7 +461,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         ReLU(x) - ReLU(x*) + ρ|x-x*|₁
         @param V_rho ρ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
-        @param state_samples The sampled state x̅[n], state_samples[i] is the 
+        @param state_samples The sampled state x̅[n], state_samples[i] is the
         i'th sample x̅ⁱ[n]
         @param x_equilibrium x*.
         @param margin We might want to shift the margin for the Lyapunov
@@ -479,7 +479,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             mode = self.system.mode(state_samples[i])
             if mode is None:
                 raise Exception(
-                    f"lyapunov_derivative_loss_at_samples: the input "+
+                    f"lyapunov_derivative_loss_at_samples: the input " +
                     f"state_sample {state_samples[i]}" +
                     f" is not in any mode of the hybrid system.")
             state_next[i] = self.system.step_forward(state_samples[i], mode)
@@ -501,7 +501,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         ReLU(x) - ReLU(x*) + ρ|x-x*|₁
         @param V_rho ρ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
-        @param state_samples The sampled state x̅[n], state_samples[i] is the 
+        @param state_samples The sampled state x̅[n], state_samples[i] is the
         i'th sample x̅ⁱ[n]
         @param state_next The next state x̅[n+1], state_next[i] is the next
         state for the i'th sample x̅ⁱ[n+1]
