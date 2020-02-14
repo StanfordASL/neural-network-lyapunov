@@ -15,6 +15,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
+    - name: setup PYTHONPATH
+      run: |
+        export PYTHONPATH=${PWD}:${PYTHONPATH}
     - name: Lint with flake8
       run: |
         # stop the build if flake8 fails.
@@ -24,4 +27,5 @@ jobs:
     - name: Test with python unittest
       run: |
         python3 -m unittest discover robust_value_approx/test
+        export PYTHONPATH=${PWD}:${PYTHONPATH}
         python3 robust_value_approx/test/train_discrete_linear_system_toy_lyapunov.py --max_iterations=2
