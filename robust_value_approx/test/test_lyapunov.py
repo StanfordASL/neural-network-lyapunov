@@ -868,23 +868,11 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             np.testing.assert_allclose(
                     bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
 
-    def test_lyapunov_derivative_loss_at_sample(self):
+    def test_lyapunov_derivative_loss_at_samples(self):
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1)
         # Construct a simple ReLU model with 2 hidden layers
-        linear1 = nn.Linear(2, 3)
-        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
-                                           dtype=self.dtype)
-        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=self.dtype)
-        linear2 = nn.Linear(3, 4)
-        linear2.weight.data = torch.tensor(
-                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
-                dtype=self.dtype)
-        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=self.dtype)
-        linear3 = nn.Linear(4, 1)
-        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
-        linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
-        relu1 = nn.Sequential(
-            linear1, nn.ReLU(), linear2, nn.ReLU(), linear3, nn.ReLU())
+        relu1 = setup_relu(torch.float64)
+        relu2 = setup_leaky_relu(torch.float64)
 
         x_samples = []
         x_samples.append(torch.tensor([-0.5, -0.2], dtype=self.dtype))
@@ -898,25 +886,40 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0, 0], dtype=self.dtype)
         V_rho = 0.1
         epsilon = 0.5
-        for x_sample in x_samples:
-            loss = dut.lyapunov_derivative_loss_at_sample(
-                relu1, V_rho, epsilon, x_sample, x_equilibrium, margin)
-            is_in_mode = False
-            for i in range(self.system1.num_modes):
-                if (torch.all(
-                        self.system1.P[i] @ x_sample <= self.system1.q[i])):
-                    x_next = self.system1.A[i] @ x_sample + self.system1.g[i]
-                    is_in_mode = True
-                    break
-            assert(is_in_mode)
-            V_x_sample = dut.lyapunov_value(
-                relu1, x_sample, x_equilibrium, V_rho)
-            V_x_next = dut.lyapunov_value(
-                relu1, x_next, x_equilibrium, V_rho)
-            V_diff = V_x_next - V_x_sample + epsilon * V_x_sample
-            loss_expected = torch.max(
-                    V_diff + margin, torch.tensor(0., dtype=self.dtype))
-            self.assertAlmostEqual(loss.item(), loss_expected.item())
+        for relu in (relu1, relu2):
+            loss_expected = [None] * len(x_samples)
+            for i, x_sample in enumerate(x_samples):
+                loss = dut.lyapunov_derivative_loss_at_samples(
+                    relu, V_rho, epsilon, x_sample.unsqueeze(0), x_equilibrium,
+                    margin)
+                x_next = self.system1.step_forward(x_sample)
+                V_x_sample = dut.lyapunov_value(
+                    relu, x_sample, x_equilibrium, V_rho)
+                V_x_next = dut.lyapunov_value(
+                    relu, x_next, x_equilibrium, V_rho)
+                V_diff = V_x_next - V_x_sample + epsilon * V_x_sample
+                loss_expected[i] = torch.max(
+                        V_diff + margin, torch.tensor(0., dtype=self.dtype))
+                self.assertAlmostEqual(loss.item(), loss_expected[i].item())
+
+            # Test for a batch of x.
+            loss_batch = dut.lyapunov_derivative_loss_at_samples(
+                relu, V_rho, epsilon, torch.stack(x_samples), x_equilibrium,
+                margin)
+            loss_batch_expected = torch.mean(torch.cat(loss_expected))
+
+            self.assertAlmostEqual(
+                loss_batch.item(), loss_batch_expected.item())
+            relu.zero_grad()
+            loss_batch.backward()
+            grad = [p.grad.data.clone() for p in relu.parameters()]
+            relu.zero_grad()
+            loss_batch_expected.backward()
+            grad_expected = [p.grad.data.clone() for p in relu.parameters()]
+            for i in range(len(grad)):
+                np.testing.assert_allclose(
+                    grad[i].detach().numpy(),
+                    grad_expected[i].detach().numpy(), atol=1e-15)
 
 
 class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
@@ -1391,7 +1394,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 torch.tensor(0., dtype=system.dtype))
             self.assertAlmostEqual(
                 loss_expected.item(),
-                dut.lyapunov_derivative_loss_at_sample(
+                dut.lyapunov_derivative_loss_at_samples(
                     relu, V_rho, epsilon, x_val,
                     x_equilibrium, margin).item())
 
@@ -1427,9 +1430,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 loss = dut.lyapunov_derivative_loss_at_samples(
                     relu, V_rho, epsilon, points, x_equilibrium, margin)
                 loss.backward()
-                loss_grad = [
-                    relu[2*i].weight.grad.data.clone() for i in
-                    range(num_full_connected_layers)]
+                loss_grad = [p.grad.data.clone() for p in relu.parameters()]
 
                 relu.zero_grad()
                 loss_expected = 0
@@ -1439,13 +1440,12 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 loss_expected = loss_expected / points.shape[0]
                 loss_expected.backward()
                 loss_grad_expected = [
-                    relu[2*i].weight.grad.data.clone() for i in
-                    range(num_full_connected_layers)]
+                    p.grad.data.clone() for p in relu.parameters()]
                 self.assertAlmostEqual(loss.item(), loss_expected.item())
                 for i in range(len(loss_grad)):
                     np.testing.assert_allclose(
                         loss_grad[i].detach().numpy(),
-                        loss_grad_expected[i].detach().numpy())
+                        loss_grad_expected[i].detach().numpy(), atol=1e-15)
 
     def test_lyapunov_derivative_loss_at_samples_gradient(self):
         # Check the gradient of lyapunov_derivative_loss_at_samples computed
