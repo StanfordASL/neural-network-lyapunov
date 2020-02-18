@@ -43,7 +43,7 @@ def setup_state_samples_all(mesh_size):
         for j in range(samples_x.shape[1]):
             state_samples[i * samples_x.shape[1] + j] = torch.tensor(
                 [samples_x[i, j], samples_y[i, j]], dtype=dtype)
-    return state_samples
+    return torch.stack(state_samples, dim=0)
 
 
 class TestTrainLyapunovReLU(unittest.TestCase):
@@ -59,30 +59,26 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         relu = setup_relu()
         state_samples_all = setup_state_samples_all((21, 21))
-        state_samples_next = \
-            [system.possible_dx(xi) for xi in state_samples_all]
+        state_samples_next = torch.stack([
+            system.step_forward(state_samples_all[i]) for i in
+            range(state_samples_all.shape[0])])
         torch.manual_seed(0)
         loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost =\
             dut.total_loss(relu, state_samples_all, state_samples_next)
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
         relu_at_equilibrium = relu.forward(x_equilibrium)
-        torch.manual_seed(0)
-        state_sample_indices = torch.randint(
-            0, len(state_samples_all), (dut.batch_size,))
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
                 relu, relu_at_equilibrium, x_equilibrium,
-                torch.stack(state_samples_all, dim=0), V_rho,
+                state_samples_all, V_rho,
                 dut.lyapunov_positivity_sample_margin)
-        for i in state_sample_indices:
-            for state_next_i in state_samples_next[i]:
-                loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
-                    lyapunov_hybrid_system.\
-                    lyapunov_derivative_loss_at_sample_and_next_state(
-                        relu, V_rho, dut.lyapunov_derivative_epsilon,
-                        state_samples_all[i], state_next_i, x_equilibrium,
-                        dut.lyapunov_derivative_sample_margin)
+        loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
+            lyapunov_hybrid_system.\
+            lyapunov_derivative_loss_at_samples_and_next_states(
+                relu, V_rho, dut.lyapunov_derivative_epsilon,
+                state_samples_all, state_samples_next, x_equilibrium,
+                dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
                 relu, x_equilibrium, V_rho, dut.lyapunov_positivity_epsilon)
@@ -166,7 +162,9 @@ class TestTrainLyapunov(unittest.TestCase):
         with torch.no_grad():
             state_cost_samples = hybrid_linear_system.\
                 generate_cost_to_go_samples(
-                    self.system, state_samples_all, N, instantaneous_cost,
+                    self.system,
+                    [state_samples_all[i] for i in
+                     range(state_samples_all.shape[0])], N, instantaneous_cost,
                     True)
             x0_samples = torch.stack([
                 pair[0] for pair in state_cost_samples], dim=0)

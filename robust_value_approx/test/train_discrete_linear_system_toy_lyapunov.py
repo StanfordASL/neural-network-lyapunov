@@ -59,7 +59,7 @@ def setup_state_samples_all(mesh_size, x_equilibrium, theta):
             state_samples[i * samples_x.shape[1] + j] = R @ torch.tensor(
                 [samples_x[i, j], samples_y[i, j]], dtype=dtype) +\
                     x_equilibrium
-    return state_samples
+    return torch.stack(state_samples, dim=0)
 
 
 def plot_relu(relu, system, V_rho, x_equilibrium, mesh_size, theta):

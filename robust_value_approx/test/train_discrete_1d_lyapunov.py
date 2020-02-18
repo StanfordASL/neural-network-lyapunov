@@ -44,9 +44,9 @@ def setup_relu():
 
 def plot_relu(relu, system, V_rho, x_equilibrium):
     num_samples = 1001
-    x_samples = list(torch.linspace(-1, 1, num_samples).type(torch.float64).
-                     reshape((-1, 1)))
-    x_next = [system.step_forward(x) for x in x_samples]
+    x_samples = torch.linspace(-1, 1, num_samples).type(torch.float64).\
+        reshape((-1, 1))
+    x_next = torch.stack([system.step_forward(x) for x in x_samples])
     with torch.no_grad():
         V = torch.zeros(num_samples)
         V_next = torch.zeros(num_samples)
@@ -77,8 +77,8 @@ if __name__ == "__main__":
     relu = setup_relu()
     V_rho = 0.1
     x_equilibrium = torch.tensor([0], dtype=torch.float64)
-    state_samples_all = list(torch.linspace(-1, 1, 20).type(torch.float64).
-                             reshape((-1, 1)))
+    state_samples_all = torch.linspace(-1, 1, 20).type(torch.float64).\
+        reshape((-1, 1))
     train_value_approximator = train_lyapunov.TrainValueApproximator()
     train_value_approximator.max_epochs = 500
     train_value_approximator.convergence_tolerance = 0.001
