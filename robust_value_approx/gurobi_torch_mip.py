@@ -195,6 +195,82 @@ class GurobiTorchMIP:
 
         return constr
 
+    def addMConstrs(self, A, x, sense, b, name=""):
+        """
+        Add linear constraints sum_i A[i] * x[i] <=, == or >= b
+        @param A. A list of pytorch tensors.
+        @param x A list of lists. x[i] is a list of gurobi variables.
+        @param sense GRB.EQUAL, GRB.LESS_EQUAL or GRB.GREATER_EQUAL
+        @param b A torch tensor. THe right-hand side of the constraint.
+        @param name The name of the constraint.
+        @return newly added constraint object
+        """
+        assert(isinstance(b, torch.Tensor))
+        num_constraints = b.shape[0]
+        assert(b.shape == (num_constraints, ))
+        assert(isinstance(A, list))
+        assert(isinstance(x, list))
+        assert(len(A) == len(x))
+        assert(all([len(Ai.shape) == 2 for Ai in A]))
+        A_flat = torch.cat(A, dim=1)
+        x_flat = [v for xi in x for v in xi]
+        constr = self.gurobi_model.addMConstrs(
+            A_flat.detach().numpy(), x_flat, sense=sense, b=b, name=name)
+        continuous_var_flag = \
+            [xi in self.r_indices.keys() for xi in x_flat]
+        binary_var_flag = [xi in self.zeta_indices.keys() for xi in x_flat]
+        num_continuous_vars = np.sum(continuous_var_flag)
+        num_binary_vars = np.sum(binary_var_flag)
+        num_vars = num_continuous_vars + num_binary_vars
+        continuous_var_indices = [
+            self.r_indices[x_flat[i]] for i in range(num_vars) if
+            continuous_var_flag[i]]
+        binary_var_indices = [
+            self.zeta_indices[x_flat[i]] for i in range(num_vars) if
+            binary_var_flag[i]]
+
+        num_existing_constraints = len(self.rhs_in) if \
+            sense == gurobipy.GRB.LESS_EQUAL or \
+            sense == gurobipy.GRB.GREATER_EQUAL else len(self.rhs_eq)
+
+        A_r_row = list(np.repeat(range(
+            num_existing_constraints,
+            num_existing_constraints + num_constraints), num_continuous_vars))
+        A_r_col = list(np.repeat([
+            continuous_var_indices], num_constraints,
+            axis=0).reshape((-1,)))
+        A_r_val = list(A_flat[:, continuous_var_flag].reshape((-1,)))
+
+        A_zeta_row = list(np.repeat(range(
+            num_existing_constraints,
+            num_existing_constraints + num_constraints), num_binary_vars))
+        A_zeta_col = list(np.repeat([
+            binary_var_indices], num_constraints,
+            axis=0).reshape((-1,)))
+        A_zeta_val = list(A_flat[:, binary_var_flag].reshape((-1,)))
+        if sense == gurobipy.GRB.EQUAL:
+            self.Aeq_r_row.extend(A_r_row)
+            self.Aeq_r_col.extend(A_r_col)
+            self.Aeq_r_val.extend(A_r_val)
+            self.Aeq_zeta_row.extend(A_zeta_row)
+            self.Aeq_zeta_col.extend(A_zeta_col)
+            self.Aeq_zeta_val.extend(A_zeta_val)
+            self.rhs_eq.extend(list(b))
+        else:
+            self.Ain_r_row.extend(A_r_row)
+            self.Ain_r_col.extend(A_r_col)
+            self.Ain_zeta_row.extend(A_zeta_row)
+            self.Ain_zeta_col.extend(A_zeta_col)
+            if sense == gurobipy.GRB.LESS_EQUAL:
+                self.Ain_r_val.extend(A_r_val)
+                self.Ain_zeta_val.extend(A_zeta_val)
+                self.rhs_in.extend(list(b))
+            else:
+                self.Ain_r_val.extend([-val for val in A_r_val])
+                self.Ain_zeta_val.extend([-val for val in A_zeta_val])
+                self.rhs_in.extend([-b[i] for i in range(num_constraints)])
+        return constr
+
     def get_active_constraints(self, active_ineq_row_indices, zeta_sol):
         """
         Pick out the active constraints on the continuous variables as
