@@ -281,6 +281,56 @@ class TestJohanssonSystem3(unittest.TestCase):
             False)
 
 
+def setup_johansson_continuous_time_system4(box_half_length=1.):
+    """
+    This is the simple example from section 4 (equation 8, 9) of
+    Computation of piecewise quadratic Lyapunov functions for hybrid systems
+    by M. Johansson and A.Rantzer, 1997.
+    This system doesn't have a common quadratic Lyapunov function.
+    We rotate the state space in Johansson's system by 45 degrees. such that
+    the boundary of th modes are x/y axes.
+    @param box_half_length. The state is confined to the domain
+    [-box_half_length, box_half_length] x [-box_half_length, box_half_length]
+    as a box.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    alpha = 5.
+    omega = 1.
+    epsilon = 0.1
+    A1 = torch.tensor(
+        [[-epsilon, omega], [-alpha*omega, -epsilon]], dtype=dtype)
+    A2 = torch.tensor(
+        [[-epsilon, alpha*omega], [-omega, -epsilon]], dtype=dtype)
+    theta = np.pi/4
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    R = torch.tensor(
+        [[cos_theta, -sin_theta], [sin_theta, cos_theta]], dtype=dtype)
+    # First quadrant
+    system.add_mode(
+        R @ A2 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+        torch.tensor([0, 0, box_half_length, box_half_length], dtype=dtype))
+    # Second quadrant
+    system.add_mode(
+        R @ A1 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+        torch.tensor([box_half_length, 0, 0, box_half_length], dtype=dtype))
+    # Third quadrant
+    system.add_mode(
+        R @ A2 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+        torch.tensor([box_half_length, box_half_length, 0, 0], dtype=dtype))
+
+    # Forth quadrant
+    system.add_mode(
+        R @ A1 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+        torch.tensor([0, box_half_length, box_half_length, 0], dtype=dtype))
+    return system
+
+
 class HybridLinearSystemTest(unittest.TestCase):
     def setUp(self):
         pass
