@@ -4,6 +4,11 @@ from pydrake.solvers.snopt import SnoptSolver
 import numpy as np
 import matplotlib.pyplot as plt
 
+import pybullet as p
+import time
+import os
+import inspect
+
 
 class NLPValueFunction():
     def __init__(self, x_lo, x_up, u_lo, u_up,
@@ -79,7 +84,7 @@ class NLPValueFunction():
             ub=np.array([0.]),
             vars=np.concatenate([x0, u0, dt0]))
 
-    def add_mode(self, dyn_fun, guard, N):
+    def add_mode(self, N, dyn_fun, guard=None):
         """
         adds a mode for N knot points
         @param dyn_fun function that equals zero for valid transition
@@ -93,10 +98,11 @@ class NLPValueFunction():
                 lb=np.zeros(self.x_dim[mode0]),
                 ub=np.zeros(self.x_dim[mode0]),
                 vars=np.concatenate([x0, u0, dt0, x1, u1, dt1]))
-            self.prog.AddConstraint(guard,
-                lb=np.array([0.]),
-                ub=np.array([np.inf]),
-                vars=np.concatenate([x1, u1, dt1]))
+            if guard is not None:
+                self.prog.AddConstraint(guard,
+                    lb=np.array([0.]),
+                    ub=np.array([np.inf]),
+                    vars=np.concatenate([x1, u1, dt1]))
 
     def add_terminal_cost(self, Q, x_desired):
         """
@@ -225,11 +231,11 @@ class SLIPNLP:
         vf = NLPValueFunction(self.x_lo, self.x_up,
             self.u_lo, self.u_up, init_mode=0)
         for n in range(num_transitions):
-            vf.add_mode(self.flight_dyn, self.touchdown_guard, N)
+            vf.add_mode(N, self.flight_dyn, self.touchdown_guard)
             vf.add_transition(self.flight_to_stance, self.touchdown_guard, 1)
-            vf.add_mode(self.stance_dyn, self.liftoff_guard, N)
+            vf.add_mode(N, self.stance_dyn, self.liftoff_guard)
             vf.add_transition(self.stance_to_flight, self.liftoff_guard, 0)
-        vf.add_mode(self.flight_dyn, self.touchdown_guard, N)
+        vf.add_mode(N, self.flight_dyn, self.touchdown_guard)
         vf.add_terminal_cost(self.Qt, xf)
         return vf
 
@@ -252,15 +258,135 @@ class SLIPNLP:
         plt.show()
 
 
+class AcrobotNLP:
+    def __init__(self):
+        """
+        https://ocw.mit.edu/courses/electrical-engineering-and-computer-\
+        science/6-832-underactuated-robotics-spring-2009/readings/\
+        MIT6_832s09_read_ch03.pdf
+        """
+        self.l1 = 1.
+        self.l2 = 1.
+        self.m1 = 1.
+        self.m2 = 1.
+        self.l1_com = .5
+        self.l2_com = .5
+        self.I = 1.
+        # [theta1, theta2, theta1_dot, theta2_dot]
+        self.x_lo = [np.array([-1e4, -1e4, -1e4, -1e4])]
+        self.x_up = [np.array([1e4, 1e4, 1e4, 1e4])]
+        self.u_lo = [np.array([-50.])]
+        self.u_up = [np.array([50.])]
+
+    def dyn(self, var):
+        x_dim = 4
+        u_dim = 1
+        x0 = var[:x_dim]
+        u0 = var[x_dim:x_dim+u_dim]
+        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
+        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]        
+        theta1 = x0[0]
+        theta2 = x0[1]
+        theta1_dot = x0[2]
+        theta2_dot = x0[3]
+        s1 = np.sin(theta1)
+        c1 = np.cos(theta1)
+        s2 = np.sin(theta2)
+        c2 = np.cos(theta2)
+        s12 = np.sin(theta1 + theta2)
+        I = self.I
+        m1 = self.m1
+        m2 = self.m2
+        l1 = self.l1
+        l2 = self.l2
+        lc1 = self.l1_com
+        lc2 = self.l2_com
+        g = -9.81
+        H = np.array([[I+I+m2*l1**2+2*m2*l1*lc2*c2, I+m2*l1*lc2*c2],
+                      [I+m2*l1*lc2*c2, I]])
+        C = np.array([[-2*m2*l1*lc2*s2*theta2_dot, -m2*l1*lc2*s2*theta2_dot],
+                      [m2*l1*lc2*s2*theta1_dot, 0.]])
+        G = np.array([(m1*lc1+m2*l1)*g*s1 + m2*g*l2*s12, m2*g*l2*s12])
+        B = np.array([[0.], [1.]])
+        Hdet = H[0,0]*H[1,1] - H[0,1]*H[1,0]
+        Hinv = (1./Hdet)*np.array([[H[1,1], -H[0,1]], [-H[1,0], H[0,0]]])
+        x_ddot = Hinv@(G + B@u0 - C@x0[2:])
+        dx0 = np.array([x0[2], x0[3], x_ddot[0], x_ddot[1]])
+        return x0 + dt0 * dx0 - x1
+
+    def cost(self, var):
+        u = var[0]
+        dt = var[1]
+        return dt * u**2
+
+    def get_nlp_value_function(self, N):
+        vf = NLPValueFunction(self.x_lo, self.x_up,
+            self.u_lo, self.u_up, init_mode=0, dt_lo=.1, dt_up=.1)
+        vf.add_mode(N, self.dyn)
+        Q = np.diag([10., 10., 1., 1.])
+        R = np.diag([1.])
+        x_desired = np.array([np.pi, 0., 0., 0.])
+        for n in range(len(vf.x_traj)):
+            x = vf.x_traj[n]
+            u = vf.u_traj[n]
+            dt = vf.dt_traj[n]
+            # TODO: Fix this cost (u * dt)
+            vf.prog.AddQuadraticErrorCost(Q=Q, x_desired=x_desired, vars=x)
+            # vf.prog.AddCost(self.cost, vars=np.array([u, dt]))
+            # vf.prog.AddQuadraticCost(Q=R, b=np.zeros(1), c=0., vars=u)
+        
+        Qt = np.diag([1000., 1000., 1., 1.])
+        # xf, uf, dtf, modef = vf.get_last_knot_point()
+        # vf.prog.AddQuadraticErrorCost(Q=Qt, x_desired=xf, vars=xf)
+        vf.add_terminal_cost(Qt, x_desired)
+
+        return vf
+
+    def plot_traj(self, x_traj):
+        plt.plot(x_traj)
+        plt.legend(['theta1', 'theta2', 'theta1_dot', 'theta2_dot'])
+        plt.show()
+
+    def vis_traj(self, x_traj, dt_traj):
+        p.connect(p.GUI)
+        p.setGravity(0, 0, -9.81)
+        p.setTimeStep(.001)
+        currentdir = os.path.dirname(os.path.abspath(
+        inspect.getfile(inspect.currentframe())))
+        p.setAdditionalSearchPath(currentdir)
+        acrobot_id = p.loadURDF("test/acrobot_description/acrobot.urdf", [0, 0, 2])
+        for n in range(len(x_traj)):
+            x = x_traj[n]
+            dt = dt_traj[n]
+            joint_poses = [x[0], x[1]]
+            for i in range(len(joint_poses)):
+                p.resetJointState(acrobot_id, i, joint_poses[i], 0.)
+            p.stepSimulation()
+            time.sleep(dt*10)
+
 def main():
-    slip = SLIPNLP()
-    x0 = np.array([0., 1.25, 3., 0.])
-    xf = np.array([10., 1., 3., 0.])
-    vf = slip.get_nlp_value_function(xf, 2, 10)
+    # slip = SLIPNLP()
+    # x0 = np.array([0., 1.25, 3., 0.])
+    # xf = np.array([10., 1., 3., 0.])
+    # vf = slip.get_nlp_value_function(xf, 2, 10)
+    # V = vf.get_value_function()
+    # res = V(x0)
+    # (x_traj_sol, u_traj_sol, dt_traj_sol, mode_traj_sol) = vf.result_to_traj(res)
+    # slip.plot_traj(x_traj_sol, mode_traj_sol)
+
+    acro = AcrobotNLP()
+    x0 = np.array([0., 0., 0., 0.])
+    # x0 = np.array([np.pi/4, 0., 0., 0.])
+    # x0 = np.array([-0.58953185,  0.0087217 , -1.51267127,  0.53221422])
+    vf = acro.get_nlp_value_function(40)
     V = vf.get_value_function()
     res = V(x0)
     (x_traj_sol, u_traj_sol, dt_traj_sol, mode_traj_sol) = vf.result_to_traj(res)
-    slip.plot_traj(x_traj_sol, mode_traj_sol)
+    # acro.plot_traj(x_traj_sol)
+    # print(x_traj_sol)
+    acro.vis_traj(x_traj_sol, dt_traj_sol)
+
+    # import pdb;pdb.set_trace()
 
 
 if __name__=="__main__":
