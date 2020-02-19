@@ -7,6 +7,7 @@ import robust_value_approx.lyapunov as lyapunov
 import matplotlib.pyplot as plt
 from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
+from matplotlib import rc
 
 
 def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
@@ -34,7 +35,7 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
             state_samples[i * mesh_size[1] + j] = \
                 R @ (x_equilibrium + torch.tensor(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype))
-    return state_samples
+    return torch.stack(state_samples, dim=0)
 
 
 def plot_relu(
@@ -74,6 +75,7 @@ def plot_relu(
                 samples_x[i, j] = state_samples_all[i * mesh_size[1] + j][0]
                 samples_y[i, j] = state_samples_all[i * mesh_size[1] + j][1]
         V = torch.zeros(mesh_size)
+        V_positivity = torch.zeros(mesh_size)
         dV = torch.zeros(mesh_size)
         relu_at_equilibrium = relu.forward(x_equilibrium)
         for i in range(mesh_size[0]):
@@ -82,7 +84,8 @@ def plot_relu(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 V[i, j] = dut.lyapunov_value(
                     relu, state_sample, x_equilibrium, V_rho,
-                    relu_at_equilibrium) -\
+                    relu_at_equilibrium)
+                V_positivity[i, j] = V[i, j] -\
                     lyapunov_positivity_epsilon * torch.norm(
                         state_sample - x_equilibrium, p=1)
                 dV[i, j] = torch.max(torch.cat(dut.lyapunov_derivative(
@@ -91,6 +94,7 @@ def plot_relu(
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
         V_np = V.detach().numpy()
+        V_positivity_np = V_positivity.detach().numpy()
         dV_np = dV.detach().numpy()
         fig = plt.figure()
         ax1 = fig.add_subplot(3, 1, 1, projection='3d')
@@ -100,20 +104,19 @@ def plot_relu(
         ax1.set_zlabel("V")
 
         ax2 = fig.add_subplot(3, 1, 2)
-        plot2 = ax2.pcolor(samples_x_np, samples_y_np, V_np)
+        plot2 = ax2.pcolor(samples_x_np, samples_y_np, V_positivity_np)
         ax2.set_xlabel("x")
         ax2.set_ylabel("y")
-        ax2.set_title("V")
+        rc('text', usetex=True)
+        ax2.set_title(r"$V-\epsilon_1|x-x^*|_1$")
         fig.colorbar(plot2, ax=ax2)
 
         ax3 = fig.add_subplot(3, 1, 3)
-        dV_range = np.max((np.abs(np.max(dV_np)), np.abs(np.min(dV_np))))
         plot3 = ax3.pcolor(
-            samples_x_np, samples_y_np, dV_np, cmap="RdBu", vmin=-dV_range,
-            vmax=dV_range)
+            samples_x_np, samples_y_np, dV_np, cmap=cm.coolwarm)
         ax3.set_xlabel("x")
         ax3.set_ylabel("y")
-        ax3.set_title("Vdot + epsilon*V")
+        ax3.set_title(r"$\dot{V} + \epsilon_2V$")
         fig.colorbar(plot3, ax=ax3)
         plt.show()
 

@@ -120,12 +120,15 @@ def setup_johansson_continuous_time_system1(box_half_length=1.):
     return system
 
 
-def setup_johansson_continuous_time_system2():
+def setup_johansson_continuous_time_system2(box_half_length=1.):
     """
     This is the simple example from section 4 (equation 8, 9) of
     Computation of piecewise quadratic Lyapunov functions for hybrid systems
     by M. Johansson and A.Rantzer, 1997.
     This system doesn't have a common quadratic Lyapunov function.
+    @param box_half_length. The state is confined to the domain
+    [-box_half_length, box_half_length] x [-box_half_length, box_half_length]
+    as a box.
     """
     dtype = torch.float64
     system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
@@ -139,27 +142,42 @@ def setup_johansson_continuous_time_system2():
     system.add_mode(
         A1, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[1, -1], [-1, -1], [0, 1]], dtype=dtype),
-        torch.tensor([0, 0, 1], dtype=dtype))
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
     system.add_mode(
         A1, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
-        torch.tensor([0, 0, 1], dtype=dtype))
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
     system.add_mode(
         A2, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[-1, 1], [-1, -1], [1, 0]], dtype=dtype),
-        torch.tensor([0, 0, 1], dtype=dtype))
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
     system.add_mode(
         A2, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[1, -1], [1, 1], [-1, 0]], dtype=dtype),
-        torch.tensor([0, 0, 1], dtype=dtype))
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
     return system
 
 
-def setup_johansson_continuous_time_system3(x_equilibrium):
+class TestJohanssonSystem2(unittest.TestCase):
+    def test(self):
+        system = setup_johansson_continuous_time_system2()
+        self.assertEqual(
+            system.mode(torch.tensor([0, 0.5], dtype=system.dtype)), 0)
+        self.assertEqual(
+            system.mode(torch.tensor([0, -0.5], dtype=system.dtype)), 1)
+        self.assertEqual(
+            system.mode(torch.tensor([0.5, 0], dtype=system.dtype)), 2)
+        self.assertEqual(
+            system.mode(torch.tensor([-0.5, 0], dtype=system.dtype)), 3)
+
+
+def setup_johansson_continuous_time_system3(x_equilibrium, box_half_length=1.):
     """
     This is the simple example from section 5 (equation 18~21) of
     Computation of piecewise quadratic Lyapunov functions for hybrid systems
     by M. Johansson and A.Rantzer, 1997.
+    The system is defined in the box [-2*box_half_length, 2*box_half_length]
+    x [-box_half_length, box_half_length]
     """
     dtype = torch.float64
     assert(isinstance(x_equilibrium, torch.Tensor))
@@ -171,11 +189,16 @@ def setup_johansson_continuous_time_system3(x_equilibrium):
     g2 = -A2 @ x_equilibrium
     g3 = -A3 @ x_equilibrium + torch.tensor([11, 50.5], dtype=dtype)
     P1 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
-    q1 = torch.tensor([2, -1, 1, 1], dtype=dtype) + P1 @ x_equilibrium
+    q1 = torch.tensor(
+        [2*box_half_length, -1, box_half_length, box_half_length],
+        dtype=dtype) + P1 @ x_equilibrium
     P2 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
-    q2 = torch.tensor([1, 1, 1, 1], dtype=dtype) + P2 @ x_equilibrium
+    q2 = torch.tensor([1, 1, box_half_length, box_half_length], dtype=dtype)\
+        + P2 @ x_equilibrium
     P3 = torch.tensor([[-1, 0], [1, 0], [0, -1], [0, 1]], dtype=dtype)
-    q3 = torch.tensor([-1, 2, 1, 1], dtype=dtype) + P3 @ x_equilibrium
+    q3 = torch.tensor(
+        [-1, 2*box_half_length, box_half_length, box_half_length],
+        dtype=dtype) + P3 @ x_equilibrium
     system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
     system.add_mode(A1, g1, P1, q1)
     system.add_mode(A2, g2, P2, q2)

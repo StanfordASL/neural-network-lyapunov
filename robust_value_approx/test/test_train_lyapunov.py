@@ -156,7 +156,7 @@ class TestTrainLyapunov(unittest.TestCase):
         result = dut.train(
             self.system, self.relu, V_rho, x_equilibrium, instantaneous_cost,
             state_samples_all, N, True)
-        self.assertTrue(result)
+        self.assertTrue(result[0])
         relu_at_equilibrium = self.relu.forward(x_equilibrium)
         # Now check the total loss.
         with torch.no_grad():
