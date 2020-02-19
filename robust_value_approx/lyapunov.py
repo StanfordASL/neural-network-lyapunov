@@ -52,11 +52,10 @@ class LyapunovHybridLinearSystem:
 
         # Now add the constraint
         # Ain_x * x + Ain_s * s + Ain_gamma * gamma <= rhs_in
-        for i in range(Ain_x.shape[0]):
-            milp.addLConstr(
-                [Ain_x[i], Ain_s[i], Ain_gamma[i]], [x, s, gamma],
-                sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs_in[i],
-                name="hybrid_linear_dynamics")
+        milp.addMConstrs(
+            [Ain_x, Ain_s, Ain_gamma], [x, s, gamma],
+            sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in,
+            name="hybrid_inear_dynamics")
 
         # Now add the constraint that sum gamma = 1
         milp.addLConstr(
@@ -94,16 +93,14 @@ class LyapunovHybridLinearSystem:
         relu_beta = milp.addVars(
             Ain_relu_beta.shape[1], vtype=gurobipy.GRB.BINARY,
             name=binary_var_name)
-        for i in range(Ain_relu_x.shape[0]):
-            milp.addLConstr(
-                [Ain_relu_x[i], Ain_relu_z[i], Ain_relu_beta[i]],
-                [x, relu_z, relu_beta], sense=gurobipy.GRB.LESS_EQUAL,
-                rhs=rhs_relu_in[i], name="milp_relu")
-        for i in range(Aeq_relu_x.shape[0]):
-            milp.addLConstr(
-                [Aeq_relu_x[i], Aeq_relu_z[i], Aeq_relu_beta[i]],
-                [x, relu_z, relu_beta], sense=gurobipy.GRB.EQUAL,
-                rhs=rhs_relu_eq[i], name="milp_relu")
+        milp.addMConstrs(
+            [Ain_relu_x, Ain_relu_z, Ain_relu_beta], [x, relu_z, relu_beta],
+            sense=gurobipy.GRB.LESS_EQUAL, b=rhs_relu_in.squeeze(),
+            name="milp_relu")
+        milp.addMConstrs(
+            [Aeq_relu_x, Aeq_relu_z, Aeq_relu_beta], [x, relu_z, relu_beta],
+            sense=gurobipy.GRB.EQUAL, b=rhs_relu_eq.squeeze(),
+            name="milp_relu")
         return (relu_z, relu_beta, a_relu_out, b_relu_out)
 
     def add_state_error_l1_constraint(
@@ -137,13 +134,12 @@ class LyapunovHybridLinearSystem:
                         self.system.x_lo_all[i] - x_equilibrium[i],
                         self.system.x_up_all[i] - x_equilibrium[i],
                         dtype=self.system.dtype)
-                for j in range(Ain_x.shape[0]):
-                    milp.addLConstr([torch.cat((
-                        Ain_x[j].unsqueeze(0), Ain_s[j].unsqueeze(0),
-                        Ain_alpha[j].unsqueeze(0)))],
-                        [[x[i], s[i], alpha[i]]],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        rhs=rhs_in[j] + Ain_x[j] * x_equilibrium[i])
+                milp.addMConstrs(
+                    [Ain_x.reshape((-1, 1)), Ain_s.reshape((-1, 1)),
+                     Ain_alpha.reshape((-1, 1))],
+                    [[x[i]], [s[i]], [alpha[i]]],
+                    sense=gurobipy.GRB.LESS_EQUAL,
+                    b=rhs_in + Ain_x * x_equilibrium[i])
         return (s, alpha)
 
     def lyapunov_value(
@@ -393,11 +389,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
         # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
-        for i in range(self.system.x_dim):
-            milp.addLConstr(
-                [torch.tensor([1.], dtype=milp.dtype), -Aeq_s1[i],
-                 -Aeq_gamma1[i]], [[x_next[i]], s, gamma],
-                sense=gurobipy.GRB.EQUAL, rhs=0.)
+        milp.addMConstrs(
+            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s1,
+             -Aeq_gamma1], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
+            b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
@@ -695,12 +690,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
             A_si = A_Aisi @ self.system.A[i]
-            for j in range(A_si.shape[0]):
-                milp.addLConstr(
-                    [A_si[j], A_z[j], A_beta[j]],
-                    [s[i * self.system.x_dim:(i+1)*self.system.x_dim], z[i],
-                     beta], sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[j],
-                    name="milp_relu_gradient_times_Aisi")
+            milp.addMConstrs(
+                [A_si, A_z, A_beta],
+                [s[i*self.system.x_dim:(i+1)*self.system.x_dim], z[i], beta],
+                sense=gurobipy.GRB.LESS_EQUAL, b=rhs,
+                name="milp_relu_gradient_times_Aisi")
         return (z, a_out)
 
     def add_relu_gradient_times_gigammai(
@@ -748,12 +742,10 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
             A_gammai = A_gigammai @ self.system.g[i]
-            for j in range(A_gammai.shape[0]):
-                milp.addLConstr(
-                    [A_gammai[j].unsqueeze(0), A_z[j], A_beta[j]],
-                    [[gamma[i]], z[i], beta],
-                    sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[j],
-                    name="milp_relu_gradient_times_gigammai")
+            milp.addMConstrs(
+                [A_gammai.reshape((-1, 1)), A_z, A_beta],
+                [[gamma[i]], z[i], beta], sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs, name="milp_relu_gradient_times_gigammai")
         return (z, a_out)
 
     def add_sign_state_error_times_Aisi(
@@ -803,13 +795,12 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                         Aisi_lower[i][j], Aisi_upper[i][j])
                 Ain_si = Ain_Aisi.reshape((-1, 1)) @ \
                     self.system.A[i][j].reshape((1, -1))
-                for k in range(Ain_si.shape[0]):
-                    milp.addLConstr(
-                        [Ain_si[k], Ain_z[k].unsqueeze(0),
-                         Ain_alpha[k].unsqueeze(0)],
-                        [s[i*self.system.x_dim:(i+1)*self.system.x_dim],
-                         [z[i][j]], [alpha[j]]], sense=gurobipy.GRB.LESS_EQUAL,
-                        rhs=rhs_in[k])
+                milp.addMConstrs(
+                    [Ain_si, Ain_z.reshape((-1, 1)),
+                     Ain_alpha.reshape((-1, 1))],
+                    [s[i*self.system.x_dim:(i+1)*self.system.x_dim],
+                     [z[i][j]], [alpha[j]]], sense=gurobipy.GRB.LESS_EQUAL,
+                    b=rhs_in)
         return (z, z_coeff, s_coeff)
 
     def add_sign_state_error_times_gigammai(
@@ -862,12 +853,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                     replace_binary_continuous_product(
                         gigammai_lower[i][j], gigammai_upper[i][j])
                 Ain_gammai = Ain_gigammai * self.system.g[i][j]
-                for k in range(Ain_gammai.shape[0]):
-                    milp.addLConstr(
-                        [Ain_gammai[k].unsqueeze(0), Ain_z[k].unsqueeze(0),
-                         Ain_alpha[k].unsqueeze(0)],
-                        [[gamma[i]], [z[i][j]], [alpha[j]]],
-                        sense=gurobipy.GRB.LESS_EQUAL, rhs=rhs[k])
+                milp.addMConstrs(
+                    [Ain_gammai.reshape((-1, 1)), Ain_z.reshape((-1, 1)),
+                     Ain_alpha.reshape((-1, 1))],
+                    [[gamma[i]], [z[i][j]], [alpha[j]]],
+                    sense=gurobipy.GRB.LESS_EQUAL, b=rhs)
         return (z, z_coeff, gamma_coeff)
 
     def lyapunov_derivative_as_milp(

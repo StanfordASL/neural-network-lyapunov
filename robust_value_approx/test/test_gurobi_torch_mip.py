@@ -212,6 +212,127 @@ class TestGurobiTorchMIP(unittest.TestCase):
             dut.rhs_eq, [torch.tensor(2, dtype=torch.float64),
                          torch.tensor(3, dtype=torch.float64)])
 
+    def test_addMConstrs(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x = dut.addVars(2, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
+        alpha = dut.addVars(2, vtype=gurobipy.GRB.BINARY)
+        y = dut.addVars(2, lb=-gurobipy.GRB.INFINITY,
+                        vtype=gurobipy.GRB.CONTINUOUS)
+        beta = dut.addVars(2, vtype=gurobipy.GRB.BINARY)
+        # Add constraint [[1, 2], [3, 4]] * x + [[2, 3], [4, 5]] * beta ==
+        # [5, 6]
+        A1 = [torch.tensor(
+            [[1., 2.], [3., 4.]], dtype=dtype),
+            torch.tensor([[2, 3], [4, 5]], dtype=dtype)]
+        _ = dut.addMConstrs(
+            A1, [x, beta], b=torch.tensor([3, 7], dtype=dtype),
+            sense=gurobipy.GRB.EQUAL)
+        dut.gurobi_model.update()
+        self.assertEqual(
+            dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumConstrs), 2)
+        dut.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        dut.gurobi_model.optimize()
+        np.testing.assert_allclose(
+            A1[0].detach().numpy() @ np.array([x[0].x, x[1].x]) +
+            A1[1].detach().numpy() @ np.array([beta[0].x, beta[1].x]),
+            np.array([3., 7.]))
+
+        self.assertEqual(
+            dut.rhs_eq,
+            [torch.tensor(3, dtype=dtype), torch.tensor(7, dtype=dtype)])
+        self.assertEqual(dut.Aeq_r_row, [0, 0, 1, 1])
+        self.assertEqual(dut.Aeq_r_col, [0, 1, 0, 1])
+        self.assertEqual(
+            dut.Aeq_r_val,
+            [A1[0][0, 0], A1[0][0, 1], A1[0][1, 0], A1[0][1, 1]])
+        self.assertEqual(dut.Aeq_zeta_row, [0, 0, 1, 1])
+        self.assertEqual(dut.Aeq_zeta_col, [2, 3, 2, 3])
+        self.assertEqual(
+            dut.Aeq_zeta_val,
+            [A1[1][0, 0], A1[1][0, 1], A1[1][1, 0], A1[1][1, 1]])
+        # The inequality constraint are x >= 0
+        self.assertEqual(dut.Ain_r_row, [0, 1])
+        self.assertEqual(dut.Ain_r_col, [0, 1])
+        self.assertEqual(
+            dut.Ain_r_val,
+            [torch.tensor(-1, dtype=dtype), torch.tensor(-1, dtype=dtype)])
+        self.assertEqual(
+            dut.rhs_in,
+            [torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype)])
+        self.assertEqual(len(dut.Ain_zeta_row), 0)
+        self.assertEqual(len(dut.Ain_zeta_col), 0)
+        self.assertEqual(len(dut.Ain_zeta_val), 0)
+
+        # Now add <= inequality constraints
+        A2 = [torch.tensor([[2., 3.], [1., 2.]], dtype=dtype),
+              torch.tensor([[3.], [1.]], dtype=dtype)]
+        dut.addMConstrs(
+            A2, [y, [alpha[1]]], sense=gurobipy.GRB.LESS_EQUAL,
+            b=torch.tensor([2., 5.], dtype=dtype))
+        dut.gurobi_model.optimize()
+        np.testing.assert_array_less(
+            A2[0].detach().numpy() @ np.array([y[0].x, y[1].x]) +
+            A2[1].detach().numpy().squeeze() * alpha[1].x,
+            np.array([2., 5.]) + 1e-6)
+        self.assertEqual(dut.Ain_r_row, [0, 1, 2, 2, 3, 3])
+        self.assertEqual(dut.Ain_r_col, [0, 1, 2, 3, 2, 3])
+        self.assertEqual(
+            dut.Ain_r_val,
+            [torch.tensor(-1, dtype=dtype), torch.tensor(-1, dtype=dtype),
+             A2[0][0, 0], A2[0][0, 1], A2[0][1, 0], A2[0][1, 1]])
+        self.assertEqual(
+            dut.rhs_in,
+            [torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+             torch.tensor(2, dtype=dtype), torch.tensor(5, dtype=dtype)])
+        self.assertEqual(dut.Ain_zeta_row, [2, 3])
+        self.assertEqual(dut.Ain_zeta_col, [1, 1])
+        self.assertEqual(dut.Ain_zeta_val, [A2[1][0, 0], A2[1][1, 0]])
+        self.assertEqual(len(dut.Aeq_r_row), 4)
+        self.assertEqual(len(dut.Aeq_r_col), 4)
+        self.assertEqual(len(dut.Aeq_r_val), 4)
+        self.assertEqual(len(dut.Aeq_zeta_row), 4)
+        self.assertEqual(len(dut.Aeq_zeta_col), 4)
+        self.assertEqual(len(dut.Aeq_zeta_val), 4)
+        self.assertEqual(len(dut.rhs_eq), 2)
+
+        # Now add >= inequality constraint.
+        A3 = [torch.tensor([[2], [1]], dtype=dtype),
+              torch.tensor([[2, 3], [1, 2]], dtype=dtype)]
+        dut.addMConstrs(
+            A3, [[x[1]], beta], b=torch.tensor([-2, -4], dtype=dtype),
+            sense=gurobipy.GRB.GREATER_EQUAL)
+        dut.gurobi_model.optimize()
+        np.testing.assert_array_less(
+            np.array([-2., -4.])-1e-6,
+            A3[0].squeeze().detach().numpy() * x[1].x +
+            A3[1].detach().numpy() @ np.array([beta[0].x, beta[1].x]))
+        self.assertEqual(dut.Ain_r_row, [0, 1, 2, 2, 3, 3, 4, 5])
+        self.assertEqual(dut.Ain_r_col, [0, 1, 2, 3, 2, 3, 1, 1])
+        self.assertEqual(
+            dut.Ain_r_val,
+            [torch.tensor(-1, dtype=dtype), torch.tensor(-1, dtype=dtype),
+             A2[0][0, 0], A2[0][0, 1], A2[0][1, 0], A2[0][1, 1], -A3[0][0, 0],
+             -A3[0][1, 0]])
+        self.assertEqual(
+            dut.rhs_in,
+            [torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+             torch.tensor(2, dtype=dtype), torch.tensor(5, dtype=dtype),
+             torch.tensor(2, dtype=dtype), torch.tensor(4, dtype=dtype)])
+        self.assertEqual(dut.Ain_zeta_row, [2, 3, 4, 4, 5, 5])
+        self.assertEqual(dut.Ain_zeta_col, [1, 1, 2, 3, 2, 3])
+        self.assertEqual(
+            dut.Ain_zeta_val,
+            [A2[1][0, 0], A2[1][1, 0], -A3[1][0, 0], -A3[1][0, 1],
+             -A3[1][1, 0], -A3[1][1, 1]])
+        self.assertEqual(len(dut.Aeq_r_row), 4)
+        self.assertEqual(len(dut.Aeq_r_col), 4)
+        self.assertEqual(len(dut.Aeq_r_val), 4)
+        self.assertEqual(len(dut.Aeq_zeta_row), 4)
+        self.assertEqual(len(dut.Aeq_zeta_col), 4)
+        self.assertEqual(len(dut.Aeq_zeta_val), 4)
+        self.assertEqual(len(dut.rhs_eq), 2)
+
     def test_get_active_constraints1(self):
         dtype = torch.float64
         dut = gurobi_torch_mip.GurobiTorchMILP(dtype)
