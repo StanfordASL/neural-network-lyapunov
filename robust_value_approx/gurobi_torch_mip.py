@@ -60,17 +60,23 @@ class GurobiTorchMIP:
             # If lower bound is not -inf, then add the inequality constraint
             # x>lb
             if lb != -gurobipy.GRB.INFINITY:
-                for i in range(num_vars):
-                    self.Ain_r_row.append(len(self.rhs_in))
-                    self.Ain_r_col.append(num_existing_r + i)
-                    self.Ain_r_val.append(torch.tensor(-1, dtype=self.dtype))
-                    self.rhs_in.append(torch.tensor(-lb, dtype=self.dtype))
+                self.Ain_r_row.extend(
+                    range(len(self.rhs_in), len(self.rhs_in) + num_vars))
+                self.Ain_r_col.extend(
+                    range(num_existing_r, num_existing_r + num_vars))
+                self.Ain_r_val.extend(
+                    [torch.tensor(-1, dtype=self.dtype)] * num_vars)
+                self.rhs_in.extend(
+                    [torch.tensor(-lb, dtype=self.dtype)] * num_vars)
             if ub != gurobipy.GRB.INFINITY:
-                for i in range(num_vars):
-                    self.Ain_r_row.append(len(self.rhs_in))
-                    self.Ain_r_col.append(num_existing_r + i)
-                    self.Ain_r_val.append(torch.tensor(1, dtype=self.dtype))
-                    self.rhs_in.append(torch.tensor(ub, dtype=self.dtype))
+                self.Ain_r_row.extend(
+                    range(len(self.rhs_in), len(self.rhs_in) + num_vars))
+                self.Ain_r_col.extend(
+                    range(num_existing_r, num_existing_r + num_vars))
+                self.Ain_r_val.extend(
+                    [torch.tensor(1, dtype=self.dtype)] * num_vars)
+                self.rhs_in.extend(
+                    [torch.tensor(ub, dtype=self.dtype)] * num_vars)
         elif vtype == gurobipy.GRB.BINARY:
             num_existing_zeta = len(self.zeta_indices)
             self.zeta.extend([new_vars[i] for i in range(num_vars)])
