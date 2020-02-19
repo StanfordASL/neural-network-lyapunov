@@ -101,7 +101,7 @@ if __name__ == "__main__":
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system2(10)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 4, 4))
+        relu = setup_relu((2, 8, 4))
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
-    V_rho = 0.05
+    V_rho = 0.02
 
     if args.system == 1 or args.system == 2:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_cost_weight = 1.
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
-    dut.lyapunov_positivity_epsilon = 0.005
+    dut.lyapunov_positivity_epsilon = 0.001
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_sample_margin = 0.
     dut.lyapunov_positivity_convergence_tol = 1e-4
@@ -170,11 +170,11 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_derivative_sample_cost_weight = 1.
     dut.optimizer = args.optimizer
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
-        x_equilibrium, x_lower, x_upper, (11, 11), 0.)
+        x_equilibrium, x_lower, x_upper, (15, 15), 0.)
     result = dut.train(relu, state_samples)
     if args.visualize:
         fig = plt.figure()

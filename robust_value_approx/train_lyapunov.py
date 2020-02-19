@@ -152,7 +152,7 @@ class TrainLyapunovReLU:
             gurobipy.GRB.Param.PoolSolutions,
             self.lyapunov_derivative_mip_pool_solutions)
         lyapunov_derivative_mip.gurobi_model.optimize()
-        
+
         relu_zeta_val = np.array([
             np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
         relu_activation_pattern = relu_to_optimization.\
@@ -165,11 +165,16 @@ class TrainLyapunovReLU:
         print(f"relu gradient {relu_gradient.squeeze().detach().numpy()}")
         print(f"lyapunov derivative MIP Relu activation: "
               f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
-        print(f"adversarial x {[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
-        print(f"hybrid mode {np.argwhere(np.array([np.round(v.x) == 1 for v in lyapunov_derivative_as_milp_return[3]]))}")
+        print(f"adversarial x " +
+              f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
+        active_hybrid_mode = np.argwhere(np.array(
+            [np.round(v.x) == 1 for v in
+             lyapunov_derivative_as_milp_return[3]]))
+        print(f"hybrid mode {active_hybrid_mode}")
 
         loss = torch.tensor(0., dtype=dtype)
         relu_at_equilibrium = relu.forward(self.x_equilibrium)
+
         def set_weight(val, default_val):
             return val if val is not None else default_val
         lyapunov_positivity_sample_cost_weight = set_weight(
@@ -198,7 +203,7 @@ class TrainLyapunovReLU:
             lyapunov_positivity_mip_cost_weight,
             self.lyapunov_positivity_mip_cost_weight)
         if lyapunov_positivity_mip_cost_weight != 0 and np.abs(
-            lyapunov_positivity_mip.gurobi_model.ObjVal)>\
+            lyapunov_positivity_mip.gurobi_model.ObjVal) >\
                 self.lyapunov_positivity_convergence_tol:
             for mip_sol_number in range(
                     self.lyapunov_positivity_mip_pool_solutions):
@@ -309,10 +314,10 @@ class TrainLyapunovReLU:
         num_increasing_iterations = 0
         optimizer = torch.optim.Adam(
             relu.parameters(), lr=self.learning_rate)
-        previous_mip_loss = np.inf 
+        previous_mip_loss = np.inf
         for iter_count in range(max_iterations):
             optimizer.zero_grad()
-            loss, lyapunov_positivity_mip_cost,lyapunov_derivative_mip_cost \
+            loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost \
                 = self.total_loss(
                     relu, state_samples_all, state_samples_next,
                     lyapunov_positivity_mip_cost_weight=0.,
@@ -338,7 +343,7 @@ class TrainLyapunovReLU:
                       f"positivity cost " +
                       f"{lyapunov_positivity_mip_cost}, " +
                       f"derivative_cost " +
-                      f"{lyapunov_derivative_mip_cost}, " + 
+                      f"{lyapunov_derivative_mip_cost}, " +
                       f"mip loss {mip_loss}\n")
             loss.backward()
             optimizer.step()

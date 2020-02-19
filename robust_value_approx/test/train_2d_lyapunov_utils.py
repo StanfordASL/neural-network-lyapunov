@@ -112,10 +112,8 @@ def plot_relu(
         fig.colorbar(plot2, ax=ax2)
 
         ax3 = fig.add_subplot(3, 1, 3)
-        dV_range = np.max((np.abs(np.max(dV_np)), np.abs(np.min(dV_np))))
         plot3 = ax3.pcolor(
-            samples_x_np, samples_y_np, dV_np, cmap="RdBu", vmin=-dV_range,
-            vmax=dV_range)
+            samples_x_np, samples_y_np, dV_np, cmap=cm.coolwarm)
         ax3.set_xlabel("x")
         ax3.set_ylabel("y")
         ax3.set_title(r"$\dot{V} + \epsilon_2V$")

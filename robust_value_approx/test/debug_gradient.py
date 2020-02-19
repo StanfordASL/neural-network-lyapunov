@@ -70,9 +70,9 @@ if __name__ == "__main__":
     relu_layer_width = tuple(relu_layer_width)
     relu_params_val = torch.cat(tuple(
         param.reshape((-1,)) for param in relu.parameters())).detach()
-    V_rho = 0.1
-    lyapunov_positivity_epsilon = 0.1
-    lyapunov_derivative_epsilon = 0.1
+    V_rho = 0.05
+    lyapunov_positivity_epsilon = 0.005
+    lyapunov_derivative_epsilon = 0.001
     grad = compute_milp_cost_given_relu(
         system, x_equilibrium, relu_layer_width, relu_params_val, V_rho,
         lyapunov_positivity_epsilon, lyapunov_derivative_epsilon, True,
