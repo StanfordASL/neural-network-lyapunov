@@ -86,6 +86,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--optimizer", type=str, default="Adam",
         help="optimizer can be either Adam or SGD.")
+    parser.add_argument(
+        "--summary_writer_folder", type=str, default=None,
+        help="folder for the tensorboard summary")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -113,7 +116,7 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
-    V_rho = 0.02
+    V_rho = 0.1
 
     if args.system == 1 or args.system == 2:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
@@ -133,11 +136,12 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_cost_weight = 1.
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
-    dut.lyapunov_positivity_epsilon = 0.001
-    dut.lyapunov_derivative_epsilon = 0.001
+    dut.lyapunov_positivity_epsilon = 0.01
+    dut.lyapunov_derivative_epsilon = 0.01
     dut.lyapunov_derivative_sample_margin = 0.
     dut.lyapunov_positivity_convergence_tol = 1e-4
     dut.lyapunov_derivative_convergence_tol = 1e-4
+    dut.summary_writer_folder = args.summary_writer_folder
 
     if args.load_relu is None:
         if args.train_on_sample:
@@ -170,7 +174,7 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 1.
+    dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.optimizer = args.optimizer
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
