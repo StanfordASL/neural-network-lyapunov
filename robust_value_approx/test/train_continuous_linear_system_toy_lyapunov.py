@@ -115,13 +115,20 @@ if __name__ == "__main__":
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium, 10)
         relu = setup_relu((2, 8, 4))
+    elif args.system == 4:
+        x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
+        system = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system4()
+        system_simulate = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system4(10)
+        relu = setup_relu((2, 8, 4))
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
     V_rho = 0.1
 
-    if args.system == 1 or args.system == 2:
+    if args.system == 1 or args.system == 2 or args.system == 4:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
         x_upper = torch.tensor([1, 1], dtype=system.dtype)
     elif args.system == 3:
