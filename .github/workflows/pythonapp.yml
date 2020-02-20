@@ -29,3 +29,4 @@ jobs:
         python3 -m unittest discover robust_value_approx/test
         export PYTHONPATH=${PWD}:${PYTHONPATH}
         python3 robust_value_approx/test/train_discrete_linear_system_toy_lyapunov.py --max_iterations=2
+        python3 robust_value_approx/test/train_continuous_linear_system_toy_lyapunov.py --train_on_sample --train_on_samples_iterations=2 --max_iterations=2

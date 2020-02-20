@@ -226,11 +226,11 @@ class LyapunovHybridLinearSystem:
 
     def lyapunov_positivity_loss_at_samples(
             self, relu_model, relu_at_equilibrium, x_equilibrium,
-            state_samples, V_rho, margin=0.):
+            state_samples, V_rho, epsilon, margin=0.):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
-        mean(max(-V(xⁱ) + margin, 0))
+        mean(max(-V(xⁱ) + ε |xⁱ - x*|₁ + margin, 0))
         @param relu_model  The Lyapunov function is
         ReLU(x) - ReLU(x*) + ρ|x-x*|₁
         @param relu_at_equilibrium A 0-D tensor. ReLU(x*)
@@ -238,6 +238,7 @@ class LyapunovHybridLinearSystem:
         @param state_samples A batch of sampled states, state_samples[i] is
         the i'th sample xⁱ.
         @param V_rho ρ in the documentation above.
+        @param epsilon ε in the documentation above.
         @param margin The margin used in the hinge loss.
         """
         assert(isinstance(relu_at_equilibrium, torch.Tensor))
@@ -250,7 +251,9 @@ class LyapunovHybridLinearSystem:
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             self.lyapunov_value(
                 relu_model, state_samples, x_equilibrium, V_rho,
-                relu_at_equilibrium), torch.tensor(-1.))
+                relu_at_equilibrium) - epsilon * torch.norm(
+                    state_samples - x_equilibrium, p=1, dim=1),
+            torch.tensor(-1.))
 
     def add_lyapunov_bounds_constraint(
         self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,

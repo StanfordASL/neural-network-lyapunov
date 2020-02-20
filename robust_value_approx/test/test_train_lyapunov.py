@@ -63,8 +63,14 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             system.step_forward(state_samples_all[i]) for i in
             range(state_samples_all.shape[0])])
         torch.manual_seed(0)
-        loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost =\
+        loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost,\
+            positivity_sample_loss, derivative_sample_loss,\
+            positivity_mip_loss, derivative_mip_loss =\
             dut.total_loss(relu, state_samples_all, state_samples_next)
+        self.assertAlmostEqual(
+            loss.item(),
+            (positivity_sample_loss + derivative_sample_loss +
+             positivity_mip_loss + derivative_mip_loss).item())
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
         relu_at_equilibrium = relu.forward(x_equilibrium)
@@ -129,7 +135,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                     lyapunov_derivative_mip.gurobi_model.getAttr(
                         gurobipy.GRB.Attr.PoolObjVal)
 
-        self.assertAlmostEqual(loss.item(), loss_expected.item())
+        self.assertAlmostEqual(loss.item(), loss_expected.item(), places=4)
         self.assertAlmostEqual(lyapunov_positivity_mip_cost,
                                lyapunov_positivity_mip.gurobi_model.ObjVal)
         self.assertAlmostEqual(lyapunov_derivative_mip_cost,

@@ -367,6 +367,7 @@ class TestLyapunovHybridSystem(unittest.TestCase):
 
         V_rho = 0.01
         margin = 2.
+        epsilon = 2.
 
         def test_fun(x_samples):
             loss = 0
@@ -374,12 +375,14 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                 relu_x = relu1.forward(x_samples[i])
                 v = (relu_x - relu_at_equilibrium) + V_rho * torch.norm(
                     x_samples[i] - x_equilibrium, p=1)
-                loss += 0 if v > margin else margin - v
+                v_minus_l1 = v - epsilon * torch.norm(
+                    x_samples[i] - x_equilibrium, p=1)
+                loss += 0 if v_minus_l1 > margin else margin - v_minus_l1
             loss = loss / x_samples.shape[0]
             self.assertAlmostEqual(
                 loss.item(), dut.lyapunov_positivity_loss_at_samples(
                     relu1, relu_at_equilibrium, x_equilibrium, x_samples,
-                    V_rho, margin=margin).item())
+                    V_rho, epsilon, margin=margin).item())
 
         test_fun(torch.tensor([[0, 0]], dtype=self.dtype))
         test_fun(torch.tensor([[0, 0], [0, 1]], dtype=self.dtype))

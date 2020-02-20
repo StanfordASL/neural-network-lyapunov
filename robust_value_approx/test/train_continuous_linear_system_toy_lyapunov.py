@@ -89,6 +89,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--summary_writer_folder", type=str, default=None,
         help="folder for the tensorboard summary")
+    parser.add_argument(
+        "--train_on_samples_iterations", type=int, default=200,
+        help="max number of iterations to pretrain on sampled states.")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -147,7 +150,7 @@ if __name__ == "__main__":
         if args.train_on_sample:
             # Train the Lyapunov loss on many sampled states
             relu = dut.train_lyapunov_on_samples(
-                relu, state_samples_all, 200, 10)
+                relu, state_samples_all, args.train_on_samples_iterations, 10)
         else:
             # First train a ReLU to approximate the value function.
             approximator = train_lyapunov.TrainValueApproximator()
