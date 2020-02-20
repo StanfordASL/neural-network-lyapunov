@@ -7,6 +7,97 @@ from pydrake.solvers.snopt import SnoptSolver
 import numpy as np
 
 
+class DiffFiniteHorizonValueFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, args):
+        """
+        Computes the value function for a finite horizon value function
+        that is expressed as an MIQP. The derivative is recovered by looking
+        at the dual variables at the solution. For now this solves a second
+        QP so that cvx returns dual variable. Assuming the following
+        problem
+        min .5 xᵀ Q1 x + .5 sᵀ Q2 s + .5 αᵀ Q3 α + q1ᵀ x + q2ᵀ s + q3ᵀ α + c
+        s.t. Ain1 x + Ain2 s + Ain3 α ≤ rhs_in
+             Aeq1 x + Aeq2 s + Aeq3 α = rhs_eq
+             α ∈ {0,1}
+        we fix both α and x, and we can compute the derivative of the value
+        function by computing
+        ∂y/∂x = λ₁ᵀAin1 + λ₂ᵀAeq1 + xᵀ Q1 + q1ᵀ
+
+        @param x Tensor representing x0
+        @param args dictionnary containing the variables of the problem as
+        either cvx variables, parameters or tensor
+            -vf (ValueFunction)
+            -x0 (Parameter)
+            -s (Variable)
+            -alpha_mi (Discrete Variable)
+            -alpha_con (Variable)
+            -obj_mi (Objective)
+            -con_mi (list of Constraints)
+            -prob_mi (Problem)
+            -obj_con (Objective)
+            -con_con (list of Constraints)
+            -prob_con (Problem)
+            -G0 (tensor)
+            -A0 (tensor)
+            -Q1 (tensor)
+            -q1 (tensor)
+        """
+        ctx.x = x
+        x_traj_flat_dim = (1, args['vf'].sys.x_dim*(args['vf'].N-1))
+        cost_to_go_dim = args['vf'].N-1
+        args['x0'].value = x.detach().numpy()
+        args['prob_mi'].solve(
+            solver=cp.GUROBI, verbose=False, warm_start=True)
+        if args['obj_mi'].value is None:
+            ctx.success = False
+            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
+                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
+        args['alpha_con'].value = args['alpha_mi'].value
+        args['prob_con'].solve(
+            solver=cp.GUROBI, verbose=False, warm_start=True)
+        if args['obj_con'].value is None:
+            ctx.success = False
+            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
+                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
+        assert(abs(args['obj_mi'].value - args['obj_con'].value) <= 1e-5)
+        s_tensor = torch.Tensor(args['s'].value).type(x.dtype)
+        alpha_mi_tensor = torch.Tensor(args['alpha_mi'].value).type(x.dtype)
+        (x_traj_val,
+         u_traj_val,
+         alpha_traj_val) = args['vf'].sol_to_traj(x, s_tensor, alpha_mi_tensor)
+        x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
+        step_costs = [args['vf'].step_cost(
+            j, x_traj_val[:, j], u_traj_val[:, j],
+            alpha_traj_val[:, j]).item() for j in range(args['vf'].N)]
+        cost_to_go = torch.Tensor(
+            list(np.cumsum(step_costs[::-1]))[::-1]).type(x.dtype)
+        ctx.success = True
+        ctx.lambda_G = torch.Tensor(
+            args['con_con'][0].dual_value).type(x.dtype)
+        ctx.lambda_A = torch.Tensor(
+            args['con_con'][1].dual_value).type(x.dtype)
+        ctx.G0 = args['G0']
+        ctx.A0 = args['A0']
+        ctx.Q1 = args['Q1']
+        ctx.q1 = args['q1']
+        return(x_traj_flat, cost_to_go[:-1])
+
+    @staticmethod
+    def backward(ctx, grad_output_x_traj_flat, grad_output_cost_to_go):
+        # for now only supports one gradient
+        assert(torch.all(grad_output_x_traj_flat == 0.))
+        assert(torch.all(grad_output_cost_to_go[1:] == 0.))
+        if not ctx.success:
+            grad_input = torch.zeros(
+                ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
+            return (grad_input, None)
+        dy = ctx.lambda_A.t()@ctx.A0 + ctx.lambda_G.t()@ctx.G0 +\
+            ctx.q1 + ctx.Q1@ctx.x
+        grad_input = (grad_output_cost_to_go[0] * dy.unsqueeze(0)).squeeze()
+        return(grad_input, None)
+
+
 class ValueFunction:
 
     def __init__(self, sys, N, x_lo, x_up, u_lo, u_up):
@@ -764,6 +855,53 @@ class ValueFunction:
                 obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n])
         return obj
 
+    def get_differentiable_value_function(self):
+        (G0, G1, G2, h,
+         A0, A1, A2, b,
+         Q1, Q2, Q3, q1, q2, q3, k) = utils.torch_to_numpy(
+            self.traj_opt_constraint())
+        G0_tensor = torch.Tensor(G0).type(self.dtype)
+        A0_tensor = torch.Tensor(A0).type(self.dtype)
+        Q1_tensor = torch.Tensor(Q1).type(self.dtype)
+        q1_tensor = torch.Tensor(q1).type(self.dtype)
+        x0 = cp.Parameter(G0.shape[1])
+        s = cp.Variable(G1.shape[1])
+        alpha_mi = cp.Variable(G2.shape[1], boolean=True)
+        obj_mi = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                             .5 * cp.quad_form(s, Q2) +
+                             .5 * cp.quad_form(alpha_mi, Q3) +
+                             q1.T@x0 + q2.T@s +
+                             q3.T@alpha_mi + k)
+        con_mi = [G1@s + G2@alpha_mi <= h - G0@x0,
+                  A1@s + A2@alpha_mi == b - A0@x0]
+        prob_mi = cp.Problem(obj_mi, con_mi)
+        alpha_con = cp.Parameter(G2.shape[1], boolean=False)
+        obj_con = cp.Minimize(.5 * cp.quad_form(x0, Q1) +
+                              .5 * cp.quad_form(s, Q2) +
+                              .5 * cp.quad_form(alpha_con, Q3) +
+                              q1.T@x0 + q2.T@s +
+                              q3.T@alpha_con + k)
+        con_con = [G1@s + G2@alpha_con <= h - G0@x0,
+                   A1@s + A2@alpha_con == b - A0@x0]
+        prob_con = cp.Problem(obj_con, con_con)
+        V_args = dict(vf=self,
+                      x0=x0,
+                      s=s,
+                      alpha_mi=alpha_mi,
+                      alpha_con=alpha_con,
+                      obj_mi=obj_mi,
+                      con_mi=con_mi,
+                      prob_mi=prob_mi,
+                      obj_con=obj_con,
+                      con_con=con_con,
+                      prob_con=prob_con,
+                      G0=G0_tensor,
+                      A0=A0_tensor,
+                      Q1=Q1_tensor,
+                      q1=q1_tensor)
+        V_with_grad = lambda x: DiffFiniteHorizonValueFunction.apply(x, V_args)
+        return V_with_grad
+
 
 class NLPValueFunction():
     def __init__(self, x_lo, x_up, u_lo, u_up,
@@ -946,5 +1084,10 @@ class NLPValueFunction():
     @property
     def N(self):
         return len(self.x_traj)
+
+    @property
+    def dtype(self):
+        return torch.float64
+    
     
 

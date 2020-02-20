@@ -23,7 +23,7 @@ class RandomSampleTest(unittest.TestCase):
                 self.assertAlmostEqual(rand_label[k, n].item(), v_, places=5)
 
 
-class MIPSampleTest(unittest.TestCase):
+class AdvSampleTest(unittest.TestCase):
     def test_mip_grad(self):
         N = 10
         vf = double_integrator_utils.get_value_function(N=N)
@@ -37,7 +37,7 @@ class MIPSampleTest(unittest.TestCase):
         vf.set_terminal_cost(Qt=Q, Rt=R, qt=q*0, rt=r*0)
         x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
-        as_gen = samples_generator.MIPAdversarialSampleGenerator(
+        as_gen = samples_generator.AdversarialSampleGenerator(
             vf, x0_lo, x0_up)
         eps = 1e-2
         for k in range(10):
@@ -66,7 +66,7 @@ class MIPSampleTest(unittest.TestCase):
         x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         max_iter = 100
-        as_gen = samples_generator.MIPAdversarialSampleGenerator(
+        as_gen = samples_generator.AdversarialSampleGenerator(
             vf, x0_lo, x0_up, max_iter=max_iter, learning_rate=.1)
         value_approx =\
             value_approximation.FiniteHorizonValueFunctionApproximation(
@@ -92,7 +92,7 @@ class MIPSampleTest(unittest.TestCase):
         vf = double_integrator_utils.get_value_function(N=N)
         x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
         x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
-        as_gen = samples_generator.MIPAdversarialSampleGenerator(
+        as_gen = samples_generator.AdversarialSampleGenerator(
             vf, x0_lo, x0_up, max_iter=5)
         value_approx =\
             value_approximation.FiniteHorizonValueFunctionApproximation(
