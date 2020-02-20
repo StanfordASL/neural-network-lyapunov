@@ -4,6 +4,8 @@ import unittest
 import torch
 import torch.nn as nn
 
+import os
+
 import robust_value_approx.lyapunov as lyapunov
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
@@ -937,6 +939,49 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         self.x_equilibrium3 = torch.tensor([1., 2.], dtype=self.dtype)
         self.system3 = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(self.x_equilibrium3)
+
+    def test_lyapunov_as_milp(self):
+        """
+        Test some cases caught in the wild. Instead of using Gurobi's
+        feasibility tolerance as the active_constraint_tolerance, we have to
+        relax the active constraint tolerance to match the objective in
+        Gurobi.
+        """
+        system = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system4()
+        x_equilibrium = torch.tensor([0, 0], dtype=torch.float64)
+        dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+        data_dir_path = os.path.dirname(os.path.realpath(__file__)) + "/data/"
+        V_rho = 0.1
+        positivity_epsilon = 0.01
+        derivative_epsilon = 0.01
+        for relu_model_data in \
+                ("negative_loss_relu_1.pt", "negative_loss_relu_2.pt"):
+            relu = torch.load(data_dir_path + relu_model_data)
+
+            lyapunov_positivity_mip_return = dut.lyapunov_positivity_as_milp(
+                relu, x_equilibrium, V_rho, positivity_epsilon)
+            lyapunov_positivity_mip_return[0].gurobi_model.setParam(
+                gurobipy.GRB.Param.OutputFlag, False)
+            lyapunov_positivity_mip_return[0].gurobi_model.optimize()
+            positivity_objective = lyapunov_positivity_mip_return[0].\
+                compute_objective_from_mip_data_and_solution()
+            self.assertAlmostEqual(
+                positivity_objective.item(),
+                lyapunov_positivity_mip_return[0].gurobi_model.ObjVal,
+                places=3)
+
+            lyapunov_derivative_mip_return = dut.lyapunov_derivative_as_milp(
+                relu, x_equilibrium, V_rho, derivative_epsilon)
+            lyapunov_derivative_mip_return[0].gurobi_model.setParam(
+                gurobipy.GRB.Param.OutputFlag, False)
+            lyapunov_derivative_mip_return[0].gurobi_model.optimize()
+            derivative_objective = lyapunov_derivative_mip_return[0].\
+                compute_objective_from_mip_data_and_solution()
+            self.assertAlmostEqual(
+                derivative_objective.item(),
+                lyapunov_derivative_mip_return[0].gurobi_model.ObjVal,
+                places=3)
 
     def test_lyapunov_derivative(self):
         linear1 = nn.Linear(2, 3)

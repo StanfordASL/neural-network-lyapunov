@@ -390,7 +390,7 @@ class GurobiTorchMIP:
 
     def compute_objective_from_mip_data_and_solution(
             self, solution_number=0, active_constraint_tolerance=1e-6,
-            penalty=0.):
+            penalty=0., objective_tol=1e-3):
         """
         Suppose the MIP is solved to optimality. We then retrieve the active
         constraints from the (suboptimal) solution, together with the binary
@@ -406,12 +406,58 @@ class GurobiTorchMIP:
         @param penalty Refer to compute_objective_from_mip_data() for more
         details. For MIQP, please set the penalty to a strictly positive
         number.
+        @param objective_tol The active constraints might not be selected
+        correctly, as the precision of the numerical solver can be different
+        from active_constraint_tolerance (the solver can normalize its
+        constraints, so even we set the active_constraint_tolerance to be the
+        feasibility tolerance of the solver, the violation of the constraint
+        can still be larger than active_constraint_tolerance). We compare the
+        objective computed by us and the objective stored in Gurobi. If the
+        difference is larger than @p objective_tol, then we increase the
+        active_constraint_tolerance by active_constraint_tolerance. We can
+        increase by 10 steps at most. If the objectives still don't match,
+        throw an exception.
         """
-        active_ineq_row_indices, zeta_sol = \
-            self.get_active_constraint_indices_and_binary_val(
-                solution_number, active_constraint_tolerance)
-        return self.compute_objective_from_mip_data(
-            active_ineq_row_indices, zeta_sol, penalty)
+        assert(solution_number >= 0 and
+               solution_number < self.gurobi_model.solCount)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
+                                   solution_number)
+        r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
+        zeta_sol = torch.tensor([round(var.xn) for var in self.zeta],
+                                dtype=self.dtype)
+        with torch.no_grad():
+            (Ain_r, Ain_zeta, rhs_in) = self.get_inequality_constraints()
+            lhs_in = Ain_r @ r_sol + Ain_zeta @ zeta_sol
+
+        # The boolean flag to indicate that the objective computed by us
+        # matches with the objective in Gurobi.
+        objective_match = False
+        # Number of trial to compute the objective. Each trial with a different
+        # tolerance on the active constraints.
+        num_trials = 0
+        max_num_trials = 10
+
+        class IncorrectActiveConstraint(Exception):
+            pass
+        while not objective_match:
+            active_ineq_row_indices = np.arange(len(self.rhs_in))
+            active_ineq_row_indices = set(active_ineq_row_indices[
+                np.abs(lhs_in.detach().numpy() - rhs_in.detach().numpy()) <
+                active_constraint_tolerance])
+            objective = self.compute_objective_from_mip_data(
+                active_ineq_row_indices, zeta_sol, penalty)
+            if (np.abs(objective.item() - self.gurobi_model.PoolObjVal) >
+                    objective_tol):
+                active_constraint_tolerance += active_constraint_tolerance
+                num_trials += 1
+                if num_trials == max_num_trials:
+                    raise IncorrectActiveConstraint(
+                        "compute_objective_from_mip_data_and_solution()" +
+                        " cannot find good active constraint.")
+            else:
+                objective_match = True
+                return objective
 
 
 class GurobiTorchMILP(GurobiTorchMIP):
