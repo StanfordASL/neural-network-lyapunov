@@ -366,7 +366,7 @@ class TrainLyapunovReLU:
             if mip_loss > previous_mip_loss:
                 num_increasing_iterations += 1
                 if num_increasing_iterations == max_increasing_iterations:
-                    print(f"mip loss {mip_loss}")
+                    print(f"best loss {best_loss}")
                     return best_relu
             else:
                 # reset the counter.
@@ -381,7 +381,7 @@ class TrainLyapunovReLU:
                       f"mip loss {mip_loss}\n")
             loss.backward()
             optimizer.step()
-        print(f"mip loss {mip_loss}")
+        print(f"best loss {best_loss}")
         return best_relu
 
 
