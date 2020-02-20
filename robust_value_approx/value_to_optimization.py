@@ -2,6 +2,9 @@
 import torch
 import robust_value_approx.utils as utils
 import cvxpy as cp
+from pydrake.solvers.mathematicalprogram import MathematicalProgram
+from pydrake.solvers.snopt import SnoptSolver
+import numpy as np
 
 
 class ValueFunction:
@@ -760,3 +763,188 @@ class ValueFunction:
             else:
                 obj += self.step_cost(n, x_traj_val[:, n], u_traj_val[:, n])
         return obj
+
+
+class NLPValueFunction():
+    def __init__(self, x_lo, x_up, u_lo, u_up,
+                 dt_lo=0., dt_up=.1, init_mode=0,
+                 Q=None, x_desired=None, R=None):
+        """
+        @param x_lo, x_up, u_lo, u_up are lists of tensors with the lower
+        and upper bounds for the states/inputs for each mode
+        @param dt_lo, dt_up floats limits for the time step sizes
+        @param init_mode integer mode the system initializes in
+        """ 
+        assert(isinstance(x_lo, list))
+        assert(isinstance(x_up, list))
+        assert(isinstance(u_lo, list))
+        assert(isinstance(u_up, list))
+        self.x_lo = x_lo
+        self.x_up = x_up
+        self.u_lo = u_lo
+        self.u_up = u_up
+        self.dt_lo = dt_lo
+        self.dt_up = dt_up
+        self.x_traj = []
+        self.u_traj = []
+        self.dt_traj = []
+        self.mode_traj = []
+        self.x_dim = [len(x) for x in x_lo]
+        self.u_dim = [len(u) for u in u_lo]
+        for i in range(len(self.x_dim)):
+            assert(self.x_dim[i] == self.x_dim[0])
+            assert(self.u_dim[i] == self.u_dim[0])
+        self.Q = Q
+        self.x_desired = x_desired
+        self.R = R
+        if Q is not None:
+            assert(isinstance(Q, list))
+        if x_desired is not None:
+            assert(isinstance(x_desired, list))
+        if R is not None:
+            assert(isinstance(R, list))
+        self.prog = MathematicalProgram()
+        x0, u0, dt0, mode0 = self.add_knot_point(init_mode)
+        self.x0_constraint = self.prog.AddBoundingBoxConstraint(
+            np.zeros(self.x_dim[mode0]),
+            np.zeros(self.x_dim[mode0]),
+            x0)
+        self.solver = SnoptSolver()
+
+    def get_last_knot_point(self):
+        assert(len(self.x_traj) > 0)
+        assert(len(self.u_traj) > 0)
+        assert(len(self.dt_traj) > 0)
+        assert(len(self.mode_traj) > 0)
+        return(self.x_traj[-1], self.u_traj[-1], self.dt_traj[-1],
+            self.mode_traj[-1])
+
+    def add_knot_point(self, mode):
+        x = self.prog.NewContinuousVariables(
+            self.x_dim[mode], "x"+str(len(self.x_traj)))
+        u = self.prog.NewContinuousVariables(
+            self.u_dim[mode], "u"+str(len(self.u_traj)))
+        dt = self.prog.NewContinuousVariables(1, "dt"+str(len(self.dt_traj)))
+        self.x_traj.append(x)
+        self.u_traj.append(u)
+        self.dt_traj.append(dt)
+        self.mode_traj.append(mode)
+        self.prog.AddBoundingBoxConstraint(self.x_lo[mode], self.x_up[mode], x)
+        self.prog.AddBoundingBoxConstraint(self.u_lo[mode], self.u_up[mode], u)
+        self.prog.AddBoundingBoxConstraint(self.dt_lo, self.dt_up, dt)
+        if self.Q is not None:
+            if self.x_desired is not None:
+                self.prog.AddQuadraticErrorCost(
+                    Q=self.Q[mode], x_desired=self.x_desired[mode], vars=x)
+            else:
+                self.prog.AddQuadraticCost(
+                    Q=self.Q[mode], b=np.zeros(self.x_dim[mode]), c=0., vars=x)
+        if self.R is not None:
+            self.prog.AddQuadraticCost(
+                Q=self.R[mode], b=np.zeros(self.u_dim[mode]), c=0., vars=u)
+        return(x, u, dt, mode)
+
+    def add_transition(self, transition_fun, guard, new_mode):
+        """
+        add a knot point and a mode transition to that knot point
+        @param transition_fun function that equals 0 for valid transition
+        @param guard function that equals 0 at the transition
+        @param new_mode index of the resulting mode
+        """
+        x0, u0, dt0, mode0 = self.get_last_knot_point()
+        x1, u1, dt1, mode1 = self.add_knot_point(new_mode)
+        self.prog.AddConstraint(transition_fun,
+            lb=np.zeros(self.x_dim[mode1]),
+            ub=np.zeros(self.x_dim[mode1]),
+            vars=np.concatenate([x0, u0, dt0, x1, u1, dt1]))
+        self.prog.AddConstraint(guard,
+            lb=np.array([0.]),
+            ub=np.array([0.]),
+            vars=np.concatenate([x0, u0, dt0]))
+
+    def add_mode(self, N, dyn_fun, guard=None):
+        """
+        adds a mode for N knot points
+        @param dyn_fun function that equals zero for valid transition
+        @param guard function that must be positive for the entire mode
+        @param N number of knot points
+        """
+        for n in range(N):
+            x0, u0, dt0, mode0 = self.get_last_knot_point()
+            x1, u1, dt1, mode1 = self.add_knot_point(mode0)
+            self.prog.AddConstraint(dyn_fun,
+                lb=np.zeros(self.x_dim[mode0]),
+                ub=np.zeros(self.x_dim[mode0]),
+                vars=np.concatenate([x0, u0, dt0, x1, u1, dt1]))
+            if guard is not None:
+                self.prog.AddConstraint(guard,
+                    lb=np.array([0.]),
+                    ub=np.array([np.inf]),
+                    vars=np.concatenate([x1, u1, dt1]))
+
+    def result_to_s(self, result):
+        x_traj_sol = [result.GetSolution(x) for x in self.x_traj]
+        u_traj_sol = [result.GetSolution(u) for u in self.u_traj]
+        s = []
+        s.append(u_traj_sol[0])
+        for i in range(1, len(x_traj_sol)):
+            s.append(x_traj_sol[i])
+            s.append(u_traj_sol[i])
+        return np.concatenate(s)
+
+    def get_value_function(self):
+        def V(x):
+            assert(isinstance(x, torch.Tensor))
+            dtype = x.dtype
+            x = x.detach().numpy()
+            self.x0_constraint.evaluator().set_bounds(x, x)
+            result = self.solver.Solve(
+                self.prog, np.random.rand(self.prog.num_vars()), None)
+            if not result.is_success():
+                return(None, None, None)
+            v_val = result.get_optimal_cost()
+            s_val = self.result_to_s(result)
+            alpha_val = np.zeros(len(self.x_traj)) # TODO
+            return(v_val, torch.Tensor(s_val).type(dtype),
+                   torch.Tensor(alpha_val).type(dtype))
+        return V
+
+    def sol_to_traj(self, x0, s_val, alpha_val):
+        assert(isinstance(x0, torch.Tensor))
+        assert(isinstance(s_val, torch.Tensor))
+        assert(isinstance(alpha_val, torch.Tensor))
+        if s_val is None:
+            return (None, None, None)
+        N = len(self.x_traj)
+        traj_val = torch.cat((x0, s_val)).reshape(N, -1).t()
+        x_traj_val = traj_val[:self.x_dim[0], :]
+        u_traj_val = traj_val[
+            self.x_dim[0]:self.x_dim[0]+self.u_dim[0], :]
+        alpha_traj_val = alpha_val.reshape(N, -1).t()
+        return (x_traj_val, u_traj_val, alpha_traj_val)
+
+    def step_cost(self, n, x_val, u_val, alpha_val=None):
+        assert(isinstance(x_val, torch.Tensor))
+        assert(isinstance(u_val, torch.Tensor))
+        if alpha_val is not None:
+            assert(isinstance(alpha_val, torch.Tensor))
+        mode = self.mode_traj[n]
+        cost = 0.
+        if self.Q is not None:
+            Q = torch.Tensor(self.Q[mode]).type(x_val.dtype)
+            if self.x_desired is not None:
+                dx = x_val - torch.Tensor(self.x_desired[mode]).type(
+                    x_val.dtype)
+                cost += dx.t()@Q@dx
+            else:
+                cost += x_val.t()@Q@x_val
+        if self.R is not None:
+            R = torch.Tensor(self.R[mode]).type(u_val.dtype)
+            cost += u_val.t()@R@u_val
+        return cost
+
+    @property
+    def N(self):
+        return len(self.x_traj)
+    
+

@@ -16,7 +16,8 @@ class SampleGenerator:
         @param x0_up tensor size x_dim upper bound on initial state for the
         samples generation
         """
-        assert(isinstance(vf, value_to_optimization.ValueFunction))
+        assert(isinstance(vf, value_to_optimization.ValueFunction) or\
+            isinstance(vf, value_to_optimization.NLPValueFunction))
         self.vf = vf
         self.x0_lo = x0_lo
         self.x0_up = x0_up
