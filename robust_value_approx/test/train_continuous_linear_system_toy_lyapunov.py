@@ -19,7 +19,6 @@ from mpl_toolkits import mplot3d # noqa
 def setup_relu(relu_layer_width, params=None):
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
-    # Construct a simple ReLU model with 2 hidden layers
     if params is not None:
         assert(isinstance(params, torch.Tensor))
     dtype = torch.float64
@@ -92,6 +91,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--train_on_samples_iterations", type=int, default=200,
         help="max number of iterations to pretrain on sampled states.")
+    parser.add_argument(
+        "--project_gradient_method", type=str, default="NONE",
+        help="accept NONE, SUM or ALTERNATE")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -152,6 +154,15 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_convergence_tol = 1e-4
     dut.lyapunov_derivative_convergence_tol = 1e-4
     dut.summary_writer_folder = args.summary_writer_folder
+    if args.project_gradient_method == "NONE":
+        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.NONE
+    elif args.project_gradient_method == "SUM":
+        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.SUM
+    elif args.project_gradient_method == "ALTERNATE":
+        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.\
+            ALTERNATE
+    else:
+        raise Exception("Unknown project gradient method.")
 
     if args.load_relu is None:
         if args.train_on_sample:
