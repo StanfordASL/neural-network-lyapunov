@@ -5,6 +5,28 @@ import gurobipy
 import copy
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.relu_to_optimization as relu_to_optimization
+import robust_value_approx.train_utils as train_utils
+
+from enum import Enum
+
+
+# We want to minimize two losses to 0, one is the violation of the Lyapunov
+# positivity constraint, the second is the violation of the Lyapunov derivative
+# constraint. The gradient of these two losses might be in opposite directions,
+# so minimizing one loss might increase the other loss. Hence we consider to
+# project the gradient of one loss to the null space of another loss. If we
+# take a small step along this projected gradient, it should not decrease one
+# loss but do not affect the other.
+# We provide 3 methods
+# 1. No projection, just use the sum of the gradient.
+# 2. Use the sum of the projected gradient.
+# 3. Alternating between the two projected gradient. In one iteration decrease
+#    one loss, in the next iteation decrease the other loss.
+class ProjectGradientMethod(Enum):
+    # Do not project the gradient
+    NONE = 1
+    SUM = 2
+    ALTERNATE = 3
 
 
 class TrainLyapunovReLU:
@@ -92,6 +114,8 @@ class TrainLyapunovReLU:
 
         # We support Adam or SGD.
         self.optimizer = "Adam"
+
+        self.project_gradient_method = ProjectGradientMethod.NONE
 
         # If summary writer is not None, then we use tensorboard to write
         # training loss to the summary writer.
@@ -310,7 +334,27 @@ class TrainLyapunovReLU:
                 return (True, losses[:iter_count+1],
                         lyapunov_positivity_mip_costs[:iter_count+1],
                         lyapunov_derivative_mip_costs[:iter_count+1])
-            loss.backward()
+            if self.project_gradient_method == ProjectGradientMethod.SUM:
+                project_gradient_mode = train_utils.ProjectGradientMode.BOTH
+            elif self.project_gradient_method == \
+                    ProjectGradientMethod.ALTERNATE:
+                if iter_count == 0:
+                    project_gradient_mode = train_utils.ProjectGradientMode.\
+                        LOSS2
+                else:
+                    project_gradient_mode = train_utils.ProjectGradientMode.\
+                        LOSS1 if project_gradient_mode == \
+                        train_utils.ProjectGradientMode.LOSS2 else \
+                        train_utils.ProjectGradientMode.LOSS2
+            if self.project_gradient_method == ProjectGradientMethod.SUM or\
+                    self.project_gradient_method == \
+                    ProjectGradientMethod.ALTERNATE:
+                train_utils.project_gradient(
+                    relu, positivity_sample_loss + positivity_mip_loss,
+                    derivative_sample_loss + derivative_mip_loss,
+                    project_gradient_mode, retain_graph=False)
+            else:
+                loss.backward()
             optimizer.step()
             iter_count += 1
         return (False, losses, lyapunov_positivity_mip_costs,
