@@ -41,7 +41,7 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
 def plot_relu(
     relu, system, V_rho, lyapunov_positivity_epsilon,
     lyapunov_derivative_epsilon, x_equilibrium, lower, upper, mesh_size,
-        theta):
+        theta, vmin=None, vmax=None):
     """
     Draw 3 subplots
     top plot: Lyapunov function in 3D.
@@ -113,7 +113,8 @@ def plot_relu(
 
         ax3 = fig.add_subplot(3, 1, 3)
         plot3 = ax3.pcolor(
-            samples_x_np, samples_y_np, dV_np, cmap=cm.coolwarm)
+            samples_x_np, samples_y_np, dV_np, vmin=vmin, vmax=vmax,
+            cmap=cm.coolwarm)
         ax3.set_xlabel("x")
         ax3.set_ylabel("y")
         ax3.set_title(r"$\dot{V} + \epsilon_2V$")

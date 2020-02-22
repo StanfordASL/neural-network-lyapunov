@@ -8,6 +8,8 @@ class ProjectGradientMode(Enum):
     LOSS1 = 1
     LOSS2 = 2
     BOTH = 3
+    EMPHASIZE_LOSS1 = 4
+    EMPHASIZE_LOSS2 = 5
 
 
 def project_gradient(network, loss1, loss2, mode, retain_graph=False):
@@ -35,10 +37,10 @@ def project_gradient(network, loss1, loss2, mode, retain_graph=False):
     i.e., decrease the derivative loss, but don't affect the positivity
     loss).
     If mode = ProjectGradientMode.BOTH, we descend on n1_perp + n2_perp.
-    @return needs_projection. If n₁ᵀn₂ >= 0, we do not need projection,
-    return False, and the gradient in the network is not updated. Otherwise
-    return True, and update the gradient of the network using n1_perp and
-    n2_perp.
+    If mode = ProjectGradientMode.EMPHASIZE_LOSS1, we descend on n1 + n2_perp
+    If mode = ProjectGradientMode.EMPHASIZE_LOSS2, we descend on n1_perp + n2
+    @return (needs_projection, n1, n2) If n₁ᵀn₂ >= 0, we do not need
+    projection return False;otherwise return True.
     """
     assert(isinstance(mode, ProjectGradientMode))
     loss1.backward(retain_graph=True)
@@ -58,13 +60,19 @@ def project_gradient(network, loss1, loss2, mode, retain_graph=False):
             need_projection = True
             grad = torch.zeros(n1.shape, dtype=loss1.dtype)
             if mode == ProjectGradientMode.LOSS1 or\
-                    mode == ProjectGradientMode.BOTH:
+                mode == ProjectGradientMode.BOTH or\
+                    mode == ProjectGradientMode.EMPHASIZE_LOSS2:
                 n1_perp = n1 - (n1 @ n2 / (n2 @ n2)) * n2
                 grad += n1_perp
+            if mode == ProjectGradientMode.EMPHASIZE_LOSS1:
+                grad += n1
             if mode == ProjectGradientMode.LOSS2 or\
-                    mode == ProjectGradientMode.BOTH:
+                    mode == ProjectGradientMode.BOTH or\
+                    mode == ProjectGradientMode.EMPHASIZE_LOSS1:
                 n2_perp = n2 - (n1 @ n2 / (n1 @ n1)) * n1
                 grad += n2_perp
+            if mode == ProjectGradientMode.EMPHASIZE_LOSS2:
+                grad += n2
         # Now set the network gradient.
         param_count = 0
         for p in network.parameters():
@@ -72,4 +80,4 @@ def project_gradient(network, loss1, loss2, mode, retain_graph=False):
             p.grad = \
                 grad[param_count:param_count+p_size].reshape(p.shape).clone()
             param_count += p_size
-        return need_projection
+        return (need_projection, n1, n2)

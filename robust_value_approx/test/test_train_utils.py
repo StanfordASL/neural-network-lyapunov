@@ -57,26 +57,34 @@ def test_project_gradient(relu, loss1, loss2, mode):
     for p in relu.parameters():
         if p.grad is not None:
             p.grad.data.zero_()
-    need_projection = train_utils.project_gradient(
+    need_projection, n1, n2 = train_utils.project_gradient(
         relu, loss1, loss2, mode, retain_graph=True)
     grad = torch.cat([
         p.grad.clone().reshape((-1,)) for p in relu.parameters()])
     if n1 @ n2 < 0:
         np.testing.assert_equal(need_projection, True)
+        n1_perp = n1 - n1 @ n2 / (n2 @ n2) * n2
+        n2_perp = n2 - n1 @ n2 / (n1 @ n1) * n1
         if mode == train_utils.ProjectGradientMode.LOSS1:
             np.testing.assert_almost_equal((grad @ n2).item(), 0)
             np.testing.assert_allclose(
                 (n1-grad), n1 @ n2/(n2 @ n2) * n2)
+            np.testing.assert_allclose(grad, n1_perp)
         elif mode == train_utils.ProjectGradientMode.LOSS2:
             np.testing.assert_almost_equal((grad @ n1).item(), 0)
             np.testing.assert_allclose(
                 (n2-grad), n1 @ n2/(n1 @ n1) * n1)
-        else:
-            n1_perp = n1 - n1 @ n2 / (n2 @ n2) * n2
-            n2_perp = n2 - n1 @ n2 / (n1 @ n1) * n1
+            np.testing.assert_allclose(grad, n2_perp)
+        elif mode == train_utils.ProjectGradientMode.BOTH:
             np.testing.assert_almost_equal(grad @ n1, n1_perp @ n1_perp)
             np.testing.assert_almost_equal(grad @ n2, n2_perp @ n2_perp)
             np.testing.assert_allclose(grad, n1_perp + n2_perp)
+        elif mode == train_utils.ProjectGradientMode.EMPHASIZE_LOSS1:
+            np.testing.assert_allclose(grad, n1 + n2_perp)
+        elif mode == train_utils.ProjectGradientMode.EMPHASIZE_LOSS2:
+            np.testing.assert_allclose(grad, n2 + n1_perp)
+        else:
+            raise Exception()
     else:
         np.testing.assert_equal(need_projection, False)
         np.testing.assert_allclose(grad, n1 + n2)
@@ -108,6 +116,9 @@ class TestProjectGradient(unittest.TestCase):
                 test_project_gradient(relu, loss1, loss3, mode)
                 test_project_gradient(relu, loss2, loss3, mode)
 
+            for mode in (train_utils.ProjectGradientMode.BOTH,
+                         train_utils.ProjectGradientMode.LOSS1,
+                         train_utils.ProjectGradientMode.LOSS2):
                 # Now project the gradient of loss1 and -loss1, they have
                 # exact opposite gradient, so the projected gradient is 0.
                 train_utils.project_gradient(
@@ -115,7 +126,7 @@ class TestProjectGradient(unittest.TestCase):
                 grad = torch.cat([
                     p.grad.reshape((-1,)) for p in relu.parameters()])
                 np.testing.assert_allclose(
-                    grad.detach().numpy(), np.zeros(grad.shape), atol=2e-13)
+                    grad.detach().numpy(), np.zeros(grad.shape), atol=3e-13)
 
 
 if __name__ == "__main__":
