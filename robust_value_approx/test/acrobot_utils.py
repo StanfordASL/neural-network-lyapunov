@@ -8,6 +8,7 @@ import time
 import os
 import inspect
 import torch
+import jax
 
 
 class AcrobotNLP:
@@ -28,6 +29,45 @@ class AcrobotNLP:
         self.x_up = [np.array([1e4, 1e4, 1e4, 1e4])]
         self.u_lo = [np.array([-50.])]
         self.u_up = [np.array([50.])]
+
+        self.x_dim = 5
+        self.u_dim = 1
+
+    def dyn_jax(self, var):
+        x_dim = 4
+        u_dim = 1
+        x0 = var[:x_dim]
+        u0 = var[x_dim:x_dim+u_dim]
+        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
+        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]        
+        theta1 = x0[0]
+        theta2 = x0[1]
+        theta1_dot = x0[2]
+        theta2_dot = x0[3]
+        s1 = jax.numpy.sin(theta1)
+        c1 = jax.numpy.cos(theta1)
+        s2 = jax.numpy.sin(theta2)
+        c2 = jax.numpy.cos(theta2)
+        s12 = jax.numpy.sin(theta1 + theta2)
+        I = self.I
+        m1 = self.m1
+        m2 = self.m2
+        l1 = self.l1
+        l2 = self.l2
+        lc1 = self.l1_com
+        lc2 = self.l2_com
+        g = -9.81
+        H = jax.numpy.array([[I+I+m2*l1**2+2*m2*l1*lc2*c2, I+m2*l1*lc2*c2],
+                      [I+m2*l1*lc2*c2, I]])
+        C = jax.numpy.array([[-2*m2*l1*lc2*s2*theta2_dot, -m2*l1*lc2*s2*theta2_dot],
+                      [m2*l1*lc2*s2*theta1_dot, 0.]])
+        G = jax.numpy.array([(m1*lc1+m2*l1)*g*s1 + m2*g*l2*s12, m2*g*l2*s12])
+        B = jax.numpy.array([[0.], [1.]])
+        Hdet = H[0,0]*H[1,1] - H[0,1]*H[1,0]
+        Hinv = (1./Hdet)*jax.numpy.array([[H[1,1], -H[0,1]], [-H[1,0], H[0,0]]])
+        x_ddot = Hinv@(G + B@u0 - C@x0[2:])
+        dx0 = jax.numpy.array([x0[2], x0[3], x_ddot[0], x_ddot[1]])
+        return x0 + dt0 * dx0 - x1       
 
     def dyn(self, var):
         x_dim = 4
@@ -71,10 +111,11 @@ class AcrobotNLP:
         dt_lo = .1
         dt_up = .1
         x_desired = np.array([np.pi, 0., 0., 0.])
-        vf = value_to_optimization.NLPValueFunction(self.x_lo, self.x_up,
+        vf = value_to_optimization.NLPValueFunction(self, self.x_lo, self.x_up,
             self.u_lo, self.u_up, init_mode=0, dt_lo=dt_lo, dt_up=dt_up,
             Q=[Q], x_desired=[x_desired], R=[R])
-        vf.add_mode(N, self.dyn)
+        vf.add_mode(N-1, self.dyn, self.dyn_jax)
+        vf.add_init_state_constraint()
         return vf
 
     def plot_traj(self, x_traj):

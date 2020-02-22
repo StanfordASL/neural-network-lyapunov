@@ -5,6 +5,7 @@ import cvxpy as cp
 from pydrake.solvers.mathematicalprogram import MathematicalProgram
 from pydrake.solvers.snopt import SnoptSolver
 import numpy as np
+import jax
 
 
 class DiffFiniteHorizonValueFunction(torch.autograd.Function):
@@ -904,7 +905,7 @@ class ValueFunction:
 
 
 class NLPValueFunction():
-    def __init__(self, x_lo, x_up, u_lo, u_up,
+    def __init__(self, sys, x_lo, x_up, u_lo, u_up,
                  dt_lo=0., dt_up=.1, init_mode=0,
                  Q=None, x_desired=None, R=None):
         """
@@ -927,6 +928,10 @@ class NLPValueFunction():
         self.u_traj = []
         self.dt_traj = []
         self.mode_traj = []
+        self.nl_constraints = []
+        self.bb_constraints = []
+        self.nl_constraints_dx = []
+        self.nl_constraints_ddx = []
         self.x_dim = [len(x) for x in x_lo]
         self.u_dim = [len(u) for u in u_lo]
         for i in range(len(self.x_dim)):
@@ -943,11 +948,27 @@ class NLPValueFunction():
             assert(isinstance(R, list))
         self.prog = MathematicalProgram()
         x0, u0, dt0, mode0 = self.add_knot_point(init_mode)
-        self.x0_constraint = self.prog.AddBoundingBoxConstraint(
-            np.zeros(self.x_dim[mode0]),
-            np.zeros(self.x_dim[mode0]),
-            x0)
+        self.x0 = x0
+        self.u0 = u0
+        self.dt0 = dt0
+        self.mode0 = mode0
         self.solver = SnoptSolver()
+        self.sys = sys
+        self.x0_constraint = None
+
+    def add_nl_constraint(self, fun, fun_jax, lb=None, ub=None, vars=None):
+        con = self.prog.AddConstraint(fun,
+            lb=lb, ub=ub,
+            vars=vars)
+        self.nl_constraints.append(con)
+        self.nl_constraints_dx.append(jax.jit(jax.jacfwd(fun_jax)))
+        self.nl_constraints_ddx.append(jax.jit(jax.jacfwd(jax.jacrev(fun_jax))))
+        return con
+
+    def add_bb_constraint(self, lb=None, ub=None, vars=None):
+        con = self.prog.AddBoundingBoxConstraint(lb, ub, vars)
+        self.bb_constraints.append(con)
+        return con
 
     def get_last_knot_point(self):
         assert(len(self.x_traj) > 0)
@@ -967,9 +988,9 @@ class NLPValueFunction():
         self.u_traj.append(u)
         self.dt_traj.append(dt)
         self.mode_traj.append(mode)
-        self.prog.AddBoundingBoxConstraint(self.x_lo[mode], self.x_up[mode], x)
-        self.prog.AddBoundingBoxConstraint(self.u_lo[mode], self.u_up[mode], u)
-        self.prog.AddBoundingBoxConstraint(self.dt_lo, self.dt_up, dt)
+        self.add_bb_constraint(self.x_lo[mode], self.x_up[mode], x)
+        self.add_bb_constraint(self.u_lo[mode], self.u_up[mode], u)
+        self.add_bb_constraint(self.dt_lo, self.dt_up, dt)
         if self.Q is not None:
             if self.x_desired is not None:
                 self.prog.AddQuadraticErrorCost(
@@ -982,7 +1003,8 @@ class NLPValueFunction():
                 Q=self.R[mode], b=np.zeros(self.u_dim[mode]), c=0., vars=u)
         return(x, u, dt, mode)
 
-    def add_transition(self, transition_fun, guard, new_mode):
+    def add_transition(self, transition_fun, transition_fun_jax,
+                       guard, guard_jax, new_mode):
         """
         add a knot point and a mode transition to that knot point
         @param transition_fun function that equals 0 for valid transition
@@ -991,16 +1013,17 @@ class NLPValueFunction():
         """
         x0, u0, dt0, mode0 = self.get_last_knot_point()
         x1, u1, dt1, mode1 = self.add_knot_point(new_mode)
-        self.prog.AddConstraint(transition_fun,
+        self.add_nl_constraint(transition_fun, transition_fun_jax,
             lb=np.zeros(self.x_dim[mode1]),
             ub=np.zeros(self.x_dim[mode1]),
             vars=np.concatenate([x0, u0, dt0, x1, u1, dt1]))
-        self.prog.AddConstraint(guard,
+        self.add_nl_constraint(guard, guard_jax,
             lb=np.array([0.]),
             ub=np.array([0.]),
             vars=np.concatenate([x0, u0, dt0]))
 
-    def add_mode(self, N, dyn_fun, guard=None):
+    def add_mode(self, N, dyn_fun, dyn_fun_jax,
+                 guard=None, guard_jax=None):
         """
         adds a mode for N knot points
         @param dyn_fun function that equals zero for valid transition
@@ -1010,15 +1033,23 @@ class NLPValueFunction():
         for n in range(N):
             x0, u0, dt0, mode0 = self.get_last_knot_point()
             x1, u1, dt1, mode1 = self.add_knot_point(mode0)
-            self.prog.AddConstraint(dyn_fun,
+            self.add_nl_constraint(dyn_fun, dyn_fun_jax,
                 lb=np.zeros(self.x_dim[mode0]),
                 ub=np.zeros(self.x_dim[mode0]),
                 vars=np.concatenate([x0, u0, dt0, x1, u1, dt1]))
             if guard is not None:
-                self.prog.AddConstraint(guard,
+                assert(guard_jax is not None)
+                self.add_nl_constraint(guard, guard_jax,
                     lb=np.array([0.]),
                     ub=np.array([np.inf]),
                     vars=np.concatenate([x1, u1, dt1]))
+
+    def add_init_state_constraint(self):
+        assert(self.x0_constraint is None)
+        self.x0_constraint = self.add_bb_constraint(
+            np.zeros(self.x_dim[self.mode0]),
+            np.zeros(self.x_dim[self.mode0]),
+            self.x0)
 
     def result_to_s(self, result):
         x_traj_sol = [result.GetSolution(x) for x in self.x_traj]
@@ -1031,6 +1062,7 @@ class NLPValueFunction():
         return np.concatenate(s)
 
     def get_value_function(self):
+        assert(self.x0_constraint is not None)
         def V(x):
             assert(isinstance(x, torch.Tensor))
             dtype = x.dtype
@@ -1088,6 +1120,166 @@ class NLPValueFunction():
     @property
     def dtype(self):
         return torch.float64
-    
-    
+
+    def get_differentiable_value_function(self):
+        # x_traj_flat, cost_to_go = self.V_with_grad(x_adv)
+        # dcost_to_go[0]/dx_adv must be available
+        # return V_with_grad
+        assert(self.x0_constraint is not None)
+        eps_active = 1e-4
+        num_x = self.prog.num_vars()
+        ddfddx = np.zeros((num_x, num_x))
+        for n in range(self.N):
+            # x, u, dt
+            mode = self.mode_traj[n]
+            x_dim = self.x_dim[mode]
+            u_dim = self.u_dim[mode]
+            x_start = n*(x_dim + u_dim + 1)
+            x_end = n*(x_dim + u_dim + 1) + x_dim
+            u_start = n*(x_dim + u_dim + 1) + x_dim
+            u_end = n*(x_dim + u_dim + 1) + x_dim + u_dim
+            if self.Q is not None:
+                ddfddx[x_start:x_end, x_start:x_end] = 2.*self.Q[mode]
+            if self.R is not None:
+                ddfddx[u_start:u_end, u_start:u_end] = 2.*self.R[mode]
+
+        def grads_g(result):
+            # todo handle transitions, not just dynamics
+            J = np.zeros((self.x_dim[0]*len(self.nl_constraints),
+                    self.prog.num_vars()))
+            H = np.zeros((self.x_dim[0]*len(self.nl_constraints),
+                    self.prog.num_vars(), self.prog.num_vars()))
+            for n in range(len(self.nl_constraints)):
+                x0 = result.GetSolution(self.x_traj[n])
+                u0 = result.GetSolution(self.u_traj[n])
+                dt0 = result.GetSolution(self.dt_traj[n])
+                x1 = result.GetSolution(self.x_traj[n+1])
+                u1 = result.GetSolution(self.u_traj[n+1])
+                dt1 = result.GetSolution(self.dt_traj[n+1])
+                var = np.concatenate([x0, u0, dt0, x1, u1, dt1])
+                # todo handle guard constraints too
+                j = np.array(self.nl_constraints_dx[n](jax.numpy.array(var)))
+                h = np.array(self.nl_constraints_ddx[n](jax.numpy.array(var)))
+                J[n*self.x_dim[0]:(n+1)*self.x_dim[0],
+                    n*(self.x_dim[0]+self.u_dim[0]+1):(n+2)*(self.x_dim[0]+self.u_dim[0]+1)] = j
+                H[n*self.x_dim[0]:(n+1)*self.x_dim[0],
+                    n*(self.x_dim[0]+self.u_dim[0]+1):(n+2)*(self.x_dim[0]+self.u_dim[0]+1),
+                    n*(self.x_dim[0]+self.u_dim[0]+1):(n+2)*(self.x_dim[0]+self.u_dim[0]+1)] = h
+            Jbb = np.zeros((self.prog.num_vars(), self.prog.num_vars()))
+            Jstart = 0
+            for n in range(self.N):
+                mode = self.mode_traj[n]
+                x = result.GetSolution(self.x_traj[n])
+                u = result.GetSolution(self.u_traj[n])
+                dt = result.GetSolution(self.dt_traj[n])
+                var = np.concatenate([x, u, dt])
+                lb = np.concatenate([self.x_lo[mode], self.u_lo[mode], np.array([self.dt_lo])])
+                ub = np.concatenate([self.x_up[mode], self.u_up[mode], np.array([self.dt_up])])
+                Jb = np.zeros((len(var), len(var)))
+                for i in range(len(var)):
+                    if np.abs(var[i] - ub[i]) <= eps_active:
+                        Jb[i, i] = 1.
+                    elif np.abs(var[i] - lb[i]) <= eps_active:
+                        Jb[i, i] = -1.
+                if n == 0:
+                    Jb[:self.x_dim[mode], :self.x_dim[mode]] = np.eye(self.x_dim[mode])
+                Jbb[Jstart:Jstart+len(var),Jstart:Jstart+len(var)] = Jb
+                Jstart += len(var)
+            return(np.concatenate((J, Jbb), axis=0), H)
+
+        def V_with_grad(x):
+            assert(isinstance(x, torch.Tensor))
+            dtype = x.dtype
+            x = x.detach().numpy()
+            self.x0_constraint.evaluator().set_bounds(x, x)
+            result = self.solver.Solve(
+                self.prog, np.random.rand(self.prog.num_vars()), None)
+            if not result.is_success():
+                return(None, None, None)
+            det = result.get_solver_details()
+            J, H = grads_g(result)
+            Qtl = ddfddx + H.T@det.Fmul[1:]
+            dgdx = J
+            dgnldp = np.zeros((len(det.F)-1, self.x_dim[self.mode0]))
+            dgbbdp = np.zeros((self.prog.num_vars(), self.x_dim[self.mode0]))
+            dgbbdp[:self.x_dim[self.mode0],:] = np.eye(self.x_dim[self.mode0])
+            dgdp = np.concatenate((dgnldp, dgbbdp), axis=0)
+
+            rhs = np.concatenate((np.zeros((self.prog.num_vars(), self.x_dim[self.mode0])), dgdp), axis=0)
+            lhs_top = np.concatenate((Qtl, dgdx.T), axis=1)
+            lhs_bottom = np.concatenate((dgdx, np.zeros((dgdx.shape[0], dgdx.shape[0]))), axis=1)
+            lhs = np.concatenate((lhs_top, lhs_bottom), axis=0)
+
+            # TODO
+            """
+            Solve lhs @ z = rhs
+            the top of z has dxdp
+            compute df/dp = df/dx * dx/dp
+            """
+            import pdb;pdb.set_trace()
+
+        return V_with_grad
+
+
+class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, args):
+        """
+        Computes the value function for a finite horizon value function
+        that is expressed as a NLP.
+        """
+        ctx.x = x
+        x_traj_flat_dim = (1, args['vf'].sys.x_dim*(args['vf'].N-1))
+        cost_to_go_dim = args['vf'].N-1
+        args['x0'].value = x.detach().numpy()
+        args['prob_mi'].solve(
+            solver=cp.GUROBI, verbose=False, warm_start=True)
+        if args['obj_mi'].value is None:
+            ctx.success = False
+            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
+                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
+        args['alpha_con'].value = args['alpha_mi'].value
+        args['prob_con'].solve(
+            solver=cp.GUROBI, verbose=False, warm_start=True)
+        if args['obj_con'].value is None:
+            ctx.success = False
+            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
+                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
+        assert(abs(args['obj_mi'].value - args['obj_con'].value) <= 1e-5)
+        s_tensor = torch.Tensor(args['s'].value).type(x.dtype)
+        alpha_mi_tensor = torch.Tensor(args['alpha_mi'].value).type(x.dtype)
+        (x_traj_val,
+         u_traj_val,
+         alpha_traj_val) = args['vf'].sol_to_traj(x, s_tensor, alpha_mi_tensor)
+        x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
+
+        step_costs = [args['vf'].step_cost(
+            j, x_traj_val[:, j], u_traj_val[:, j],
+            alpha_traj_val[:, j]).item() for j in range(args['vf'].N)]
+        cost_to_go = torch.Tensor(
+            list(np.cumsum(step_costs[::-1]))[::-1]).type(x.dtype)
+        ctx.success = True
+        ctx.lambda_G = torch.Tensor(
+            args['con_con'][0].dual_value).type(x.dtype)
+        ctx.lambda_A = torch.Tensor(
+            args['con_con'][1].dual_value).type(x.dtype)
+        ctx.G0 = args['G0']
+        ctx.A0 = args['A0']
+        ctx.Q1 = args['Q1']
+        ctx.q1 = args['q1']
+        return(x_traj_flat, cost_to_go[:-1])
+
+    @staticmethod
+    def backward(ctx, grad_output_x_traj_flat, grad_output_cost_to_go):
+        # for now only supports one gradient
+        assert(torch.all(grad_output_x_traj_flat == 0.))
+        assert(torch.all(grad_output_cost_to_go[1:] == 0.))
+        if not ctx.success:
+            grad_input = torch.zeros(
+                ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
+            return (grad_input, None)
+        dy = ctx.lambda_A.t()@ctx.A0 + ctx.lambda_G.t()@ctx.G0 +\
+            ctx.q1 + ctx.Q1@ctx.x
+        grad_input = (grad_output_cost_to_go[0] * dy.unsqueeze(0)).squeeze()
+        return(grad_input, None)
 

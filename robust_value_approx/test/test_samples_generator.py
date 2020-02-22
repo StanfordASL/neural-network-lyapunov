@@ -1,6 +1,7 @@
 import robust_value_approx.samples_generator as samples_generator
 import robust_value_approx.value_approximation as value_approximation
 import double_integrator_utils
+import acrobot_utils
 
 import unittest
 import torch
@@ -101,6 +102,36 @@ class AdvSampleTest(unittest.TestCase):
         (adv_data, adv_label) = as_gen.generate_samples(n, value_approx)
         self.assertEqual(adv_data.shape[0], n)
         self.assertEqual(adv_label.shape[0], n)
+
+    def test_squared_bound_sample_nlp(self):
+        N = 5
+        vf = acrobot_utils.get_value_function(N=N)
+        V = vf.get_value_function()
+        x0 = torch.Tensor([0., 0., 0., 0.])
+        V(x0)
+        # x0_lo = -1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+        # x0_up = 1 * torch.ones(vf.sys.x_dim, dtype=vf.dtype)
+        # max_iter = 100
+        # as_gen = samples_generator.AdversarialSampleGenerator(
+        #     vf, x0_lo, x0_up, max_iter=max_iter, learning_rate=.1)
+        # value_approx =\
+        #     value_approximation.FiniteHorizonValueFunctionApproximation(
+        #         vf, x0_lo, x0_up, 16, 1)
+        # x_adv0 = torch.Tensor([.1, .1, 0., 0.]).type(vf.dtype)
+        # (epsilon_buff,
+        #  x_adv_buff,
+        #  cost_to_go_buff) = as_gen.get_squared_bound_sample(
+        #     value_approx, x_adv0)
+        # self.assertLess(epsilon_buff.shape[0], max_iter)
+        # with torch.no_grad():
+        #     for i in range(20):
+        #         # note that the property is actually only guaranteed locally!
+        #         x0 = torch.rand(vf.sys.x_dim, dtype=vf.dtype) *\
+        #             (x0_up - x0_lo) + x0_lo
+        #         eps_sample = torch.pow(V(x0)[0] - value_approx.eval(
+        #             0, x0.unsqueeze(0)), 2)
+        #         self.assertGreaterEqual(epsilon_buff[-1, 0].item(),
+        #                                 eps_sample.item())
 
 
 if __name__ == '__main__':
