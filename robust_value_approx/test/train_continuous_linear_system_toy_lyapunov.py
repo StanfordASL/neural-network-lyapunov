@@ -84,7 +84,7 @@ if __name__ == "__main__":
         help="saved pickle file on the relu model.")
     parser.add_argument(
         "--optimizer", type=str, default="Adam",
-        help="optimizer can be either Adam or SGD.")
+        help="optimizer can be either Adam, SGD or GD.")
     parser.add_argument(
         "--summary_writer_folder", type=str, default=None,
         help="folder for the tensorboard summary")
@@ -94,6 +94,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--project_gradient_method", type=str, default="NONE",
         help="accept NONE, SUM, EMPHASIZE_POSITIVITY or ALTERNATE")
+    parser.add_argument(
+        "--momentum", type=float, default=0.,
+        help="momentum in SGD and GD")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -154,6 +157,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_convergence_tol = 1e-4
     dut.lyapunov_derivative_convergence_tol = 1e-4
     dut.summary_writer_folder = args.summary_writer_folder
+    dut.momentum = args.momentum
     if args.project_gradient_method == "NONE":
         dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.NONE
     elif args.project_gradient_method == "SUM":
@@ -204,7 +208,10 @@ if __name__ == "__main__":
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
         x_equilibrium, x_lower, x_upper, (15, 15), 0.)
-    result = dut.train(relu, state_samples)
+    if dut.optimizer == "GD":
+        result = dut.train_with_line_search(relu, state_samples)
+    else:
+        result = dut.train(relu, state_samples)
     if args.visualize:
         fig = plt.figure()
         ax1 = fig.add_subplot(3, 1, 1)

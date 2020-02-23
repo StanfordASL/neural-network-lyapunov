@@ -116,10 +116,6 @@ class LineSearchGD(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        loss = None
-        if closure is not None:
-            loss = closure()
-
         p_all = []
         dp_all = []
         for group in self.param_groups:
