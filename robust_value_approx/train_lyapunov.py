@@ -6,6 +6,7 @@ import copy
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.train_utils as train_utils
+import robust_value_approx.line_search_gd as line_search_gd
 
 from enum import Enum
 
@@ -124,6 +125,8 @@ class TrainLyapunovReLU:
         # If summary writer is not None, then we use tensorboard to write
         # training loss to the summary writer.
         self.summary_writer_folder = None
+
+        self.momentum = 0.
 
     def total_loss(
             self, relu, state_samples_all, state_samples_next,
@@ -283,6 +286,59 @@ class TrainLyapunovReLU:
             positivity_sample_loss, derivative_sample_loss,\
             positivity_mip_loss, derivative_mip_loss
 
+    def train_with_line_search(self, relu, state_samples_all):
+        assert(isinstance(state_samples_all, torch.Tensor))
+        assert(
+            state_samples_all.shape[1] ==
+            self.lyapunov_hybrid_system.system.x_dim)
+        state_samples_next = torch.stack([
+            self.lyapunov_hybrid_system.system.step_forward(
+                state_samples_all[i]) for i in
+            range(state_samples_all.shape[0])], dim=0)
+        lyapunov_positivity_mip_costs = [None] * self.max_iterations
+        lyapunov_derivative_mip_costs = [None] * self.max_iterations
+        losses = [None] * self.max_iterations
+        if self.summary_writer_folder is not None:
+            writer = torch.utils.tensorboard.SummaryWriter(
+                self.summary_writer_folder)
+
+        def closure():
+            return self.total_loss(relu, state_samples_all, state_samples_next)
+
+        losses[0], lyapunov_positivity_mip_costs[0],\
+            lyapunov_derivative_mip_costs[0], _, _, _, _ = closure()
+        iter_count = 1
+        optimizer = line_search_gd.LineSearchGD(
+            relu.parameters(), lr=self.learning_rate, momentum=self.momentum,
+            min_step_size=1e-8, loss_minimal_decrement=-1e-4,
+            step_size_reduction=0.2)
+        while iter_count < self.max_iterations:
+            optimizer.zero_grad()
+            losses[iter_count-1].backward()
+            losses[iter_count], lyapunov_positivity_mip_costs[iter_count],\
+                lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
+                optimizer.step(closure, [losses[iter_count-1]])
+            if lyapunov_positivity_mip_costs[iter_count] < \
+                self.lyapunov_positivity_convergence_tol and \
+                lyapunov_derivative_mip_costs[iter_count] < \
+                    self.lyapunov_derivative_convergence_tol:
+                return True
+            print(f"iter {iter_count}, loss {losses[iter_count].item()}," +
+                  f"positivity mip cost " +
+                  f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
+                  f"mip cost {lyapunov_derivative_mip_costs[iter_count]}")
+            if self.summary_writer_folder is not None:
+                writer.add_scalar(
+                    "loss", losses[iter_count].item(), iter_count)
+                writer.add_scalar(
+                    "positivity MIP cost",
+                    lyapunov_positivity_mip_costs[iter_count], iter_count)
+                writer.add_scalar(
+                    "derivative MIP cost",
+                    lyapunov_derivative_mip_costs[iter_count], iter_count)
+            iter_count += 1
+        return False
+
     def train(self, relu, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
         assert(
@@ -298,7 +354,8 @@ class TrainLyapunovReLU:
                 relu.parameters(), lr=self.learning_rate)
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
-                relu.parameters(), lr=self.learning_rate, momentum=0)
+                relu.parameters(), lr=self.learning_rate,
+                momentum=self.momentum)
         else:
             raise Exception(
                 "train: unknown optimizer, only support Adam or SGD.")
