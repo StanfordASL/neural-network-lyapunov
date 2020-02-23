@@ -93,7 +93,7 @@ if __name__ == "__main__":
         help="max number of iterations to pretrain on sampled states.")
     parser.add_argument(
         "--project_gradient_method", type=str, default="NONE",
-        help="accept NONE, SUM or ALTERNATE")
+        help="accept NONE, SUM, EMPHASIZE_POSITIVITY or ALTERNATE")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -123,7 +123,7 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system4()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 8, 4))
+        relu = setup_relu((2, 4, 4, 4))
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
@@ -161,6 +161,9 @@ if __name__ == "__main__":
     elif args.project_gradient_method == "ALTERNATE":
         dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.\
             ALTERNATE
+    elif args.project_gradient_method == "EMPHASIZE_POSITIVITY":
+        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.\
+            EMPHASIZE_POSITIVITY
     else:
         raise Exception("Unknown project gradient method.")
 
@@ -195,7 +198,8 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_derivative_sample_cost_weight = 1.
+    dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
