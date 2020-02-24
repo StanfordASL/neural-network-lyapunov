@@ -92,6 +92,9 @@ class AdversarialSampleGenerator(SampleGenerator):
         self.learning_rate = learning_rate
         self.penalty = penalty
         self.V_with_grad = vf.get_differentiable_value_function()
+        self.x_dim = x0_lo.shape[0]
+        self.dtype = x0_lo.dtype
+        self.N = vf.N
         super().__init__(vf, x0_lo, x0_up)
 
     def generate_samples(self, n, value_approx):
@@ -140,7 +143,7 @@ class AdversarialSampleGenerator(SampleGenerator):
             x_adv_params = torch.zeros(self.x_dim, dtype=self.dtype)
         else:
             assert(isinstance(x_adv0, torch.Tensor))
-            assert(len(x_adv0) == self.vf.sys.x_dim)
+            assert(len(x_adv0) == self.x_dim)
             x_adv_params = x_adv0.clone()
         if max_iter is None:
             max_iter = self.max_iter

@@ -904,6 +904,77 @@ class ValueFunction:
         return V_with_grad
 
 
+class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, args):
+        """
+        Computes the value function for a finite horizon value function
+        that is expressed as a NLP.
+        """
+        ctx.x = x
+        x_traj_flat_dim = (1, args['vf'].sys.x_dim*(args['vf'].N-1))
+        cost_to_go_dim = args['vf'].N-1
+        x_np = x.detach().numpy()
+        args['vf'].x0_constraint.evaluator().set_bounds(x_np, x_np)
+        result = args['vf'].solver.Solve(
+            args['vf'].prog, np.random.rand(args['vf'].prog.num_vars()), None)
+        if not result.is_success():
+            ctx.success = False
+            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
+                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
+        v_val = result.get_optimal_cost()
+        s_val = args['vf'].result_to_s(result)
+        alpha_val = np.zeros(len(args['vf'].x_traj)) # TODO
+        s_tensor = torch.Tensor(s_val).type(x.dtype)
+        alpha_mi_tensor = torch.Tensor(alpha_val).type(x.dtype)
+        (x_traj_val,
+         u_traj_val,
+         alpha_traj_val) = args['vf'].sol_to_traj(x, s_tensor, alpha_mi_tensor)
+        x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
+        step_costs = [args['vf'].step_cost(
+            j, x_traj_val[:, j], u_traj_val[:, j],
+            alpha_traj_val[:, j]).item() for j in range(args['vf'].N)]
+        cost_to_go = torch.Tensor(
+            list(np.cumsum(step_costs[::-1]))[::-1]).type(x.dtype)
+        
+        grads_g = args['grads_g']
+        ddfddx = args['ddfddx']
+        dfdx = args['dfdx']
+        vf = args['vf']
+        det = result.get_solver_details()
+        dgdx, ddgddx = grads_g(result)
+        Qtl = ddfddx + ddgddx.T@det.Fmul[1:]
+        dgnldp = np.zeros((len(det.F)-1, vf.x_dim[vf.mode0]))
+        dgbbdp = np.zeros((vf.prog.num_vars(), vf.x_dim[vf.mode0]))
+        dgbbdp[:vf.x_dim[vf.mode0],:] = np.eye(vf.x_dim[vf.mode0])
+        dgdp = np.concatenate((dgnldp, dgbbdp), axis=0)
+        rhs = np.concatenate((np.zeros((vf.prog.num_vars(), vf.x_dim[vf.mode0])), dgdp), axis=0)
+        lhs_top = np.concatenate((Qtl, dgdx.T), axis=1)
+        lhs_bottom = np.concatenate((dgdx, np.zeros((dgdx.shape[0], dgdx.shape[0]))), axis=1)
+        lhs = np.concatenate((lhs_top, lhs_bottom), axis=0)
+        penalty = 1e-6*np.eye(lhs.shape[0])
+        z = np.linalg.inv(lhs + penalty) @ rhs
+        dxdp = z[:vf.prog.num_vars(), :]
+        dfdp = dfdx(result)@dxdp
+        ctx.dfdp = torch.Tensor(dfdp).type(x.dtype)
+
+        ctx.success = True
+        return(x_traj_flat, cost_to_go[:-1])
+
+    @staticmethod
+    def backward(ctx, grad_output_x_traj_flat, grad_output_cost_to_go):
+        # for now only supports one gradient
+        assert(torch.all(grad_output_x_traj_flat == 0.))
+        assert(torch.all(grad_output_cost_to_go[1:] == 0.))
+        if not ctx.success:
+            grad_input = torch.zeros(
+                ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
+            return (grad_input, None)
+        dy = ctx.dfdp
+        grad_input = (grad_output_cost_to_go[0] * dy.unsqueeze(0)).squeeze()
+        return(grad_input, None)
+
+
 class NLPValueFunction():
     def __init__(self, sys, x_lo, x_up, u_lo, u_up,
                  dt_lo=0., dt_up=.1, init_mode=0,
@@ -1126,9 +1197,8 @@ class NLPValueFunction():
         # dcost_to_go[0]/dx_adv must be available
         # return V_with_grad
         assert(self.x0_constraint is not None)
-        eps_active = 1e-4
-        num_x = self.prog.num_vars()
-        ddfddx = np.zeros((num_x, num_x))
+        
+        ddfddx = np.zeros((self.prog.num_vars(), self.prog.num_vars()))
         for n in range(self.N):
             # x, u, dt
             mode = self.mode_traj[n]
@@ -1144,6 +1214,7 @@ class NLPValueFunction():
                 ddfddx[u_start:u_end, u_start:u_end] = 2.*self.R[mode]
 
         def grads_g(result):
+            eps_active = 1e-4
             # todo handle transitions, not just dynamics
             J = np.zeros((self.x_dim[0]*len(self.nl_constraints),
                     self.prog.num_vars()))
@@ -1187,99 +1258,30 @@ class NLPValueFunction():
                 Jstart += len(var)
             return(np.concatenate((J, Jbb), axis=0), H)
 
-        def V_with_grad(x):
-            assert(isinstance(x, torch.Tensor))
-            dtype = x.dtype
-            x = x.detach().numpy()
-            self.x0_constraint.evaluator().set_bounds(x, x)
-            result = self.solver.Solve(
-                self.prog, np.random.rand(self.prog.num_vars()), None)
-            if not result.is_success():
-                return(None, None, None)
-            det = result.get_solver_details()
-            J, H = grads_g(result)
-            Qtl = ddfddx + H.T@det.Fmul[1:]
-            dgdx = J
-            dgnldp = np.zeros((len(det.F)-1, self.x_dim[self.mode0]))
-            dgbbdp = np.zeros((self.prog.num_vars(), self.x_dim[self.mode0]))
-            dgbbdp[:self.x_dim[self.mode0],:] = np.eye(self.x_dim[self.mode0])
-            dgdp = np.concatenate((dgnldp, dgbbdp), axis=0)
+        def dfdx(result):
+            df = np.zeros(self.prog.num_vars())
+            for n in range(self.N):
+                # x, u, dt
+                mode = self.mode_traj[n]
+                x_dim = self.x_dim[mode]
+                u_dim = self.u_dim[mode]
+                x_start = n*(x_dim + u_dim + 1)
+                x_end = n*(x_dim + u_dim + 1) + x_dim
+                u_start = n*(x_dim + u_dim + 1) + x_dim
+                u_end = n*(x_dim + u_dim + 1) + x_dim + u_dim
+                x = result.GetSolution(self.x_traj[n])
+                u = result.GetSolution(self.u_traj[n])
+                if self.Q is not None:
+                    if self.x_desired is not None:
+                        df[x_start:x_end] = 2.*self.Q[mode]@\
+                            (x - self.x_desired[mode])
+                    else:
+                        df[x_start:x_end] = 2.*self.Q[mode]@x
+                if self.R is not None:
+                    df[u_start:u_end] = 2.*self.R[mode]@u
+            return df
 
-            rhs = np.concatenate((np.zeros((self.prog.num_vars(), self.x_dim[self.mode0])), dgdp), axis=0)
-            lhs_top = np.concatenate((Qtl, dgdx.T), axis=1)
-            lhs_bottom = np.concatenate((dgdx, np.zeros((dgdx.shape[0], dgdx.shape[0]))), axis=1)
-            lhs = np.concatenate((lhs_top, lhs_bottom), axis=0)
-
-            # TODO
-            """
-            Solve lhs @ z = rhs
-            the top of z has dxdp
-            compute df/dp = df/dx * dx/dp
-            """
-            import pdb;pdb.set_trace()
-
+        V_args = dict(vf=self, dfdx=dfdx, grads_g=grads_g, ddfddx=ddfddx)
+        V_with_grad = lambda x: DiffFiniteHorizonNLPValueFunction.apply(x, V_args)
+        
         return V_with_grad
-
-
-class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x, args):
-        """
-        Computes the value function for a finite horizon value function
-        that is expressed as a NLP.
-        """
-        ctx.x = x
-        x_traj_flat_dim = (1, args['vf'].sys.x_dim*(args['vf'].N-1))
-        cost_to_go_dim = args['vf'].N-1
-        args['x0'].value = x.detach().numpy()
-        args['prob_mi'].solve(
-            solver=cp.GUROBI, verbose=False, warm_start=True)
-        if args['obj_mi'].value is None:
-            ctx.success = False
-            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
-                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
-        args['alpha_con'].value = args['alpha_mi'].value
-        args['prob_con'].solve(
-            solver=cp.GUROBI, verbose=False, warm_start=True)
-        if args['obj_con'].value is None:
-            ctx.success = False
-            return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
-                   torch.zeros(cost_to_go_dim, dtype=x.dtype)*float('nan'))
-        assert(abs(args['obj_mi'].value - args['obj_con'].value) <= 1e-5)
-        s_tensor = torch.Tensor(args['s'].value).type(x.dtype)
-        alpha_mi_tensor = torch.Tensor(args['alpha_mi'].value).type(x.dtype)
-        (x_traj_val,
-         u_traj_val,
-         alpha_traj_val) = args['vf'].sol_to_traj(x, s_tensor, alpha_mi_tensor)
-        x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
-
-        step_costs = [args['vf'].step_cost(
-            j, x_traj_val[:, j], u_traj_val[:, j],
-            alpha_traj_val[:, j]).item() for j in range(args['vf'].N)]
-        cost_to_go = torch.Tensor(
-            list(np.cumsum(step_costs[::-1]))[::-1]).type(x.dtype)
-        ctx.success = True
-        ctx.lambda_G = torch.Tensor(
-            args['con_con'][0].dual_value).type(x.dtype)
-        ctx.lambda_A = torch.Tensor(
-            args['con_con'][1].dual_value).type(x.dtype)
-        ctx.G0 = args['G0']
-        ctx.A0 = args['A0']
-        ctx.Q1 = args['Q1']
-        ctx.q1 = args['q1']
-        return(x_traj_flat, cost_to_go[:-1])
-
-    @staticmethod
-    def backward(ctx, grad_output_x_traj_flat, grad_output_cost_to_go):
-        # for now only supports one gradient
-        assert(torch.all(grad_output_x_traj_flat == 0.))
-        assert(torch.all(grad_output_cost_to_go[1:] == 0.))
-        if not ctx.success:
-            grad_input = torch.zeros(
-                ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
-            return (grad_input, None)
-        dy = ctx.lambda_A.t()@ctx.A0 + ctx.lambda_G.t()@ctx.G0 +\
-            ctx.q1 + ctx.Q1@ctx.x
-        grad_input = (grad_output_cost_to_go[0] * dy.unsqueeze(0)).squeeze()
-        return(grad_input, None)
-

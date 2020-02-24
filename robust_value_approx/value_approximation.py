@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import robust_value_approx.value_to_optimization as value_to_optimization
 import torch
 
 
@@ -16,8 +17,14 @@ class FiniteHorizonValueFunctionApproximation:
         self.nn_width = nn_width
         self.nn_depth = nn_depth
         self.N = vf.N
-        self.x_dim = vf.sys.x_dim
-        self.u_dim = vf.sys.u_dim
+        if isinstance(vf, value_to_optimization.NLPValueFunction):
+            self.x_dim = vf.x_dim[vf.mode0]
+            self.u_dim = vf.u_dim[vf.mode0]
+        elif isinstance(vf, value_to_optimization.ValueFunction):
+            self.x_dim = vf.sys.x_dim
+            self.u_dim = vf.sys.u_dim
+        else:
+            assert(False)
         self.dtype = vf.dtype
         self.models = []
         self.optimizers = []
