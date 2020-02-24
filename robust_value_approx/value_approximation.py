@@ -4,28 +4,19 @@ import torch
 
 
 class FiniteHorizonValueFunctionApproximation:
-    def __init__(self, vf, x0_lo, x0_up, nn_width, nn_depth):
+    def __init__(self, N, x0_lo, x0_up, nn_width, nn_depth):
         """
         Contains an approximation for a finite-horizon value function
         the last state is the terminal state so there is no "cost-to-go" there.
         Therefore a value function of length N should have N-1 models
         """
-        assert(vf.N > 1)
-        self.vf = vf
+        self.N = N
         self.x0_lo = x0_lo
         self.x0_up = x0_up
         self.nn_width = nn_width
         self.nn_depth = nn_depth
-        self.N = vf.N
-        if isinstance(vf, value_to_optimization.NLPValueFunction):
-            self.x_dim = vf.x_dim[vf.mode0]
-            self.u_dim = vf.u_dim[vf.mode0]
-        elif isinstance(vf, value_to_optimization.ValueFunction):
-            self.x_dim = vf.sys.x_dim
-            self.u_dim = vf.sys.u_dim
-        else:
-            assert(False)
-        self.dtype = vf.dtype
+        self.dtype = x0_lo.dtype
+        self.x_dim = x0_lo.shape[0]
         self.models = []
         self.optimizers = []
         for n in range(self.N-1):
