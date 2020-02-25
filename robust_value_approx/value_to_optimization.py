@@ -917,7 +917,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         x_np = x.detach().numpy()
         args['vf'].x0_constraint.evaluator().set_bounds(x_np, x_np)
         result = args['vf'].solver.Solve(
-            args['vf'].prog, np.random.rand(args['vf'].prog.num_vars()), None)
+            args['vf'].prog, np.zeros(args['vf'].prog.num_vars()), None)
         if not result.is_success():
             ctx.success = False
             return(torch.zeros(x_traj_flat_dim, dtype=x.dtype)*float('nan'),
@@ -936,7 +936,6 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
             alpha_traj_val[:, j]).item() for j in range(args['vf'].N)]
         cost_to_go = torch.Tensor(
             list(np.cumsum(step_costs[::-1]))[::-1]).type(x.dtype)
-        
         grads_g = args['grads_g']
         ddfddx = args['ddfddx']
         dfdx = args['dfdx']
@@ -957,7 +956,6 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         dxdp = z[:vf.prog.num_vars(), :]
         dfdp = dfdx(result)@dxdp
         ctx.dfdp = torch.Tensor(dfdp).type(x.dtype)
-
         ctx.success = True
         return(x_traj_flat, cost_to_go[:-1])
 
@@ -1140,7 +1138,7 @@ class NLPValueFunction():
             x = x.detach().numpy()
             self.x0_constraint.evaluator().set_bounds(x, x)
             result = self.solver.Solve(
-                self.prog, np.random.rand(self.prog.num_vars()), None)
+                self.prog, np.zeros(self.prog.num_vars()), None)
             if not result.is_success():
                 return(None, None, None)
             v_val = result.get_optimal_cost()
@@ -1151,11 +1149,11 @@ class NLPValueFunction():
         return V
 
     def sol_to_traj(self, x0, s_val, alpha_val):
+        if s_val is None:
+            return (None, None, None)
         assert(isinstance(x0, torch.Tensor))
         assert(isinstance(s_val, torch.Tensor))
         assert(isinstance(alpha_val, torch.Tensor))
-        if s_val is None:
-            return (None, None, None)
         N = len(self.x_traj)
         traj_val = torch.cat((x0, s_val)).reshape(N, -1).t()
         x_traj_val = traj_val[:self.x_dim[0], :]
@@ -1193,11 +1191,7 @@ class NLPValueFunction():
         return torch.float64
 
     def get_differentiable_value_function(self):
-        # x_traj_flat, cost_to_go = self.V_with_grad(x_adv)
-        # dcost_to_go[0]/dx_adv must be available
-        # return V_with_grad
         assert(self.x0_constraint is not None)
-        
         ddfddx = np.zeros((self.prog.num_vars(), self.prog.num_vars()))
         for n in range(self.N):
             # x, u, dt
@@ -1212,7 +1206,6 @@ class NLPValueFunction():
                 ddfddx[x_start:x_end, x_start:x_end] = 2.*self.Q[mode]
             if self.R is not None:
                 ddfddx[u_start:u_end, u_start:u_end] = 2.*self.R[mode]
-
         def grads_g(result):
             eps_active = 1e-4
             # todo handle transitions, not just dynamics
@@ -1257,7 +1250,6 @@ class NLPValueFunction():
                 Jbb[Jstart:Jstart+len(var),Jstart:Jstart+len(var)] = Jb
                 Jstart += len(var)
             return(np.concatenate((J, Jbb), axis=0), H)
-
         def dfdx(result):
             df = np.zeros(self.prog.num_vars())
             for n in range(self.N):
@@ -1280,8 +1272,25 @@ class NLPValueFunction():
                 if self.R is not None:
                     df[u_start:u_end] = 2.*self.R[mode]@u
             return df
-
         V_args = dict(vf=self, dfdx=dfdx, grads_g=grads_g, ddfddx=ddfddx)
         V_with_grad = lambda x: DiffFiniteHorizonNLPValueFunction.apply(x, V_args)
-        
         return V_with_grad
+
+    def get_optimal_controller(self):
+        assert(self.x0_constraint is not None)
+        def ctrl(x):
+            assert(isinstance(x, torch.Tensor))
+            dtype = x.dtype
+            x = x.detach().numpy()
+            self.x0_constraint.evaluator().set_bounds(x, x)
+            result = self.solver.Solve(
+                self.prog, np.zeros(self.prog.num_vars()), None)
+            if not result.is_success():
+                return(None, None, None)
+            u0 = result.GetSolution(self.u_traj[0])
+            u1 = result.GetSolution(self.u_traj[1])
+            x_opt = result.GetSolution(self.x_traj[1])
+            return(torch.Tensor(u0).type(dtype),
+                torch.Tensor(u1).type(dtype),
+                torch.Tensor(x_opt).type(dtype))
+        return ctrl

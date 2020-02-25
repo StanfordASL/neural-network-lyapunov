@@ -2,8 +2,7 @@ import robust_value_approx.value_to_optimization as value_to_optimization
 from pydrake.solvers.mathematicalprogram import MathematicalProgram
 from pydrake.solvers.snopt import SnoptSolver
 import numpy as np
-import matplotlib.pyplot as plt
-import pybullet as p
+import scipy
 import time
 import os
 import inspect
@@ -13,103 +12,78 @@ import jax
 
 class AcrobotNLP:
     def __init__(self):
-        """
-        https://ocw.mit.edu/courses/electrical-engineering-and-computer-\
-        science/6-832-underactuated-robotics-spring-2009/readings/\
-        MIT6_832s09_read_ch03.pdf
-        """
         self.l1 = 1.
         self.l2 = 1.
         self.m1 = 1.
         self.m2 = 1.
-        self.l1_com = .5
-        self.l2_com = .5
+        self.lc1 = .5
+        self.lc2 = .5
         self.I = 1.
-        self.x_lo = [np.array([-1e4, -1e4, -1e4, -1e4])]
-        self.x_up = [np.array([1e4, 1e4, 1e4, 1e4])]
-        self.u_lo = [np.array([-50.])]
-        self.u_up = [np.array([50.])]
-
-        self.x_dim = 5
+        self.b1 = .1
+        self.b2 = .1
+        self.x_lo = [np.array([-1e9, -1e9, -1e9, -1e9])]
+        self.x_up = [np.array([1e9, 1e9, 1e9, 1e9])]
+        self.u_lo = [np.array([-1000.])]
+        self.u_up = [np.array([1000.])]
+        self.g = 9.81
+        self.x_dim = 4
         self.u_dim = 1
 
-    def dyn_jax(self, var):
-        x_dim = 4
-        u_dim = 1
-        x0 = var[:x_dim]
-        u0 = var[x_dim:x_dim+u_dim]
-        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
-        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]        
-        theta1 = x0[0]
-        theta2 = x0[1]
-        theta1_dot = x0[2]
-        theta2_dot = x0[3]
-        s1 = jax.numpy.sin(theta1)
-        c1 = jax.numpy.cos(theta1)
-        s2 = jax.numpy.sin(theta2)
-        c2 = jax.numpy.cos(theta2)
-        s12 = jax.numpy.sin(theta1 + theta2)
+    def dx(self, x0, u0, arraylib=np):
         I = self.I
         m1 = self.m1
         m2 = self.m2
         l1 = self.l1
-        l2 = self.l2
-        lc1 = self.l1_com
-        lc2 = self.l2_com
-        g = -9.81
-        H = jax.numpy.array([[I+I+m2*l1**2+2*m2*l1*lc2*c2, I+m2*l1*lc2*c2],
-                      [I+m2*l1*lc2*c2, I]])
-        C = jax.numpy.array([[-2*m2*l1*lc2*s2*theta2_dot, -m2*l1*lc2*s2*theta2_dot],
-                      [m2*l1*lc2*s2*theta1_dot, 0.]])
-        G = jax.numpy.array([(m1*lc1+m2*l1)*g*s1 + m2*g*l2*s12, m2*g*l2*s12])
-        B = jax.numpy.array([[0.], [1.]])
+        lc1 = self.lc1
+        lc2 = self.lc2
+        b1 = self.b1
+        b2 = self.b2
+        g = self.g
+        x_dim = self.x_dim
+        u_dim = self.u_dim
+        theta1 = x0[0]
+        theta2 = x0[1]
+        theta1_dot = x0[2]
+        theta2_dot = x0[3]
+        s1 = arraylib.sin(theta1)
+        c1 = arraylib.cos(theta1)
+        s2 = arraylib.sin(theta2)
+        c2 = arraylib.cos(theta2)
+        s12 = arraylib.sin(theta1 + theta2)
+        H = arraylib.array([[I+I+m2*l1**2+2*m2*l1*lc2*c2, I+m2*l1*lc2*c2],
+                            [I+m2*l1*lc2*c2, I]])
+        C = arraylib.array([[-2*m2*l1*lc2*s2*theta2_dot, -m2*l1*lc2*s2*theta2_dot],
+                            [m2*l1*lc2*s2*theta1_dot, 0.]])
+        G = arraylib.array([-m1*g*lc1*s1 - m2*g*(l1*s1 + lc2*s12) - b1*theta1_dot,
+                            -m2*g*lc2*s12 - b2*theta2_dot])
+        B = arraylib.array([[0.],
+                            [1.]])        
         Hdet = H[0,0]*H[1,1] - H[0,1]*H[1,0]
-        Hinv = (1./Hdet)*jax.numpy.array([[H[1,1], -H[0,1]], [-H[1,0], H[0,0]]])
+        Hinv = (1./Hdet)*arraylib.array([[H[1,1], -H[0,1]], [-H[1,0], H[0,0]]])
         x_ddot = Hinv@(G + B@u0 - C@x0[2:])
-        dx0 = jax.numpy.array([x0[2], x0[3], x_ddot[0], x_ddot[1]])
-        return x0 + dt0 * dx0 - x1       
+        dx0 = arraylib.array([x0[2], x0[3], x_ddot[0], x_ddot[1]])
+        return dx0
+    
+    def dyn(self, var, arraylib=np):
+        x_dim = self.x_dim
+        u_dim = self.u_dim
+        x0 = var[:x_dim]
+        u0 = var[x_dim:x_dim+u_dim]
+        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
+        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]
+        u1 = var[x_dim+u_dim+1+x_dim:x_dim+u_dim+1+x_dim+u_dim]
+        dx0 = self.dx(x0, u0, arraylib=arraylib)
+        dx1 = self.dx(x1, u1, arraylib=arraylib)
+        return x0 + .5 * (dx0 + dx1) * dt0 - x1
 
-    def dyn(self, var):
-        x_dim = 4
-        u_dim = 1
-        x0 = var[:x_dim]
-        u0 = var[x_dim:x_dim+u_dim]
-        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
-        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]        
-        theta1 = x0[0]
-        theta2 = x0[1]
-        theta1_dot = x0[2]
-        theta2_dot = x0[3]
-        s1 = np.sin(theta1)
-        c1 = np.cos(theta1)
-        s2 = np.sin(theta2)
-        c2 = np.cos(theta2)
-        s12 = np.sin(theta1 + theta2)
-        I = self.I
-        m1 = self.m1
-        m2 = self.m2
-        l1 = self.l1
-        l2 = self.l2
-        lc1 = self.l1_com
-        lc2 = self.l2_com
-        g = -9.81
-        H = np.array([[I+I+m2*l1**2+2*m2*l1*lc2*c2, I+m2*l1*lc2*c2],
-                      [I+m2*l1*lc2*c2, I]])
-        C = np.array([[-2*m2*l1*lc2*s2*theta2_dot, -m2*l1*lc2*s2*theta2_dot],
-                      [m2*l1*lc2*s2*theta1_dot, 0.]])
-        G = np.array([(m1*lc1+m2*l1)*g*s1 + m2*g*l2*s12, m2*g*l2*s12])
-        B = np.array([[0.], [1.]])
-        Hdet = H[0,0]*H[1,1] - H[0,1]*H[1,0]
-        Hinv = (1./Hdet)*np.array([[H[1,1], -H[0,1]], [-H[1,0], H[0,0]]])
-        x_ddot = Hinv@(G + B@u0 - C@x0[2:])
-        dx0 = np.array([x0[2], x0[3], x_ddot[0], x_ddot[1]])
-        return x0 + dt0 * dx0 - x1
+    def dyn_jax(self, var):
+        return self.dyn(var, arraylib=jax.numpy)
 
     def get_nlp_value_function(self, N):
-        Q = np.diag([10., 10., 1., 1.])
-        R = np.diag([1.])
-        dt_lo = .1
-        dt_up = .1
+        Q = np.diag([1., 1., 0.01, 0.01])
+        R = np.diag([0.01])
+        dt_lo = .2
+        dt_up = .2
         x_desired = np.array([np.pi, 0., 0., 0.])
         vf = value_to_optimization.NLPValueFunction(self, self.x_lo, self.x_up,
             self.u_lo, self.u_up, init_mode=0, dt_lo=dt_lo, dt_up=dt_up,
@@ -118,28 +92,31 @@ class AcrobotNLP:
         vf.add_init_state_constraint()
         return vf
 
-    def plot_traj(self, x_traj):
-        plt.plot(x_traj)
-        plt.legend(['theta1', 'theta2', 'theta1_dot', 'theta2_dot'])
-        plt.show()
-
-    def vis_traj(self, x_traj, dt_traj):
-        p.connect(p.GUI)
-        p.setGravity(0, 0, -9.81)
-        p.setTimeStep(.001)
-        currentdir = os.path.dirname(os.path.abspath(
-        inspect.getfile(inspect.currentframe())))
-        p.setAdditionalSearchPath(currentdir)
-        acrobot_id = p.loadURDF(
-            "test/acrobot_description/acrobot.urdf", [0, 0, 2])
-        for n in range(len(x_traj)):
-            x = x_traj[n]
-            dt = dt_traj[n]
-            joint_poses = [x[0], x[1]]
-            for i in range(len(joint_poses)):
-                p.resetJointState(acrobot_id, i, joint_poses[i], 0.)
-            p.stepSimulation()
-            time.sleep(dt*10)
+    def sim_ctrl(self, x0, ctrl, dt, N):
+        x_traj = [x0.unsqueeze(1).detach().numpy()]
+        t_traj = [np.array([0.])]
+        for n in range(N-1):
+            x0_np = x_traj[-1][:,-1]
+            t0 = t_traj[-1][-1]
+            u0, u1, _ = ctrl(torch.Tensor(x0_np).double())
+            if u0 is not None:
+                u0 = u0.detach().numpy()
+                u1 = u1.detach().numpy()
+            def sim_dyn(t, y):
+                if u0 is not None:
+                    s = (t - t0)/dt
+                    u = (1 - s)*u0 + s*u1
+                else:
+                    u = np.zeros(self.u_dim)
+                dx = self.dx(y, u)
+                return dx
+            traj = scipy.integrate.solve_ivp(sim_dyn, (t0, t0+dt), x0_np)
+            x_traj.append(traj.y[:,1:])
+            t_traj.append(traj.t[1:])
+        x_traj = np.concatenate(x_traj, axis=1)
+        t_traj = np.concatenate(t_traj)
+        return(torch.Tensor(x_traj).type(x0.dtype),
+            torch.Tensor(t_traj).type(x0.dtype))
 
 
 def get_value_function(N):
