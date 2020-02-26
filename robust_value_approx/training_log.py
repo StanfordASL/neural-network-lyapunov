@@ -9,6 +9,8 @@ class TrainingLog():
         self.loss_dim = loss_dim
         self.prefix = prefix
         self.first_value_only = first_value_only
+        if loss_dim <= 1:
+            self.first_value_only = True
         if writer is None:
             self.writer = SummaryWriter()
         else:

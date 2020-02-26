@@ -138,7 +138,9 @@ class AdversarialSampleGenerator(SampleGenerator):
         @return cost_to_go_buff, the value of each iterate
         """
         fhvfa = value_approximation.FiniteHorizonValueFunctionApproximation
-        assert(isinstance(value_approx, fhvfa))
+        ihvfa = value_approximation.InfiniteHorizonValueFunctionApproximation
+        assert(isinstance(value_approx, fhvfa) or\
+            isinstance(value_approx, ihvfa))
         if x_adv0 is None:
             x_adv_params = torch.zeros(self.x_dim, dtype=self.dtype)
         else:
