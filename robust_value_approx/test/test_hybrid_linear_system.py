@@ -534,6 +534,10 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         Ax_lower, Ax_upper = dut.mode_derivative_bounds(0)
         np.testing.assert_allclose(Ax_lower, np.array([-4.5, -4.5]))
         np.testing.assert_allclose(Ax_upper, np.array([4.5, 4.5]))
+        np.testing.assert_allclose(
+            dut.dx_lower, Ax_lower + g0.detach().numpy())
+        np.testing.assert_allclose(
+            dut.dx_upper, Ax_upper + g0.detach().numpy())
 
     def test_mixed_integer_constraints(self):
         dut = hybrid_linear_system.AutonomousHybridLinearSystem(

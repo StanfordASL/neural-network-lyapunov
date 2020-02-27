@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import gurobipy
 import torch
+import numpy as np
 
 import queue
 
@@ -700,6 +701,46 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 name="milp_relu_gradient_times_Aisi")
         return (z, a_out)
 
+    def add_relu_gradient_times_xdot(
+            self, relu_model, relu_free_pattern, milp, xdot, beta,
+            xdot_lower, xdot_upper, slack_name="z"):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Add sum_i ∂ReLU(x)/∂x*ẋ as mixed-integer linear constraints.
+        @param xdot The variable representing xdot
+        @param beta The binary variable to determine the activation of the
+        (leaky) ReLU units in the network, returned from
+        add_relu_output_constraint()
+        @param xdot_lower xdot_lower[i] is the lower bound of ẋ
+        @param xdot_upper xdot_upper[i] is the lower bound of ẋ
+        @return (z, a_out) z and a_out are both lists. z[i] are the slack
+        variables to write ∂ReLU(x)/∂x*ẋ as mixed-integer linear constraint
+        a_out[i].dot(z[i]) = ∂ReLU(x)/∂x*ẋ
+        """
+        assert(isinstance(
+            relu_free_pattern, relu_to_optimization.ReLUFreePattern))
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert(isinstance(beta, list))
+
+        assert(isinstance(xdot_lower, np.ndarray))
+        assert(isinstance(xdot_upper, np.ndarray))
+        assert(xdot_lower.shape == (self.system.x_dim,))
+        assert(xdot_upper.shape == (self.system.x_dim,))
+        # First write ∂ReLU(x)/∂x*ẋ
+        a_out, A_xdot, A_z, A_beta, rhs, _, _ = \
+            relu_free_pattern.output_gradient_times_vector(
+                relu_model, torch.from_numpy(xdot_lower),
+                torch.from_numpy(xdot_upper))
+        z = milp.addVars(
+            A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+        milp.addMConstrs(
+            [A_xdot, A_z, A_beta], [xdot, z, beta],
+            sense=gurobipy.GRB.LESS_EQUAL, b=rhs,
+            name="milp_relu_gradient_times_xdot")
+        return (z, a_out)
+
     def add_relu_gradient_times_gigammai(
         self, relu_model, relu_free_pattern, milp, gamma, beta,
             gigammai_lower=None, gigammai_upper=None, slack_name="z"):
@@ -863,6 +904,47 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                     sense=gurobipy.GRB.LESS_EQUAL, b=rhs)
         return (z, z_coeff, gamma_coeff)
 
+    def add_sign_state_error_times_xdot(
+            self, milp, xdot, alpha, xdot_lower, xdot_upper, slack_name="z"):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Adds ∑ᵢ sign(x(i)-x*(i))* ẋ(i) as mixed-integer linear constraints.
+        @param xdot The decision variable representing ẋ
+        @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
+        α(i)=0 => x(i)≤x*(i). This is returned from
+        add_state_error_l1_constraint()
+        @return (z, z_coeff, xdot_coeff). z is the continuous slack variable
+        in the mixed integer linear constraints. z[i] = α(i) *ẋ(i),
+        z_coeff.dot(z) + xdot_coeff[i].dot(xdot) = sign(x(i)-x*(i))*ẋ
+        """
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert(isinstance(xdot, list))
+        assert(len(xdot) == self.system.x_dim)
+        assert(isinstance(alpha, list))
+        assert(len(alpha) == self.system.x_dim)
+        assert(isinstance(xdot_lower, np.ndarray))
+        assert(isinstance(xdot_upper, np.ndarray))
+        # since sign(x(i) - x*(i)) = 2 * α(i) - 1
+        # sign(x(i)-x*(i)) * xdot(j) = 2α(i)*xdot(i) - xdot(i)
+        z = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+        z_coeff = \
+            2 * torch.ones(self.system.x_dim, dtype=self.system.dtype)
+        xdot_coeff = -torch.ones(
+            self.system.x_dim, dtype=self.system.dtype)
+        for i in range(self.system.x_dim):
+            Ain_xdot, Ain_z, Ain_alpha, rhs_in = utils.\
+                replace_binary_continuous_product(
+                    xdot_lower[i], xdot_upper[i])
+            milp.addMConstrs(
+                [Ain_xdot.reshape((-1, 1)), Ain_z.reshape((-1, 1)),
+                 Ain_alpha.reshape((-1, 1))],
+                [[xdot[i]], [z[i]], [alpha[i]]],
+                sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in)
+        return (z, z_coeff, xdot_coeff)
+
     def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
@@ -996,6 +1078,143 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         cost_vars.append(s)
         cost_coeffs.append(torch.cat(cost_gamma_coef))
         cost_vars.append(gamma)
+
+        cost_vars.append(relu_z)
+        cost_coeffs.append(a_relu_out * epsilon)
+
+        cost_vars.append(t)
+        cost_coeffs.append(
+            epsilon * V_rho * torch.ones(
+                self.system.x_dim, dtype=self.system.dtype))
+        milp.setObjective(
+            cost_coeffs, cost_vars,
+            epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
+            gurobipy.GRB.MAXIMIZE)
+
+        return (milp, x, relu_beta, gamma)
+
+    def lyapunov_derivative_as_milp2(
+            self, relu_model, x_equilibrium, V_rho, epsilon,
+            lyapunov_lower=None, lyapunov_upper=None):
+        """
+        We assume that the Lyapunov function
+        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
+        state.
+        Formulate the Lyapunov condition
+        V̇(x) ≤ -ε V(x) for all x satisfying
+        lower <= V(x) <= upper
+        as the maximal of following optimization problem is no larger
+        than 0.
+        max V̇(x) + ε * V(x)
+        s.t lower <= V(x) <= upper
+        We would formulate this optimization problem as an MILP.
+        This is an alternative formulation different from
+        lyapunov_derivative_as_milp()
+
+        @param relu_model A pytorch ReLU network.
+        @param x_equilibrium The equilibrium state.
+        @param V_rho ρ in the documentation above.
+        @param epsilon The exponential convergence rate.
+        @param lyapunov_lower the "lower" bound in the documentation above. If
+        lyapunov_lower = None, then we ignore the lower bound on V(x).
+        @param lyapunov_upper the "upper" bound in the documentation above. If
+        lyapunov_upper = None, then we ignore the upper bound on V(x).
+        @param epsilon The rate of exponential convergence. If the goal is to
+        verify convergence but not exponential convergence, then set epsilon
+        to 0.
+        @return (milp, x, relu_beta, gamma) milp is the GurobiTorchMILP
+        object such that if the maximal of this MILP is 0, the condition
+        V̇(x) ≤ -ε V(x) is satisfied. x is the decision variable in the milp
+        as the adversarial state (the state with the maximal violation of
+        Lyapunov condition V̇(x) ≤ -ε V(x), and relu_beta is the binary
+        variable representing the activation pattern of the ReLU network.
+        gamma is the binary variable representing the active hybrid mode
+        for the adversarial state x.
+        """
+        assert(isinstance(x_equilibrium, torch.Tensor))
+        assert(x_equilibrium.shape == (self.system.x_dim,))
+        if lyapunov_lower is not None:
+            assert(isinstance(lyapunov_lower, float))
+        if lyapunov_upper is not None:
+            assert(isinstance(lyapunov_upper, float))
+        assert(isinstance(V_rho, float))
+        assert(isinstance(epsilon, float))
+
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            relu_model, self.system.dtype)
+
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
+
+        (x, s, gamma, Aeq_s, Aeq_gamma) = self.add_hybrid_system_constraint(
+            milp)
+
+        xdot = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="xdot")
+        # Add constraint ẋ = Aeq_s * s + Aeq_gamma * gamma
+        milp.addMConstrs(
+            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s,
+             -Aeq_gamma], [xdot, s, gamma], sense=gurobipy.GRB.EQUAL,
+            b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
+
+        # V̇ = ∂V/∂x * ẋ
+        #   = ∂ReLU(x)/∂x*ẋ + ρ*sign(x-x*) *ẋ
+        # In order to compute ∂ReLU(x)/∂x*ẋ, we first
+        # introduce the binary variable β, which represents the activation of
+        # each (leaky) ReLU unit in the network. Then we can call
+        # output_gradient_times_vector().
+
+        # We first get the mixed-integer linear constraint, which encode the
+        # activation of beta and the network input.
+        (relu_z, relu_beta, a_relu_out, b_relu_out) = \
+            self.add_relu_output_constraint(
+                relu_model, relu_free_pattern, milp, x)
+
+        # for each mode, we want to compute ∂V/∂x*ẋ
+        # where ∂V/∂x=∂ReLU(x)/∂x + ρ*sign(x-x*)
+        # In order to handle the part on ρ*sign(x-x*) * ẋ
+        # we first introduce binary variable α, such that
+        # α(j) = 1 => x(j) - x*(j) >= 0
+        # α(j) = 0 => x(j) - x*(j) <= 0
+        # Hence sign(x(j) - x*(j)) = 2 * α - 1
+        # t[i] = |x(i)-x*(i)|
+        (t, alpha) = self.add_state_error_l1_constraint(
+                milp, x_equilibrium, x, slack_name="t",
+                binary_var_name="alpha")
+
+        # Now add the constraint
+        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
+        relu_x_equilibrium = relu_model.forward(x_equilibrium)
+        self.add_lyapunov_bounds_constraint(
+            lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
+            V_rho, relu_x_equilibrium, relu_z, t)
+
+        # z1 is the slack variable to write ∂ReLU(x)/∂x*ẋ as
+        # mixed-integer linear constraints. cost_z1_coef is the coefficient of
+        # z1 in the objective.
+        xdot_lower = self.system.dx_lower
+        xdot_upper = self.system.dx_upper
+        z1, cost_z1_coef = self.add_relu_gradient_times_xdot(
+            relu_model, relu_free_pattern, milp, xdot, relu_beta, xdot_lower,
+            xdot_upper, slack_name="z1")
+        # z2 is the slack variable to write sign(x-x*)*ẋ as mixed-integer
+        # linear constraints.
+        z2, z2_coef, xdot_coef = self.add_sign_state_error_times_xdot(
+            milp, xdot, alpha, xdot_lower, xdot_upper, slack_name="z2")
+        # cost_z3_coef[i] is the coefficient of z3[i] in the cost function.
+        cost_z2_coef = z2_coef * V_rho
+        cost_xdot_coef = xdot_coef * V_rho
+
+        # The cost is
+        # max V̇ + εV
+        #   = ∑ᵢ∂V/∂x * ẋᵢ + ε(ReLU(x) - ReLU(x*) + ρ|x-x*|₁)
+        # We know that ∂V/∂x = ∂ReLU(x)/∂x + ρ*sign(x-x*) and
+        # ∂ReLU(x)/∂x * ẋ = z1_coef.dot(z1)
+        # ρ*sign(x-x*) * ẋ = cost_z2_coeff.dot(z2) * cost_xdot_coef.dot(xdot)
+        # ReLU(x) = a_relu_out.dot(relu_z) + b_relu_out
+        # ρ|x-x*|₁ = ρ * sum(t)
+        cost_vars = [z1, z2, xdot]
+        cost_coeffs = [cost_z1_coef, cost_z2_coef, cost_xdot_coef]
 
         cost_vars.append(relu_z)
         cost_coeffs.append(a_relu_out * epsilon)
