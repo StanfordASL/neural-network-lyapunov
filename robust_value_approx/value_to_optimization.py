@@ -1275,22 +1275,3 @@ class NLPValueFunction():
         V_args = dict(vf=self, dfdx=dfdx, grads_g=grads_g, ddfddx=ddfddx)
         V_with_grad = lambda x: DiffFiniteHorizonNLPValueFunction.apply(x, V_args)
         return V_with_grad
-
-    def get_optimal_controller(self):
-        assert(self.x0_constraint is not None)
-        def ctrl(x):
-            assert(isinstance(x, torch.Tensor))
-            dtype = x.dtype
-            x = x.detach().numpy()
-            self.x0_constraint.evaluator().set_bounds(x, x)
-            result = self.solver.Solve(
-                self.prog, np.zeros(self.prog.num_vars()), None)
-            if not result.is_success():
-                return(None, None, None)
-            u0 = result.GetSolution(self.u_traj[0])
-            u1 = result.GetSolution(self.u_traj[1])
-            x_opt = result.GetSolution(self.x_traj[1])
-            return(torch.Tensor(u0).type(dtype),
-                torch.Tensor(u1).type(dtype),
-                torch.Tensor(x_opt).type(dtype))
-        return ctrl

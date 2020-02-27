@@ -92,35 +92,6 @@ class AcrobotNLP:
         vf.add_init_state_constraint()
         return vf
 
-    def sim_ctrl(self, x0, ctrl, dt, N):
-        x_traj = [x0.unsqueeze(1).detach().numpy()]
-        t_traj = [np.array([0.])]
-        for n in range(N-1):
-            x0_np = x_traj[-1][:,-1]
-            t0 = t_traj[-1][-1]
-            u0, u1, _ = ctrl(torch.Tensor(x0_np).double())
-            if u0 is not None:
-                u0 = u0.detach().numpy()
-                u1 = u1.detach().numpy()
-            def sim_dyn(t, y):
-                if u0 is not None:
-                    s = (t - t0)/dt
-                    u = (1 - s)*u0 + s*u1
-                else:
-                    u = np.zeros(self.u_dim)
-                dx = self.dx(y, u)
-                return dx
-            traj = scipy.integrate.solve_ivp(sim_dyn, (t0, t0+dt), x0_np)
-            if not traj.success:
-                print("Warning: simulation failed")
-                break
-            x_traj.append(traj.y[:,1:])
-            t_traj.append(traj.t[1:])
-        x_traj = np.concatenate(x_traj, axis=1)
-        t_traj = np.concatenate(t_traj)
-        return(torch.Tensor(x_traj).type(x0.dtype),
-            torch.Tensor(t_traj).type(x0.dtype))
-
 
 def get_value_function(N):
 	acro = AcrobotNLP()
