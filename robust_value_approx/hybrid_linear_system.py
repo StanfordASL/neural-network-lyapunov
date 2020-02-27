@@ -301,6 +301,10 @@ class AutonomousHybridLinearSystem:
         self.Ai_times_x_lower = []
         self.Ai_times_x_upper = []
 
+        # The lower and upper bounds on Ai * x if Pi * x <= qi.
+        self.dx_lower = np.full((x_dim,), np.inf)
+        self.dx_upper = np.full((x_dim,), -np.inf)
+
     def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
         """
         Add a new mode
@@ -339,6 +343,12 @@ class AutonomousHybridLinearSystem:
             self.num_modes - 1)
         self.Ai_times_x_lower.append(Ai_times_x_lower)
         self.Ai_times_x_upper.append(Ai_times_x_upper)
+        if isinstance(gi, torch.Tensor):
+            gi_np = gi.detach().numpy()
+        elif isinstance(gi, np.ndarray):
+            gi_np = gi
+        self.dx_lower = np.minimum(self.dx_lower, Ai_times_x_lower + gi_np)
+        self.dx_upper = np.maximum(self.dx_upper, Ai_times_x_upper + gi_np)
 
     def mixed_integer_constraints(self, x_lo=None, x_up=None):
         """
