@@ -365,6 +365,8 @@ class TrainLyapunovReLU:
         if self.summary_writer_folder is not None:
             writer = torch.utils.tensorboard.SummaryWriter(
                 self.summary_writer_folder)
+        relu_params = [None] * self.max_iterations
+        gradients = [None] * self.max_iterations
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
             loss, lyapunov_positivity_mip_costs[iter_count],\
@@ -418,6 +420,10 @@ class TrainLyapunovReLU:
                     relu, positivity_sample_loss + positivity_mip_loss,
                     derivative_sample_loss + derivative_mip_loss,
                     project_gradient_mode, retain_graph=False)
+            relu_params[iter_count] = torch.cat(
+                [p.data.reshape((-1,)) for p in relu.parameters()])
+            gradients[iter_count] = torch.cat(
+                [p.grad.reshape((-1,)) for p in relu.parameters()])
             optimizer.step()
             iter_count += 1
         return (False, losses, lyapunov_positivity_mip_costs,
