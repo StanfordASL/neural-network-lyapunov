@@ -14,6 +14,7 @@ import argparse
 import matplotlib.pyplot as plt
 from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
+import tracemalloc
 
 
 def setup_relu(relu_layer_width, params=None):
@@ -97,6 +98,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--momentum", type=float, default=0.,
         help="momentum in SGD and GD")
+    parser.add_argument(
+        "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
     args = parser.parse_args()
 
     if args.system == 1:
@@ -119,14 +122,14 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system3(x_equilibrium)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium, 10)
-        relu = setup_relu((2, 8, 4))
+        relu = setup_relu((2, 16, 2))
     elif args.system == 4:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 4, 4, 4))
+        relu = setup_relu((2, 4, 4))
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
@@ -147,7 +150,8 @@ if __name__ == "__main__":
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate
-    dut.lyapunov_positivity_mip_cost_weight = 1.
+    dut.lyapunov_positivity_mip_cost_weight = \
+        args.lyapunov_positivity_mip_cost_weight
     dut.lyapunov_derivative_mip_cost_weight = 1.
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
@@ -202,14 +206,20 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 1.
+    dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
         x_equilibrium, x_lower, x_upper, (15, 15), 0.)
     if dut.optimizer == "GD":
+        tracemalloc.start()
         result = dut.train_with_line_search(relu, state_samples)
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+        print("[Top 10]")
+        for stat in top_stats[:10]:
+            print(stat)
     else:
         result = dut.train(relu, state_samples)
     if args.visualize:
