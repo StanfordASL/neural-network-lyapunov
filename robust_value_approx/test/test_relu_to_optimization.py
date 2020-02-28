@@ -14,16 +14,24 @@ class TestReLU(unittest.TestCase):
             [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
         self.linear1.bias.data = torch.tensor(
             [-11, 13, 4], dtype=self.dtype)
+        self.linear1_no_bias = nn.Linear(2, 3, bias=False)
+        self.linear1_no_bias.weight.data = self.linear1.weight.data.clone()
+
         self.linear2 = nn.Linear(3, 4)
         self.linear2.weight.data = torch.tensor(
             [[-1, 0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1, 4, 6]],
             dtype=self.dtype)
         self.linear2.bias.data = torch.tensor(
             [4, -1, -2, -20], dtype=self.dtype)
+        self.linear2_no_bias = nn.Linear(3, 4, bias=False)
+        self.linear2_no_bias.weight.data = self.linear2.weight.data.clone()
+
         self.linear3 = nn.Linear(4, 1)
         self.linear3.weight.data = torch.tensor(
             [[4, 5, 6, 7]], dtype=self.dtype)
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
+        self.linear3_no_bias = nn.Linear(4, 1)
+        self.linear3_no_bias.weight.data = self.linear3.weight.data.clone()
         # Model with a ReLU unit in the output layer
         self.model1 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                     nn.ReLU(), self.linear3, nn.ReLU())
@@ -41,6 +49,11 @@ class TestReLU(unittest.TestCase):
         self.model4 = nn.Sequential(
             self.linear1, self.leaky_relus[0], self.linear2,
             self.leaky_relus[1], self.linear3)
+
+        # Model with leaky ReLU but no bias term
+        self.model5 = nn.Sequential(
+            self.linear1_no_bias, self.leaky_relus[0], self.linear2_no_bias,
+            self.leaky_relus[1], self.linear3_no_bias)
 
     def test_compute_relu_activation_pattern1(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
@@ -221,36 +234,18 @@ class TestReLU(unittest.TestCase):
                             torch.all(torch.le(
                                 P @ (x_sample.reshape((-1, 1))), q)))
 
-        test_relu_given_activation_pattern_util(
-            self, self.model1, torch.tensor([-6, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model1, torch.tensor([-10, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model1, torch.tensor([3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model1, torch.tensor([-3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model1, torch.tensor([-10, -20], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model2, torch.tensor([-6, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model2, torch.tensor([-10, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model2, torch.tensor([3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model2, torch.tensor([-3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model2, torch.tensor([-10, -20], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model3, torch.tensor([-6, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model3, torch.tensor([-10, 4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model3, torch.tensor([3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model3, torch.tensor([-3, -4], dtype=self.dtype))
-        test_relu_given_activation_pattern_util(
-            self, self.model3, torch.tensor([-10, -20], dtype=self.dtype))
+        for model in (self.model1, self.model2, self.model3, self.model4,
+                      self.model5):
+            test_relu_given_activation_pattern_util(
+                self, model, torch.tensor([-6, 4], dtype=self.dtype))
+            test_relu_given_activation_pattern_util(
+                self, model, torch.tensor([-10, 4], dtype=self.dtype))
+            test_relu_given_activation_pattern_util(
+                self, model, torch.tensor([3, -4], dtype=self.dtype))
+            test_relu_given_activation_pattern_util(
+                self, model, torch.tensor([-3, -4], dtype=self.dtype))
+            test_relu_given_activation_pattern_util(
+                self, model, torch.tensor([-10, -20], dtype=self.dtype))
 
     def test_relu_free_pattern_constructor1(self):
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model1,
@@ -322,14 +317,19 @@ class TestReLU(unittest.TestCase):
                 beta_var = cp.Variable(relu_free_pattern.num_relu_units,
                                        boolean=True)
                 x_np = x.detach().numpy()
-                con = [Ain1.detach().numpy() @ x_np +
-                       Ain2.detach().numpy() @ z_var +
-                       Ain3.detach().numpy() @ beta_var <=
-                       rhs_in.squeeze().detach().numpy(),
-                       Aeq1.detach().numpy() @ x_np +
-                       Aeq2.detach().numpy() @ z_var +
-                       Aeq3.detach().numpy() @ beta_var ==
-                       rhs_eq.squeeze().detach().numpy()]
+                con = []
+                if rhs_in.shape[0] != 0:
+                    con.append(
+                        Ain1.detach().numpy() @ x_np +
+                        Ain2.detach().numpy() @ z_var +
+                        Ain3.detach().numpy() @ beta_var <=
+                        rhs_in.squeeze().detach().numpy())
+                if rhs_eq.shape[0] != 0:
+                    con.append(
+                        Aeq1.detach().numpy() @ x_np +
+                        Aeq2.detach().numpy() @ z_var +
+                        Aeq3.detach().numpy() @ beta_var ==
+                        rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
                 prob.solve(solver=cp.GUROBI)
@@ -422,6 +422,7 @@ class TestReLU(unittest.TestCase):
         test_model(self.model2)
         test_model(self.model3)
         test_model(self.model4)
+        test_model(self.model5)
 
     def test_compute_alpha_index1(self):
         relu_free_pattern = relu_to_optimization.\
@@ -599,7 +600,8 @@ class TestReLU(unittest.TestCase):
                 z_var.value, z_expected.detach().numpy())
 
         # Check for different models and inputs.
-        for model in (self.model1, self.model2, self.model3, self.model4):
+        for model in (self.model1, self.model2, self.model3, self.model4,
+                      self.model5):
             test_model(model, torch.tensor([1.5, 2.], dtype=self.dtype),
                        torch.tensor([0., 0.], dtype=self.dtype),
                        torch.tensor([-1., -2.], dtype=self.dtype),

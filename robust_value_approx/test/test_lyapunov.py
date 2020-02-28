@@ -50,38 +50,53 @@ def setup_relu(dtype, params=None):
     return relu1
 
 
-def setup_leaky_relu(dtype, params=None):
-    if params is not None:
+def setup_leaky_relu(dtype, params=None, bias=True):
+    if params is not None and bias:
         assert(isinstance(params, torch.Tensor))
         assert(params.shape == (30,))
-    linear1 = nn.Linear(2, 3)
+    linear1 = nn.Linear(2, 3, bias=bias)
+    param_count = 0
     if params is None:
         linear1.weight.data = torch.tensor(
             [[-1.3405, -0.2602], [-0.9392, 0.9033], [-2.1063, 1.3141]],
             dtype=dtype)
-        linear1.bias.data = torch.tensor([0.913, 0.6429, 0.0011], dtype=dtype)
+        if bias:
+            linear1.bias.data = torch.tensor(
+                [0.913, 0.6429, 0.0011], dtype=dtype)
     else:
         linear1.weight.data = params[:6].clone().reshape((3, 2))
-        linear1.bias.data = params[6:9].clone()
-    linear2 = nn.Linear(3, 4)
+        param_count += 6
+        if bias:
+            linear1.bias.data = params[param_count: param_count + 3].clone()
+            param_count += 3
+    linear2 = nn.Linear(3, 4, bias=bias)
     if params is None:
         linear2.weight.data = torch.tensor(
             [[-0.4209, -1.1947, 1.4353], [1.7519, -1.3908, 2.6274],
              [-2.7574, 0.3764, -0.5544], [-0.3721, -1.0413, 0.52]],
             dtype=dtype)
-        linear2.bias.data = torch.tensor(
-            [-0.9802, 1.1129, 1.0941, 1.582], dtype=dtype)
+        if bias:
+            linear2.bias.data = torch.tensor(
+                [-0.9802, 1.1129, 1.0941, 1.582], dtype=dtype)
     else:
-        linear2.weight.data = params[9:21].clone().reshape((4, 3))
-        linear2.bias.data = params[21:25].clone()
+        linear2.weight.data = params[param_count: param_count + 12].clone().\
+            reshape((4, 3))
+        param_count += 12
+        if bias:
+            linear2.bias.data = params[param_count: param_count + 4].clone()
+            param_count += 4
     linear3 = nn.Linear(4, 1)
     if params is None:
         linear3.weight.data = torch.tensor(
             [[-1.1727, 0.2846, 1.2452, 0.8230]], dtype=dtype)
         linear3.bias.data = torch.tensor([0.4431], dtype=dtype)
     else:
-        linear3.weight.data = params[25:29].clone().reshape((1, 4))
-        linear3.bias.data = params[29].clone().reshape((1))
+        linear3.weight.data = params[param_count:param_count + 4].clone().\
+            reshape((1, 4))
+        param_count += 4
+        if bias:
+            linear3.bias.data = params[param_count].clone().reshape((1))
+            param_count += 1
     relu = nn.Sequential(
         linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3)
     return relu
@@ -455,16 +470,15 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         dut2 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system2)
 
         relu1 = setup_relu(dut1.system.dtype)
+        relu2 = setup_leaky_relu(dut1.system.dtype, bias=False)
         V_epsilon = 0.01
         V_rho = 0.1
-        relu_x_equilibrium1 = relu1.forward(self.x_equilibrium1)
-        relu_x_equilibrium2 = relu1.forward(self.x_equilibrium2)
 
-        def test_fun(dut, x_equilibrium, relu_x_equilibrium, x_val):
+        def test_fun(dut, relu, x_equilibrium, relu_x_equilibrium, x_val):
             # Fix x to different values. Now check if the optimal cost is
             # ReLU(x) - ReLU(x*) + (ρ - epsilon) * |x - x*|₁
             (milp, x) = dut.lyapunov_positivity_as_milp(
-                relu1, x_equilibrium, V_rho, V_epsilon)
+                relu, x_equilibrium, V_rho, V_epsilon)
             for i in range(dut.system.x_dim):
                 milp.addLConstr(
                     [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
@@ -474,52 +488,62 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
             self.assertAlmostEqual(
-                milp.gurobi_model.ObjVal, relu1.forward(x_val).item() -
+                milp.gurobi_model.ObjVal, relu.forward(x_val).item() -
                 relu_x_equilibrium.item() +
                 (V_rho - V_epsilon) * torch.norm(x_val - x_equilibrium, p=1).
                 item())
 
+        relu_x_equilibrium1 = relu1.forward(self.x_equilibrium1)
+        relu_x_equilibrium2 = relu1.forward(self.x_equilibrium2)
+        relu_x_equilibrium3 = relu2.forward(self.x_equilibrium1)
+
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([0, 0], dtype=self.dtype))
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([0, 0.5], dtype=self.dtype))
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([0.1, 0.5], dtype=self.dtype))
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([-0.3, 0.8], dtype=self.dtype))
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([-0.3, -0.2], dtype=self.dtype))
         test_fun(
-            dut1, self.x_equilibrium1, relu_x_equilibrium1,
+            dut1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
             torch.tensor([0.6, -0.2], dtype=self.dtype))
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.x_equilibrium2)
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.R2 @ torch.tensor([0, 0.5], dtype=self.dtype) +
             self.x_equilibrium2)
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.R2 @ torch.tensor([0.1, 0.5], dtype=self.dtype) +
             self.x_equilibrium2)
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.R2 @ torch.tensor([-0.3, 0.5], dtype=self.dtype) +
             self.x_equilibrium2)
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.R2 @ torch.tensor([0.5, -0.8], dtype=self.dtype) +
             self.x_equilibrium2)
         test_fun(
-            dut2, self.x_equilibrium2, relu_x_equilibrium2,
+            dut2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.R2 @ torch.tensor([-0.2, -0.8], dtype=self.dtype) +
             self.x_equilibrium2)
+        test_fun(
+            dut1, relu2, self.x_equilibrium1, relu_x_equilibrium3,
+            torch.tensor([-0.3, -0.2], dtype=self.dtype))
+        test_fun(
+            dut1, relu2, self.x_equilibrium1, relu_x_equilibrium3,
+            torch.tensor([0.5, -0.2], dtype=self.dtype))
 
     def test_lyapunov_derivative_as_milp(self):
         """
