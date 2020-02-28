@@ -17,8 +17,8 @@ class PendulumNLP:
         self.b = .5
         self.x_lo = [np.array([-1e9, -1e9])]
         self.x_up = [np.array([1e9, 1e9])]
-        self.u_lo = [np.array([-1000.])]
-        self.u_up = [np.array([1000.])]
+        self.u_lo = [np.array([-10.])]
+        self.u_up = [np.array([10.])]
         self.g = 9.81
         self.x_dim = 2
         self.u_dim = 1

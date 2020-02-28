@@ -19,12 +19,12 @@ class AcrobotNLP:
         self.lc1 = .5
         self.lc2 = .5
         self.I = 1.
-        self.b1 = .1
-        self.b2 = .1
+        self.b1 = .001
+        self.b2 = .001
         self.x_lo = [np.array([-1e9, -1e9, -1e9, -1e9])]
         self.x_up = [np.array([1e9, 1e9, 1e9, 1e9])]
-        self.u_lo = [np.array([-1000.])]
-        self.u_up = [np.array([1000.])]
+        self.u_lo = [np.array([-100.])]
+        self.u_up = [np.array([100.])]
         self.g = 9.81
         self.x_dim = 4
         self.u_dim = 1
@@ -80,8 +80,9 @@ class AcrobotNLP:
         return self.dyn(var, arraylib=jax.numpy)
 
     def get_nlp_value_function(self, N):
-        Q = np.diag([1., 1., 0.01, 0.01])
-        R = np.diag([0.01])
+        Q = np.diag([.01, .01, .001, .001])
+        R = np.diag([.001])
+        Qt = 10. * Q
         dt_lo = .2
         dt_up = .2
         x_desired = np.array([np.pi, 0., 0., 0.])
@@ -89,6 +90,7 @@ class AcrobotNLP:
             self.u_lo, self.u_up, init_mode=0, dt_lo=dt_lo, dt_up=dt_up,
             Q=[Q], x_desired=[x_desired], R=[R])
         vf.add_mode(N-1, self.dyn, self.dyn_jax)
+        vf.add_terminal_state_cost(Qt)
         vf.add_init_state_constraint()
         return vf
 

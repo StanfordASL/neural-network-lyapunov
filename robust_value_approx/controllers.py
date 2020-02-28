@@ -6,6 +6,8 @@ import torch
 import copy
 import numpy as np
 import scipy
+import jax
+import control
 
 
 def get_inifinite_horizon_ctrl(dyn_con, vf, ctrl_model):
@@ -98,18 +100,20 @@ def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
                                              num_samples=50):
     u_dim = u_min.shape[0]
     dtype = u_min.dtype
+    u_min_np = u_min.detach().numpy()
+    u_max_np = u_max.detach().numpy()
     def ctrl(x):
         x0_np = x.detach().numpy()
         v_opt = float("Inf")
         u_opt = None
         for k in range(num_samples):
-            u = np.random.rand(u_dim) * (u_max - u_min) + u_min
+            u = np.random.rand(u_dim) * (u_max_np - u_min_np) + u_min_np
             sim_dyn = lambda t, y: dx(y, u)
             traj = scipy.integrate.solve_ivp(sim_dyn, (0, dt), x0_np)
             if traj.success:
-                step_cost = step_cost(0, x, torch.Tensor(u).type(dtype))
+                cost = step_cost(0, x, torch.Tensor(u).type(dtype))
                 xn = torch.Tensor(traj.y[:,-1]).type(dtype)
-                v = step_cost + torch.clamp(ctrl_model(xn), 0.)
+                v = cost + torch.clamp(ctrl_model(xn), 0.)
                 if v < v_opt:
                     v_opt = v
                     u_opt = u
@@ -119,7 +123,7 @@ def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
 
 
 def get_optimal_controller(vf):
-    assert(isinstance(vf, NLPValueFunction))
+    assert(isinstance(vf, value_to_optimization.NLPValueFunction))
     assert(vf.x0_constraint is not None)
     def ctrl(x):
         assert(isinstance(x, torch.Tensor))
@@ -136,6 +140,29 @@ def get_optimal_controller(vf):
         return(torch.Tensor(u0).type(dtype),
             torch.Tensor(u1).type(dtype),
             torch.Tensor(x_opt).type(dtype))
+    return ctrl
+
+
+def get_lqr_controller(dx, x0, u0, Q, R, u_min, u_max):
+    x_dim = x0.shape[0]
+    u_dim = u0.shape[0]
+    dtype = x0.dtype
+    J = jax.jacobian(
+        lambda x: dx(x[:x_dim], x[x_dim:x_dim+u_dim], arraylib=jax.numpy))
+    AB = J(torch.cat((x0, u0)).detach().numpy())
+    A = np.array(AB[:, :x_dim])
+    B = np.array(AB[:, x_dim:x_dim+u_dim])
+    if isinstance(Q, torch.Tensor):
+        Q = Q.detach().numpy()
+    if isinstance(R, torch.Tensor):
+        R = R.detach().numpy()
+    K, S, E = control.lqr(A, B, Q, R)
+    K = torch.Tensor(K).type(dtype)
+    def ctrl(x):
+        assert(isinstance(x, torch.Tensor))  
+        u = -K@(x - x0) + u0
+        u = torch.max(torch.min(u, u_max), u_min)
+        return(u, u, None)
     return ctrl
 
 
@@ -170,7 +197,7 @@ def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
         torch.Tensor(t_traj).type(x0.dtype))
 
 
-def benchmark_controller(ctrl, sim, x0, x0_eps, num_breaks, x_goal, 
+def benchmark_controller(u_dim, dx, ctrl, x0, x0_eps, num_breaks, x_goal, 
                          dt, N, dim1=0, dim2=1):
     dtype = x0.dtype
     x_dim1 = torch.linspace(x0[dim1] - x0_eps[dim1],
@@ -183,7 +210,7 @@ def benchmark_controller(ctrl, sim, x0, x0_eps, num_breaks, x_goal,
             x0_ = x0.clone()
             x0_[dim1] = x_dim1[i]
             x0_[dim2] = x_dim2[j]
-            x_traj_sim, t_traj_sim = sim(x0_, ctrl, dt, N)
+            x_traj_sim, t_traj_sim = sim_ctrl(x0_, u_dim, dx, ctrl, dt, N)
             xf = x_traj_sim[:, -1]
             bench[i,j] = torch.norm(xf - x_goal).item()
     return bench

@@ -951,7 +951,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         lhs_top = np.concatenate((Qtl, dgdx.T), axis=1)
         lhs_bottom = np.concatenate((dgdx, np.zeros((dgdx.shape[0], dgdx.shape[0]))), axis=1)
         lhs = np.concatenate((lhs_top, lhs_bottom), axis=0)
-        penalty = 1e-6*np.eye(lhs.shape[0])
+        penalty = 1e-12*np.eye(lhs.shape[0])
         z = np.linalg.inv(lhs + penalty) @ rhs
         dxdp = z[:vf.prog.num_vars(), :]
         dfdp = dfdx(result)@dxdp
@@ -1024,6 +1024,7 @@ class NLPValueFunction():
         self.solver = SnoptSolver()
         self.sys = sys
         self.x0_constraint = None
+        self.Qt = None
 
     def add_nl_constraint(self, fun, fun_jax, lb=None, ub=None, vars=None):
         con = self.prog.AddConstraint(fun,
@@ -1120,6 +1121,12 @@ class NLPValueFunction():
             np.zeros(self.x_dim[self.mode0]),
             self.x0)
 
+    def add_terminal_state_cost(self, Qt):
+        assert(self.Qt is None)
+        self.Qt = Qt
+        self.prog.AddQuadraticErrorCost(Q=Qt, x_desired=self.x_desired[-1],
+            vars=self.x_traj[-1])
+
     def result_to_s(self, result):
         x_traj_sol = [result.GetSolution(x) for x in self.x_traj]
         u_traj_sol = [result.GetSolution(u) for u in self.u_traj]
@@ -1180,6 +1187,14 @@ class NLPValueFunction():
         if self.R is not None:
             R = torch.Tensor(self.R[mode]).type(u_val.dtype)
             cost += u_val.t()@R@u_val
+        if self.Qt is not None and n == self.N-1:
+            Q = torch.Tensor(self.Qt).type(x_val.dtype)
+            if self.x_desired is not None:
+                dx = x_val - torch.Tensor(self.x_desired[mode]).type(
+                    x_val.dtype)
+                cost += dx.t()@Q@dx
+            else:
+                cost += x_val.t()@Q@x_val
         return cost
 
     @property
@@ -1206,6 +1221,8 @@ class NLPValueFunction():
                 ddfddx[x_start:x_end, x_start:x_end] = 2.*self.Q[mode]
             if self.R is not None:
                 ddfddx[u_start:u_end, u_start:u_end] = 2.*self.R[mode]
+            if n == self.N-1 and self.Qt is not None:
+                ddfddx[x_start:x_end, x_start:x_end] += 2.*self.Qt    
         def grads_g(result):
             eps_active = 1e-4
             # todo handle transitions, not just dynamics
@@ -1271,6 +1288,12 @@ class NLPValueFunction():
                         df[x_start:x_end] = 2.*self.Q[mode]@x
                 if self.R is not None:
                     df[u_start:u_end] = 2.*self.R[mode]@u
+                if n == self.N-1 and self.Qt is not None:
+                    if self.x_desired is not None:
+                        df[x_start:x_end] += 2.*self.Qt@\
+                            (x - self.x_desired[mode])
+                    else:
+                        df[x_start:x_end] += 2.*self.Qt@x
             return df
         V_args = dict(vf=self, dfdx=dfdx, grads_g=grads_g, ddfddx=ddfddx)
         V_with_grad = lambda x: DiffFiniteHorizonNLPValueFunction.apply(x, V_args)
