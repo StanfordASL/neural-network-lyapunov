@@ -146,7 +146,8 @@ def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
         if (isinstance(layer, nn.Linear)):
             A_layer = layer.weight @ A_layer
             b_layer = layer.weight @ b_layer + \
-                layer.bias.reshape((-1, 1))
+                (layer.bias.reshape((-1, 1)) if layer.bias is not None else
+                 torch.zeros((layer.weight.shape[0], 1), dtype=dtype))
             num_linear_layer_output = layer.weight.shape[0]
         elif (isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU)):
             assert(len(activation_pattern[relu_layer_count])
@@ -313,7 +314,8 @@ class ReLUFreePattern:
         for layer in model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
-                bi = layer.bias
+                bi = layer.bias if layer.bias is not None else\
+                    torch.zeros((layer.weight.shape[0],), dtype=self.dtype)
                 if (layer_count < len(self.relu_unit_index)):
                     for j in range(len(self.relu_unit_index[layer_count])):
                         # First compute zᵤₚ, zₗₒ as the bounds for
@@ -348,11 +350,15 @@ class ReLUFreePattern:
                         z_pre_relu_lo[z_bound_index] = layer.weight[j][mask1] \
                             @ zi_lo[mask1].reshape((-1)) + \
                             layer.weight[j][mask2] @ \
-                            zi_up[mask2].reshape((-1)) + layer.bias[j]
+                            zi_up[mask2].reshape((-1)) + \
+                            (layer.bias[j] if layer.bias is not None else
+                             torch.tensor(0., dtype=self.dtype))
                         z_pre_relu_up[z_bound_index] = layer.weight[j][mask1] \
                             @ zi_up[mask1].reshape((-1)) + \
                             layer.weight[j][mask2] @ \
-                            zi_lo[mask2].reshape((-1)) + layer.bias[j]
+                            zi_lo[mask2].reshape((-1)) + \
+                            (layer.bias[j] if layer.bias is not None else
+                             torch.tensor(0., dtype=self.dtype))
                         assert(z_pre_relu_lo[z_bound_index] <=
                                z_pre_relu_up[z_bound_index])
 
@@ -365,7 +371,8 @@ class ReLUFreePattern:
                     for k in range(len(self.relu_unit_index[layer_count - 1])):
                         a_out[self.relu_unit_index[layer_count - 1][k]] =\
                             layer.weight[0][k]
-                    b_out = layer.bias[0]
+                    b_out = layer.bias[0] if layer.bias is not None else \
+                        torch.tensor(0., dtype=self.dtype)
 
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.
