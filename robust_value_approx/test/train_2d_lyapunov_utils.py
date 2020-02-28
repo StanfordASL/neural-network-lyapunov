@@ -52,12 +52,12 @@ def setup_state_samples_on_boundary(x_equilibrium, lower, upper, mesh_size, thet
         torch.linspace(lower[0], upper[0], mesh_size[0]),
         torch.linspace(lower[0], upper[0], mesh_size[0]),
         torch.full((mesh_size[1],), lower[0]),
-        torch.full((mesh_size[1],), upper[0])])
+        torch.full((mesh_size[1],), upper[0])]).type(dtype)
     samples_y = torch.cat([
         torch.full((mesh_size[0],), lower[1]),
         torch.full((mesh_size[1],), upper[1]),
         torch.linspace(lower[1], upper[1], mesh_size[1]),
-        torch.linspace(lower[1], upper[1], mesh_size[1])])
+        torch.linspace(lower[1], upper[1], mesh_size[1])]).type(dtype)
     samples = torch.stack([samples_x, samples_y])
     if isinstance(theta, float):
         theta = torch.tensor(theta, dtype=dtype)

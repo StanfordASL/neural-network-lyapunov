@@ -49,7 +49,7 @@ def setup_relu(relu_layer_width, params=None, bias=True):
     layers = [None] * (len(relu_layer_width) * 2 - 1)
     for i in range(len(relu_layer_width) - 1):
         layers[2 * i] = linear_layers[i]
-        layers[2 * i + 1] = nn.LeakyReLU(0.2)
+        layers[2 * i + 1] = nn.LeakyReLU(-0.2)
     layers[-1] = linear_layers[-1]
     relu = nn.Sequential(*layers)
     return relu
@@ -136,12 +136,12 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system4()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 16, 4), bias=bias)
+        relu = setup_relu((2, 8, 4), bias=bias)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
-    V_rho = 0.1
+    V_rho = 0.
 
     if args.system == 1 or args.system == 2 or args.system == 4:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
@@ -221,7 +221,7 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 1.
+    dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
