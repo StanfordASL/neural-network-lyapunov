@@ -160,7 +160,7 @@ class AdversarialSampleGenerator(SampleGenerator):
             Vx = cost_to_go[0]
             if torch.any(torch.isnan(Vx)):
                 break
-            nx = value_approx.eval(0, x_adv.unsqueeze(0))
+            nx = torch.clamp(value_approx.eval(0, x_adv.unsqueeze(0)), 0.)
             epsilon = torch.pow(Vx - nx, 2)
             epsilon_buff = torch.cat((epsilon_buff, epsilon.clone().detach()),
                                      axis=0)
