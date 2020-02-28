@@ -186,7 +186,7 @@ class TrainLyapunovReLU:
         lyapunov_positivity_mip.gurobi_model.optimize()
 
         lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
-            lyapunov_derivative_as_milp(
+            lyapunov_derivative_as_milp2(
                 relu, self.x_equilibrium, self.V_rho,
                 self.lyapunov_derivative_epsilon)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]

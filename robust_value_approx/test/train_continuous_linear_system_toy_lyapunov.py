@@ -16,7 +16,7 @@ from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
 
 
-def setup_relu(relu_layer_width, params=None):
+def setup_relu(relu_layer_width, params=None, bias=True):
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
     if params is not None:
@@ -29,9 +29,10 @@ def setup_relu(relu_layer_width, params=None):
             linear.in_features * linear.out_features].clone().reshape((
                 linear.out_features, linear.in_features))
         param_count += linear.in_features * linear.out_features
-        linear.bias.data = params[
-            param_count: param_count + linear.out_features].clone()
-        param_count += linear.out_features
+        if bias:
+            linear.bias.data = params[
+                param_count: param_count + linear.out_features].clone()
+            param_count += linear.out_features
         return param_count
 
     linear_layers = [None] * len(relu_layer_width)
@@ -40,7 +41,7 @@ def setup_relu(relu_layer_width, params=None):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
         linear_layers[i] = nn.Linear(
-            relu_layer_width[i], next_layer_width).type(dtype)
+            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -107,34 +108,35 @@ if __name__ == "__main__":
         help="minimal improvement in line search.")
     args = parser.parse_args()
 
+    bias = False
     if args.system == 1:
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1(2.)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 4, 2))
+        relu = setup_relu((2, 4, 2), bias=bias)
     elif args.system == 2:
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system2()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system2(10)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 8, 4))
+        relu = setup_relu((2, 8, 4), bias=bias)
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium, 10)
-        relu = setup_relu((2, 16, 2))
+        relu = setup_relu((2, 16, 2), bias=bias)
     elif args.system == 4:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 4, 4))
+        relu = setup_relu((2, 16, 4), bias=bias)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
@@ -147,8 +149,14 @@ if __name__ == "__main__":
     elif args.system == 3:
         x_lower = torch.tensor([-2, -1], dtype=system.dtype)
         x_upper = torch.tensor([2, 1], dtype=system.dtype)
-    state_samples_all = train_2d_lyapunov_utils.setup_state_samples_all(
-        x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    if bias:
+        state_samples_all = train_2d_lyapunov_utils.setup_state_samples_all(
+            x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    else:
+        state_samples_all = train_2d_lyapunov_utils.\
+            setup_state_samples_on_boundary(
+                x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    
 
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_rho, x_equilibrium)
@@ -213,12 +221,17 @@ if __name__ == "__main__":
 
     # No loss on sampled states. Only use MIP loss.
     dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_derivative_sample_cost_weight = 1.
     dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
-    state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
-        x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    if bias:
+        state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
+            x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    else:
+        state_samples = train_2d_lyapunov_utils.\
+            setup_state_samples_on_boundary(
+                x_equilibrium, x_lower, x_upper, (15, 15), 0.)
     if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
         result = dut.train_with_line_search(relu, state_samples)
     else:
