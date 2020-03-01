@@ -945,7 +945,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in)
         return (z, z_coeff, xdot_coeff)
 
-    def lyapunov_derivative_as_milp(
+    def lyapunov_derivative_as_milp2(
             self, relu_model, x_equilibrium, V_rho, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
         """
@@ -1093,7 +1093,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         return (milp, x, relu_beta, gamma)
 
-    def lyapunov_derivative_as_milp2(
+    def lyapunov_derivative_as_milp(
             self, relu_model, x_equilibrium, V_rho, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
         """
