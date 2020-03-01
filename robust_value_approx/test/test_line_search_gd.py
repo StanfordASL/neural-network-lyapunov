@@ -32,7 +32,7 @@ class TestLineSearchGD(unittest.TestCase):
 
         def loss_fun(a, b):
             y = x @ a.reshape((-1, 1)) + b
-            return [y.squeeze() @ y.squeeze()]
+            return y.squeeze() @ y.squeeze()
 
         def grad_fun(a, b):
             with torch.no_grad():
@@ -47,11 +47,11 @@ class TestLineSearchGD(unittest.TestCase):
 
         def closure():
             y = network(x)
-            return [y.squeeze() @ y.squeeze()]
+            return y.squeeze() @ y.squeeze()
 
         loss0 = closure()
         network.zero_grad()
-        loss0[0].backward()
+        loss0.backward()
         np.testing.assert_allclose(
             grad_flat().detach().numpy(),
             grad_fun(network.weight.data.squeeze(), network.bias).
@@ -69,9 +69,9 @@ class TestLineSearchGD(unittest.TestCase):
         a1 = a0 - grad0[:2] * lr
         b1 = b0 - grad0[2] * lr
         loss1 = loss_fun(a1, b1)
-        assert(loss1[0] <= loss0[0] -
+        assert(loss1 <= loss0 -
                loss_minimal_decrement * lr * grad0 @ grad0)
-        dut1.step(closure, loss0)
+        dut1.step(closure, loss0.item())
         np.testing.assert_allclose(
             a1.detach().numpy(),
             network.weight.data.squeeze().detach().numpy())
@@ -95,18 +95,18 @@ class TestLineSearchGD(unittest.TestCase):
         assert(loss2 > loss0)
         step_size = 0.5
         a, b = a2, b2
-        while loss_fun(a, b)[0] > loss0[0] + \
+        while loss_fun(a, b) > loss0 + \
                 step_size * loss_minimal_decrement * (-grad0 @ grad0):
             a = a0 - grad0[:2] * step_size
             b = b0 - grad0[2] * step_size
             step_size *= step_size_reduction
-        loss2 = dut2.step(closure, loss0)
+        loss2 = dut2.step(closure, loss0.item())
 
         np.testing.assert_allclose(
             network.weight.data.squeeze().detach().numpy(), a.detach().numpy())
         np.testing.assert_almost_equal(network.bias.data.item(), b.item())
         np.testing.assert_almost_equal(
-            loss2[0].item(), loss_fun(a, b)[0].item())
+            loss2.item(), loss_fun(a, b).item())
 
         # Change boththe learning rate and the minimal step size. Now the line
         # search stops even though the Armijo's condition is not satisfied.
@@ -121,7 +121,7 @@ class TestLineSearchGD(unittest.TestCase):
             min_step_size=min_step_size,
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=step_size_reduction)
-        loss3 = dut3.step(closure, loss0)
+        loss3 = dut3.step(closure, loss0.item())
         step_size = lr
         while step_size > min_step_size:
             a = a0 - grad0[:2] * step_size
@@ -131,9 +131,9 @@ class TestLineSearchGD(unittest.TestCase):
             network.weight.data.squeeze().detach().numpy(), a.detach().numpy())
         np.testing.assert_almost_equal(network.bias.data.item(), b.item())
         np.testing.assert_almost_equal(
-            loss3[0].item(), loss_fun(a, b)[0].item())
+            loss3.item(), loss_fun(a, b).item())
         self.assertGreater(
-            loss3[0].item(), loss0[0].item() +
+            loss3.item(), loss0.item() +
             (loss_minimal_decrement * step_size/step_size_reduction *
              -grad0 @ grad0).item())
 
@@ -149,10 +149,10 @@ class TestLineSearchGD(unittest.TestCase):
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=step_size_reduction)
         loss = closure()
-        while loss[0] > 1e-6:
+        while loss > 1e-6:
             dut4.zero_grad()
-            loss[0].backward()
-            loss = dut4.step(closure, loss)
+            loss.backward()
+            loss = dut4.step(closure, loss.item())
 
         np.testing.assert_allclose(
             network(x).squeeze().detach().numpy(), np.zeros(3), atol=1e-3)

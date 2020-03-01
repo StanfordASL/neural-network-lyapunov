@@ -302,11 +302,17 @@ class TrainLyapunovReLU:
             writer = torch.utils.tensorboard.SummaryWriter(
                 self.summary_writer_folder)
 
-        def closure():
-            return self.total_loss(relu, state_samples_all, state_samples_next)
+        iter_count = 0
 
-        losses[0], lyapunov_positivity_mip_costs[0],\
-            lyapunov_derivative_mip_costs[0], _, _, _, _ = closure()
+        def closure():
+            loss, lyapunov_positivity_mip_costs[iter_count],\
+                lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
+                self.total_loss(relu, state_samples_all, state_samples_next)
+            return loss
+
+        loss = closure()
+        loss.backward()
+        losses[0] = loss.item()
         iter_count = 1
         optimizer = line_search_gd.LineSearchGD(
             relu.parameters(), lr=self.learning_rate, momentum=self.momentum,
@@ -314,22 +320,21 @@ class TrainLyapunovReLU:
             step_size_reduction=0.2)
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
-            losses[iter_count-1].backward()
-            losses[iter_count], lyapunov_positivity_mip_costs[iter_count],\
-                lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
-                optimizer.step(closure, [losses[iter_count-1]])
+            loss = optimizer.step(closure, losses[iter_count-1])
+            loss.backward()
+            losses[iter_count] = loss.item()
             if lyapunov_positivity_mip_costs[iter_count] < \
                 self.lyapunov_positivity_convergence_tol and \
                 lyapunov_derivative_mip_costs[iter_count] < \
                     self.lyapunov_derivative_convergence_tol:
                 return True
-            print(f"iter {iter_count}, loss {losses[iter_count].item()}," +
+            print(f"iter {iter_count}, loss {losses[iter_count]}," +
                   f"positivity mip cost " +
                   f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
                   f"mip cost {lyapunov_derivative_mip_costs[iter_count]}")
             if self.summary_writer_folder is not None:
                 writer.add_scalar(
-                    "loss", losses[iter_count].item(), iter_count)
+                    "loss", losses[iter_count], iter_count)
                 writer.add_scalar(
                     "positivity MIP cost",
                     lyapunov_positivity_mip_costs[iter_count], iter_count)

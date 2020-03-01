@@ -14,7 +14,6 @@ import argparse
 import matplotlib.pyplot as plt
 from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
-import tracemalloc
 
 
 def setup_relu(relu_layer_width, params=None):
@@ -213,13 +212,7 @@ if __name__ == "__main__":
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
         x_equilibrium, x_lower, x_upper, (15, 15), 0.)
     if dut.optimizer == "GD":
-        tracemalloc.start()
         result = dut.train_with_line_search(relu, state_samples)
-        snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics('lineno')
-        print("[Top 10]")
-        for stat in top_stats[:10]:
-            print(stat)
     else:
         result = dut.train(relu, state_samples)
     if args.visualize:
