@@ -60,7 +60,8 @@ class TestLineSearchGD(unittest.TestCase):
         lr = 1e-3
         loss_minimal_decrement = 1e-4
         dut1 = line_search_gd.LineSearchGD(
-            network.parameters(), lr=lr, momentum=0, min_step_size=1e-8,
+            network.parameters(), lr=lr, momentum=0,
+            min_step_size_decrease=1e-5,
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=0.2)
         a0 = network.weight.data.clone().squeeze()
@@ -85,7 +86,8 @@ class TestLineSearchGD(unittest.TestCase):
         loss_minimal_decrement = 1e-4
         step_size_reduction = 0.2
         dut2 = line_search_gd.LineSearchGD(
-            network.parameters(), lr=lr, momentum=0, min_step_size=1e-8,
+            network.parameters(), lr=lr, momentum=0,
+            min_step_size_decrease=1e-6,
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=step_size_reduction)
         a2 = a0 - grad0[:2] * lr
@@ -108,7 +110,7 @@ class TestLineSearchGD(unittest.TestCase):
         np.testing.assert_almost_equal(
             loss2.item(), loss_fun(a, b).item())
 
-        # Change boththe learning rate and the minimal step size. Now the line
+        # Change both the learning rate and the minimal step size. Now the line
         # search stops even though the Armijo's condition is not satisfied.
         reset_network()
         lr = 0.5
@@ -118,7 +120,7 @@ class TestLineSearchGD(unittest.TestCase):
 
         dut3 = line_search_gd.LineSearchGD(
             network.parameters(), lr=lr, momentum=0,
-            min_step_size=min_step_size,
+            min_step_size_decrease=min_step_size/lr,
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=step_size_reduction)
         loss3 = dut3.step(closure, loss0.item())
@@ -145,7 +147,7 @@ class TestLineSearchGD(unittest.TestCase):
 
         dut4 = line_search_gd.LineSearchGD(
             network.parameters(), lr=lr, momentum=0,
-            min_step_size=min_step_size,
+            min_step_size_decrease=min_step_size/lr,
             loss_minimal_decrement=loss_minimal_decrement,
             step_size_reduction=step_size_reduction)
         loss = closure()

@@ -59,7 +59,7 @@ class LineSearchGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, min_step_size=1e-8,
+                 weight_decay=0, nesterov=False, min_step_size_decrease=1e-4,
                  loss_minimal_decrement=1e-4, step_size_reduction=0.2):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -70,7 +70,7 @@ class LineSearchGD(Optimizer):
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        min_step_size=min_step_size,
+                        min_step_size_decrease=min_step_size_decrease,
                         loss_minimal_decrement=loss_minimal_decrement,
                         step_size_reduction=step_size_reduction)
         if nesterov and (momentum <= 0 or dampening != 0):
@@ -96,17 +96,19 @@ class LineSearchGD(Optimizer):
         for group in self.param_groups:
             loss_minimal_decrement = group['loss_minimal_decrement']
             step_size_reduction = group['step_size_reduction']
-            min_step_size = group['min_step_size']
+            min_step_size_decrease = group['min_step_size_decrease']
 
         increment = loss_minimal_decrement * torch.sum(torch.stack(
             [torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
-        t_prev = 0
-        while t > min_step_size:
-            loss = self.directional_evaluate(closure, p, t - t_prev, d_p)
+        alpha_prev = 0
+        alpha = 1
+        while alpha > min_step_size_decrease:
+            loss = self.directional_evaluate(
+                closure, p, (alpha - alpha_prev) * t, d_p)
             if loss <= loss0 + t * increment:
                 return loss
-            t_prev = t
-            t *= step_size_reduction
+            alpha_prev = alpha
+            alpha *= step_size_reduction
         return loss
 
     def step(self, closure, loss0):
