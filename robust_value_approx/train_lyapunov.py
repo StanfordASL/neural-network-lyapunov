@@ -126,7 +126,10 @@ class TrainLyapunovReLU:
         # training loss to the summary writer.
         self.summary_writer_folder = None
 
+        # parameter used in SGD
         self.momentum = 0.
+        # parameter used in line search optimizer
+        self.loss_minimal_decrement = 0.
 
     def total_loss(
             self, relu, state_samples_all, state_samples_next,
@@ -316,7 +319,8 @@ class TrainLyapunovReLU:
         iter_count = 1
         optimizer = line_search_gd.LineSearchGD(
             relu.parameters(), lr=self.learning_rate, momentum=self.momentum,
-            min_step_size=1e-8, loss_minimal_decrement=-1e-4,
+            min_step_size_decrease=1e-4,
+            loss_minimal_decrement=self.loss_minimal_decrement,
             step_size_reduction=0.2)
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
@@ -331,7 +335,7 @@ class TrainLyapunovReLU:
             print(f"iter {iter_count}, loss {losses[iter_count]}," +
                   f"positivity mip cost " +
                   f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
-                  f"mip cost {lyapunov_derivative_mip_costs[iter_count]}")
+                  f"mip cost {lyapunov_derivative_mip_costs[iter_count]}\n")
             if self.summary_writer_folder is not None:
                 writer.add_scalar(
                     "loss", losses[iter_count], iter_count)
