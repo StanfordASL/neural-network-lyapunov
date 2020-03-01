@@ -308,14 +308,19 @@ class TrainLyapunovReLU:
         iter_count = 0
 
         def closure():
+            relu.zero_grad()
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
                 self.total_loss(relu, state_samples_all, state_samples_next)
             return loss
 
+        relu_params = [None] * self.max_iterations
+
         loss = closure()
         loss.backward()
         losses[0] = loss.item()
+        relu_params[iter_count] = torch.cat(
+            [p.data.reshape((-1,)) for p in relu.parameters()])
         iter_count = 1
         optimizer = line_search_gd.LineSearchGD(
             relu.parameters(), lr=self.learning_rate, momentum=self.momentum,
@@ -323,10 +328,11 @@ class TrainLyapunovReLU:
             loss_minimal_decrement=self.loss_minimal_decrement,
             step_size_reduction=0.2)
         while iter_count < self.max_iterations:
-            optimizer.zero_grad()
             loss = optimizer.step(closure, losses[iter_count-1])
             loss.backward()
             losses[iter_count] = loss.item()
+            relu_params[iter_count] = torch.cat(
+                [p.data.reshape((-1,)) for p in relu.parameters()])
             if lyapunov_positivity_mip_costs[iter_count] < \
                 self.lyapunov_positivity_convergence_tol and \
                 lyapunov_derivative_mip_costs[iter_count] < \

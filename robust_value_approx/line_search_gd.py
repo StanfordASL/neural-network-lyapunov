@@ -147,5 +147,5 @@ class LineSearchGD(Optimizer):
                     else:
                         d_p = buf
                 p_all.append(p)
-                dp_all.append(-d_p)
+                dp_all.append(-d_p.clone())
         return self.line_search(loss0, closure, p_all, lr, dp_all)
