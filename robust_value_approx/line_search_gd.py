@@ -103,7 +103,7 @@ class LineSearchGD(Optimizer):
         t_prev = 0
         while t > min_step_size:
             loss = self.directional_evaluate(closure, p, t - t_prev, d_p)
-            if loss[0] <= loss0[0] + t * increment:
+            if loss <= loss0 + t * increment:
                 return loss
             t_prev = t
             t *= step_size_reduction
@@ -116,6 +116,7 @@ class LineSearchGD(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        assert(isinstance(loss0, float))
         p_all = []
         dp_all = []
         for group in self.param_groups:
@@ -145,5 +146,4 @@ class LineSearchGD(Optimizer):
                         d_p = buf
                 p_all.append(p)
                 dp_all.append(-d_p)
-        loss = self.line_search(loss0, closure, p_all, lr, dp_all)
-        return loss
+        return self.line_search(loss0, closure, p_all, lr, dp_all)
