@@ -215,7 +215,7 @@ if __name__ == "__main__":
 
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
         x_equilibrium, x_lower, x_upper, (15, 15), 0.)
-    if dut.optimizer == "GD":
+    if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
         result = dut.train_with_line_search(relu, state_samples)
     else:
         result = dut.train(relu, state_samples)
