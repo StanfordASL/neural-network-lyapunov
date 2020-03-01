@@ -7,6 +7,7 @@ import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.train_utils as train_utils
 import robust_value_approx.line_search_gd as line_search_gd
+import robust_value_approx.line_search_adam as line_search_adam
 
 from enum import Enum
 
@@ -322,11 +323,18 @@ class TrainLyapunovReLU:
         relu_params[iter_count] = torch.cat(
             [p.data.reshape((-1,)) for p in relu.parameters()])
         iter_count = 1
-        optimizer = line_search_gd.LineSearchGD(
-            relu.parameters(), lr=self.learning_rate, momentum=self.momentum,
-            min_step_size_decrease=1e-4,
-            loss_minimal_decrement=self.loss_minimal_decrement,
-            step_size_reduction=0.2)
+        if self.optimizer == "GD":
+            optimizer = line_search_gd.LineSearchGD(
+                relu.parameters(), lr=self.learning_rate,
+                momentum=self.momentum, min_step_size_decrease=1e-4,
+                loss_minimal_decrement=self.loss_minimal_decrement,
+                step_size_reduction=0.2)
+        elif self.optimizer == "LineSearchAdam":
+            optimizer = line_search_adam.LineSearchAdam(
+                relu.parameters(), lr=self.learning_rate,
+                min_step_size_decrease=1e-4,
+                loss_minimal_decrement=self.loss_minimal_decrement,
+                step_size_reduction=0.2)
         while iter_count < self.max_iterations:
             loss = optimizer.step(closure, losses[iter_count-1])
             loss.backward()
