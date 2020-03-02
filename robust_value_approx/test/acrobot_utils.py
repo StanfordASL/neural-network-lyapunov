@@ -82,7 +82,7 @@ class AcrobotNLP:
     def get_nlp_value_function(self, N):
         Q = np.diag([.01, .01, .001, .001])
         R = np.diag([.001])
-        Qt = 10. * Q
+        Qt = 100. * Q
         dt_lo = .2
         dt_up = .2
         x_desired = np.array([np.pi, 0., 0., 0.])
