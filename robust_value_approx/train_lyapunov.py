@@ -328,13 +328,13 @@ class TrainLyapunovReLU:
                 relu.parameters(), lr=self.learning_rate,
                 momentum=self.momentum, min_step_size_decrease=1e-4,
                 loss_minimal_decrement=self.loss_minimal_decrement,
-                step_size_reduction=0.2)
+                step_size_reduction=0.2, min_improvement=self.min_improvement)
         elif self.optimizer == "LineSearchAdam":
             optimizer = line_search_adam.LineSearchAdam(
                 relu.parameters(), lr=self.learning_rate,
                 min_step_size_decrease=1e-4,
                 loss_minimal_decrement=self.loss_minimal_decrement,
-                step_size_reduction=0.2)
+                step_size_reduction=0.2, min_improvement=self.min_improvement)
         while iter_count < self.max_iterations:
             loss = optimizer.step(closure, losses[iter_count-1])
             loss.backward()
