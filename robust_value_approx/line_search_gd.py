@@ -60,7 +60,8 @@ class LineSearchGD(Optimizer):
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False, min_step_size_decrease=1e-4,
-                 loss_minimal_decrement=1e-4, step_size_reduction=0.2):
+                 loss_minimal_decrement=1e-4, step_size_reduction=0.2,
+                 min_improvement=0.):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -72,7 +73,8 @@ class LineSearchGD(Optimizer):
                         weight_decay=weight_decay, nesterov=nesterov,
                         min_step_size_decrease=min_step_size_decrease,
                         loss_minimal_decrement=loss_minimal_decrement,
-                        step_size_reduction=step_size_reduction)
+                        step_size_reduction=step_size_reduction,
+                        min_improvement=min_improvement)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError(
                 "Nesterov momentum requires a momentum and zero dampening")
@@ -97,6 +99,7 @@ class LineSearchGD(Optimizer):
             loss_minimal_decrement = group['loss_minimal_decrement']
             step_size_reduction = group['step_size_reduction']
             min_step_size_decrease = group['min_step_size_decrease']
+            min_improvement = group['min_improvement']
 
         increment = loss_minimal_decrement * torch.sum(torch.stack(
             [torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
@@ -105,7 +108,8 @@ class LineSearchGD(Optimizer):
         while alpha > min_step_size_decrease:
             loss = self.directional_evaluate(
                 closure, p, (alpha - alpha_prev) * t, d_p)
-            if loss <= loss0 + t * increment:
+            if loss <= loss0 + t * increment and \
+                    loss <= loss0 - min_improvement:
                 return loss
             alpha_prev = alpha
             alpha *= step_size_reduction

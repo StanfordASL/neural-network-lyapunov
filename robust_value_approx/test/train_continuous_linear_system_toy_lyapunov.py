@@ -100,8 +100,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
     parser.add_argument(
-        "--loss_minimal_decrement", type=float, default=-1e-4,
+        "--loss_minimal_decrement", type=float, default=-np.inf,
         help="check line_search_gd.")
+    parser.add_argument(
+        "--min_improvement", type=float, default=-0.1,
+        help="minimal improvement in line search.")
     args = parser.parse_args()
 
     if args.system == 1:
@@ -165,6 +168,7 @@ if __name__ == "__main__":
     dut.summary_writer_folder = args.summary_writer_folder
     dut.momentum = args.momentum
     dut.loss_minimal_decrement = args.loss_minimal_decrement
+    dut.min_improvement = args.min_improvement
     if args.project_gradient_method == "NONE":
         dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.NONE
     elif args.project_gradient_method == "SUM":
