@@ -111,7 +111,7 @@ def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
             sim_dyn = lambda t, y: dx(y, u)
             traj = scipy.integrate.solve_ivp(sim_dyn, (0, dt), x0_np)
             if traj.success:
-                cost = step_cost(0, x, torch.Tensor(u).type(dtype))
+                cost = step_cost(0, x, torch.Tensor(u).type(dtype))*dt
                 xn = torch.Tensor(traj.y[:,-1]).type(dtype)
                 v = cost + torch.clamp(ctrl_model(xn), 0.)
                 if v < v_opt:

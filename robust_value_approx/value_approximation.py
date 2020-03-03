@@ -9,17 +9,28 @@ import scipy
 
 
 class QuadraticModel(torch.nn.Module):
-    def __init__(self, dim, dtype):
+    def __init__(self, dim, dtype, Q=None, q=None, c=None):
         super(QuadraticModel, self).__init__()
-        self.Q = torch.nn.Parameter(torch.rand((dim, dim), dtype=dtype))
-        self.q = torch.nn.Parameter(torch.rand(dim, dtype=dtype))
-        self.c = torch.nn.Parameter(torch.rand(1, dtype=dtype))
+        if Q is None:
+            self.sqrtQ = torch.nn.Parameter(
+                torch.rand((dim, dim), dtype=dtype))
+        else:
+            self.sqrtQ = torch.Tensor(scipy.linalg.sqrtm(Q)).type(dtype)
+        if q is None:
+            self.q = torch.nn.Parameter(torch.rand(dim, dtype=dtype))
+        else:
+            self.q = q
+        if c is None:
+            self.c = torch.nn.Parameter(torch.rand(1, dtype=dtype))
+        else:
+            self.c = c
 
     def forward(self, x):
         if len(x.shape) == 1:
-            return x@self.Q@x + x@self.q + self.c
+            return x@(self.sqrtQ.t()@self.sqrtQ)@x + x@self.q + self.c
         else:
-            return (torch.diag(x@self.Q@x.t()) + x@self.q + self.c).unsqueeze(1)
+            return (torch.diag(x@(self.sqrtQ.t()@self.sqrtQ)@x.t()) +\
+                x@self.q + self.c).unsqueeze(1)
 
 
 class InfiniteHorizonValueFunctionApproximation:
@@ -33,14 +44,14 @@ class InfiniteHorizonValueFunctionApproximation:
         self.nn_depth = nn_depth
         self.dtype = x0_lo.dtype
         self.x_dim = x0_lo.shape[0]
-        # nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
-        #              torch.nn.ReLU()]
-        # for i in range(nn_depth):
-        #     nn_layers += [torch.nn.Linear(nn_width, nn_width),
-        #                   torch.nn.ReLU()]
-        # nn_layers += [torch.nn.Linear(nn_width, 1)]
-        # self.model = torch.nn.Sequential(*nn_layers).double()
-        self.model = QuadraticModel(self.x_dim, self.dtype)
+        nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
+                     torch.nn.ReLU()]
+        for i in range(nn_depth):
+            nn_layers += [torch.nn.Linear(nn_width, nn_width),
+                          torch.nn.ReLU()]
+        nn_layers += [torch.nn.Linear(nn_width, 1)]
+        self.model = torch.nn.Sequential(*nn_layers).double()
+        # self.model = QuadraticModel(self.x_dim, self.dtype)
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
     def eval(self, n, x):
