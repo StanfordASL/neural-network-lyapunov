@@ -548,6 +548,8 @@ class GurobiTorchMILP(GurobiTorchMIP):
         # Now compute A_act⁻¹ * b_act. A_act may not be invertible, so we
         # use its pseudo-inverse
         # (A_actᵀ * A_act + penalty * I)⁻¹ * A_actᵀ * b_act
+        if np.linalg.cond((A_act.T @ A_act).detach().numpy()) > 1e15:
+            penalty = 1e-10
         return self.c_r @ torch.inverse(
             A_act.T @ A_act +
             penalty * torch.eye(len(self.r), dtype=self.dtype)) @ (A_act.T) @\

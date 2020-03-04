@@ -178,11 +178,12 @@ class TrainLyapunovReLU:
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
-        lyapunov_positivity_mip.gurobi_model.setParam(
-            gurobipy.GRB.Param.PoolSearchMode, 2)
-        lyapunov_positivity_mip.gurobi_model.setParam(
-            gurobipy.GRB.Param.PoolSolutions,
-            self.lyapunov_positivity_mip_pool_solutions)
+        if self.lyapunov_positivity_mip_pool_solutions > 1:
+            lyapunov_positivity_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.PoolSearchMode, 2)
+            lyapunov_positivity_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.PoolSolutions,
+                self.lyapunov_positivity_mip_pool_solutions)
         lyapunov_positivity_mip.gurobi_model.optimize()
 
         lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
@@ -192,11 +193,12 @@ class TrainLyapunovReLU:
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
-        lyapunov_derivative_mip.gurobi_model.setParam(
-            gurobipy.GRB.Param.PoolSearchMode, 2)
-        lyapunov_derivative_mip.gurobi_model.setParam(
-            gurobipy.GRB.Param.PoolSolutions,
-            self.lyapunov_derivative_mip_pool_solutions)
+        if (self.lyapunov_derivative_mip_pool_solutions > 1):
+            lyapunov_derivative_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.PoolSearchMode, 2)
+            lyapunov_derivative_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.PoolSolutions,
+                self.lyapunov_derivative_mip_pool_solutions)
         lyapunov_derivative_mip.gurobi_model.optimize()
 
         relu_zeta_val = np.array([
@@ -313,6 +315,8 @@ class TrainLyapunovReLU:
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
                 self.total_loss(relu, state_samples_all, state_samples_next)
+            print(f"derivative mip loss "+
+                  f"{lyapunov_derivative_mip_costs[iter_count]}")
             return loss
 
         relu_params = [None] * self.max_iterations
