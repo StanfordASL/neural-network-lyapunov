@@ -16,8 +16,7 @@ class SampleGenerator:
         @param x0_up tensor size x_dim upper bound on initial state for the
         samples generation
         """
-        assert(isinstance(vf, value_to_optimization.ValueFunction) or\
-            isinstance(vf, value_to_optimization.NLPValueFunction))
+        assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.x0_lo = x0_lo
         self.x0_up = x0_up
@@ -55,38 +54,25 @@ class RandomSampleGenerator(SampleGenerator):
         @return rand_data Tensor with random initial states
         @return rand_label Tensor with corresponding labels
         """
-        rand_data = torch.zeros(n, self.x_dim*(self.N-1), dtype=self.dtype)
-        rand_label = torch.zeros(n, self.N-1, dtype=self.dtype)
-        k = 0
-        while k < n:
+        rand_data = []
+        rand_label = []
+        while len(rand_data) < n:
             rand_x0 = self.get_random_x0()
             if project:
                 rand_x0 = self.project_x0(rand_x0)
-            rand_v, rand_s, rand_alpha = self.V(rand_x0)
+            rand_v, rand_res = self.V(rand_x0)
             if rand_v is not None:
-                (x_traj_val,
-                 u_traj_val,
-                 alpha_traj_val) = self.vf.sol_to_traj(
-                    rand_x0, rand_s, rand_alpha)
-                x_traj_flat = x_traj_val[:, :-1].t().reshape((1, -1))
-                step_costs = [self.vf.step_cost(
-                    j,
-                    x_traj_val[:, j],
-                    u_traj_val[:, j],
-                    alpha_traj_val[:, j]).item() for j in range(self.N)]
-                cost_to_go = torch.Tensor(
-                    list(np.cumsum(step_costs[::-1]))[::-1]).type(self.dtype)
-                rand_data[k, :] = x_traj_flat
-                rand_label[k, :] = cost_to_go[:-1]
-                k += 1
-        return(rand_data, rand_label)
+                x_traj_flat = torch.cat(rand_res['x_traj'][:-1])
+                cost_to_go = self.vf.result_to_costtogo(rand_res)
+                rand_data.append(x_traj_flat.unsqueeze(0))
+                rand_label.append(cost_to_go.unsqueeze(0))
+        return(torch.cat(rand_data, axis=0), torch.cat(rand_label, axis=0))
 
 
 class AdversarialSampleGenerator(SampleGenerator):
     def __init__(self, vf, x0_lo, x0_up,
                  max_iter=10, conv_tol=1e-5, learning_rate=.01, penalty=1e-8):
-        assert(isinstance(vf, value_to_optimization.ValueFunction) or\
-            isinstance(vf, value_to_optimization.NLPValueFunction))
+        assert(isinstance(vf, value_to_optimization.ValueFunction))
         self.max_iter = max_iter
         self.conv_tol = conv_tol
         self.learning_rate = learning_rate
@@ -98,16 +84,19 @@ class AdversarialSampleGenerator(SampleGenerator):
         super().__init__(vf, x0_lo, x0_up)
 
     def generate_samples(self, n, value_approx):
-        adv_data = torch.zeros(0, self.x_dim*(self.N-1), dtype=self.dtype)
-        adv_label = torch.zeros(0, self.N-1, dtype=self.dtype)
-        while adv_data.shape[0] < n:
-            max_iter = min(self.max_iter, n - adv_data.shape[0])
+        adv_data = []
+        adv_label = []
+        k = 0
+        while k < n:
+            max_iter = min(self.max_iter, n - k)
             x_adv0 = self.get_random_x0()
-            (eps, x_adv_buff, cost_to_go_buff) = self.get_squared_bound_sample(
+            (eps, cost_to_go_buff, x_adv_buff) = self.get_squared_bound_sample(
                 value_approx, x_adv0=x_adv0, max_iter=max_iter)
-            adv_data = torch.cat((adv_data, x_adv_buff), axis=0)
-            adv_label = torch.cat((adv_label, cost_to_go_buff), axis=0)
-        return(adv_data, adv_label)
+            print(eps)
+            adv_data.append(x_adv_buff)
+            adv_label.append(cost_to_go_buff)
+            k += x_adv_buff.shape[0]
+        return(torch.cat(adv_data, axis=0), torch.cat(adv_label, axis=0))
 
     def get_squared_bound_sample(self, value_approx,
                                  x_adv0=None, max_iter=None):
@@ -137,10 +126,8 @@ class AdversarialSampleGenerator(SampleGenerator):
         @return x_adv_buff, each iterate of the optimization
         @return cost_to_go_buff, the value of each iterate
         """
-        fhvfa = value_approximation.FiniteHorizonValueFunctionApproximation
-        ihvfa = value_approximation.InfiniteHorizonValueFunctionApproximation
-        assert(isinstance(value_approx, fhvfa) or\
-            isinstance(value_approx, ihvfa))
+        assert(isinstance(value_approx,
+            value_approximation.ValueFunctionApproximation))
         if x_adv0 is None:
             x_adv_params = torch.zeros(self.x_dim, dtype=self.dtype)
         else:
@@ -152,24 +139,19 @@ class AdversarialSampleGenerator(SampleGenerator):
         x_adv_params.requires_grad = True
         x_adv = torch.max(torch.min(x_adv_params, self.x0_up), self.x0_lo)
         optimizer = torch.optim.Adam([x_adv_params], lr=self.learning_rate)
-        epsilon_buff = torch.Tensor(0, 1).type(self.dtype)
-        x_adv_buff = torch.Tensor(0, self.x_dim*(self.N-1)).type(self.dtype)
-        cost_to_go_buff = torch.Tensor(0, self.N-1).type(self.dtype)
+        epsilon_buff = []
+        cost_to_go_buff = []
+        x_adv_buff = []
         for i in range(max_iter):
-            x_traj_flat, cost_to_go = self.V_with_grad(x_adv)
-            Vx = cost_to_go[0]
-            if torch.any(torch.isnan(Vx)):
+            cost_to_go, x_traj_flat = self.V_with_grad(x_adv)
+            if cost_to_go is None:
                 break
-            nx = torch.clamp(value_approx.eval(0, x_adv.unsqueeze(0)), 0.)
+            Vx = cost_to_go[0]
+            nx = torch.clamp(value_approx.eval(x_adv.unsqueeze(0), n=0), 0.)
             epsilon = torch.pow(Vx - nx, 2)
-            epsilon_buff = torch.cat((epsilon_buff, epsilon.clone().detach()),
-                                     axis=0)
-            x_adv_buff = torch.cat(
-                (x_adv_buff, x_traj_flat.clone().detach()),
-                axis=0)
-            cost_to_go_buff = torch.cat(
-                (cost_to_go_buff, cost_to_go.clone().detach().unsqueeze(0)),
-                axis=0)
+            epsilon_buff.append(epsilon.clone().detach().unsqueeze(0))
+            cost_to_go_buff.append(cost_to_go.clone().detach().unsqueeze(0))
+            x_adv_buff.append(x_traj_flat.clone().detach().unsqueeze(0))
             if i == (max_iter-1):
                 break
             objective = -epsilon
@@ -178,6 +160,8 @@ class AdversarialSampleGenerator(SampleGenerator):
             optimizer.step()
             x_adv = torch.max(torch.min(x_adv_params, self.x0_up), self.x0_lo)
             if torch.all(torch.abs(
-                    x_adv - x_adv_buff[-1, :self.x_dim]) <= self.conv_tol):
+                x_adv - x_adv_buff[-1][0, :self.x_dim]) <= self.conv_tol):
                 break
-        return(epsilon_buff, x_adv_buff, cost_to_go_buff)
+        return(torch.cat(epsilon_buff, axis=0),
+            torch.cat(cost_to_go_buff, axis=0),
+            torch.cat(x_adv_buff, axis=0))

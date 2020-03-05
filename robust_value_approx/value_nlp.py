@@ -357,7 +357,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         ctx.vf = vf
         ctx.V = V
         ctx.result = res
-        x_traj_flat = torch.cat(res['x_traj'])
+        x_traj_flat = torch.cat(res['x_traj'][:-1])
         cost_to_go = vf.result_to_costtogo(res)
         return(cost_to_go, x_traj_flat)
 

@@ -33,31 +33,35 @@ class QuadraticModel(torch.nn.Module):
                 x@self.q + self.c).unsqueeze(1)
 
 
-class InfiniteHorizonValueFunctionApproximation:
-    def __init__(self, x0_lo, x0_up, nn_width, nn_depth):
+class ValueFunctionApproximation:
+    def __init__(self):
+        raise(NotImplementedError)
+
+
+class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
+    def __init__(self, dtype, x_dim, nn_width=None, nn_depth=None):
         """
         Contains an approximation for a infinite-horizon value function
+        uses a quadratic model if no neural network parameters are provided
         """
-        self.x0_lo = x0_lo
-        self.x0_up = x0_up
+        self.dtype = dtype
+        self.x_dim = x_dim
         self.nn_width = nn_width
         self.nn_depth = nn_depth
-        self.dtype = x0_lo.dtype
-        self.x_dim = x0_lo.shape[0]
-        nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
-                     torch.nn.ReLU()]
-        for i in range(nn_depth):
-            nn_layers += [torch.nn.Linear(nn_width, nn_width),
-                          torch.nn.ReLU()]
-        nn_layers += [torch.nn.Linear(nn_width, 1)]
-        self.model = torch.nn.Sequential(*nn_layers).double()
-        # self.model = QuadraticModel(self.x_dim, self.dtype)
+        if nn_width is not None:
+            assert(nn_depth is not None)
+            nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
+                         torch.nn.ReLU()]
+            for i in range(nn_depth):
+                nn_layers += [torch.nn.Linear(nn_width, nn_width),
+                              torch.nn.ReLU()]
+            nn_layers += [torch.nn.Linear(nn_width, 1)]
+            self.model = torch.nn.Sequential(*nn_layers).double()
+        else:
+            self.model = QuadraticModel(self.x_dim, self.dtype)
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
-    def eval(self, n, x):
-        """
-        n for compatibility with finite horizon
-        """
+    def eval(self, x, n=0):
         return self.model(x)
 
     def train_step(self, x_traj_samples, v_labels):
@@ -87,8 +91,8 @@ class InfiniteHorizonValueFunctionApproximation:
         return torch.Tensor(loss_log).type(self.dtype)
 
 
-class FiniteHorizonValueFunctionApproximation:
-    def __init__(self, N, x0_lo, x0_up, nn_width, nn_depth):
+class FiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
+    def __init__(self, dtype, x_dim, N, nn_width, nn_depth):
         """
         Contains an approximation for a finite-horizon value function
         the last state is the terminal state so there is no "cost-to-go" there.
