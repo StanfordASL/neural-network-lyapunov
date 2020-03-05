@@ -132,11 +132,13 @@ def get_optimal_controller(vf):
         return(u0, u1, x1)
     return ctrl
 
+
 def lqr(A, B, Q, R):
     X = np.matrix(scipy.linalg.solve_continuous_are(A, B, Q, R))
     K = np.matrix(scipy.linalg.inv(R)*(B.T*X))
     eigVals, eigVecs = scipy.linalg.eig(A-B*K)
     return K, X, eigVals
+
 
 def get_lqr_controller(dx, x0, u0, Q, R, u_min, u_max):
     x_dim = x0.shape[0]
@@ -158,7 +160,7 @@ def get_lqr_controller(dx, x0, u0, Q, R, u_min, u_max):
         u = -K@(x - x0) + u0
         u = torch.max(torch.min(u, u_max), u_min)
         return(u, u, None)
-    return ctrl
+    return ctrl, S
 
 
 def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
