@@ -92,7 +92,6 @@ class AdversarialSampleGenerator(SampleGenerator):
             x_adv0 = self.get_random_x0()
             (eps, cost_to_go_buff, x_adv_buff) = self.get_squared_bound_sample(
                 value_approx, x_adv0=x_adv0, max_iter=max_iter)
-            print(eps)
             adv_data.append(x_adv_buff)
             adv_label.append(cost_to_go_buff)
             k += x_adv_buff.shape[0]
