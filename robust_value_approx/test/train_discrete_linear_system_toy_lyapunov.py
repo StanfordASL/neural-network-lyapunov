@@ -146,6 +146,9 @@ if __name__ == "__main__":
         help='save the Lyapunov function to a pickle file.')
     parser.add_argument(
         '--visualize', action='store_true', help='visualization flag')
+    parser.add_argument(
+        '--summary_writer_folder', type=str, default=None,
+        help="folder for the tensorboard summary")
     args = parser.parse_args()
 
     theta = args.theta
@@ -184,6 +187,9 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_sample_cost_weight = 0.
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_mip_cost_weight = 0.
+    dut.lyapunov_positivity_convergence_tol = 1e-5
+    dut.lyapunov_derivative_convergence_tol = 4e-5
+    dut.summary_writer_folder = args.summary_writer_folder
     result = dut.train(relu, state_samples_all)
 
     if args.save_model is not None:
