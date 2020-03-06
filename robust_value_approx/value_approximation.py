@@ -15,15 +15,16 @@ class QuadraticModel(torch.nn.Module):
             self.sqrtQ = torch.nn.Parameter(
                 torch.rand((dim, dim), dtype=dtype))
         else:
-            self.sqrtQ = torch.Tensor(scipy.linalg.sqrtm(Q)).type(dtype)
+            self.sqrtQ = torch.nn.Parameter(torch.Tensor(
+                scipy.linalg.sqrtm(Q)).type(dtype))
         if q is None:
             self.q = torch.nn.Parameter(torch.rand(dim, dtype=dtype))
         else:
-            self.q = q
+            self.q = torch.nn.Parameter(q)
         if c is None:
             self.c = torch.nn.Parameter(torch.rand(1, dtype=dtype))
         else:
-            self.c = c
+            self.c = torch.nn.Parameter(c)
 
     def forward(self, x):
         if len(x.shape) == 1:
