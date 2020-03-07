@@ -41,7 +41,7 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
 def plot_relu(
     relu, system, V_rho, lyapunov_positivity_epsilon,
     lyapunov_derivative_epsilon, x_equilibrium, lower, upper, mesh_size,
-        theta, vmin=None, vmax=None):
+        theta, vmin=None, vmax=None, discrete_time=True, cmap=cm.coolwarm):
     """
     Draw 3 subplots
     top plot: Lyapunov function in 3D.
@@ -61,7 +61,10 @@ def plot_relu(
     the box.
     @boxparam theta The rotation angle θ.
     """
-    dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+    if discrete_time:
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
+    else:
+        dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
     assert(isinstance(mesh_size, tuple))
     assert(len(mesh_size) == 2)
     dtype = torch.float64
@@ -114,10 +117,13 @@ def plot_relu(
         ax3 = fig.add_subplot(3, 1, 3)
         plot3 = ax3.pcolor(
             samples_x_np, samples_y_np, dV_np, vmin=vmin, vmax=vmax,
-            cmap=cm.coolwarm)
+            cmap=cmap)
         ax3.set_xlabel("x")
         ax3.set_ylabel("y")
-        ax3.set_title(r"$\dot{V} + \epsilon_2V$")
+        if discrete_time:
+            ax3.set_title(r"$V(x[n+1])-V(x[n])+\epsilon_2V(x[n])")
+        else:
+            ax3.set_title(r"$\dot{V} + \epsilon_2V$")
         fig.colorbar(plot3, ax=ax3)
         plt.show()
 
