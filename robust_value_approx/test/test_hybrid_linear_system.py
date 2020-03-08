@@ -91,6 +91,35 @@ def setup_transformed_trecate_system(theta, x_equilibrium):
     return system
 
 
+def setup_xu_system(box_half_length=1.):
+    """
+    This is example 2 of
+    Homogeneous Polynomial Lyapunov Functions for Piecewise Affine Systems.
+    by Jun Xu, Lihua Xie and Yeng Chai Soh
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    A1 = torch.tensor([[1., 0.01], [-0.05, 0.897]], dtype=dtype)
+    A2 = torch.tensor([[1, 0.05], [-0.01, 0.897]], dtype=dtype)
+    system.add_mode(
+        A1, torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, -1], [1, 1], [-1, 0]], dtype=dtype),
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[1, -1], [-1, -1], [0, 1]], dtype=dtype),
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    system.add_mode(
+        A1, torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[-1, 1], [-1, -1], [1, 0]], dtype=dtype),
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0, 0], dtype=dtype),
+        torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
+        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    return system
+
+
 def setup_johansson_continuous_time_system1(box_half_length=1.):
     """
     This is the simple example from section 3 of
@@ -101,8 +130,7 @@ def setup_johansson_continuous_time_system1(box_half_length=1.):
     [-box_half_length, -box_half_length] x [box_half_length, box_half_length]
     """
     dtype = torch.float64
-    system = hybrid_linear_system.AutonomousHybridLinearSystem(
-        2, dtype)
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
     system.add_mode(
         torch.tensor([[-5, -4], [-1, -2]], dtype=dtype),
         torch.tensor([0, 0], dtype=dtype),
