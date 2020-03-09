@@ -14,7 +14,8 @@ import torch.nn as nn
 import argparse
 
 
-def setup_relu(relu_layer_width, params=None, negative_gradient=0.1):
+def setup_relu(
+        relu_layer_width, params=None, negative_gradient=0.1, bias=True):
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
     if params is not None:
@@ -27,9 +28,10 @@ def setup_relu(relu_layer_width, params=None, negative_gradient=0.1):
             linear.in_features * linear.out_features].clone().reshape((
                 linear.out_features, linear.in_features))
         param_count += linear.in_features * linear.out_features
-        linear.bias.data = params[
-            param_count: param_count + linear.out_features].clone()
-        param_count += linear.out_features
+        if bias:
+            linear.bias.data = params[
+                param_count: param_count + linear.out_features].clone()
+            param_count += linear.out_features
         return param_count
 
     linear_layers = [None] * len(relu_layer_width)
@@ -38,7 +40,7 @@ def setup_relu(relu_layer_width, params=None, negative_gradient=0.1):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
         linear_layers[i] = nn.Linear(
-            relu_layer_width[i], next_layer_width).type(dtype)
+            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -56,10 +58,10 @@ def setup_relu1():
     # Construct a simple ReLU model with 2 hidden layers
     dtype = torch.float64
     relu_param = torch.tensor(
-        [-1, 0.5, -0.3, 0.74, -2, 1.5, -0.5, 0.2, -0.1, 1.0, 0.5, 0.2, -1,
+        [-1, 0.5, -0.3, 0.74, -2, 1.5, -0.5, 0.2, -1,
          -0.5, 1.5, 1.2, 2, -1.5, 2.6, 0.3, -2, -0.3, -.4, -0.1, 0.2, -0.5,
-         1.2, 1.3, -0.3, 0.2, 0.7, 0.4, -.4, .5, -.6, 0.3, -0.9], dtype=dtype)
-    return setup_relu((2, 4, 4), relu_param, negative_gradient=0.1)
+         1.2, 1.3, -.4, .5, -.6, 0.3], dtype=dtype)
+    return setup_relu((2, 4, 4), relu_param, negative_gradient=0.1, bias=False)
 
 
 if __name__ == "__main__":
@@ -115,7 +117,7 @@ if __name__ == "__main__":
     elif args.system == 2:
         system = test_hybrid_linear_system.setup_xu_system(1.)
         system_simulate = test_hybrid_linear_system.setup_xu_system(5.)
-        relu = setup_relu((2, 8, 4))
+        relu = setup_relu((2, 8, 4), bias=False)
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
@@ -173,7 +175,10 @@ if __name__ == "__main__":
     elif args.system == 2:
         dut.lyapunov_positivity_mip_cost_weight = 1.
     dut.lyapunov_positivity_convergence_tol = 1e-5
-    dut.lyapunov_derivative_convergence_tol = 4e-5
+    if args.system == 1:
+        dut.lyapunov_derivative_convergence_tol = 4e-5
+    elif args.system == 2:
+        dut.lyapunov_derivative_convergence_tol = 8e-5
     dut.summary_writer_folder = args.summary_writer_folder
     if (args.visualize):
         train_2d_lyapunov_utils.plot_relu(
