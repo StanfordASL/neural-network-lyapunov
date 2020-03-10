@@ -7,6 +7,38 @@ import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import cvxpy as cp
 
 
+def setup_hu_system(box_half_length=1.):
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    A = torch.tensor([[0.8876, -0.5555], [0.5555, 1.5542]], dtype=dtype)
+    B = torch.tensor([[-0.1124], [0.5555]], dtype=dtype)
+    K = torch.tensor([[-0.7651, -2.0299]], dtype=dtype)
+    x_lo = torch.tensor([-box_half_length, -box_half_length], dtype=dtype)
+    x_up = torch.tensor([box_half_length, box_half_length], dtype=dtype)
+    # no saturation
+    Acl = A + B@K
+    gcl = torch.zeros((2,), dtype=dtype)
+    Pcl = torch.cat((K, -K,
+        torch.eye(2, dtype=dtype), -torch.eye(2, dtype=dtype)), axis=0)
+    qcl = torch.cat((torch.tensor([1., 1.], dtype=dtype), x_up, -x_lo))
+    system.add_mode(Acl, gcl, Pcl, qcl)
+    # upper saturation
+    Acl = A
+    gcl = B@torch.tensor((1., ), dtype=dtype)
+    Pcl = torch.cat((-K,
+        torch.eye(2, dtype=dtype), -torch.eye(2, dtype=dtype)), axis=0)
+    qcl = torch.cat((torch.tensor([-1.], dtype=dtype), x_up, -x_lo))
+    system.add_mode(Acl, gcl, Pcl, qcl)
+    # lower saturation
+    Acl = A
+    gcl = B@torch.tensor((-1., ), dtype=dtype)
+    Pcl = torch.cat((K,
+        torch.eye(2, dtype=dtype), -torch.eye(2, dtype=dtype)), axis=0)
+    qcl = torch.cat((torch.tensor([-1.], dtype=dtype), x_up, -x_lo))
+    system.add_mode(Acl, gcl, Pcl, qcl)
+    return system
+
+
 def setup_trecate_discrete_time_system():
     """
     The piecewise affine system is from "Analysis of discrete-time

@@ -562,6 +562,8 @@ def compute_discrete_time_system_cost_to_go(
                 mode = j
                 x_steps[i+1] = system.A[j] @ x_steps[i] + system.g[j]
                 break
+        if mode is None:
+            import pdb; pdb.set_trace()
         assert(mode is not None)
         cost_steps[i + 1] = instantaneous_cost_fun(x_steps[i + 1])
         total_cost += cost_steps[i+1]

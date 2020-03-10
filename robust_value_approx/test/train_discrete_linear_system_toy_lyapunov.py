@@ -64,10 +64,10 @@ def setup_relu1():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='learning lyapunov for Trecate system parameters')
+        description='learning lyapunov parameters')
     parser.add_argument(
         '--system', type=int, default=1,
-        help="1 for Trecate system, 2 for Xu system.")
+        help="1 for Trecate system, 2 for Xu system, 3 for Hu system.")
     parser.add_argument(
         '--theta', type=float, default=0.,
         help='rotation angle of the Trecate system transformation')
@@ -116,6 +116,10 @@ if __name__ == "__main__":
         system = test_hybrid_linear_system.setup_xu_system(1.)
         system_simulate = test_hybrid_linear_system.setup_xu_system(5.)
         relu = setup_relu((2, 8, 4))
+    elif args.system == 3:
+        system = test_hybrid_linear_system.setup_hu_system(.4)
+        system_simulate = test_hybrid_linear_system.setup_hu_system(100.)
+        relu = setup_relu((2, 4, 4))
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
@@ -157,6 +161,12 @@ if __name__ == "__main__":
             print(f"value function approximation error {result1[1]}")
         else:
             relu = torch.load(args.load_relu)
+    elif args.system == 3:
+        result1 = approximator.train(
+            system_simulate, relu, V_rho, x_equilibrium,
+            lambda x: torch.norm(x - x_equilibrium, p=1),
+            state_samples_all1, 10, True)
+        print(f"value function approximation error {result1[1]}")
 
     state_samples_all = state_samples_all1
     dut = train_lyapunov.TrainLyapunovReLU(
