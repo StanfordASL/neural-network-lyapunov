@@ -359,6 +359,36 @@ def setup_johansson_continuous_time_system4(box_half_length=1.):
     return system
 
 
+def setup_johansson_continuous_time_system5(box_half_length=1.):
+    """
+    This system is taken from example 4.2 of Mikael Johansson's thesis
+    Piecewise Linear Control Systems.
+    """
+    dtype = torch.float64
+    system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
+    A1 = torch.tensor([[-0.1, 1.], [-10, -0.1]], dtype=dtype)
+    A2 = torch.tensor([[-0.1, 10.], [-1., -0.1]], dtype=dtype)
+    # In 1st and 3rd quadrant, use A1, in 2nd and 4th quadrant, use A2.
+    system.add_mode(
+        A1, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]], dtype=dtype),
+        torch.tensor([box_half_length, box_half_length, 0., 0.], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]], dtype=dtype),
+        torch.tensor([0., box_half_length, box_half_length, 0.], dtype=dtype))
+    system.add_mode(
+        A1, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1., 0.], [0., -1.], [1., 0.], [0., 1.]], dtype=dtype),
+        torch.tensor([box_half_length, box_half_length, 0., 0.], dtype=dtype))
+    system.add_mode(
+        A2, torch.tensor([0., 0.], dtype=dtype),
+        torch.tensor([[-1., 0.], [0., -1.], [1., 0.], [0., 1.]], dtype=dtype),
+        torch.tensor([0., box_half_length, box_half_length, 0.], dtype=dtype))
+
+    return system
+
+
 class HybridLinearSystemTest(unittest.TestCase):
     def setUp(self):
         pass
