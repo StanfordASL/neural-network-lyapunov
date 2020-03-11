@@ -15,12 +15,12 @@ class Acrobot(nonlinear_system.NonlinearSystem):
         self.lc1 = .5
         self.lc2 = .5
         self.I = 1.
-        self.b1 = 1.
-        self.b2 = 1.
-        self.x_lo = [torch.Tensor([-1e9, -1e9, -1e9, -1e9]).type(dtype)]
-        self.x_up = [torch.Tensor([1e9, 1e9, 1e9, 1e9]).type(dtype)]
-        self.u_lo = [torch.Tensor([-10000.]).type(dtype)]
-        self.u_up = [torch.Tensor([10000.]).type(dtype)]
+        self.b1 = .01
+        self.b2 = .01
+        self.x_lo = [torch.Tensor([-1e6, -1e6, -1e6, -1e6]).type(dtype)]
+        self.x_up = [torch.Tensor([1e6, 1e6, 1e6, 1e6]).type(dtype)]
+        self.u_lo = [torch.Tensor([-100.]).type(dtype)]
+        self.u_up = [torch.Tensor([100.]).type(dtype)]
         self.g = 9.81
         self.x_dim = [4]
         self.u_dim = [1]
@@ -73,7 +73,7 @@ def get_value_function(N):
         sys.x_lo, sys.x_up, sys.u_lo, sys.u_up, dt_lo, dt_up)
     vf.add_segment(N-1, sys.dyn, lambda x: sys.dyn(x, arraylib=jax.numpy))
     Q = np.diag([1., 1., .1, .1])
-    R = np.diag([0.001])
+    R = np.diag([.01])
     x_desired = np.array([np.pi, 0., 0., 0.])
     for n in range(vf.N-1):
         fun = lambda x: sys.quad_cost(
@@ -81,14 +81,8 @@ def get_value_function(N):
         fun_jax = lambda x: sys.quad_cost(
             x, Q=Q, R=R, x_desired=x_desired, arraylib=jax.numpy)
         vf.add_step_cost(n, fun, fun_jax)
-    # Qt = np.diag([100., 100., .1, .1])
-    Qt = np.array([
-        [8092.28906178, 2349.94106499, 3659.6468729,  1288.39082893],
-        [2349.94106499,  692.55329914, 1064.39654618,  378.09253263],
-        [3659.6468729,  1064.39654618, 1655.37533229,  583.33841651],
-        [1288.39082893,  378.09253263,  583.33841651,  206.7199479 ],
-    ])
-    Rt = np.diag([0.001])
+    Qt = np.diag([10., 10., 1., 1.])
+    Rt = np.diag([.01])
     fun = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=np)
     fun_jax = lambda x: sys.quad_cost(

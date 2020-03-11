@@ -73,6 +73,7 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             np.inf*np.ones(self.u_dim[self.init_mode]), [np.inf]])
         self.x0_constraint = self.add_bb_constraint(bb_lo, bb_up, [0])
         self.solver = SnoptSolver()
+        self.initial_guess = None
 
     @property
     def N(self):
@@ -241,6 +242,7 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             (self.num_modes, self.N), dtype=self.dtype)
         for i in range(len(self.mode_traj)):
             alpha_traj_sol[self.mode_traj[i], i] = 1.
+        self.initial_guess = np.zeros(self.prog.num_vars())
         def V(x):
             assert(isinstance(x, torch.Tensor))
             dtype = x.dtype
@@ -250,10 +252,10 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             bb_up = np.concatenate(
                 [x, np.inf*np.ones(self.u_dim[self.init_mode]), [np.inf]])
             self.x0_constraint.evaluator().set_bounds(bb_lo, bb_up)
-            res = self.solver.Solve(
-                self.prog, np.zeros(self.prog.num_vars()), None)
+            res = self.solver.Solve(self.prog, self.initial_guess, None)
             if not res.is_success():
                 return(None, None)
+            self.initial_guess = res.get_x_val()
             v_val = res.get_optimal_cost()
             x_traj_sol = [torch.Tensor(
                 res.GetSolution(x)).type(self.dtype) for x in self.x_traj]
@@ -351,7 +353,8 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         (v, res) = V(x)
         if v is None:
             ctx.success = False
-            return(None, None)
+            return(torch.tensor([np.nan], dtype=x.dtype), 
+                torch.tensor([np.nan], dtype=x.dtype))
         ctx.success = True
         ctx.x = x
         ctx.vf = vf
@@ -369,7 +372,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         assert(torch.all(grad_output_cost_to_go[1:] == 0.))
         assert(torch.all(grad_output_x_traj_flat == 0.))
         if not ctx.success:
-            grad_input = torch.zeros(
+            grad_input = torch.ones(
                 ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
             return (grad_input, None, None)
         vf = ctx.vf

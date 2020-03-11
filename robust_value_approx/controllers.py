@@ -126,9 +126,14 @@ def get_optimal_controller(vf):
     def ctrl(x):
         assert(isinstance(x, torch.Tensor))
         v, res = V(x)
-        u0 = res['u_traj'][0]
-        u1 = res['u_traj'][1]
-        x1 = res['x_traj'][1]
+        if v is not None:
+            u0 = res['u_traj'][0]
+            u1 = res['u_traj'][1]
+            x1 = res['x_traj'][1]
+        else:
+            u0 = None
+            u1 = None
+            x1 = None
         return(u0, u1, x1)
     return ctrl
 
