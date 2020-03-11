@@ -9,6 +9,7 @@ import os
 import robust_value_approx.lyapunov as lyapunov
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
+import robust_value_approx.hybrid_linear_system as hybrid_linear_system
 import robust_value_approx.utils as utils
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -254,6 +255,26 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             self.system2, self.x_equilibrium2,
             self.R2 @ torch.tensor([0.5, -0.3], dtype=self.dtype) +
             self.x_equilibrium2)
+        # system 5 has some x_lo equal to x_equilibrium.
+        system5 = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5(keep_positive_x=True)
+        test_fun(
+            system5, torch.tensor([0., 0], dtype=self.dtype),
+            torch.tensor([0.5, 0.3], dtype=self.dtype))
+        # system 6 has some x_up equal to x_equilibrium.
+        system5_full = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5()
+        system6 = hybrid_linear_system.AutonomousHybridLinearSystem(
+            2, dtype=self.dtype)
+        system6.add_mode(
+            system5_full.A[1], system5_full.g[1], system5_full.P[1],
+            system5_full.q[1])
+        system6.add_mode(
+            system5_full.A[2], system5_full.g[2], system5_full.P[2],
+            system5_full.q[2])
+        test_fun(
+            system6, torch.tensor([0., 0], dtype=self.dtype),
+            torch.tensor([-0.2, 0.3], dtype=self.dtype))
 
     def test_add_lyapunov_bounds_constraint(self):
         V_rho = 0.5

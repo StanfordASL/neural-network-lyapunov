@@ -134,22 +134,32 @@ if __name__ == "__main__":
     elif args.system == 4:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system4()
+            setup_johansson_continuous_time_system4(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 4, 4, 4), negative_gradient=-1., bias=bias)
+        relu = setup_relu((2, 4, 4, 4), negative_gradient=-1., bias=False)
+    elif args.system == 5:
+        x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
+        system = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5(keep_positive_x=True)
+        system_simulate = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5(10)
+        relu = setup_relu((2, 8, 4), negative_gradient=-1., bias=False)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
     V_rho = 0.
 
-    if args.system == 1 or args.system == 2 or args.system == 4:
+    if args.system in {1, 2}:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
         x_upper = torch.tensor([1, 1], dtype=system.dtype)
     elif args.system == 3:
         x_lower = torch.tensor([-2, -1], dtype=system.dtype)
         x_upper = torch.tensor([2, 1], dtype=system.dtype)
+    elif args.system in {4, 5}:
+        x_lower = torch.tensor([0, -1], dtype=system.dtype)
+        x_upper = torch.tensor([1, 1], dtype=system.dtype)
     if bias:
         state_samples_all = train_2d_lyapunov_utils.setup_state_samples_all(
             x_equilibrium, x_lower, x_upper, (51, 51), 0.)

@@ -309,7 +309,8 @@ class TestJohanssonSystem3(unittest.TestCase):
             False)
 
 
-def setup_johansson_continuous_time_system4(box_half_length=1.):
+def setup_johansson_continuous_time_system4(
+        box_half_length=1., keep_positive_x=False):
     """
     This is the simple example from section 4 (equation 8, 9) of
     Computation of piecewise quadratic Lyapunov functions for hybrid systems
@@ -320,6 +321,11 @@ def setup_johansson_continuous_time_system4(box_half_length=1.):
     @param box_half_length. The state is confined to the domain
     [-box_half_length, box_half_length] x [-box_half_length, box_half_length]
     as a box.
+    @param keep_positive_x The system has symmetric dynamics, namely
+    f(-x) = -f(x). So we can verify only the positive x[0] if the Lyapunov
+    function is symmetric. If keep_positive_x is True, then we return a system
+    with only two hybrid modes, namely the system in the 1st and 4th quadrant,
+    where x[0] >= 0.
     """
     dtype = torch.float64
     system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
@@ -340,16 +346,19 @@ def setup_johansson_continuous_time_system4(box_half_length=1.):
         R @ A2 @ R.T, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
         torch.tensor([0, 0, box_half_length, box_half_length], dtype=dtype))
-    # Second quadrant
-    system.add_mode(
-        R @ A1 @ R.T, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
-        torch.tensor([box_half_length, 0, 0, box_half_length], dtype=dtype))
-    # Third quadrant
-    system.add_mode(
-        R @ A2 @ R.T, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
-        torch.tensor([box_half_length, box_half_length, 0, 0], dtype=dtype))
+    if not keep_positive_x:
+        # Second quadrant
+        system.add_mode(
+            R @ A1 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+            torch.tensor([box_half_length, 0, 0, box_half_length],
+                         dtype=dtype))
+        # Third quadrant
+        system.add_mode(
+            R @ A2 @ R.T, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[-1, 0], [0, -1], [1, 0], [0, 1]], dtype=dtype),
+            torch.tensor([box_half_length, box_half_length, 0, 0],
+                         dtype=dtype))
 
     # Forth quadrant
     system.add_mode(
@@ -359,10 +368,16 @@ def setup_johansson_continuous_time_system4(box_half_length=1.):
     return system
 
 
-def setup_johansson_continuous_time_system5(box_half_length=1.):
+def setup_johansson_continuous_time_system5(
+        box_half_length=1., keep_positive_x=False):
     """
     This system is taken from example 4.2 of Mikael Johansson's thesis
     Piecewise Linear Control Systems.
+    @param keep_positive_x The system has symmetric dynamics, namely
+    f(-x) = -f(x). So we can verify only the positive x[0] if the Lyapunov
+    function is symmetric. If keep_positive_x is True, then we return a system
+    with only two hybrid modes, namely the system in the 1st and 4th quadrant,
+    where x[0] >= 0.
     """
     dtype = torch.float64
     system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
@@ -373,14 +388,19 @@ def setup_johansson_continuous_time_system5(box_half_length=1.):
         A1, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]], dtype=dtype),
         torch.tensor([box_half_length, box_half_length, 0., 0.], dtype=dtype))
-    system.add_mode(
-        A2, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]], dtype=dtype),
-        torch.tensor([0., box_half_length, box_half_length, 0.], dtype=dtype))
-    system.add_mode(
-        A1, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[-1., 0.], [0., -1.], [1., 0.], [0., 1.]], dtype=dtype),
-        torch.tensor([box_half_length, box_half_length, 0., 0.], dtype=dtype))
+    if not keep_positive_x:
+        system.add_mode(
+            A2, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]],
+                         dtype=dtype),
+            torch.tensor([0., box_half_length, box_half_length, 0.],
+                         dtype=dtype))
+        system.add_mode(
+            A1, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[-1., 0.], [0., -1.], [1., 0.], [0., 1.]],
+                         dtype=dtype),
+            torch.tensor([box_half_length, box_half_length, 0., 0.],
+                         dtype=dtype))
     system.add_mode(
         A2, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[-1., 0.], [0., -1.], [1., 0.], [0., 1.]], dtype=dtype),
