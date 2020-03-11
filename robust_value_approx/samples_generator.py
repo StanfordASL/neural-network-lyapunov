@@ -7,7 +7,7 @@ import robust_value_approx.utils as utils
 
 
 class SampleGenerator:
-    def __init__(self, vf, x0_lo, x0_up):
+    def __init__(self, vf, x0_lo, x0_up, x0_rand_init=None):
         """
         Super class to generate samples from a value function
         @param vf ValueFunction instance from which to generate the samples
@@ -24,13 +24,29 @@ class SampleGenerator:
         self.dtype = x0_lo.dtype
         self.V = vf.get_value_function()
         self.N = vf.N
+        self.x0_rand_init = x0_rand_init
+        self.reset_x0()
 
-    def get_random_x0(self):
+    def reset_x0(self):
+        if self.x0_rand_init is not None:
+            self.last_x0 = self.x0_rand_init
+        else:
+            self.last_x0 = .5 * (self.x0_lo + self.x0_up)
+
+    def get_random_x0(self, warm_start_radius=None):
         """
         @returns a Tensor between the initial state bounds of the training
         """
-        return torch.rand(self.x_dim, dtype=self.dtype) *\
-            (self.x0_up - self.x0_lo) + self.x0_lo
+        if warm_start_radius is None:
+            return torch.rand(self.x_dim, dtype=self.dtype) *\
+                (self.x0_up - self.x0_lo) + self.x0_lo
+        else:
+            assert(isinstance(warm_start_radius, torch.Tensor))
+            assert(len(warm_start_radius) == self.x_dim)
+            x0_rand = self.last_x0 + torch.rand(self.x_dim, dtype=self.dtype) *\
+                (self.x0_up - self.x0_lo) * warm_start_radius
+            x0_rand = torch.min(torch.max(x0_rand, self.x0_lo), self.x0_up)
+            return x0_rand
 
 
 class RandomSampleGenerator(SampleGenerator):
@@ -46,7 +62,8 @@ class RandomSampleGenerator(SampleGenerator):
             projected_x0_rand[dim] = self.x0_up[dim]
         return projected_x0_rand
 
-    def generate_samples(self, n, project=False):
+    def generate_samples(self, n, project=False, rollout=False,
+                         show_progress=False, warm_start_radius=None):
         """
         @param n Integer number of samples
         @param project Boolean on whether or not to project the sample
@@ -57,15 +74,23 @@ class RandomSampleGenerator(SampleGenerator):
         rand_data = []
         rand_label = []
         while len(rand_data) < n:
-            rand_x0 = self.get_random_x0()
+            rand_x0 = self.get_random_x0(warm_start_radius=warm_start_radius)
             if project:
                 rand_x0 = self.project_x0(rand_x0)
             rand_v, rand_res = self.V(rand_x0)
             if rand_v is not None:
-                x_traj_flat = torch.cat(rand_res['x_traj'][:-1])
-                cost_to_go = self.vf.result_to_costtogo(rand_res)
+                if rollout:
+                    x_traj_flat = torch.cat(rand_res['x_traj'][:-1])
+                    cost_to_go = self.vf.result_to_costtogo(rand_res)
+                else:
+                    x_traj_flat = rand_res['x_traj'][0]
+                    cost_to_go = torch.tensor([rand_v], dtype=self.dtype)
                 rand_data.append(x_traj_flat.unsqueeze(0))
                 rand_label.append(cost_to_go.unsqueeze(0))
+                if show_progress:
+                    utils.update_progress(len(rand_data) / n)
+            else:
+                self.reset_x0()
         return(torch.cat(rand_data, axis=0), torch.cat(rand_label, axis=0))
 
 
@@ -83,18 +108,26 @@ class AdversarialSampleGenerator(SampleGenerator):
         self.N = vf.N
         super().__init__(vf, x0_lo, x0_up)
 
-    def generate_samples(self, n, value_approx):
+    def generate_samples(self, n, value_approx,
+                         rollout=False, show_progress=False, 
+                         warm_start_radius=None):
         adv_data = []
         adv_label = []
         k = 0
         while k < n:
             max_iter = min(self.max_iter, n - k)
-            x_adv0 = self.get_random_x0()
+            x_adv0 = self.get_random_x0(warm_start_radius=warm_start_radius)
             (eps, cost_to_go_buff, x_adv_buff) = self.get_squared_bound_sample(
                 value_approx, x_adv0=x_adv0, max_iter=max_iter)
-            adv_data.append(x_adv_buff)
-            adv_label.append(cost_to_go_buff)
+            if rollout:
+                adv_data.append(x_adv_buff)
+                adv_label.append(cost_to_go_buff)
+            else:
+                adv_data.append(x_adv_buff[:, :self.x_dim])
+                adv_label.append(cost_to_go_buff[:, 0:1])
             k += x_adv_buff.shape[0]
+            if show_progress:
+                utils.update_progress(k / n)
         return(torch.cat(adv_data, axis=0), torch.cat(adv_label, axis=0))
 
     def get_squared_bound_sample(self, value_approx,
