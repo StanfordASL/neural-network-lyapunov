@@ -113,6 +113,7 @@ class LineSearchGD(Optimizer):
                 return loss
             alpha_prev = alpha
             alpha *= step_size_reduction
+
         return loss
 
     def step(self, closure, loss0):

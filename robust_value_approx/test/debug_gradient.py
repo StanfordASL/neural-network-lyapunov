@@ -25,23 +25,22 @@ def compute_total_loss(
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_sample_cost_weight = 0.
     dut.lyapunov_derivative_mip_cost_weight = 1.
-    dut.lyapunov_positivity_mip_cost_weight = 0.
+    dut.lyapunov_positivity_mip_cost_weight = 10.
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_positivity_epsilon = lyapunov_positivity_epsilon
     dut.lyapunov_derivative_epsilon = lyapunov_derivative_epsilon
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
         relu_layer_width, params_val, bias=bias)
-    total_loss_return = dut.total_loss(
-        relu, state_samples, state_samples_next)
+    total_loss = dut.total_loss(relu, state_samples, state_samples_next)
     if requires_grad:
-        total_loss_return[0].backward()
+        total_loss[0].backward()
         grad = np.concatenate(
             [p.grad.detach().numpy().reshape((-1,)) for p in
              relu.parameters()], axis=0)
         return grad
     else:
-        return total_loss_return[0].item()
+        return total_loss[0].item()
 
 
 def compute_milp_cost_given_relu(

@@ -16,7 +16,8 @@ from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
 
 
-def setup_relu(relu_layer_width, params=None, bias=True):
+def setup_relu(
+        relu_layer_width, params=None, negative_gradient=0.1, bias=True):
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
     if params is not None:
@@ -49,7 +50,7 @@ def setup_relu(relu_layer_width, params=None, bias=True):
     layers = [None] * (len(relu_layer_width) * 2 - 1)
     for i in range(len(relu_layer_width) - 1):
         layers[2 * i] = linear_layers[i]
-        layers[2 * i + 1] = nn.LeakyReLU(-0.2)
+        layers[2 * i + 1] = nn.LeakyReLU(negative_gradient)
     layers[-1] = linear_layers[-1]
     relu = nn.Sequential(*layers)
     return relu
@@ -101,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
     parser.add_argument(
-        "--loss_minimal_decrement", type=float, default=-np.inf,
+        "--loss_minimal_decrement", type=float, default=None,
         help="check line_search_gd.")
     parser.add_argument(
         "--min_improvement", type=float, default=-0.1,
@@ -136,7 +137,7 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system4()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 8, 4), bias=bias)
+        relu = setup_relu((2, 4, 4, 4), negative_gradient=-1., bias=bias)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
