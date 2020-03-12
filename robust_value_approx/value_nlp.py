@@ -74,6 +74,7 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
         self.x0_constraint = self.add_bb_constraint(bb_lo, bb_up, [0])
         self.solver = SnoptSolver()
         self.initial_guess = None
+        self.result_filters = []
 
     @property
     def N(self):
@@ -201,6 +202,9 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
         self.step_costs[n].append(fun)
         self.add_cost(fun, fun_jax, [n])
 
+    def add_result_filter(self, fun):
+        self.result_filters.append(fun)
+
     def step_cost(self, n, x, u, dt):
         """
         only uses cost that were added using add_step_cost, i.e. that
@@ -273,6 +277,9 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
                 fmul=torch.Tensor(dets.Fmul[1:]).type(self.dtype),
                 xmul=torch.Tensor(dets.xmul).type(self.dtype),
                 )
+            for filt in self.result_filters:
+                if not filt(result):
+                    return(None, None)
             return(v_val, result)
         return V
 

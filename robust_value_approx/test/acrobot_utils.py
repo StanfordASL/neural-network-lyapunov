@@ -72,8 +72,8 @@ def get_value_function(N):
     vf = value_nlp.NLPValueFunction(
         sys.x_lo, sys.x_up, sys.u_lo, sys.u_up, dt_lo, dt_up)
     vf.add_segment(N-1, sys.dyn, lambda x: sys.dyn(x, arraylib=jax.numpy))
-    Q = np.diag([1., 1., .1, .1])
-    R = np.diag([.01])
+    Q = np.diag([1., 1., 1., 1.])
+    R = np.diag([1.])
     x_desired = np.array([np.pi, 0., 0., 0.])
     for n in range(vf.N-1):
         fun = lambda x: sys.quad_cost(
@@ -81,11 +81,18 @@ def get_value_function(N):
         fun_jax = lambda x: sys.quad_cost(
             x, Q=Q, R=R, x_desired=x_desired, arraylib=jax.numpy)
         vf.add_step_cost(n, fun, fun_jax)
-    Qt = np.diag([10., 10., 1., 1.])
-    Rt = np.diag([.01])
+    Qt = np.diag([1., 1., 1., 1.])
+    Rt = np.diag([1.])
     fun = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=np)
     fun_jax = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=jax.numpy)
     vf.add_step_cost(vf.N-1, fun, fun_jax)
+    x_desired_eps = torch.tensor([.1, .1, .1, .1], dtype=vf.dtype)
+    x_desired_tensor = torch.tensor(x_desired, dtype=vf.dtype)
+    def xf_filter(result):
+        xf = result['x_traj'][-1]
+        valid = torch.all(torch.abs(xf - x_desired_tensor) < x_desired_eps)
+        return valid
+    vf.add_result_filter(xf_filter)
     return(vf, sys)

@@ -40,7 +40,8 @@ class ValueFunctionApproximation:
 
 
 class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
-    def __init__(self, dtype, x_dim, nn_width=None, nn_depth=None):
+    def __init__(self, dtype, x_dim, learning_rate=1e-3,
+                 nn_width=None, nn_depth=None):
         """
         Contains an approximation for a infinite-horizon value function
         uses a quadratic model if no neural network parameters are provided
@@ -60,7 +61,8 @@ class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
             self.model = torch.nn.Sequential(*nn_layers).double()
         else:
             self.model = QuadraticModel(self.x_dim, self.dtype)
-        self.optimizer = torch.optim.Adam(self.model.parameters())
+        self.optimizer = torch.optim.Adam(self.model.parameters(),
+            lr=learning_rate)
 
     def eval(self, x, n=0):
         return self.model(x)
