@@ -5,16 +5,17 @@ import plotly.graph_objs as go
 
 class NonlinearSystem:
     def dyn(self, var, arraylib=np):
-	    x_dim = self.x_dim[0]
-	    u_dim = self.u_dim[0]
-	    x0 = var[:x_dim]
-	    u0 = var[x_dim:x_dim+u_dim]
-	    dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
-	    x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]
-	    u1 = var[x_dim+u_dim+1+x_dim:x_dim+u_dim+1+x_dim+u_dim]
-	    dx0 = self.dx(x0, u0, arraylib=arraylib)
-	    dx1 = self.dx(x1, u1, arraylib=arraylib)
-	    return x0 + .5 * (dx0 + dx1) * dt0 - x1
+        x_dim = self.x_dim[0]
+        u_dim = self.u_dim[0]
+        x0 = var[:x_dim]
+        u0 = var[x_dim:x_dim+u_dim]
+        dt0 = var[x_dim+u_dim:x_dim+u_dim+1]
+        x1 = var[x_dim+u_dim+1:x_dim+u_dim+1+x_dim]
+        u1 = var[x_dim+u_dim+1+x_dim:x_dim+u_dim+1+x_dim+u_dim]
+        dx0 = self.dx(x0, u0, arraylib=arraylib)
+        dx1 = self.dx(x1, u1, arraylib=arraylib)
+        dx01 = self.dx(.5*(x0 + x1), .5*(u0 + u1), arraylib=arraylib)
+        return x1 - (x0 + (dt0/6.)*(dx0 + 4*dx01 + dx1))
 
     def quad_cost(self, var,
                   Q=None, R=None, x_desired=None, u_desired=None,
