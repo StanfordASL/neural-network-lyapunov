@@ -315,7 +315,7 @@ class TrainLyapunovReLU:
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], _, _, _, _ = \
                 self.total_loss(relu, state_samples_all, state_samples_next)
-            print(f"derivative mip loss "+
+            print(f"derivative mip loss " +
                   f"{lyapunov_derivative_mip_costs[iter_count]}")
             return loss
 

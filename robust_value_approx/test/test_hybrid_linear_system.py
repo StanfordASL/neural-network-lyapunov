@@ -148,7 +148,8 @@ def setup_johansson_continuous_time_system1(box_half_length=1.):
     return system
 
 
-def setup_johansson_continuous_time_system2(box_half_length=1.):
+def setup_johansson_continuous_time_system2(
+        box_half_length=1., keep_symmetric_half=False):
     """
     This is the simple example from section 4 (equation 8, 9) of
     Computation of piecewise quadratic Lyapunov functions for hybrid systems
@@ -157,6 +158,11 @@ def setup_johansson_continuous_time_system2(box_half_length=1.):
     @param box_half_length. The state is confined to the domain
     [-box_half_length, box_half_length] x [-box_half_length, box_half_length]
     as a box.
+    @param keep_symmetric_half. The dynamics of the system satisfies
+    f(-x) = -f(x). So if we have a symmetric Lyapunov candidate satisfying
+    V(-x) = V(x), then we only need to verify the Lyapunov condition in half
+    of the state space. If keep_symmetric_half=True, then we only add the
+    mode above x+y=0.
     """
     dtype = torch.float64
     system = hybrid_linear_system.AutonomousHybridLinearSystem(2, dtype)
@@ -167,22 +173,28 @@ def setup_johansson_continuous_time_system2(box_half_length=1.):
         [[-epsilon, omega], [-alpha*omega, -epsilon]], dtype=dtype)
     A2 = torch.tensor(
         [[-epsilon, alpha*omega], [-omega, -epsilon]], dtype=dtype)
+    # Top mode.
     system.add_mode(
         A1, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[1, -1], [-1, -1], [0, 1]], dtype=dtype),
         torch.tensor([0, 0, box_half_length], dtype=dtype))
-    system.add_mode(
-        A1, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
-        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    if not keep_symmetric_half:
+        # Bottom mode.
+        system.add_mode(
+            A1, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
+            torch.tensor([0, 0, box_half_length], dtype=dtype))
+    # Right mode
     system.add_mode(
         A2, torch.tensor([0., 0.], dtype=dtype),
         torch.tensor([[-1, 1], [-1, -1], [1, 0]], dtype=dtype),
         torch.tensor([0, 0, box_half_length], dtype=dtype))
-    system.add_mode(
-        A2, torch.tensor([0., 0.], dtype=dtype),
-        torch.tensor([[1, -1], [1, 1], [-1, 0]], dtype=dtype),
-        torch.tensor([0, 0, box_half_length], dtype=dtype))
+    if not keep_symmetric_half:
+        # Left mode
+        system.add_mode(
+            A2, torch.tensor([0., 0.], dtype=dtype),
+            torch.tensor([[1, -1], [1, 1], [-1, 0]], dtype=dtype),
+            torch.tensor([0, 0, box_half_length], dtype=dtype))
     return system
 
 

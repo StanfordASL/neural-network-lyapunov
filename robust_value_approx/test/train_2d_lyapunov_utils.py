@@ -37,7 +37,9 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype))
     return torch.stack(state_samples, dim=0)
 
-def setup_state_samples_on_boundary(x_equilibrium, lower, upper, mesh_size, theta):
+
+def setup_state_samples_on_boundary(
+        x_equilibrium, lower, upper, mesh_size, theta):
     """
     Generate samples one the boundary of a rotated box region R(θ) * (x* + box)
     where box is lower <= x <= upper
@@ -65,6 +67,7 @@ def setup_state_samples_on_boundary(x_equilibrium, lower, upper, mesh_size, thet
     s_theta = torch.sin(theta)
     R = torch.tensor([[c_theta, -s_theta], [s_theta, c_theta]], dtype=dtype)
     return (R @ (samples + x_equilibrium.reshape((2, 1)))).T
+
 
 def plot_relu(
     relu, system, V_rho, lyapunov_positivity_epsilon,

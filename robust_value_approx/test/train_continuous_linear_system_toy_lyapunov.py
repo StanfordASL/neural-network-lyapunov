@@ -17,12 +17,20 @@ from mpl_toolkits import mplot3d # noqa
 
 
 def setup_relu(
-        relu_layer_width, params=None, negative_gradient=0.1, bias=True):
+        relu_layer_width, params=None, negative_gradient=0.1, bias=True,
+        symmetric_x=False):
+    """
+    @param symmetric_x If true, then we want the network satisfies
+    network(x) = network(-x). This requires that bias=False, and the negative
+    gradient of the first ReLU unit to be -1.
+    """
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
     if params is not None:
         assert(isinstance(params, torch.Tensor))
     dtype = torch.float64
+    if symmetric_x:
+        assert(not bias)
 
     def set_param(linear, param_count):
         linear.weight.data = params[
@@ -50,7 +58,10 @@ def setup_relu(
     layers = [None] * (len(relu_layer_width) * 2 - 1)
     for i in range(len(relu_layer_width) - 1):
         layers[2 * i] = linear_layers[i]
-        layers[2 * i + 1] = nn.LeakyReLU(negative_gradient)
+        if symmetric_x and i == 0:
+            layers[2 * i + 1] = nn.LeakyReLU(-1.)
+        else:
+            layers[2 * i + 1] = nn.LeakyReLU(negative_gradient)
     layers[-1] = linear_layers[-1]
     relu = nn.Sequential(*layers)
     return relu
@@ -119,11 +130,13 @@ if __name__ == "__main__":
         relu = setup_relu((2, 4, 2), bias=bias)
     elif args.system == 2:
         system = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system2()
+            setup_johansson_continuous_time_system2(keep_symmetric_half=True)
         system_simulate = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system2(10)
+            setup_johansson_continuous_time_system2(
+                10, keep_symmetric_half=False)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 8, 4), bias=bias)
+        relu = setup_relu(
+            (2, 8, 4), negative_gradient=0.1, bias=bias, symmetric_x=True)
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
@@ -137,14 +150,16 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system4(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 4, 4, 4), negative_gradient=-1., bias=False)
+        relu = setup_relu(
+            (2, 4, 4, 4), negative_gradient=0.1, bias=False, symmetric_x=True)
     elif args.system == 5:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system5(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system5(10)
-        relu = setup_relu((2, 8, 4), negative_gradient=-1., bias=False)
+        relu = setup_relu(
+            (2, 8, 4), negative_gradient=-1., bias=False, symmetric_x=True)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
@@ -167,7 +182,12 @@ if __name__ == "__main__":
         state_samples_all = train_2d_lyapunov_utils.\
             setup_state_samples_on_boundary(
                 x_equilibrium, x_lower, x_upper, (51, 51), 0.)
-    
+    keep_symmetric_half = True
+    # Only keep the state samples above x+y=0 line for system 2.
+    if keep_symmetric_half and args.system == 2:
+        state_samples_all = torch.stack(
+            [state_samples_all[i, :] for i in range(state_samples_all.shape[0])
+             if state_samples_all[i, 0] + state_samples_all[i, 1] >= 0])
 
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_rho, x_equilibrium)
@@ -243,6 +263,10 @@ if __name__ == "__main__":
         state_samples = train_2d_lyapunov_utils.\
             setup_state_samples_on_boundary(
                 x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    if keep_symmetric_half and args.system == 2:
+        state_samples = torch.stack(
+            [state_samples[i, :] for i in range(state_samples.shape[0])
+             if state_samples[i, 0] + state_samples[i, 1] >= 0])
     if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
         result = dut.train_with_line_search(relu, state_samples)
     else:
