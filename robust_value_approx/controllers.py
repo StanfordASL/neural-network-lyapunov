@@ -95,27 +95,30 @@ import jax
 
 
 def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
-                                             u_min, u_max, dt, num_samples):
-    u_dim = u_min.shape[0]
-    dtype = u_min.dtype
-    u_min_np = u_min.detach().numpy()
-    u_max_np = u_max.detach().numpy()
+                                             x_lo, x_up,
+                                             u_lo, u_up,
+                                             dt, num_samples):
+    u_dim = u_lo.shape[0]
+    dtype = u_lo.dtype
+    u_lo_np = u_lo.detach().numpy()
+    u_up_np = u_up.detach().numpy()
     def ctrl(x):
         x0_np = x.detach().numpy()
         v_opt = float("Inf")
         u_opt = None
         for k in range(num_samples):
-            u = np.random.rand(u_dim) * (u_max_np - u_min_np) + u_min_np
+            u = np.random.rand(u_dim) * (u_up_np - u_lo_np) + u_lo_np
             sim_dyn = lambda t, y: dx(y, u)
             traj = scipy.integrate.solve_ivp(sim_dyn, (0, dt), x0_np)
             if traj.success:
-                u = torch.Tensor(u).type(dtype)
-                cost = step_cost(0, x, u, dt)
                 xn = torch.Tensor(traj.y[:,-1]).type(dtype)
-                v = cost + torch.clamp(ctrl_model(xn), 0.)
-                if v < v_opt:
-                    v_opt = v
-                    u_opt = u
+                if torch.all(xn < x_up) and torch.all(xn > x_lo):
+                    u = torch.Tensor(u).type(dtype)
+                    cost = step_cost(0, x, u, dt)
+                    v = cost + torch.clamp(ctrl_model(xn), 0.)
+                    if v < v_opt:
+                        v_opt = v
+                        u_opt = u
         return (u_opt, u_opt, None)
     return ctrl
 
