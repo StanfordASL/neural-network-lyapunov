@@ -38,6 +38,37 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
     return torch.stack(state_samples, dim=0)
 
 
+def setup_state_samples_on_boundary(
+        x_equilibrium, lower, upper, mesh_size, theta):
+    """
+    Generate samples one the boundary of a rotated box region R(θ) * (x* + box)
+    where box is lower <= x <= upper
+    """
+    assert(isinstance(lower, torch.Tensor))
+    assert(isinstance(upper, torch.Tensor))
+    assert(lower.shape == (2,))
+    assert(upper.shape == (2,))
+    assert(len(mesh_size) == 2)
+    dtype = torch.float64
+    samples_x = torch.cat([
+        torch.linspace(lower[0], upper[0], mesh_size[0]),
+        torch.linspace(lower[0], upper[0], mesh_size[0]),
+        torch.full((mesh_size[1],), lower[0]),
+        torch.full((mesh_size[1],), upper[0])]).type(dtype)
+    samples_y = torch.cat([
+        torch.full((mesh_size[0],), lower[1]),
+        torch.full((mesh_size[1],), upper[1]),
+        torch.linspace(lower[1], upper[1], mesh_size[1]),
+        torch.linspace(lower[1], upper[1], mesh_size[1])]).type(dtype)
+    samples = torch.stack([samples_x, samples_y])
+    if isinstance(theta, float):
+        theta = torch.tensor(theta, dtype=dtype)
+    c_theta = torch.cos(theta)
+    s_theta = torch.sin(theta)
+    R = torch.tensor([[c_theta, -s_theta], [s_theta, c_theta]], dtype=dtype)
+    return (R @ (samples + x_equilibrium.reshape((2, 1)))).T
+
+
 def plot_relu(
     relu, system, V_rho, lyapunov_positivity_epsilon,
     lyapunov_derivative_epsilon, x_equilibrium, lower, upper, mesh_size,

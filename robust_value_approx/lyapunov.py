@@ -115,12 +115,12 @@ class LyapunovHybridLinearSystem:
         s(i) = |x(i) - x*(i)|, alpha is the binary variable,
         alpha(i) = 1 => x(i) >= x*(i), alpha(i) = 0 => x(i)<=x*(i).
         """
-        if not torch.all(torch.from_numpy(self.system.x_lo_all) <
+        if not torch.all(torch.from_numpy(self.system.x_lo_all) <=
                          x_equilibrium) or\
-                not torch.all(torch.from_numpy(self.system.x_up_all) >
+                not torch.all(torch.from_numpy(self.system.x_up_all) >=
                               x_equilibrium):
             raise Exception("add_state_error_l1_constraint: we currently " +
-                            "require that x_lo < x_equilibrium < x_up")
+                            "require that x_lo <= x_equilibrium <= x_up")
         s = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
@@ -141,6 +141,25 @@ class LyapunovHybridLinearSystem:
                     [[x[i]], [s[i]], [alpha[i]]],
                     sense=gurobipy.GRB.LESS_EQUAL,
                     b=rhs_in + Ain_x * x_equilibrium[i])
+            elif self.system.x_lo_all[i] >= x_equilibrium[i]:
+                # x_lo[i] >= x*[i], so s[i] = x[i] - x*[i], alpha[i] = 1
+                milp.addMConstrs(
+                    [torch.tensor([[1., -1., 0], [0, 0, 1]],
+                                  dtype=self.system.dtype)],
+                    [[x[i], s[i], alpha[i]]], sense=gurobipy.GRB.EQUAL,
+                    b=torch.stack([
+                        x_equilibrium[i],
+                        torch.tensor(1, dtype=self.system.dtype)]))
+            else:
+                # x_up[i] <= x*[i], so s[i] = x*[i] - x[i], alpha[i] = 0
+                milp.addMConstrs(
+                    [torch.tensor(
+                        [[1, 1, 0], [0, 0, 1]], dtype=self.system.dtype)],
+                    [[x[i], s[i], alpha[i]]], sense=gurobipy.GRB.EQUAL,
+                    b=torch.stack([
+                        x_equilibrium[i],
+                        torch.tensor(0, dtype=self.system.dtype)]))
+
         return (s, alpha)
 
     def lyapunov_value(
@@ -210,13 +229,12 @@ class LyapunovHybridLinearSystem:
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(
             relu_model, relu_free_pattern, milp, x)
 
-        # Now write the 1-norm |x - x*|₁ as mixed-integer linear constraints.
-        # TODO(hongkai.di): support the case when x_equilibrium is not in the
-        # strict interior of the state space.
         # Now compute ReLU(x*)
+        relu_x_equilibrium = relu_model.forward(x_equilibrium)
+
+        # Now write the 1-norm |x - x*|₁ as mixed-integer linear constraints.
         (s, gamma) = self.add_state_error_l1_constraint(
             milp, x_equilibrium, x, slack_name="s", binary_var_name="gamma")
-        relu_x_equilibrium = relu_model.forward(x_equilibrium)
 
         milp.setObjective(
             [a_out,

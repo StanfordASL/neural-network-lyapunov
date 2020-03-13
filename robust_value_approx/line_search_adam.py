@@ -78,16 +78,22 @@ class LineSearchAdam(Optimizer):
             min_step_size_decrease = group['min_step_size_decrease']
             min_improvement = group['min_improvement']
 
-        decrement = loss_minimal_decrement * torch.sum(torch.stack(
-            [t[i] * torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
+        if loss_minimal_decrement is not None:
+            decrement = loss_minimal_decrement * torch.sum(torch.stack(
+                [t[i] * torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
+        else:
+            decrement = None
 
         alpha_prev = 0
         alpha = 1.
         while alpha > min_step_size_decrease:
             loss = self.directional_evaluate(
                 closure, p, [(alpha - alpha_prev) * ti for ti in t], d_p)
-            if loss < loss0 + alpha * decrement and \
+            if decrement is not None and \
+                loss < loss0 + alpha * decrement and \
                     loss < loss0 - min_improvement:
+                return loss
+            if decrement is None and loss < loss0 - min_improvement:
                 return loss
             alpha_prev = alpha
             alpha *= step_size_reduction

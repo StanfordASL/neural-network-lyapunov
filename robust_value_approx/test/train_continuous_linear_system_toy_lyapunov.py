@@ -16,12 +16,21 @@ from matplotlib import cm # noqa
 from mpl_toolkits import mplot3d # noqa
 
 
-def setup_relu(relu_layer_width, params=None):
+def setup_relu(
+        relu_layer_width, params=None, negative_gradient=0.1, bias=True,
+        symmetric_x=False):
+    """
+    @param symmetric_x If true, then we want the network satisfies
+    network(x) = network(-x). This requires that bias=False, and the negative
+    gradient of the first ReLU unit to be -1.
+    """
     assert(isinstance(relu_layer_width, tuple))
     assert(relu_layer_width[0] == 2)
     if params is not None:
         assert(isinstance(params, torch.Tensor))
     dtype = torch.float64
+    if symmetric_x:
+        assert(not bias)
 
     def set_param(linear, param_count):
         linear.weight.data = params[
@@ -29,9 +38,10 @@ def setup_relu(relu_layer_width, params=None):
             linear.in_features * linear.out_features].clone().reshape((
                 linear.out_features, linear.in_features))
         param_count += linear.in_features * linear.out_features
-        linear.bias.data = params[
-            param_count: param_count + linear.out_features].clone()
-        param_count += linear.out_features
+        if bias:
+            linear.bias.data = params[
+                param_count: param_count + linear.out_features].clone()
+            param_count += linear.out_features
         return param_count
 
     linear_layers = [None] * len(relu_layer_width)
@@ -40,7 +50,7 @@ def setup_relu(relu_layer_width, params=None):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
         linear_layers[i] = nn.Linear(
-            relu_layer_width[i], next_layer_width).type(dtype)
+            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -48,7 +58,10 @@ def setup_relu(relu_layer_width, params=None):
     layers = [None] * (len(relu_layer_width) * 2 - 1)
     for i in range(len(relu_layer_width) - 1):
         layers[2 * i] = linear_layers[i]
-        layers[2 * i + 1] = nn.LeakyReLU(0.2)
+        if symmetric_x and i == 0:
+            layers[2 * i + 1] = nn.LeakyReLU(-1.)
+        else:
+            layers[2 * i + 1] = nn.LeakyReLU(negative_gradient)
     layers[-1] = linear_layers[-1]
     relu = nn.Sequential(*layers)
     return relu
@@ -100,55 +113,81 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
     parser.add_argument(
-        "--loss_minimal_decrement", type=float, default=-np.inf,
+        "--loss_minimal_decrement", type=float, default=None,
         help="check line_search_gd.")
     parser.add_argument(
         "--min_improvement", type=float, default=-0.1,
         help="minimal improvement in line search.")
     args = parser.parse_args()
 
+    bias = False
     if args.system == 1:
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1()
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1(2.)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 4, 2))
+        relu = setup_relu((2, 4, 2), bias=bias)
     elif args.system == 2:
         system = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system2()
+            setup_johansson_continuous_time_system2(keep_symmetric_half=True)
         system_simulate = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system2(10)
+            setup_johansson_continuous_time_system2(
+                10, keep_symmetric_half=False)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu((2, 8, 4))
+        relu = setup_relu(
+            (2, 8, 4), negative_gradient=0.1, bias=bias, symmetric_x=True)
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system3(x_equilibrium, 10)
-        relu = setup_relu((2, 16, 2))
+        relu = setup_relu((2, 16, 2), bias=bias)
     elif args.system == 4:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system4()
+            setup_johansson_continuous_time_system4(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu((2, 4, 4))
+        relu = setup_relu(
+            (2, 4, 4, 4), negative_gradient=0.1, bias=False, symmetric_x=True)
+    elif args.system == 5:
+        x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
+        system = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5(keep_positive_x=True)
+        system_simulate = test_hybrid_linear_system.\
+            setup_johansson_continuous_time_system5(10)
+        relu = setup_relu(
+            (2, 8, 4), negative_gradient=-1., bias=False, symmetric_x=True)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
         system)
 
-    V_rho = 0.1
+    V_rho = 0.
 
-    if args.system == 1 or args.system == 2 or args.system == 4:
+    if args.system in {1, 2}:
         x_lower = torch.tensor([-1, -1], dtype=system.dtype)
         x_upper = torch.tensor([1, 1], dtype=system.dtype)
     elif args.system == 3:
         x_lower = torch.tensor([-2, -1], dtype=system.dtype)
         x_upper = torch.tensor([2, 1], dtype=system.dtype)
-    state_samples_all = train_2d_lyapunov_utils.setup_state_samples_all(
-        x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    elif args.system in {4, 5}:
+        x_lower = torch.tensor([0, -1], dtype=system.dtype)
+        x_upper = torch.tensor([1, 1], dtype=system.dtype)
+    if bias:
+        state_samples_all = train_2d_lyapunov_utils.setup_state_samples_all(
+            x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    else:
+        state_samples_all = train_2d_lyapunov_utils.\
+            setup_state_samples_on_boundary(
+                x_equilibrium, x_lower, x_upper, (51, 51), 0.)
+    keep_symmetric_half = True
+    # Only keep the state samples above x+y=0 line for system 2.
+    if keep_symmetric_half and args.system == 2:
+        state_samples_all = torch.stack(
+            [state_samples_all[i, :] for i in range(state_samples_all.shape[0])
+             if state_samples_all[i, 0] + state_samples_all[i, 1] >= 0])
 
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_rho, x_equilibrium)
@@ -217,8 +256,17 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
-    state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
-        x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    if bias:
+        state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
+            x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    else:
+        state_samples = train_2d_lyapunov_utils.\
+            setup_state_samples_on_boundary(
+                x_equilibrium, x_lower, x_upper, (15, 15), 0.)
+    if keep_symmetric_half and args.system == 2:
+        state_samples = torch.stack(
+            [state_samples[i, :] for i in range(state_samples.shape[0])
+             if state_samples[i, 0] + state_samples[i, 1] >= 0])
     if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
         result = dut.train_with_line_search(relu, state_samples)
     else:
