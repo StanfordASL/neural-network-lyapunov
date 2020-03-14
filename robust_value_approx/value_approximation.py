@@ -53,10 +53,10 @@ class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
         if nn_width is not None:
             assert(nn_depth is not None)
             nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
-                         torch.nn.ReLU()]
+                         torch.nn.Tanh()]
             for i in range(nn_depth):
                 nn_layers += [torch.nn.Linear(nn_width, nn_width),
-                              torch.nn.ReLU()]
+                              torch.nn.Tanh()]
             nn_layers += [torch.nn.Linear(nn_width, 1)]
             self.model = torch.nn.Sequential(*nn_layers).double()
         else:
