@@ -12,26 +12,27 @@ class QuadraticModel(torch.nn.Module):
     def __init__(self, dim, dtype, Q=None, q=None, c=None):
         super(QuadraticModel, self).__init__()
         if Q is None:
-            self.sqrtQ = torch.nn.Parameter(
-                torch.rand((dim, dim), dtype=dtype))
+            Q_init = 2. * (torch.rand((dim, dim), dtype=dtype) - .5)
+            Q_init = .5 * Q_init.t()@Q_init
+            self.Q = torch.nn.Parameter(Q_init)
         else:
-            self.sqrtQ = torch.nn.Parameter(torch.Tensor(
-                scipy.linalg.sqrtm(Q)).type(dtype))
+            self.Q = torch.nn.Parameter(Q)
         if q is None:
-            self.q = torch.nn.Parameter(torch.rand(dim, dtype=dtype))
+            q_init = 2. * (torch.rand(dim, dtype=dtype) - .5)
+            self.q = torch.nn.Parameter(q_init)
         else:
             self.q = torch.nn.Parameter(q)
         if c is None:
-            self.c = torch.nn.Parameter(torch.rand(1, dtype=dtype))
+            c_init = 2. * (torch.rand(1, dtype=dtype) - .5)
+            self.c = torch.nn.Parameter(c_init)
         else:
             self.c = torch.nn.Parameter(c)
 
     def forward(self, x):
         if len(x.shape) == 1:
-            return x@(self.sqrtQ.t()@self.sqrtQ)@x + x@self.q + self.c
+            return (x@self.Q@x + x@self.q + self.c)
         else:
-            return (torch.diag(x@(self.sqrtQ.t()@self.sqrtQ)@x.t()) +\
-                x@self.q + self.c).unsqueeze(1)
+            return (torch.diag(x@self.Q@x.t()) + x@self.q + self.c).unsqueeze(1)
 
 
 class ValueFunctionApproximation:
@@ -40,7 +41,7 @@ class ValueFunctionApproximation:
 
 
 class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
-    def __init__(self, dtype, x_dim, learning_rate=1e-3,
+    def __init__(self, dtype, x_dim, learning_rate=1e-3, weight_decay=0.,
                  nn_width=None, nn_depth=None):
         """
         Contains an approximation for a infinite-horizon value function
@@ -58,11 +59,11 @@ class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
                 nn_layers += [torch.nn.Linear(nn_width, nn_width),
                               torch.nn.Tanh()]
             nn_layers += [torch.nn.Linear(nn_width, 1)]
-            self.model = torch.nn.Sequential(*nn_layers).double()
+            self.model = torch.nn.Sequential(*nn_layers).type(dtype)
         else:
-            self.model = QuadraticModel(self.x_dim, self.dtype)
+            self.model = QuadraticModel(x_dim, dtype)
         self.optimizer = torch.optim.Adam(self.model.parameters(),
-            lr=learning_rate)
+            lr=learning_rate, weight_decay=weight_decay)
 
     def eval(self, x, n=0):
         return self.model(x)
