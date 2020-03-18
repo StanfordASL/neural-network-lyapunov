@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import robust_value_approx.value_to_optimization as value_to_optimization
+import robust_value_approx.value_approximation as value_approximation
 from pydrake.solvers.mathematicalprogram import MathematicalProgram
 from pydrake.solvers.snopt import SnoptSolver
 from pydrake.autodiffutils import (autoDiffToValueMatrix,
@@ -40,14 +41,14 @@ def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
     return ctrl
 
 
-def eigenautodiff_model(model, x_numpy):
+def eigenautodiff_vf_approx(vf_approx, x_numpy):
     if x_numpy.dtype == np.object:
         # x_numpy is an numpy array of autodiff scalars.
         x_val = autoDiffToValueMatrix(x_numpy)
         dx_dz = autoDiffToGradientMatrix(x_numpy)
         x_torch = torch.from_numpy(x_val).squeeze()
         x_torch.requires_grad=True
-        y = model(x_torch)
+        y = vf_approx.eval(x_torch)
         y.backward()
         dy_dx = x_torch.grad.clone().detach().numpy()
         dy_dz = dy_dx @ dx_dz
@@ -56,13 +57,16 @@ def eigenautodiff_model(model, x_numpy):
         return y_numpy
     else:
         # x is an eigen vector of doubles
-        return model(torch.from_numpy(x_numpy)).detach().numpy()
+        return vf_approx.eval(torch.from_numpy(x_numpy)).detach().numpy()
 
-def get_limited_lookahead_controller(vf, model=None):
+def get_limited_lookahead_controller(vf, vf_approx=None):
     assert(isinstance(vf, value_to_optimization.ValueFunction))
-    if model is not None:
+    if vf_approx is not None:
+        assert(isinstance(
+            vf_approx, value_approximation.ValueFunctionApproximation))
         xf = vf.x_traj[-1]
-        vf.prog.AddCost(lambda x: eigenautodiff_model(model, x)[0], vars=xf)
+        vf.prog.AddCost(
+            lambda x: eigenautodiff_vf_approx(vf_approx, x)[0], vars=xf)
     V = vf.get_value_function()
     def ctrl(x):
         assert(isinstance(x, torch.Tensor))
