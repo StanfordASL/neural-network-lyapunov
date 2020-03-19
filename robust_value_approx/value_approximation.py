@@ -12,7 +12,7 @@ class QuadraticModel(torch.nn.Module):
     def __init__(self, dtype, dim, Q=None, q=None, c=None, scaling=1.):
         super(QuadraticModel, self).__init__()
         if Q is None:
-            Q_init = 2. * (torch.rand((dim, dim), dtype=dtype) - .5)
+            Q_init = torch.rand((dim, dim), dtype=dtype)
             Q_init = .5 * Q_init.t()@Q_init
             self.Q = torch.nn.Parameter(Q_init)
         else:
@@ -33,11 +33,10 @@ class QuadraticModel(torch.nn.Module):
         if len(x.shape) == 1:
             return (x@self.Q@x + x@self.q + self.c) * self.scaling
         else:
-            return (torch.diag(x@self.Q@x.t()) +\
-                x@self.q + self.c).unsqueeze(1) * self.scaling
+            return (torch.sum(x.t()*(self.Q@x.t()), dim=0) + x@self.q + self.c).unsqueeze(1) * self.scaling
 
 
-class NeuralNetworkModel():
+class NeuralNetworkModel(torch.nn.Module):
     def __init__(self, dtype, dim, nn_width, nn_depth,
                  activation=torch.nn.Tanh, scaling=1.):
         super(NeuralNetworkModel, self).__init__()
@@ -45,8 +44,8 @@ class NeuralNetworkModel():
         for i in range(nn_depth):
             self.nn_layers += [torch.nn.Linear(nn_width, nn_width),
                                activation()]
-        nn_layers += [torch.nn.Linear(nn_width, 1)]
-        self.nn = torch.nn.Sequential(*nn_layers).type(dtype)
+        self.nn_layers += [torch.nn.Linear(nn_width, 1)]
+        self.nn = torch.nn.Sequential(*self.nn_layers).type(dtype)
         self.scaling = scaling
 
     def forward(self, x):

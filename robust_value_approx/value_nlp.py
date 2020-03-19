@@ -75,6 +75,9 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
         self.solver = SnoptSolver()
         self.initial_guess = None
         self.result_filters = []
+        # default 1000
+        self.prog.SetSolverOption(
+            self.solver.solver_id(), "Major iterations limit", 1000)
 
     @property
     def N(self):
