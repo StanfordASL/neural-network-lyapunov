@@ -48,7 +48,7 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy):
         dx_dz = autoDiffToGradientMatrix(x_numpy)
         x_torch = torch.from_numpy(x_val).squeeze()
         x_torch.requires_grad=True
-        y = vf_approx.eval(x_torch)
+        y = torch.clamp(vf_approx.eval(x_torch), 0.)
         y.backward()
         dy_dx = x_torch.grad.clone().detach().numpy()
         dy_dz = dy_dx @ dx_dz
@@ -57,7 +57,7 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy):
         return y_numpy
     else:
         # x is an eigen vector of doubles
-        return vf_approx.eval(torch.from_numpy(x_numpy)).detach().numpy()
+        return torch.clamp(vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
 def get_limited_lookahead_controller(vf, vf_approx=None):
     assert(isinstance(vf, value_to_optimization.ValueFunction))
@@ -125,6 +125,9 @@ def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
         if u0 is not None:
             u0 = u0.detach().numpy()
             u1 = u1.detach().numpy()
+        else:
+            u0 = np.zeros(u_dim)
+            u1 = np.zeros(u_dim)
         def sim_dyn(t, y):
             if u0 is not None:
                 s = (t - t0)/dt
