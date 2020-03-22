@@ -132,6 +132,9 @@ class TrainLyapunovReLU:
         # parameter used in line search optimizer
         self.loss_minimal_decrement = 0.
 
+        # Whether we add the adversarial states to the training set.
+        self.add_adversarial_state_to_training = False
+
     def total_loss(
             self, relu, state_samples_all, state_samples_next,
             lyapunov_positivity_sample_cost_weight=None,
@@ -287,10 +290,53 @@ class TrainLyapunovReLU:
                         gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
         loss = positivity_sample_loss + derivative_sample_loss + \
             positivity_mip_loss + derivative_mip_loss
+
+        # We add the most adverisal states of the positivity MIP and derivative
+        # MIP to the training set. Note we solve positivity MIP and derivative
+        # MIP separately. This is different from adding the most adversarial
+        # state of the total loss.
+        if self.add_adversarial_state_to_training:
+            positivity_mip_adversarial = torch.tensor([
+                v.x for v in lyapunov_positivity_as_milp_return[1]],
+                dtype=self.lyapunov_hybrid_system.system.dtype)
+            try:
+                positivity_mip_adversarial_next = self.lyapunov_hybrid_system.\
+                    system.step_forward(positivity_mip_adversarial)
+            except hybrid_linear_system.AutonomousHybridLinearSystem.\
+                    StepForwardException:
+                positivity_mip_adversarial = None
+                positivity_mip_adversarial_next = None
+            derivative_mip_adversarial = torch.tensor([
+                v.x for v in lyapunov_derivative_as_milp_return[1]],
+                dtype=self.lyapunov_hybrid_system.system.dtype)
+            derivative_mip_adversarial_mode = np.argwhere(np.array(
+                [v.x for v in lyapunov_derivative_as_milp_return[3]])
+                > 0.99)[0][0]
+            derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
+                system.step_forward(
+                    derivative_mip_adversarial,
+                    derivative_mip_adversarial_mode)
+            if positivity_mip_adversarial is not None:
+                new_state_samples = torch.stack(
+                    [positivity_mip_adversarial, derivative_mip_adversarial])
+                new_state_samples_next = torch.stack(
+                    [positivity_mip_adversarial_next,
+                     derivative_mip_adversarial_next])
+            else:
+                new_state_samples = derivative_mip_adversarial.unsqueeze(0)
+                new_state_samples_next = \
+                    derivative_mip_adversarial_next.unsqueeze(0)
+
+            state_samples_all = torch.cat(
+                [state_samples_all, new_state_samples], dim=0)
+            state_samples_next = torch.cat(
+                [state_samples_next, new_state_samples_next], dim=0)
+
         return loss, lyapunov_positivity_mip.gurobi_model.ObjVal,\
             lyapunov_derivative_mip.gurobi_model.ObjVal,\
             positivity_sample_loss, derivative_sample_loss,\
-            positivity_mip_loss, derivative_mip_loss
+            positivity_mip_loss, derivative_mip_loss, state_samples_all,\
+            state_samples_next
 
     def train_with_line_search(self, relu, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
@@ -399,7 +445,8 @@ class TrainLyapunovReLU:
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], \
                 positivity_sample_loss, derivative_sample_loss,\
-                positivity_mip_loss, derivative_mip_loss\
+                positivity_mip_loss, derivative_mip_loss, state_samples_all,\
+                state_samples_next\
                 = self.total_loss(relu, state_samples_all, state_samples_next)
             losses[iter_count] = loss.item()
 
@@ -491,7 +538,7 @@ class TrainLyapunovReLU:
         for iter_count in range(max_iterations):
             optimizer.zero_grad()
             loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost, \
-                _, _, _, _\
+                _, _, _, _, _, _\
                 = self.total_loss(
                     relu, state_samples_all, state_samples_next,
                     lyapunov_positivity_mip_cost_weight=0.,
