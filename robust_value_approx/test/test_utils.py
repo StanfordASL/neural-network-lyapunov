@@ -355,5 +355,19 @@ class TestLeakyReLUInterval(unittest.TestCase):
             (0., torch.tensor(2.)))
 
 
+class TestProjectToPolyhedron(unittest.TestCase):
+    def test(self):
+        dtype = torch.float64
+        A = torch.cat(
+            [torch.eye(2).type(dtype), -torch.eye(2).type(dtype)], dim=0)
+        b = torch.tensor([1, 1, 0, 0], dtype=dtype)
+        np.testing.assert_almost_equal(utils.project_to_polyhedron(
+            A, b, torch.tensor([0.5, 0.6], dtype=dtype)).detach().numpy(),
+            np.array([0.5, 0.6]))
+        np.testing.assert_almost_equal(utils.project_to_polyhedron(
+            A, b, torch.tensor([1.2, 1.4], dtype=dtype)).detach().numpy(),
+            np.array([1., 1.]))
+
+
 if __name__ == "__main__":
     unittest.main()
