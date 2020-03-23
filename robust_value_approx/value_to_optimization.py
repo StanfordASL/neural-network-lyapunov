@@ -17,9 +17,3 @@ class ValueFunction():
         Where the first cost-to-go is differentiable wrt x
         """
         raise(NotImplementedError)
-
-    def result_to_traj(self, result):
-        """
-        returns x_traj, u_traj, alpha_traj, dt_traj from result
-        """
-        raise(NotImplementedError)

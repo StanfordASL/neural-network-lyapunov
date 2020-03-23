@@ -243,49 +243,6 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             cost_to_go[N-1-n] = c 
         return cost_to_go[:-1]
 
-    def get_value_function(self):
-        # alpha solution is always the same for a fixed mode sequence
-        alpha_traj_sol = torch.zeros(
-            (self.num_modes, self.N), dtype=self.dtype)
-        for i in range(len(self.mode_traj)):
-            alpha_traj_sol[self.mode_traj[i], i] = 1.
-        self.initial_guess = np.zeros(self.prog.num_vars())
-        def V(x):
-            assert(isinstance(x, torch.Tensor))
-            dtype = x.dtype
-            x = x.detach().numpy()
-            bb_lo = np.concatenate(
-                [x, -np.inf*np.ones(self.u_dim[self.init_mode]), [-np.inf]])
-            bb_up = np.concatenate(
-                [x, np.inf*np.ones(self.u_dim[self.init_mode]), [np.inf]])
-            self.x0_constraint.evaluator().set_bounds(bb_lo, bb_up)
-            res = self.solver.Solve(self.prog, self.initial_guess, None)
-            if not res.is_success():
-                return(None, None)
-            self.initial_guess = res.get_x_val()
-            v_val = res.get_optimal_cost()
-            x_traj_sol = [torch.Tensor(
-                res.GetSolution(x)).type(self.dtype) for x in self.x_traj]
-            u_traj_sol = [torch.Tensor(
-                res.GetSolution(u)).type(self.dtype) for u in self.u_traj]
-            dt_traj_sol = [res.GetSolution(dt) for dt in self.dt_traj]
-            dets = res.get_solver_details()
-            result = dict(
-                v=v_val,
-                x_traj=x_traj_sol,
-                u_traj=u_traj_sol,
-                dt_traj=torch.Tensor(dt_traj_sol).type(self.dtype),
-                alpha_traj=alpha_traj_sol,
-                mode_traj=torch.Tensor(self.mode_traj).type(self.dtype),
-                fmul=torch.Tensor(dets.Fmul[1:]).type(self.dtype),
-                xmul=torch.Tensor(dets.xmul).type(self.dtype),
-                )
-            for filt in self.result_filters:
-                if not filt(result):
-                    return(None, None)
-            return(v_val, result)
-        return V
-
     def pts_val_from_result(self, result, pts):
         var = []
         indices = []
@@ -345,6 +302,49 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
         xmul = result['xmul'].detach().numpy()
         xmul[np.abs(xmul) < eps_tol] = 0.
         return np.diag(-np.sign(xmul))
+
+    def get_value_function(self):
+        # alpha solution is always the same for a fixed mode sequence
+        alpha_traj_sol = torch.zeros(
+            (self.num_modes, self.N), dtype=self.dtype)
+        for i in range(len(self.mode_traj)):
+            alpha_traj_sol[self.mode_traj[i], i] = 1.
+        self.initial_guess = np.zeros(self.prog.num_vars())
+        def V(x):
+            assert(isinstance(x, torch.Tensor))
+            dtype = x.dtype
+            x = x.detach().numpy()
+            bb_lo = np.concatenate(
+                [x, -np.inf*np.ones(self.u_dim[self.init_mode]), [-np.inf]])
+            bb_up = np.concatenate(
+                [x, np.inf*np.ones(self.u_dim[self.init_mode]), [np.inf]])
+            self.x0_constraint.evaluator().set_bounds(bb_lo, bb_up)
+            res = self.solver.Solve(self.prog, self.initial_guess, None)
+            if not res.is_success():
+                return(None, None)
+            self.initial_guess = res.get_x_val()
+            v_val = res.get_optimal_cost()
+            x_traj_sol = [torch.Tensor(
+                res.GetSolution(x)).type(self.dtype) for x in self.x_traj]
+            u_traj_sol = [torch.Tensor(
+                res.GetSolution(u)).type(self.dtype) for u in self.u_traj]
+            dt_traj_sol = [res.GetSolution(dt) for dt in self.dt_traj]
+            dets = res.get_solver_details()
+            result = dict(
+                v=v_val,
+                x_traj=x_traj_sol,
+                u_traj=u_traj_sol,
+                dt_traj=torch.Tensor(dt_traj_sol).type(self.dtype),
+                alpha_traj=alpha_traj_sol,
+                mode_traj=torch.Tensor(self.mode_traj).type(self.dtype),
+                fmul=torch.Tensor(dets.Fmul[1:]).type(self.dtype),
+                xmul=torch.Tensor(dets.xmul).type(self.dtype),
+                )
+            for filt in self.result_filters:
+                if not filt(result):
+                    return(None, None)
+            return(v_val, result)
+        return V
 
     def get_differentiable_value_function(self):
         V = self.get_value_function()

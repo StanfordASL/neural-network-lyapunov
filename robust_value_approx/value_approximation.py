@@ -28,12 +28,14 @@ class QuadraticModel(torch.nn.Module):
         else:
             self.c = torch.nn.Parameter(c)
         self.scaling = scaling
+        self.reg = torch.eye(dim) * 1e-6
 
     def forward(self, x):
         if len(x.shape) == 1:
-            return (x@self.Q@x + x@self.q + self.c) * self.scaling
+            return (x@(.5*self.Q.t()@self.Q + self.reg)@x + x@self.q + self.c) * self.scaling
         else:
-            return (torch.sum(x.t()*(self.Q@x.t()), dim=0) + x@self.q + self.c).unsqueeze(1) * self.scaling
+            val = (torch.sum(x.t()*((.5*self.Q.t()@self.Q + self.reg)@x.t()), dim=0) + x@self.q + self.c)
+            return val.unsqueeze(1) * self.scaling
 
 
 class NeuralNetworkModel(torch.nn.Module):

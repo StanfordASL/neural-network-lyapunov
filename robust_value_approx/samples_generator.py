@@ -94,6 +94,38 @@ class RandomSampleGenerator(SampleGenerator):
         return(torch.cat(rand_data, axis=0), torch.cat(rand_label, axis=0))
 
 
+class GridSampleGenerator(SampleGenerator):
+    def generate_samples(self, num_breaks, show_progress=False):
+        """
+        generates a uniformly sampled grid of optimal cost-to-go samples
+        for this value function
+        @param num_breaks the number of points along each axis
+        as a list of integers (of same dimension as x_lo and x_up)
+        @return x_samples a tensor with each row corresponding to an x sample
+        @return v_samples a tensor with each row corresponding to the value
+        associated with the matching row in x_samples
+        """
+        assert(self.x_dim == len(num_breaks))
+        dim_samples = []
+        for i in range(self.x_dim):
+            dim_samples.append(torch.linspace(
+                self.x0_lo[i], self.x0_up[i], num_breaks[i]).type(self.dtype))
+        grid = torch.meshgrid(dim_samples)
+        x_samples_all = torch.cat([g.reshape(-1, 1) for g in grid], axis=1)
+        x_samples = torch.zeros((0, self.x_dim), dtype=self.dtype)
+        v_samples = torch.zeros((0, 1), dtype=self.dtype)
+        for i in range(x_samples_all.shape[0]):
+            x = x_samples_all[i, :]
+            v, res = self.V(x)
+            if v is not None:
+                x_samples = torch.cat((x_samples, x.unsqueeze(0)), axis=0)
+                v_samples = torch.cat(
+                    (v_samples, torch.Tensor([[v]]).type(self.dtype)), axis=0)
+            if show_progress:
+                utils.update_progress((i + 1) / x_samples_all.shape[0])
+        return(x_samples, v_samples)
+
+
 class AdversarialSampleGenerator(SampleGenerator):
     def __init__(self, vf, x0_lo, x0_up,
                  max_iter=10, conv_tol=1e-5, learning_rate=.01, penalty=1e-8):
