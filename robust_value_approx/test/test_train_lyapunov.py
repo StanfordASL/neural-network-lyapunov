@@ -57,6 +57,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             lyapunov_hybrid_system, V_rho, x_equilibrium)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
+        dut.add_adversarial_state_to_training = True
         relu = setup_relu()
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = torch.stack([
@@ -65,8 +66,13 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         torch.manual_seed(0)
         loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost,\
             positivity_sample_loss, derivative_sample_loss,\
-            positivity_mip_loss, derivative_mip_loss =\
-            dut.total_loss(relu, state_samples_all, state_samples_next)
+            positivity_mip_loss, derivative_mip_loss, state_samples_all_new,\
+            state_samples_next_new = dut.total_loss(
+                relu, state_samples_all, state_samples_next)
+        self.assertEqual(
+            state_samples_all.shape[0] + 2, state_samples_all_new.shape[0])
+        self.assertEqual(
+            state_samples_next.shape[0] + 2, state_samples_next_new.shape[0])
         self.assertAlmostEqual(
             loss.item(),
             (positivity_sample_loss + derivative_sample_loss +

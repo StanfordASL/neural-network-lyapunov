@@ -102,6 +102,16 @@ if __name__ == "__main__":
     parser.add_argument(
         '--summary_writer_folder', type=str, default=None,
         help="folder for the tensorboard summary")
+    parser.add_argument(
+        "--lyapunov_positivity_sample_cost_weight", type=float, default=0.)
+    parser.add_argument(
+        "--lyapunov_derivative_sample_cost_weight", type=float, default=0.)
+    parser.add_argument(
+        "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
+    parser.add_argument(
+        "--lyapunov_derivative_mip_cost_weight", type=float, default=1.)
+    parser.add_argument(
+        '--add_adversarial_state_to_training', action="store_true")
     args = parser.parse_args()
 
     theta = args.theta
@@ -168,12 +178,19 @@ if __name__ == "__main__":
     dut.learning_rate = args.learning_rate
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
-    dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_positivity_sample_cost_weight = \
+        args.lyapunov_positivity_sample_cost_weight
+    dut.lyapunov_derivative_sample_cost_weight = \
+        args.lyapunov_derivative_sample_cost_weight
+    dut.add_adversarial_state_to_training = \
+        args.add_adversarial_state_to_training
+    dut.lyapunov_derivative_mip_cost_weight = \
+        args.lyapunov_derivative_mip_cost_weight
     if args.system == 1:
         dut.lyapunov_positivity_mip_cost_weight = 0.
     elif args.system == 2:
-        dut.lyapunov_positivity_mip_cost_weight = 1.
+        dut.lyapunov_positivity_mip_cost_weight = \
+            args.lyapunov_positivity_mip_cost_weight
     dut.lyapunov_positivity_convergence_tol = 1e-5
     if args.system == 1:
         dut.lyapunov_derivative_convergence_tol = 4e-5

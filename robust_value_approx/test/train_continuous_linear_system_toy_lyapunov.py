@@ -111,7 +111,15 @@ if __name__ == "__main__":
         "--momentum", type=float, default=0.,
         help="momentum in SGD and GD")
     parser.add_argument(
+        "--lyapunov_positivity_sample_cost_weight", type=float, default=0.)
+    parser.add_argument(
+        "--lyapunov_derivative_sample_cost_weight", type=float, default=0.)
+    parser.add_argument(
+        "--lyapunov_derivative_mip_cost_weight", type=float, default=1.)
+    parser.add_argument(
         "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
+    parser.add_argument(
+        "--add_adversarial_state_to_training", action="store_true")
     parser.add_argument(
         "--loss_minimal_decrement", type=float, default=None,
         help="check line_search_gd.")
@@ -196,7 +204,8 @@ if __name__ == "__main__":
     dut.learning_rate = args.learning_rate
     dut.lyapunov_positivity_mip_cost_weight = \
         args.lyapunov_positivity_mip_cost_weight
-    dut.lyapunov_derivative_mip_cost_weight = 1.
+    dut.lyapunov_derivative_mip_cost_weight = \
+        args.lyapunov_derivative_mip_cost_weight
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_positivity_epsilon = 0.01
@@ -208,6 +217,8 @@ if __name__ == "__main__":
     dut.momentum = args.momentum
     dut.loss_minimal_decrement = args.loss_minimal_decrement
     dut.min_improvement = args.min_improvement
+    dut.add_adversarial_state_to_training =\
+        args.add_adversarial_state_to_training
     if args.project_gradient_method == "NONE":
         dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.NONE
     elif args.project_gradient_method == "SUM":
@@ -251,8 +262,10 @@ if __name__ == "__main__":
         relu = torch.load(args.load_relu)
 
     # No loss on sampled states. Only use MIP loss.
-    dut.lyapunov_positivity_sample_cost_weight = 0.
-    dut.lyapunov_derivative_sample_cost_weight = 0.
+    dut.lyapunov_positivity_sample_cost_weight = \
+        args.lyapunov_positivity_sample_cost_weight
+    dut.lyapunov_derivative_sample_cost_weight = \
+        args.lyapunov_derivative_sample_cost_weight
     dut.lyapunov_derivative_sample_margin = 0.01
     dut.optimizer = args.optimizer
 
