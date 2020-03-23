@@ -558,3 +558,17 @@ def leaky_relu_interval(negative_slope, x_lo, x_up):
                 return (0., torch.max(negative_slope * x_lo, x_up))
             else:
                 return (0., np.maximum(negative_slope * x_lo, x_up))
+
+
+def project_to_polyhedron(A, b, x):
+    # project x to the polyhedron {y | A * y <= b}.
+    if torch.all(A @ x <= b):
+        return x
+    else:
+        # Find the closest point in A*y<= b to x
+        y = cp.Variable(x.shape[0])
+        objective = cp.Minimize(cp.sum_squares(x.detach().numpy() - y))
+        con = A.detach().numpy() @ y <= b.detach().numpy()
+        prob = cp.Problem(objective, [con])
+        prob.solve()
+        return torch.from_numpy(y.value).type(x.dtype)
