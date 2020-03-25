@@ -218,6 +218,7 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
         if isinstance(u, torch.Tensor):
             u = u.detach().numpy()
         if isinstance(dt, torch.Tensor):
+            dt = dt.reshape(1)
             dt = dt.detach().numpy()
         if isinstance(dt, float):
             dt = np.array([dt])
@@ -225,22 +226,24 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             [c(np.concatenate([x, u, dt])) for c in self.step_costs[n]])
         return cost
 
-    def result_to_costtogo(self, result):
+    def traj_to_costtogo(self, x_traj, u_traj, dt_traj):
         """
         only uses cost that were added using add_step_cost, i.e. that
         are dependent solely on ONE time step (think additive cost)
         """
         N = self.N
-        assert(len(result['x_traj']) == N)
+        assert(len(x_traj) == N)
+        assert(len(u_traj) == N)
+        assert(len(dt_traj) == N)
         cost_to_go = torch.zeros(self.N, dtype=self.dtype)
         for n in range(N):
-            x = result['x_traj'][N-1-n]
-            u = result['u_traj'][N-1-n]
-            dt = result['dt_traj'][N-1-n]
+            x = x_traj[N-1-n]
+            u = u_traj[N-1-n]
+            dt = dt_traj[N-1-n]
             c = self.step_cost(N-1-n, x, u, dt)
             if n > 0:
                 c += cost_to_go[N-1-n+1]
-            cost_to_go[N-1-n] = c 
+            cost_to_go[N-1-n] = c
         return cost_to_go[:-1]
 
     def pts_val_from_result(self, result, pts):
@@ -328,14 +331,22 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
                 res.GetSolution(x)).type(self.dtype) for x in self.x_traj]
             u_traj_sol = [torch.Tensor(
                 res.GetSolution(u)).type(self.dtype) for u in self.u_traj]
-            dt_traj_sol = [res.GetSolution(dt) for dt in self.dt_traj]
+            dt_traj_sol = torch.Tensor([res.GetSolution(dt).item() for dt in self.dt_traj]).type(self.dtype)
+            t_traj = torch.cat((torch.zeros(1, dtype=self.dtype), torch.cumsum(dt_traj_sol[:-1], 0)))
+            t_to_go = dt_traj_sol.clone()
+            for i in range(len(t_to_go)-2, -1, -1):
+                t_to_go[i] += t_to_go[i+1]
+            cost_to_go = self.traj_to_costtogo(x_traj_sol, u_traj_sol, dt_traj_sol)
             dets = res.get_solver_details()
             result = dict(
                 v=v_val,
                 x_traj=x_traj_sol,
                 u_traj=u_traj_sol,
-                dt_traj=torch.Tensor(dt_traj_sol).type(self.dtype),
                 alpha_traj=alpha_traj_sol,
+                dt_traj=dt_traj_sol,
+                t_traj=t_traj,
+                t_to_go=t_to_go,
+                cost_to_go=cost_to_go,
                 mode_traj=torch.Tensor(self.mode_traj).type(self.dtype),
                 fmul=torch.Tensor(dets.Fmul[1:]).type(self.dtype),
                 xmul=torch.Tensor(dets.xmul).type(self.dtype),
@@ -371,7 +382,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         ctx.V = V
         ctx.result = res
         x_traj_flat = torch.cat(res['x_traj'][:-1])
-        cost_to_go = vf.result_to_costtogo(res)
+        cost_to_go = res['cost_to_go']
         return(cost_to_go, x_traj_flat)
 
     @staticmethod
