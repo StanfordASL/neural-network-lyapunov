@@ -244,7 +244,7 @@ class NLPValueFunction(value_to_optimization.ValueFunction):
             if n > 0:
                 c += cost_to_go[N-1-n+1]
             cost_to_go[N-1-n] = c
-        return cost_to_go[:-1]
+        return cost_to_go
 
     def pts_val_from_result(self, result, pts):
         var = []
