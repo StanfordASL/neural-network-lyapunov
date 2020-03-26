@@ -62,54 +62,40 @@ class RandomSampleGenerator(SampleGenerator):
             projected_x0_rand[dim] = self.x0_up[dim]
         return projected_x0_rand
 
-    def generate_samples(self, n, project=False, rollout=False,
+    def generate_samples(self, n, project=False, include_time=False,
                          show_progress=False, warm_start_radius=None):
-        """
-        @param n Integer number of samples
-        @param project Boolean on whether or not to project the sample
-        to a random state/input space limit
-        @return rand_data Tensor with random initial states
-        @return rand_label Tensor with corresponding labels
-        """
-        rand_data = []
-        rand_label = []
-        rand_time = []
-        while len(rand_data) < n:
+        data = []
+        labels = []
+        k = 0
+        while k < n:
             rand_x0 = self.get_random_x0(warm_start_radius=warm_start_radius)
             if project:
                 rand_x0 = self.project_x0(rand_x0)
             v, res = self.V(rand_x0)
             if v is not None:
-                if rollout:
-                    x_traj_flat = torch.cat(res['x_traj'][:-1])
-                    cost_to_go = res['cost_to_go']
-                    t_to_go = res['t_to_go']
+                if include_time:
+                    x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
+                    t_traj = res['t_to_go'].unsqueeze(0).t()
+                    d = torch.cat((t_traj, x_traj), axis=1)
+                    l = res['cost_to_go'].unsqueeze(0).t()
                 else:
-                    x_traj_flat = res['x_traj'][0]
-                    cost_to_go = res['cost_to_go'][0]
-                    t_to_go = res['t_to_go'][0]
-                rand_data.append(x_traj_flat.unsqueeze(0))
-                rand_label.append(cost_to_go.unsqueeze(0))
-                rand_time.append(t_to_go.unsqueeze(0))
+                    d = res['x_traj'][0].unsqueeze(0)
+                    l = res['cost_to_go'][0:1].unsqueeze(0).t()
+                data.append(d)
+                labels.append(l)
+                k += d.shape[0]
                 if show_progress:
-                    utils.update_progress(len(rand_data) / n)
+                    utils.update_progress(k / n)
             else:
                 self.reset_x0()
-        return(torch.cat(rand_data, axis=0), torch.cat(rand_label, axis=0),
-            torch.cat(rand_time, axis=0))
+        data = torch.cat(data, axis=0)
+        labels = torch.cat(labels, axis=0)
+        return(data[:n,:], labels[:n,:])
 
 
 class GridSampleGenerator(SampleGenerator):
-    def generate_samples(self, num_breaks, rollout=False, show_progress=False):
-        """
-        generates a uniformly sampled grid of optimal cost-to-go samples
-        for this value function
-        @param num_breaks the number of points along each axis
-        as a list of integers (of same dimension as x_lo and x_up)
-        @return x_samples a tensor with each row corresponding to an x sample
-        @return v_samples a tensor with each row corresponding to the value
-        associated with the matching row in x_samples
-        """
+    def generate_samples(self, num_breaks, include_time=False,
+                         show_progress=False):
         assert(self.x_dim == len(num_breaks))
         dim_samples = []
         for i in range(self.x_dim):
@@ -117,28 +103,27 @@ class GridSampleGenerator(SampleGenerator):
                 self.x0_lo[i], self.x0_up[i], num_breaks[i]).type(self.dtype))
         grid = torch.meshgrid(dim_samples)
         x_samples_all = torch.cat([g.reshape(-1, 1) for g in grid], axis=1)
-        grid_data = []
-        grid_label = []
-        grid_time = []
+        data = []
+        labels = []
         for i in range(x_samples_all.shape[0]):
             x = x_samples_all[i, :]
             v, res = self.V(x)
             if v is not None:
-                if rollout:
-                    x_traj_flat = torch.cat(res['x_traj'][:-1])
-                    cost_to_go = res['cost_to_go']
-                    t_to_go = res['t_to_go']
+                if include_time:
+                    x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
+                    t_traj = res['t_to_go'].unsqueeze(0).t()
+                    d = torch.cat((t_traj, x_traj), axis=1)
+                    l = res['cost_to_go'].unsqueeze(0).t()
                 else:
-                    x_traj_flat = res['x_traj'][0]
-                    cost_to_go = res['cost_to_go'][0]
-                    t_to_go = res['t_to_go'][0]
-                grid_data.append(x_traj_flat.unsqueeze(0))
-                grid_label.append(cost_to_go.unsqueeze(0))
-                grid_time.append(t_to_go.unsqueeze(0))
+                    d = res['x_traj'][0].unsqueeze(0)
+                    l = res['cost_to_go'][0:1].unsqueeze(0).t()
+                data.append(d)
+                labels.append(l)
                 if show_progress:
-                    utils.update_progress(len(grid_data) / x_samples_all.shape[0])
-        return(torch.cat(grid_data, axis=0), torch.cat(grid_label, axis=0),
-            torch.cat(grid_time, axis=0))
+                    utils.update_progress(len(data) / x_samples_all.shape[0])
+        data = torch.cat(data, axis=0)
+        labels = torch.cat(labels, axis=0)
+        return(data, labels)
 
 
 class AdversarialSampleGenerator(SampleGenerator):
