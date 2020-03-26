@@ -11,6 +11,8 @@ import scipy
 class QuadraticModel(torch.nn.Module):
     def __init__(self, dtype, dim, Q=None, q=None, c=None, scaling=1.):
         super(QuadraticModel, self).__init__()
+        self.dtype = dtype
+        self.dim = dim
         if Q is None:
             Q_init = torch.rand((dim, dim), dtype=dtype)
             Q_init = .5 * Q_init.t()@Q_init
@@ -32,9 +34,11 @@ class QuadraticModel(torch.nn.Module):
 
     def forward(self, x):
         if len(x.shape) == 1:
-            return (x@(.5*self.Q.t()@self.Q + self.reg)@x + x@self.q + self.c) * self.scaling
+            return (x@(.5*self.Q.t()@self.Q + self.reg)@x +\
+                x@self.q + self.c) * self.scaling
         else:
-            val = (torch.sum(x.t()*((.5*self.Q.t()@self.Q + self.reg)@x.t()), dim=0) + x@self.q + self.c)
+            val = (torch.sum(x.t()*((.5*self.Q.t()@self.Q +\
+                self.reg)@x.t()), dim=0) + x@self.q + self.c)
             return val.unsqueeze(1) * self.scaling
 
 
@@ -42,6 +46,8 @@ class NeuralNetworkModel(torch.nn.Module):
     def __init__(self, dtype, dim, nn_width, nn_depth,
                  activation=torch.nn.Tanh, scaling=1.):
         super(NeuralNetworkModel, self).__init__()
+        self.dtype = dtype
+        self.dim = dim
         self.nn_layers = [torch.nn.Linear(dim, nn_width), activation()]
         for i in range(nn_depth):
             self.nn_layers += [torch.nn.Linear(nn_width, nn_width),
@@ -55,111 +61,31 @@ class NeuralNetworkModel(torch.nn.Module):
 
 
 class ValueFunctionApproximation:
-    def __init__(self):
-        raise(NotImplementedError)
-
-
-class InfiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
-    def __init__(self, dtype, x_dim, model,
-                 learning_rate=1e-3, weight_decay=0.):
-        """
-        Contains an approximation for a infinite-horizon value function
-        uses a quadratic model if no neural network parameters are provided
-        """
-        self.dtype = dtype
-        self.x_dim = x_dim
+    def __init__(self, model, learning_rate=1e-3, weight_decay=0.):
+        self.dtype = model.dtype
+        self.dim = model.dim
         self.model = model
         self.optimizer = torch.optim.Adam(self.model.parameters(),
             lr=learning_rate, weight_decay=weight_decay)
 
-    def eval(self, x, n=0):
+    def eval(self, x):
         return self.model(x)
 
-    def train_step(self, x_traj_samples, v_labels):
-        assert(isinstance(x_traj_samples, torch.Tensor))
-        assert(isinstance(v_labels, torch.Tensor))
-        assert(x_traj_samples.shape[1] >= self.x_dim)
+    def train_step(self, samples, labels):
         loss_log = []
-        v_predicted = self.model(x_traj_samples[:, :self.x_dim])
-        loss = torch.nn.functional.mse_loss(
-            v_predicted.squeeze(), v_labels[:, 0])
+        predicted = self.model(samples)
+        loss = torch.nn.functional.mse_loss(predicted.squeeze(), labels[:, 0])
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         loss_log.append(loss.item())
-        return torch.Tensor(loss_log).type(self.dtype)
+        return torch.tensor(loss_log, dtype=self.dtype)
 
-    def validation_loss(self, x_traj_samples, v_labels):
-        assert(isinstance(x_traj_samples, torch.Tensor))
-        assert(isinstance(v_labels, torch.Tensor))
-        assert(x_traj_samples.shape[1] >= self.x_dim)
+    def validation_loss(self, samples, labels):
         loss_log = []
         with torch.no_grad():
-            v_predicted = self.model(x_traj_samples[:, :self.x_dim])
+            predicted = self.model(samples)
             loss = torch.nn.functional.mse_loss(
-                v_predicted.squeeze(), v_labels[:, 0])
+                predicted.squeeze(), labels[:, 0])
             loss_log.append(loss.item())
-        return torch.Tensor(loss_log).type(self.dtype)
-
-
-# class FiniteHorizonValueFunctionApproximation(ValueFunctionApproximation):
-#     def __init__(self, dtype, x_dim, N, nn_width, nn_depth):
-#         """
-#         Contains an approximation for a finite-horizon value function
-#         the last state is the terminal state so there is no "cost-to-go" there.
-#         Therefore a value function of length N should have N-1 models
-#         """
-#         self.N = N
-#         self.x0_lo = x0_lo
-#         self.x0_up = x0_up
-#         self.nn_width = nn_width
-#         self.nn_depth = nn_depth
-#         self.dtype = x0_lo.dtype
-#         self.x_dim = x0_lo.shape[0]
-#         self.models = []
-#         self.optimizers = []
-#         for n in range(self.N-1):
-#             nn_layers = [torch.nn.Linear(self.x_dim, nn_width),
-#                          torch.nn.ReLU()]
-#             for i in range(nn_depth):
-#                 nn_layers += [torch.nn.Linear(nn_width, nn_width),
-#                               torch.nn.ReLU()]
-#             nn_layers += [torch.nn.Linear(nn_width, 1)]
-#             model = torch.nn.Sequential(*nn_layers).double()
-#             self.models.append(model)
-#             self.optimizers.append(torch.optim.Adam(model.parameters()))
-
-#     def eval(self, n, x):
-#         assert(isinstance(x, torch.Tensor))
-#         assert(x.shape[1] == self.x_dim)
-#         return self.models[n](x)
-
-#     def train_step(self, x_traj_samples, v_labels):
-#         assert(isinstance(x_traj_samples, torch.Tensor))
-#         assert(isinstance(v_labels, torch.Tensor))
-#         assert(x_traj_samples.shape[1] == self.x_dim*(self.N-1))
-#         loss_log = []
-#         for n in range(self.N-1):
-#             v_predicted = self.eval(
-#                 n, x_traj_samples[:, n*self.x_dim:(n+1)*self.x_dim])
-#             loss = torch.nn.functional.mse_loss(
-#                 v_predicted.squeeze(), v_labels[:, n])
-#             self.optimizers[n].zero_grad()
-#             loss.backward()
-#             self.optimizers[n].step()
-#             loss_log.append(loss.item())
-#         return torch.Tensor(loss_log).type(self.dtype)
-
-#     def validation_loss(self, x_traj_samples, v_labels):
-#         assert(isinstance(x_traj_samples, torch.Tensor))
-#         assert(isinstance(v_labels, torch.Tensor))
-#         assert(x_traj_samples.shape[1] == self.x_dim*(self.N-1))
-#         loss_log = []
-#         with torch.no_grad():
-#             for n in range(self.N-1):
-#                 v_predicted = self.eval(
-#                     n, x_traj_samples[:, n*self.x_dim:(n+1)*self.x_dim])
-#                 loss = torch.nn.functional.mse_loss(
-#                     v_predicted.squeeze(), v_labels[:, n])
-#                 loss_log.append(loss.item())
-#         return torch.Tensor(loss_log).type(self.dtype)
+        return torch.tensor(loss_log, dtype=self.dtype)
