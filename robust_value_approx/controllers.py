@@ -12,35 +12,6 @@ import scipy
 import jax
 
 
-def get_sampling_infinite_horizon_controller(dx, step_cost, ctrl_model,
-                                             x_lo, x_up,
-                                             u_lo, u_up,
-                                             dt, num_samples):
-    u_dim = u_lo.shape[0]
-    dtype = u_lo.dtype
-    u_lo_np = u_lo.detach().numpy()
-    u_up_np = u_up.detach().numpy()
-    def ctrl(x):
-        x0_np = x.detach().numpy()
-        v_opt = float("Inf")
-        u_opt = None
-        for k in range(num_samples):
-            u = np.random.rand(u_dim) * (u_up_np - u_lo_np) + u_lo_np
-            sim_dyn = lambda t, y: dx(y, u)
-            traj = scipy.integrate.solve_ivp(sim_dyn, (0, dt), x0_np)
-            if traj.success:
-                xn = torch.Tensor(traj.y[:,-1]).type(dtype)
-                if torch.all(xn < x_up) and torch.all(xn > x_lo):
-                    u = torch.Tensor(u).type(dtype)
-                    cost = step_cost(0, x, u, dt)
-                    v = cost + torch.clamp(ctrl_model(xn), 0.)
-                    if v < v_opt:
-                        v_opt = v
-                        u_opt = u
-        return (u_opt, u_opt, None)
-    return ctrl
-
-
 def eigenautodiff_vf_approx(vf_approx, x_numpy):
     if x_numpy.dtype == np.object:
         # x_numpy is an numpy array of autodiff scalars.
@@ -60,26 +31,46 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy):
         return torch.clamp(vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
 def get_limited_lookahead_controller(vf, vf_approx=None):
+    """
+    WARNING this function modifies the value function!!!
+    """
     assert(isinstance(vf, value_to_optimization.ValueFunction))
     if vf_approx is not None:
-        assert(isinstance(
-            vf_approx, value_approximation.ValueFunctionApproximation))
+        assert(isinstance(vf_approx, value_approximation.ValueFunctionApproximation))
+        t0 = vf.prog.NewContinuousVariables(1, "t0")
+        t0_con = vf.prog.AddBoundingBoxConstraint(0, 0, t0)
+        tf = vf.prog.NewContinuousVariables(1, "tf")
+        tf_con = vf.prog.AddConstraint((t0 + np.sum(vf.dt_traj) - tf)[0] == 0.)
         xf = vf.x_traj[-1]
-        vf.prog.AddCost(
-            lambda x: eigenautodiff_vf_approx(vf_approx, x)[0], vars=xf)
-    V = vf.get_value_function()
-    def ctrl(x):
-        assert(isinstance(x, torch.Tensor))
-        v, res = V(x)
-        if v is not None:
-            u0 = res['u_traj'][0]
-            u1 = res['u_traj'][1]
-            x1 = res['x_traj'][1]
-        else:
-            u0 = None
-            u1 = None
-            x1 = None
-        return(u0, u1, x1)
+        vf.prog.AddCost(lambda x: eigenautodiff_vf_approx(vf_approx, x)[0], vars=np.concatenate([tf, xf]))
+        V = vf.get_value_function()
+        def ctrl(t, x):
+            assert(isinstance(x, torch.Tensor))
+            t0_con.evaluator().set_bounds(np.array([t]), np.array([t]))
+            v, res = V(x)
+            if v is not None:
+                u0 = res['u_traj'][0]
+                u1 = res['u_traj'][1]
+                x1 = res['x_traj'][1]
+            else:
+                u0 = None
+                u1 = None
+                x1 = None
+            return(u0, u1, x1)
+    else:
+        V = vf.get_value_function()
+        def ctrl(t, x):
+            assert(isinstance(x, torch.Tensor))
+            v, res = V(x)
+            if v is not None:
+                u0 = res['u_traj'][0]
+                u1 = res['u_traj'][1]
+                x1 = res['x_traj'][1]
+            else:
+                u0 = None
+                u1 = None
+                x1 = None
+            return(u0, u1, x1)
     return ctrl
 
 
@@ -105,7 +96,7 @@ def get_lqr_controller(dx, x0, u0, Q, R, u_min, u_max):
         R = R.detach().numpy()
     K, S, E = lqr(A, B, Q, R)
     K = torch.Tensor(K).type(dtype)
-    def ctrl(x):
+    def ctrl(t, x):
         assert(isinstance(x, torch.Tensor))  
         u = -K@(x - x0) + u0
         u = torch.max(torch.min(u, u_max), u_min)
@@ -121,7 +112,7 @@ def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
     for n in range(N-1):
         x0_np = x_traj[-1][:,-1]
         t0 = t_traj[-1][-1]
-        u0, u1, _ = ctrl(torch.Tensor(x0_np).type(dtype))
+        u0, u1, _ = ctrl(t0, torch.Tensor(x0_np).type(dtype))
         if u0 is not None:
             u0 = u0.detach().numpy()
             u1 = u1.detach().numpy()
