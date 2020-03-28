@@ -83,14 +83,14 @@ class RandomSampleGenerator(SampleGenerator):
                     l = res['cost_to_go'][0:1].unsqueeze(0).t()
                 data.append(d)
                 labels.append(l)
-                k += d.shape[0]
+                k += 1
                 if show_progress:
                     utils.update_progress(k / n)
             else:
                 self.reset_x0()
         data = torch.cat(data, axis=0)
         labels = torch.cat(labels, axis=0)
-        return(data[:n,:], labels[:n,:])
+        return(data, labels)
 
 
 class GridSampleGenerator(SampleGenerator):
@@ -160,14 +160,14 @@ class AdversarialSampleGenerator(SampleGenerator):
                 l = cost_to_go
                 data.append(d)
                 labels.append(l)
-                k += d.shape[0]
+                k += len(eps)
                 if show_progress:
                     utils.update_progress(k / n)
             else:
                 self.reset_x0()
         data = torch.cat(data, axis=0)
         labels = torch.cat(labels, axis=0)
-        return(data[:n,:], labels[:n,:])
+        return(data, labels)
 
     def optimize_sample(self, value_approx,
                         x_adv0=None, max_iter=None,
