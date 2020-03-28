@@ -379,19 +379,18 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         ctx.success = True
         ctx.x = x
         ctx.vf = vf
-        ctx.V = V
         ctx.result = res
-        x_traj_flat = torch.cat(res['x_traj'][:-1])
-        cost_to_go = res['cost_to_go']
-        return(cost_to_go, x_traj_flat)
+        v = torch.tensor([v], dtype=x.dtype)
+        x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
+        t_traj = res['t_traj'].unsqueeze(0).t()
+        cost_to_go = res['cost_to_go'].unsqueeze(0).t()
+        return(v, x_traj, t_traj, cost_to_go)
 
     @staticmethod
-    def backward(ctx, grad_output_cost_to_go, grad_output_x_traj_flat):
-        """
-        for now only supports one gradient
-        """
-        assert(torch.all(grad_output_cost_to_go[1:] == 0.))
-        assert(torch.all(grad_output_x_traj_flat == 0.))
+    def backward(ctx, doutdv, doutdx_traj, doutdt_traj, doutdcost_to_go):
+        assert(torch.all(doutdx_traj == 0.))
+        assert(torch.all(doutdt_traj == 0.))
+        assert(torch.all(doutdcost_to_go == 0.))
         if not ctx.success:
             grad_input = torch.ones(
                 ctx.x.shape, dtype=ctx.x.dtype)*float('nan')
@@ -422,5 +421,5 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         z = torch.inverse(lhs + 1e-12*torch.eye(lhs.shape[0]))@rhs
         dxdp = z[:vf.prog.num_vars(), :]
         dfdp = torch.Tensor(dfdx).type(dtype)@dxdp
-        grad_input = (grad_output_cost_to_go[0] * dfdp.unsqueeze(0)).squeeze()
+        grad_input = (doutdv * dfdp.unsqueeze(0)).squeeze()
         return(grad_input, None, None)

@@ -49,7 +49,7 @@ def get_value_function(N):
         fun_jax = lambda x: sys.quad_cost(
             x, Q=Q, R=R, x_desired=x_desired, arraylib=jax.numpy)
         vf.add_step_cost(n, fun, fun_jax)
-    Qt = np.diag([100., 10.])
+    Qt = np.diag([1., .1])
     Rt = np.diag([.01])
     fun = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=np)

@@ -10,6 +10,8 @@ import copy
 import numpy as np
 import scipy
 import jax
+import plotly
+import plotly.graph_objs as go
 
 
 def eigenautodiff_vf_approx(vf_approx, x_numpy):
@@ -155,3 +157,16 @@ def benchmark_controller(u_dim, dx, ctrl, x0, x0_eps, num_breaks, x_goal,
             xf = x_traj_sim[:, -1]
             bench[i,j] = torch.norm(xf - x_goal).item()
     return bench
+
+
+def plot_sim(t_traj, x_traj, title=""):
+    fig = go.Figure()
+    for i in range(x_traj.shape[0]):
+        fig.add_trace(go.Scatter(
+            x=t_traj,
+            y=x_traj[i,:]
+        ))
+    fig.update_layout(
+        title=title,
+    )
+    return fig
