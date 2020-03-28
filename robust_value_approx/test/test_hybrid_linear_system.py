@@ -119,6 +119,7 @@ def setup_xu_system(box_half_length=1.):
         torch.tensor([0, 0, box_half_length], dtype=dtype))
     return system
 
+
 def setup_xu_system2(box_half_length=1.):
     """
     This is example 2 of
@@ -146,6 +147,7 @@ def setup_xu_system2(box_half_length=1.):
         torch.tensor([[-1, 1], [1, 1], [0, -1]], dtype=dtype),
         torch.tensor([0, 0, box_half_length], dtype=dtype))
     return system
+
 
 def setup_johansson_continuous_time_system1(box_half_length=1.):
     """
