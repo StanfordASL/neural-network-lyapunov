@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 
 import argparse
+import time
 
 
 def setup_relu(
@@ -128,10 +129,14 @@ if __name__ == "__main__":
         system = test_hybrid_linear_system.setup_xu_system(1.)
         system_simulate = test_hybrid_linear_system.setup_xu_system(5.)
         relu = setup_relu((2, 8, 4), bias=False)
+    elif args.system == 3:
+        system = test_hybrid_linear_system.setup_xu_system2(1.)
+        system_simulate = test_hybrid_linear_system.setup_xu_system(5.)
+        relu = setup_relu((2, 8, 8), bias=False)
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
-    V_rho = 0.1
+    V_rho = 0.
 
     x_lower = torch.tensor([-1 + 1e-6, -1 + 1e-6], dtype=torch.float64)
     x_upper = torch.tensor([1 - 1e-6, 1 - 1e-6], dtype=torch.float64)
@@ -148,16 +153,16 @@ if __name__ == "__main__":
             lambda x: torch.norm(x - x_equilibrium, p=1),
             state_samples_all1, 100, True)
         print(f"value function approximation error {result1[1]}")
-    elif args.system == 2:
+    elif args.system == 2 or args.system == 3:
         if args.load_relu is None:
             if args.load_cost_to_go_data is None:
                 state_samples_cost_to_go = train_2d_lyapunov_utils.\
-                    setup_state_samples_all(
+                    setup_state_samples_on_boundary(
                         x_equilibrium, x_lower, x_upper, (21, 21), theta)
                 result1 = approximator.train(
                     system_simulate, relu, V_rho, x_equilibrium,
                     lambda x: 0.02 * torch.norm(x - x_equilibrium, p=1),
-                    state_samples_all1, 1000, True, x_equilibrium,
+                    state_samples_all1, 3000, True, x_equilibrium,
                     lambda x: torch.norm(x - x_equilibrium, 1) < 0.01 and
                     torch.any(x - x_equilibrium <= x_lower) and
                     torch.any(x - x_equilibrium >= x_upper))
@@ -188,7 +193,7 @@ if __name__ == "__main__":
         args.lyapunov_derivative_mip_cost_weight
     if args.system == 1:
         dut.lyapunov_positivity_mip_cost_weight = 0.
-    elif args.system == 2:
+    elif args.system == 2 or args.system == 3:
         dut.lyapunov_positivity_mip_cost_weight = \
             args.lyapunov_positivity_mip_cost_weight
     dut.lyapunov_positivity_convergence_tol = 1e-5
@@ -196,13 +201,18 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_convergence_tol = 4e-5
     elif args.system == 2:
         dut.lyapunov_derivative_convergence_tol = 8e-5
+    elif args.system == 3:
+        dut.lyapunov_derivative_convergence_tol = 1e-4
+        dut.lyapunov_derivative_epsilon = 1e-5
     dut.summary_writer_folder = args.summary_writer_folder
     if (args.visualize):
         train_2d_lyapunov_utils.plot_relu(
             relu, system, V_rho, dut.lyapunov_positivity_epsilon,
             dut.lyapunov_derivative_epsilon, x_equilibrium, x_lower, x_upper,
             (51, 51), theta, discrete_time=True)
+    start_time = time.time()
     result = dut.train(relu, state_samples_all)
+    print(f"training time {time.time()-start_time}s")
 
     if args.save_model is not None:
         lyapunov = {
