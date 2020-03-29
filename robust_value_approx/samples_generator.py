@@ -246,7 +246,7 @@ class AdversarialSampleGenerator(SampleGenerator):
         if len(epsilon_buff) == 0:
             return None, None, None, None
         epsilon_buff = torch.tensor(epsilon_buff, dtype=self.dtype)
-        x_traj_buff = torch.cat(x_traj_buff, axis=0)
-        t_traj_buff = torch.cat(t_traj_buff, axis=0)
-        cost_to_go_buff = torch.cat(cost_to_go_buff, axis=0)
+        x_traj_buff = torch.cat(x_traj_buff, axis=0).detach()
+        t_traj_buff = torch.cat(t_traj_buff, axis=0).detach()
+        cost_to_go_buff = torch.cat(cost_to_go_buff, axis=0).detach()
         return epsilon_buff, x_traj_buff, t_traj_buff, cost_to_go_buff
