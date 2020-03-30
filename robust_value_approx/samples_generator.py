@@ -75,8 +75,8 @@ class RandomSampleGenerator(SampleGenerator):
             if v is not None:
                 if include_time:
                     x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
-                    t_traj = res['t_traj'].unsqueeze(0).t()
-                    d = torch.cat((t_traj, x_traj), axis=1)
+                    t_to_go = res['t_to_go'].unsqueeze(0).t()
+                    d = torch.cat((t_to_go, x_traj), axis=1)
                     l = res['cost_to_go'].unsqueeze(0).t()
                 else:
                     d = res['x_traj'][0].unsqueeze(0)
@@ -111,8 +111,8 @@ class GridSampleGenerator(SampleGenerator):
             if v is not None:
                 if include_time:
                     x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
-                    t_traj = res['t_traj'].unsqueeze(0).t()
-                    d = torch.cat((t_traj, x_traj), axis=1)
+                    t_to_go = res['t_to_go'].unsqueeze(0).t()
+                    d = torch.cat((t_to_go, x_traj), axis=1)
                     l = res['cost_to_go'].unsqueeze(0).t()
                 else:
                     d = res['x_traj'][0].unsqueeze(0)
@@ -149,12 +149,12 @@ class AdversarialSampleGenerator(SampleGenerator):
         while k < n:
             max_iter = min(self.max_iter, n - k)
             x_adv0 = self.get_random_x0(warm_start_radius=warm_start_radius)
-            eps, x_traj, t_traj, cost_to_go = self.optimize_sample(
+            eps, x_traj, t_to_go, cost_to_go = self.optimize_sample(
                 value_approx, x_adv0=x_adv0,
                 max_iter=max_iter, include_time=include_time)
             if eps is not None:
                 if include_time:
-                    d = torch.cat((t_traj, x_traj), axis=1)
+                    d = torch.cat((t_to_go, x_traj), axis=1)
                 else:
                     d = x_traj
                 l = cost_to_go
@@ -213,10 +213,10 @@ class AdversarialSampleGenerator(SampleGenerator):
         optimizer = torch.optim.Adam([x_adv_params], lr=self.learning_rate)
         epsilon_buff = []
         x_traj_buff = []
-        t_traj_buff = []
+        t_to_go_buff = []
         cost_to_go_buff = []
         for i in range(max_iter):
-            v, x_traj, t_traj, cost_to_go = self.V_with_grad(x_adv)
+            v, x_traj, t_to_go, cost_to_go = self.V_with_grad(x_adv)
             if v is None:
                 break
             if include_time:
@@ -228,11 +228,11 @@ class AdversarialSampleGenerator(SampleGenerator):
             epsilon_buff.append(epsilon.detach().item())
             if include_time:
                 x_traj_buff.append(x_traj)
-                t_traj_buff.append(t_traj)
+                t_to_go_buff.append(t_to_go)
                 cost_to_go_buff.append(cost_to_go)
             else:
                 x_traj_buff.append(x_traj[0:1, :])
-                t_traj_buff.append(t_traj[0:1, :])
+                t_to_go_buff.append(t_to_go[0:1, :])
                 cost_to_go_buff.append(cost_to_go[0:1, :])
             if i == (max_iter-1):
                 break
@@ -247,6 +247,6 @@ class AdversarialSampleGenerator(SampleGenerator):
             return None, None, None, None
         epsilon_buff = torch.tensor(epsilon_buff, dtype=self.dtype)
         x_traj_buff = torch.cat(x_traj_buff, axis=0).detach()
-        t_traj_buff = torch.cat(t_traj_buff, axis=0).detach()
+        t_to_go_buff = torch.cat(t_to_go_buff, axis=0).detach()
         cost_to_go_buff = torch.cat(cost_to_go_buff, axis=0).detach()
-        return epsilon_buff, x_traj_buff, t_traj_buff, cost_to_go_buff
+        return epsilon_buff, x_traj_buff, t_to_go_buff, cost_to_go_buff

@@ -14,7 +14,9 @@ import plotly
 import plotly.graph_objs as go
 
 
-def eigenautodiff_vf_approx(vf_approx, x_numpy):
+def eigenautodiff_vf_approx(vf_approx, x_numpy, first_is_time=False):
+    if first_is_time:
+        x_numpy[0] = np.maximum(x_numpy[0], 0.)
     if x_numpy.dtype == np.object:
         # x_numpy is an numpy array of autodiff scalars.
         x_val = autoDiffToValueMatrix(x_numpy)
@@ -30,35 +32,57 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy):
         return y_numpy
     else:
         # x is an eigen vector of doubles
-        return torch.clamp(vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
+        return torch.clamp(
+            vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
-def get_limited_lookahead_controller(vf, vf_approx=None):
+def get_limited_lookahead_controller(vf, vf_approx=None, final_time=None):
     """
     WARNING this function modifies the value function!!!
     """
     assert(isinstance(vf, value_to_optimization.ValueFunction))
     if vf_approx is not None:
-        assert(isinstance(vf_approx, value_approximation.ValueFunctionApproximation))
-        t0 = vf.prog.NewContinuousVariables(1, "t0")
-        t0_con = vf.prog.AddBoundingBoxConstraint(0, 0, t0)
-        tf = vf.prog.NewContinuousVariables(1, "tf")
-        tf_con = vf.prog.AddConstraint((t0 + np.sum(vf.dt_traj) - tf)[0] == 0.)
-        xf = vf.x_traj[-1]
-        vf.prog.AddCost(lambda x: eigenautodiff_vf_approx(vf_approx, x)[0], vars=np.concatenate([tf, xf]))
-        V = vf.get_value_function()
-        def ctrl(t, x):
-            assert(isinstance(x, torch.Tensor))
-            t0_con.evaluator().set_bounds(np.array([t]), np.array([t]))
-            v, res = V(x)
-            if v is not None:
-                u0 = res['u_traj'][0]
-                u1 = res['u_traj'][1]
-                x1 = res['x_traj'][1]
-            else:
-                u0 = None
-                u1 = None
-                x1 = None
-            return(u0, u1, x1)
+        assert(isinstance(
+            vf_approx, value_approximation.ValueFunctionApproximation))
+        if final_time is not None:
+            t0 = vf.prog.NewContinuousVariables(1, "t0")
+            t0_con = vf.prog.AddBoundingBoxConstraint(0, 0, t0)
+            t_to_go = vf.prog.NewContinuousVariables(1, "t_to_go")
+            t_to_go_con = vf.prog.AddConstraint(
+                (final_time - t0 - np.sum(vf.dt_traj) - t_to_go)[0] == 0.)
+            xf = vf.x_traj[-1]
+            vf.prog.AddCost(lambda x: eigenautodiff_vf_approx(vf_approx, x,
+                first_is_time=True)[0], vars=np.concatenate([t_to_go, xf]))
+            V = vf.get_value_function()
+            def ctrl(t, x):
+                assert(isinstance(x, torch.Tensor))
+                t0_con.evaluator().set_bounds(np.array([t]), np.array([t]))
+                v, res = V(x)
+                if v is not None:
+                    u0 = res['u_traj'][0]
+                    u1 = res['u_traj'][1]
+                    x1 = res['x_traj'][1]
+                else:
+                    u0 = None
+                    u1 = None
+                    x1 = None
+                return(u0, u1, x1)
+        else:
+            xf = vf.x_traj[-1]
+            vf.prog.AddCost(lambda x: eigenautodiff_vf_approx(vf_approx, x,
+                first_is_time=False)[0], vars=xf)
+            V = vf.get_value_function()
+            def ctrl(t, x):
+                assert(isinstance(x, torch.Tensor))
+                v, res = V(x)
+                if v is not None:
+                    u0 = res['u_traj'][0]
+                    u1 = res['u_traj'][1]
+                    x1 = res['x_traj'][1]
+                else:
+                    u0 = None
+                    u1 = None
+                    x1 = None
+                return(u0, u1, x1)
     else:
         V = vf.get_value_function()
         def ctrl(t, x):

@@ -382,9 +382,9 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         ctx.result = res
         v = torch.tensor([v], dtype=x.dtype)
         x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
-        t_traj = res['t_traj'].unsqueeze(0).t()
+        t_to_go = res['t_to_go'].unsqueeze(0).t()
         cost_to_go = res['cost_to_go'].unsqueeze(0).t()
-        return(v, x_traj, t_traj, cost_to_go)
+        return(v, x_traj, t_to_go, cost_to_go)
 
     @staticmethod
     def backward(ctx, doutdv, doutdx_traj, doutdt_traj, doutdcost_to_go):
