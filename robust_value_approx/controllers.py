@@ -29,9 +29,13 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy, first_is_time=False):
         dy_dz = dy_dx @ dx_dz
         y_numpy = initializeAutoDiffGivenGradientMatrix(
             y.detach().numpy().reshape(1,-1), dy_dz.reshape(1,-1))
+        if x_numpy[0] <= 0:
+            y_numpy *= 0.
         return y_numpy
     else:
         # x is an eigen vector of doubles
+        if x_numpy[0] <= 0:
+            return np.zeros(1)
         return torch.clamp(
             vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
@@ -130,7 +134,7 @@ def get_lqr_controller(dx, x0, u0, Q, R, u_min, u_max):
     return ctrl, S
 
 
-def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
+def sim_ctrl(x0, u_dim, dx, ctrl, dt, N, integration_mode="foh"):
     assert(isinstance(x0, torch.Tensor))
     dtype = x0.dtype
     x_traj = [x0.unsqueeze(1).detach().numpy()]
@@ -145,6 +149,14 @@ def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
         else:
             u0 = np.zeros(u_dim)
             u1 = np.zeros(u_dim)
+        if integration_mode == "backward":
+            u0 = np.array(u1)
+        elif integration_mode == "forward":
+            u1 = np.array(u0)
+        elif integration_mode == "foh":
+            pass
+        else:
+            raise(NotImplementedError)
         def sim_dyn(t, y):
             if u0 is not None:
                 s = (t - t0)/dt
@@ -165,7 +177,7 @@ def sim_ctrl(x0, u_dim, dx, ctrl, dt, N):
 
 
 def benchmark_controller(u_dim, dx, ctrl, x0, x0_eps, num_breaks, x_goal, 
-                         dt, N, dim1=0, dim2=1):
+                         dt, N, dim1=0, dim2=1, integration_mode="foh"):
     dtype = x0.dtype
     x_dim1 = torch.linspace(x0[dim1] - x0_eps[dim1],
         x0[dim1] + x0_eps[dim1], num_breaks[0])
@@ -177,7 +189,8 @@ def benchmark_controller(u_dim, dx, ctrl, x0, x0_eps, num_breaks, x_goal,
             x0_ = x0.clone()
             x0_[dim1] = x_dim1[i]
             x0_[dim2] = x_dim2[j]
-            x_traj_sim, t_traj_sim = sim_ctrl(x0_, u_dim, dx, ctrl, dt, N)
+            x_traj_sim, t_traj_sim = sim_ctrl(
+                x0_, u_dim, dx, ctrl, dt, N, integration_mode)
             xf = x_traj_sim[:, -1]
             bench[i,j] = torch.norm(xf - x_goal).item()
     return bench

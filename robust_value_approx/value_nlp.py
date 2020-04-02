@@ -375,6 +375,8 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         if v is None:
             ctx.success = False
             return(torch.tensor([np.nan], dtype=x.dtype), 
+                torch.tensor([np.nan], dtype=x.dtype),
+                torch.tensor([np.nan], dtype=x.dtype),
                 torch.tensor([np.nan], dtype=x.dtype))
         ctx.success = True
         ctx.x = x

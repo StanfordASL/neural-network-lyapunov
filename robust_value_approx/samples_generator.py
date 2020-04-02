@@ -217,7 +217,7 @@ class AdversarialSampleGenerator(SampleGenerator):
         cost_to_go_buff = []
         for i in range(max_iter):
             v, x_traj, t_to_go, cost_to_go = self.V_with_grad(x_adv)
-            if v is None:
+            if torch.isnan(v).all():
                 break
             if include_time:
                 tx = torch.cat((torch.zeros(1, dtype=self.dtype), x_adv))
