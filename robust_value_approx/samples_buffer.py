@@ -9,6 +9,7 @@ class SamplesBuffer:
         self.max_size = max_size
         self.x_samples = torch.Tensor(0, samples_dim).type(dtype)
         self.v_labels = torch.Tensor(0, labels_dim).type(dtype)
+        self.current_sample = 0
 
     def add_samples(self, new_x_samples, new_v_labels):
         """
@@ -38,6 +39,12 @@ class SamplesBuffer:
                                    replace=False)
         return indices
 
+    def get_next_sample_indices(self, num_indices):
+        indices = np.arange(self.current_sample, self.current_sample + num_indices)
+        indices %= self.num_samples
+        self.current_sample = indices[-1] + 1
+        return indices
+
     def get_samples_from_indices(self, indices):
         """
         @return tuple of tensor of the (samples, labels) corresponding to
@@ -50,6 +57,13 @@ class SamplesBuffer:
         @return a tuple with (random samples, random labels)
         """
         indices = self.get_random_sample_indices(num_rand_samples)
+        return self.get_samples_from_indices(indices)
+
+    def get_next_samples(self, num_next_samples):
+        """
+        @return a tuple with (next samples, next labels)
+        """
+        indices = self.get_next_sample_indices(num_next_samples)
         return self.get_samples_from_indices(indices)
 
     @property

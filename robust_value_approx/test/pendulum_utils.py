@@ -12,8 +12,8 @@ class Pendulum(nonlinear_system.NonlinearSystem):
         self.m = 1.
         self.b = .5
         self.I = self.m*self.l**2
-        self.x_lo = [torch.Tensor([-1e9, -1e9]).type(dtype)]
-        self.x_up = [torch.Tensor([1e9, 1e9]).type(dtype)]
+        self.x_lo = [torch.Tensor([-10, -10]).type(dtype)]
+        self.x_up = [torch.Tensor([10, 10]).type(dtype)]
         self.u_lo = [torch.Tensor([-100.]).type(dtype)]
         self.u_up = [torch.Tensor([100.]).type(dtype)]
         self.g = 9.81
@@ -35,13 +35,13 @@ class Pendulum(nonlinear_system.NonlinearSystem):
 
 def get_value_function(N):
     sys = Pendulum(torch.float64)
-    dt_lo = .2
-    dt_up = .2
+    dt_lo = .1
+    dt_up = .1
     vf = value_nlp.NLPValueFunction(
         sys.x_lo, sys.x_up, sys.u_lo, sys.u_up, dt_lo, dt_up)
     vf.add_segment(N-1, sys.dyn, lambda x: sys.dyn(x, arraylib=jax.numpy))
-    Q = np.diag([1., .1])
-    R = np.diag([.01])
+    Q = np.diag([1., 1.])
+    R = np.diag([.1])
     x_desired = np.array([np.pi, 0.])
     for n in range(vf.N-1):
         fun = lambda x: sys.quad_cost(
@@ -49,8 +49,8 @@ def get_value_function(N):
         fun_jax = lambda x: sys.quad_cost(
             x, Q=Q, R=R, x_desired=x_desired, arraylib=jax.numpy)
         vf.add_step_cost(n, fun, fun_jax)
-    Qt = np.diag([1., .1])
-    Rt = np.diag([.01])
+    Qt = np.diag([1., 1.])
+    Rt = np.diag([.1])
     fun = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=np)
     fun_jax = lambda x: sys.quad_cost(
