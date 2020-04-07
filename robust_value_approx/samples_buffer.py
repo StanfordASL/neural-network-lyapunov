@@ -24,10 +24,10 @@ class SamplesBuffer:
         if (self.max_size is not None and
                 self.num_samples + num_new_samples > self.max_size):
             num_extra = self.max_size - num_new_samples
-            self.x_samples = self.x_samples[num_extra:, :]
-            self.v_labels = self.v_labels[num_extra:, :]
-        self.x_samples = torch.cat((self.x_samples, new_x_samples), axis=0)
-        self.v_labels = torch.cat((self.v_labels, new_v_labels), axis=0)
+            self.x_samples = self.x_samples[:-num_extra, :]
+            self.v_labels = self.v_labels[:-num_extra, :]
+        self.x_samples = torch.cat((new_x_samples, self.x_samples), axis=0)
+        self.v_labels = torch.cat((new_v_labels, self.v_labels), axis=0)
 
     def get_random_sample_indices(self, num_indices):
         """
