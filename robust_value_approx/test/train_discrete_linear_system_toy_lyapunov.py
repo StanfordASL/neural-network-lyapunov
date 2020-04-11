@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 
 import argparse
+
 import time
 
 
@@ -205,11 +206,6 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_convergence_tol = 1e-4
         dut.lyapunov_derivative_epsilon = 1e-5
     dut.summary_writer_folder = args.summary_writer_folder
-    if (args.visualize):
-        train_2d_lyapunov_utils.plot_relu(
-            relu, system, V_rho, dut.lyapunov_positivity_epsilon,
-            dut.lyapunov_derivative_epsilon, x_equilibrium, x_lower, x_upper,
-            (51, 51), theta, discrete_time=True)
     start_time = time.time()
     result = dut.train(relu, state_samples_all)
     print(f"training time {time.time()-start_time}s")
@@ -223,8 +219,3 @@ if __name__ == "__main__":
             "lyapunov_positivity_epsilon": dut.lyapunov_positivity_epsilon,
             "lyapunov_derivative_epsilon": dut.lyapunov_derivative_epsilon}
         torch.save(lyapunov, args.save_model)
-    if (args.visualize):
-        train_2d_lyapunov_utils.plot_relu(
-            relu, system, V_rho, dut.lyapunov_positivity_epsilon,
-            dut.lyapunov_derivative_epsilon, x_equilibrium, x_lower, x_upper,
-            (51, 51), theta, discrete_time=True)
