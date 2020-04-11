@@ -10,6 +10,7 @@ import torch.nn as nn
 import numpy as np
 
 import argparse
+import time
 
 import matplotlib.pyplot as plt
 from matplotlib import cm # noqa
@@ -129,6 +130,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     bias = False
+    keep_symmetric_half = True
     if args.system == 1:
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1()
@@ -138,13 +140,15 @@ if __name__ == "__main__":
         relu = setup_relu((2, 4, 2), bias=bias)
     elif args.system == 2:
         system = test_hybrid_linear_system.\
-            setup_johansson_continuous_time_system2(keep_symmetric_half=True)
+            setup_johansson_continuous_time_system2(
+                keep_symmetric_half=keep_symmetric_half)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system2(
                 10, keep_symmetric_half=False)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
         relu = setup_relu(
-            (2, 8, 4), negative_gradient=0.1, bias=bias, symmetric_x=True)
+            (2, 4, 4, 4, 4, 4), negative_gradient=0.1, bias=bias,
+            symmetric_x=True)
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
@@ -283,7 +287,9 @@ if __name__ == "__main__":
     if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
         result = dut.train_with_line_search(relu, state_samples)
     else:
+        start_time = time.time()
         result = dut.train(relu, state_samples)
+        print(f"training time: {time.time()-start_time}s")
     if args.visualize:
         fig = plt.figure()
         ax1 = fig.add_subplot(3, 1, 1)
