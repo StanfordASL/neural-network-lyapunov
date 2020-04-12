@@ -58,21 +58,33 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.add_adversarial_state_to_training = True
+        dut.max_sample_pool_size = 400
         relu = setup_relu()
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = torch.stack([
             system.step_forward(state_samples_all[i]) for i in
             range(state_samples_all.shape[0])])
         torch.manual_seed(0)
+        positivity_state_samples = state_samples_all.clone()
+        derivative_state_samples = state_samples_all.clone()
+        derivative_state_samples_next = state_samples_next.clone()
         loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost,\
             positivity_sample_loss, derivative_sample_loss,\
-            positivity_mip_loss, derivative_mip_loss, state_samples_all_new,\
-            state_samples_next_new = dut.total_loss(
-                relu, state_samples_all, state_samples_next)
+            positivity_mip_loss, derivative_mip_loss,\
+            positivity_state_samples_new, derivative_state_samples_new,\
+            derivative_state_samples_next_new = dut.total_loss(
+                relu, positivity_state_samples, derivative_state_samples,
+                state_samples_next)
+
         self.assertEqual(
-            state_samples_all.shape[0] + 2, state_samples_all_new.shape[0])
+            positivity_state_samples.shape[0] + 1,
+            positivity_state_samples_new.shape[0])
         self.assertEqual(
-            state_samples_next.shape[0] + 2, state_samples_next_new.shape[0])
+            derivative_state_samples.shape[0] + 1,
+            derivative_state_samples_new.shape[0])
+        self.assertEqual(
+            derivative_state_samples_next.shape[0] + 1,
+            derivative_state_samples_next_new.shape[0])
         self.assertAlmostEqual(
             loss.item(),
             (positivity_sample_loss + derivative_sample_loss +
@@ -83,13 +95,14 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
                 relu, relu_at_equilibrium, x_equilibrium,
-                state_samples_all, V_rho,
+                state_samples_all[-dut.max_sample_pool_size:], V_rho,
                 dut.lyapunov_positivity_sample_margin)
         loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
                 relu, V_rho, dut.lyapunov_derivative_epsilon,
-                state_samples_all, state_samples_next, x_equilibrium,
+                state_samples_all[-dut.max_sample_pool_size:],
+                state_samples_next[-dut.max_sample_pool_size:], x_equilibrium,
                 dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
