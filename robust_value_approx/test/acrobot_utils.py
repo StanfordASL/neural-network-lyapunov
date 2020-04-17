@@ -65,15 +65,17 @@ class Acrobot(nonlinear_system.NonlinearSystem):
         return self.plot_result_named(result, names)
 
 
-def get_value_function(N, dt, dtype):
+def get_value_function(N, dt, dtype, Q=None, R=None):
     sys = Acrobot(torch.float64)
     dt_lo = dt
     dt_up = dt
     vf = value_nlp.NLPValueFunction(
         sys.x_lo, sys.x_up, sys.u_lo, sys.u_up, dt_lo, dt_up)
     vf.add_segment(N-1, sys.dyn, lambda x: sys.dyn(x, arraylib=jax.numpy))
-    Q = np.diag([.1, .1, .1, .1])
-    R = np.diag([.01])
+    if Q is None:
+        Q = np.diag([.5, .5, .1, .1])
+    if R is None:
+        R = np.diag([.01])
     x_desired = np.array([np.pi, 0., 0., 0.])
     cost_exp = 0
     for n in range(vf.N-1):
@@ -84,8 +86,8 @@ def get_value_function(N, dt, dtype):
             x, Q=Q * (n+1)**cost_exp, R=R, x_desired=x_desired,
             arraylib=jax.numpy)
         vf.add_step_cost(n, fun, fun_jax)
-    Qt = np.diag([.1, .1, .1, .1]) * vf.N**cost_exp
-    Rt = np.diag([.01])
+    Qt = Q
+    Rt = R
     fun = lambda x: sys.quad_cost(
         x, Q=Qt, R=Rt, x_desired=x_desired, arraylib=np)
     fun_jax = lambda x: sys.quad_cost(

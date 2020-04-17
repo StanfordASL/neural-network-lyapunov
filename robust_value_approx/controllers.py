@@ -45,13 +45,6 @@ def get_learned_policy_controller(policy_approx, final_time=None, dt=None):
     if final_time is not None:
         assert(dt is not None)
         def ctrl(t, x):
-
-
-
-            t = 0.
-            
-
-
             assert(isinstance(t, float))
             assert(isinstance(x, torch.Tensor))
             t_to_go0 = max(final_time - t, 0.)
