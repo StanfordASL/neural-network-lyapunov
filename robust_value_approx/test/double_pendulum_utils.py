@@ -64,10 +64,10 @@ class DoublePendulum(nonlinear_system.NonlinearSystem):
         return self.plot_result_named(result, names)
 
 
-def get_value_function(N):
+def get_value_function(N, dt, dtype):
     sys = DoublePendulum(torch.float64)
-    dt_lo = .1
-    dt_up = .1
+    dt_lo = dt
+    dt_up = dt
     vf = value_nlp.NLPValueFunction(
         sys.x_lo, sys.x_up, sys.u_lo, sys.u_up, dt_lo, dt_up)
     vf.add_segment(N-1, sys.dyn, lambda x: sys.dyn(x, arraylib=jax.numpy))

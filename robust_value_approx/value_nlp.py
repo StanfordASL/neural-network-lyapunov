@@ -377,6 +377,7 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
             return(torch.tensor([np.nan], dtype=x.dtype), 
                 torch.tensor([np.nan], dtype=x.dtype),
                 torch.tensor([np.nan], dtype=x.dtype),
+                torch.tensor([np.nan], dtype=x.dtype),
                 torch.tensor([np.nan], dtype=x.dtype))
         ctx.success = True
         ctx.x = x
@@ -386,13 +387,16 @@ class DiffFiniteHorizonNLPValueFunction(torch.autograd.Function):
         x_traj = torch.cat([x.unsqueeze(0) for x in res['x_traj']], axis=0)
         t_to_go = res['t_to_go'].unsqueeze(0).t()
         cost_to_go = res['cost_to_go'].unsqueeze(0).t()
-        return(v, x_traj, t_to_go, cost_to_go)
+        u_traj = torch.cat([u.unsqueeze(0) for u in res['u_traj']], axis=0)
+        return(v, x_traj, t_to_go, cost_to_go, u_traj)
 
     @staticmethod
-    def backward(ctx, doutdv, doutdx_traj, doutdt_traj, doutdcost_to_go):
+    def backward(ctx, doutdv, doutdx_traj, 
+                 doutdt_traj, doutdcost_to_go, doutdu_traj):
         assert(torch.all(doutdx_traj == 0.))
         assert(torch.all(doutdt_traj == 0.))
         assert(torch.all(doutdcost_to_go == 0.))
+        assert(torch.all(doutdu_traj == 0.))
         if not ctx.success:
             grad_input = torch.ones(
                 ctx.x.shape, dtype=ctx.x.dtype)*float('nan')

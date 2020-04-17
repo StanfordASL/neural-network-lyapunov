@@ -44,7 +44,7 @@ class QuadraticModel(torch.nn.Module):
 
 class NeuralNetworkModel(torch.nn.Module):
     def __init__(self, dtype, dim, nn_width, nn_depth,
-                 activation=torch.nn.Tanh, scaling=1.):
+                 activation=torch.nn.Tanh, scaling=1., dim_out=1):
         super(NeuralNetworkModel, self).__init__()
         self.dtype = dtype
         self.dim = dim
@@ -52,7 +52,7 @@ class NeuralNetworkModel(torch.nn.Module):
         for i in range(nn_depth):
             self.nn_layers += [torch.nn.Linear(nn_width, nn_width),
                                activation()]
-        self.nn_layers += [torch.nn.Linear(nn_width, 1)]
+        self.nn_layers += [torch.nn.Linear(nn_width, dim_out)]
         self.nn = torch.nn.Sequential(*self.nn_layers).type(dtype)
         self.scaling = scaling
 
@@ -60,7 +60,7 @@ class NeuralNetworkModel(torch.nn.Module):
         return self.nn(x) * self.scaling
 
 
-class ValueFunctionApproximation:
+class FunctionApproximation:
     def __init__(self, model, learning_rate=1e-3, weight_decay=0.):
         self.dtype = model.dtype
         self.dim = model.dim
@@ -74,7 +74,7 @@ class ValueFunctionApproximation:
     def train_step(self, samples, labels):
         loss_log = []
         predicted = self.model(samples)
-        loss = torch.nn.functional.mse_loss(predicted.squeeze(), labels[:, 0])
+        loss = torch.nn.functional.mse_loss(predicted, labels)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -85,7 +85,6 @@ class ValueFunctionApproximation:
         loss_log = []
         with torch.no_grad():
             predicted = self.model(samples)
-            loss = torch.nn.functional.mse_loss(
-                predicted.squeeze(), labels[:, 0])
+            loss = torch.nn.functional.mse_loss(predicted, labels)
             loss_log.append(loss.item())
         return torch.tensor(loss_log, dtype=self.dtype)

@@ -39,6 +39,34 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy, first_is_time=False):
         return torch.clamp(
             vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
+
+def get_learned_policy_controller(policy_approx, final_time=None, dt=None):
+    assert(isinstance(policy_approx, value_approximation.FunctionApproximation))
+    if final_time is not None:
+        assert(dt is not None)
+        def ctrl(t, x):
+
+
+
+            t = 0.
+            
+
+
+            assert(isinstance(t, float))
+            assert(isinstance(x, torch.Tensor))
+            t_to_go0 = max(final_time - t, 0.)
+            u0 = policy_approx.eval(torch.cat([torch.tensor([t_to_go0],
+                dtype=policy_approx.dtype), x]))
+            # TODO: u1 should use x1, which is integrated from x0 and u0
+            t_to_go1 = max(final_time - t - dt, 0.)
+            u1 = policy_approx.eval(torch.cat([torch.tensor([t_to_go1],
+                dtype=policy_approx.dtype), x]))
+            return(u0, u1, None)
+    else:
+        raise(NotImplementedError)
+    return ctrl
+
+
 def get_limited_lookahead_controller(vf, vf_approx=None, final_time=None):
     """
     WARNING this function modifies the value function!!!
@@ -46,7 +74,7 @@ def get_limited_lookahead_controller(vf, vf_approx=None, final_time=None):
     assert(isinstance(vf, value_to_optimization.ValueFunction))
     if vf_approx is not None:
         assert(isinstance(
-            vf_approx, value_approximation.ValueFunctionApproximation))
+            vf_approx, value_approximation.FunctionApproximation))
         if final_time is not None:
             t0 = vf.prog.NewContinuousVariables(1, "t0")
             t0_con = vf.prog.AddBoundingBoxConstraint(0, 0, t0)
@@ -180,10 +208,10 @@ def benchmark_controller(u_dim, dx, ctrl, x0, x0_eps, num_breaks, x_goal,
                          dt, N, dim1=0, dim2=1, integration_mode="foh"):
     dtype = x0.dtype
     x_dim1 = torch.linspace(x0[dim1] - x0_eps[dim1],
-        x0[dim1] + x0_eps[dim1], num_breaks[0])
+        x0[dim1] + x0_eps[dim1], num_breaks[dim1])
     x_dim2 = torch.linspace(x0[dim2] - x0_eps[dim2],
-        x0[dim2] + x0_eps[dim2], num_breaks[1])
-    bench = torch.zeros((num_breaks[0], num_breaks[1]), dtype=dtype)
+        x0[dim2] + x0_eps[dim2], num_breaks[dim2])
+    bench = torch.zeros((num_breaks[dim1], num_breaks[dim2]), dtype=dtype)
     for i in range(len(x_dim1)):
         for j in range(len(x_dim2)):
             x0_ = x0.clone()
