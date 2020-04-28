@@ -9,7 +9,7 @@ import scipy
 
 
 class QuadraticModel(torch.nn.Module):
-    def __init__(self, dtype, dim, Q=None, q=None, c=None, scaling=1.):
+    def __init__(self, dtype, dim, Q=None, q=None, c=None):
         super(QuadraticModel, self).__init__()
         self.dtype = dtype
         self.dim = dim
@@ -29,22 +29,21 @@ class QuadraticModel(torch.nn.Module):
             self.c = torch.nn.Parameter(c_init)
         else:
             self.c = torch.nn.Parameter(c)
-        self.scaling = scaling
         self.reg = torch.eye(dim) * 1e-6
 
     def forward(self, x):
         if len(x.shape) == 1:
             return (x@(.5*self.Q.t()@self.Q + self.reg)@x +\
-                x@self.q + self.c) * self.scaling
+                x@self.q + self.c)
         else:
             val = (torch.sum(x.t()*((.5*self.Q.t()@self.Q +\
                 self.reg)@x.t()), dim=0) + x@self.q + self.c)
-            return val.unsqueeze(1) * self.scaling
+            return val.unsqueeze(1)
 
 
 class NeuralNetworkModel(torch.nn.Module):
     def __init__(self, dtype, dim, nn_width, nn_depth,
-                 activation=torch.nn.Tanh, scaling=1., dim_out=1):
+                 activation=torch.nn.Tanh, dim_out=1):
         super(NeuralNetworkModel, self).__init__()
         self.dtype = dtype
         self.dim = dim
@@ -54,10 +53,9 @@ class NeuralNetworkModel(torch.nn.Module):
                                activation()]
         self.nn_layers += [torch.nn.Linear(nn_width, dim_out)]
         self.nn = torch.nn.Sequential(*self.nn_layers).type(dtype)
-        self.scaling = scaling
 
     def forward(self, x):
-        return self.nn(x) * self.scaling
+        return self.nn(x)
 
 
 class FunctionApproximation:

@@ -75,7 +75,7 @@ def get_value_function(N, dt, dtype, Q=None, R=None):
     if Q is None:
         Q = np.diag([.5, .5, .1, .1])
     if R is None:
-        R = np.diag([.01])
+        R = np.diag([.001])
     x_desired = np.array([np.pi, 0., 0., 0.])
     cost_exp = 0
     for n in range(vf.N-1):

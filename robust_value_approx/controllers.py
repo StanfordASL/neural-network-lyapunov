@@ -40,23 +40,39 @@ def eigenautodiff_vf_approx(vf_approx, x_numpy, first_is_time=False):
             vf_approx.eval(torch.from_numpy(x_numpy)), 0.).detach().numpy()
 
 
-def get_learned_policy_controller(policy_approx, final_time=None, dt=None):
+def get_learned_policy_controller(dx, policy_approx,
+                                  final_time=None, dt=None,
+                                  x_offset=0., x_scale=1., u_offset=0., u_scale=1.):
     assert(isinstance(policy_approx, value_approximation.FunctionApproximation))
     if final_time is not None:
         assert(dt is not None)
+        def next_x(x0, u):
+            x0_np = x0.detach().numpy()
+            u_np = u.detach().numpy()
+            traj = scipy.integrate.solve_ivp(lambda t, y: dx(y, u_np), (0, dt), x0_np)
+            return torch.tensor(traj.y[:,-1], dtype=policy_approx.dtype)
         def ctrl(t, x):
             assert(isinstance(t, float))
             assert(isinstance(x, torch.Tensor))
             t_to_go0 = max(final_time - t, 0.)
-            u0 = policy_approx.eval(torch.cat([torch.tensor([t_to_go0],
-                dtype=policy_approx.dtype), x]))
-            # TODO: u1 should use x1, which is integrated from x0 and u0
+            model_input = torch.cat([torch.tensor([t_to_go0], dtype=policy_approx.dtype), x])
+            model_input = (model_input - x_offset) / x_scale
+            u0 = policy_approx.eval(model_input)
+            u0 = (u0 * u_scale) + u_offset
             t_to_go1 = max(final_time - t - dt, 0.)
-            u1 = policy_approx.eval(torch.cat([torch.tensor([t_to_go1],
-                dtype=policy_approx.dtype), x]))
+            x1 = next_x(x, u0)
+            model_input1 = torch.cat([torch.tensor([t_to_go1], dtype=policy_approx.dtype), x1])
+            model_input1 = (model_input1 - x_offset) / x_scale
+            u1 = policy_approx.eval(model_input1)
+            u1 = (u1 * u_scale) + u_offset
             return(u0, u1, None)
     else:
-        raise(NotImplementedError)
+        def ctrl(t, x):
+            assert(isinstance(x, torch.Tensor))
+            x = (x - x_offset) / x_scale
+            u0 = policy_approx.eval(x)
+            u0 = (u0 * u_scale) + u_offset
+            return(u0, u0, None)
     return ctrl
 
 
