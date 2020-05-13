@@ -69,7 +69,7 @@ def get_learned_policy_controller(dx, policy_approx,
     else:
         def ctrl(t, x):
             assert(isinstance(x, torch.Tensor))
-            x = (x - x_offset) / x_scale
+            x = (x - x_offset) / (x_scale + 1e-5)
             u0 = policy_approx.eval(x)
             u0 = (u0 * u_scale) + u_offset
             return(u0, u0, None)

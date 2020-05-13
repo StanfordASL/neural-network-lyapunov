@@ -43,18 +43,25 @@ class QuadraticModel(torch.nn.Module):
 
 class NeuralNetworkModel(torch.nn.Module):
     def __init__(self, dtype, dim, nn_width, nn_depth,
-                 activation=torch.nn.Tanh, dim_out=1):
+                 activation=torch.nn.Tanh, dim_out=1, out_lo=None, out_up=None):
         super(NeuralNetworkModel, self).__init__()
         self.dtype = dtype
         self.dim = dim
+        self.out_lo = out_lo
+        self.out_up = out_up
         self.nn_layers = [torch.nn.Linear(dim, nn_width), activation()]
         for i in range(nn_depth):
             self.nn_layers += [torch.nn.Linear(nn_width, nn_width),
                                activation()]
-        self.nn_layers += [torch.nn.Linear(nn_width, dim_out)]
+        if out_lo is not None and out_up is not None:
+            self.nn_layers += [torch.nn.Linear(nn_width, dim_out), torch.nn.Sigmoid()]
+        else:
+            self.nn_layers += [torch.nn.Linear(nn_width, dim_out)]
         self.nn = torch.nn.Sequential(*self.nn_layers).type(dtype)
 
     def forward(self, x):
+        if self.out_lo is not None and self.out_up is not None:
+            return self.nn(x) * (self.out_up - self.out_lo) + self.out_lo
         return self.nn(x)
 
 
