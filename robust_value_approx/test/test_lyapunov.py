@@ -10,6 +10,7 @@ import robust_value_approx.lyapunov as lyapunov
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.relu_system as relu_system
 import robust_value_approx.utils as utils
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -101,6 +102,44 @@ def setup_leaky_relu(dtype, params=None, bias=True):
     relu = nn.Sequential(
         linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3)
     return relu
+
+
+def setup_relu_dyn(dtype, params=None):
+    # Construct a simple ReLU model with 2 hidden layers
+    # params is the value of weights/bias after concatenation.
+    # the network has the same number of outputs as inputs (2)
+    if params is not None:
+        assert(isinstance(params, torch.Tensor))
+        assert(params.shape == (35,))
+    linear1 = nn.Linear(2, 3)
+    if params is None:
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=dtype)
+        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
+    else:
+        linear1.weight.data = params[:6].clone().reshape((3, 2))
+        linear1.bias.data = params[6:9].clone()
+    linear2 = nn.Linear(3, 4)
+    if params is None:
+        linear2.weight.data = torch.tensor(
+                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+                dtype=dtype)
+        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
+    else:
+        linear2.weight.data = params[9:21].clone().reshape((4, 3))
+        linear2.bias.data = params[21:25].clone()
+    linear3 = nn.Linear(4, 2)
+    if params is None:
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]], dtype=dtype)
+        linear3.bias.data = torch.tensor([-9, 3], dtype=dtype)
+    else:
+        linear3.weight.data = params[25:33].clone().reshape((2, 4))
+        linear3.bias.data = params[33:35].clone().reshape((2))
+    relu1 = nn.Sequential(
+        linear1, nn.ReLU(), linear2, nn.ReLU(), linear3)
+    assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype))[0].item() == 0)
+    assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype))[1].item() == 0)
+    return relu1
 
 
 class TestLyapunovHybridSystem(unittest.TestCase):
@@ -1782,6 +1821,119 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 relu_param.detach().numpy())
             np.testing.assert_allclose(
                 grad, grad_numerical.squeeze(), atol=1e-7)
+
+
+class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
+
+    def setUp(self):
+        self.dtype = torch.float64
+        self.x_equilibrium1 = torch.tensor([0, 0], dtype=self.dtype)
+        self.relu_dyn = setup_relu_dyn(self.dtype)
+        self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
+        self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
+        self.system1 = relu_system.ReLUSystem(2, self.dtype,
+            self.x_lo, self.x_up, self.relu_dyn)
+
+    def test_lyapunov_derivative_as_milp(self):
+        """
+        Test lyapunov_derivative_as_milp without bounds on V(x[n])
+        """
+        dut1 = lyapunov.LyapunovDiscreteTimeReLUSystem(self.system1)
+
+        relu1 = setup_leaky_relu(self.dtype)
+        relu2 = setup_relu(self.dtype)
+        V_rho = 2.
+        dV_epsilon = 0.1
+
+        def test_milp(dut, x_equilibrium, relu):
+            (milp, x, beta, gamma, x_next, s, z, z_next, beta_next) =\
+                dut.lyapunov_derivative_as_milp(
+                    relu, self.relu_dyn, x_equilibrium, V_rho, dV_epsilon)
+            # First solve this MILP. The solution has to satisfy that
+            # x_next = Ai * x + g_i where i is the active mode inferred from
+            # gamma.
+            # milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            milp.gurobi_model.optimize()
+            if (milp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE):
+                milp.gurobi_model.computeIIS()
+                milp.gurobi_model.write("milp.ilp")
+            self.assertEqual(
+                milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+            x_sol = np.array([var.x for var in x])
+            x_next_sol = np.array([var.x for var in x_next])
+            np.testing.assert_array_almost_equal(
+                self.system1.step_forward(torch.tensor(x_sol, dtype=self.dtype),
+                    self.relu_dyn).detach().numpy(),
+                x_next_sol, decimal=5)
+            v_next = dut.lyapunov_value(
+                relu, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
+            v = dut.lyapunov_value(
+                relu, torch.from_numpy(x_sol), x_equilibrium, V_rho)
+            self.assertAlmostEqual(
+                milp.gurobi_model.objVal,
+                (v_next - v + dV_epsilon * v).item())
+
+        test_milp(dut1, self.x_equilibrium1, relu1)
+        test_milp(dut1, self.x_equilibrium1, relu2)
+
+        # Now solve MILP to optimal for system1 and system2
+        milp1 = dut1.lyapunov_derivative_as_milp(
+                relu1, self.relu_dyn, self.x_equilibrium1, V_rho, dV_epsilon)[0]
+        milp1.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+        milp1.gurobi_model.optimize()
+        milp_optimal_cost1 = milp1.gurobi_model.ObjVal
+        milp2 = dut1.lyapunov_derivative_as_milp(
+                relu2, self.relu_dyn, self.x_equilibrium1, V_rho, dV_epsilon)[0]
+        milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+        milp2.gurobi_model.optimize()
+        milp_optimal_cost2 = milp2.gurobi_model.ObjVal
+
+        # Now test reformulating
+        # ReLU(x[n+1]) + ρ|x[n+1]-x*|₁ - ReLU(x[n]) - ρ|x[n]-x*|₁ +
+        # epsilon * (Relu(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁) as a
+        # mixed-integer linear program. We fix x[n] to some value, compute the
+        # cost function of the MILP, and then check if it is the same as
+        # evaluating the ReLU network on x[n] and x[n+1]
+        def test_milp_cost(dut, relu, x_val, x_equilibrium, milp_optimal_cost):
+            x_next_val = self.system1.step_forward(x_val, self.relu_dyn)
+            v_next = dut.lyapunov_value(
+                relu, x_next_val, x_equilibrium, V_rho)
+            v = dut.lyapunov_value(relu, x_val, x_equilibrium, V_rho)
+            cost_expected = (v_next - v + dV_epsilon * v).item()
+            (milp_test, x_test, _, _, _, _, _, _, _) =\
+                dut.lyapunov_derivative_as_milp(
+                    relu, self.relu_dyn, x_equilibrium, V_rho, dV_epsilon)
+            for i in range(dut.system.x_dim):
+                milp_test.addLConstr(
+                    [torch.tensor([1.], dtype=milp_test.dtype)], [[x_test[i]]],
+                    rhs=x_val[i], sense=gurobipy.GRB.EQUAL)
+            milp_test.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            milp_test.gurobi_model.optimize()
+            self.assertEqual(milp_test.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(cost_expected,
+                                   milp_test.gurobi_model.objVal)
+            # milp_test solves the problem with fixed x[n], so it should
+            # achieve less optimal cost than milp1 or milp2.
+            self.assertLessEqual(milp_test.gurobi_model.objVal,
+                                 milp_optimal_cost)
+
+        # Now test with random x[n]
+        torch.manual_seed(0)
+        np.random.seed(0)
+
+        def sample_state():
+            while True:
+                x_val = torch.rand(self.system1.x_dim, dtype=self.dtype) * (self.system1.x_up - self.system1.x_lo) + self.system1.x_lo
+                x_val_next = self.system1.step_forward(x_val, self.relu_dyn)
+                if torch.all(x_val_next <= self.system1.x_up) and torch.all(x_val_next >= self.system1.x_lo):
+                    return x_val
+
+        for _ in range(20):
+            x_val = sample_state()
+            test_milp_cost(dut1, relu1, x_val, self.x_equilibrium1, milp_optimal_cost1)
+            test_milp_cost(dut1, relu2, x_val, self.x_equilibrium1, milp_optimal_cost2)
 
 
 if __name__ == "__main__":

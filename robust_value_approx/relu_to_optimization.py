@@ -366,13 +366,18 @@ class ReLUFreePattern:
                     # This is for the output layer when the output layer
                     # doesn't have a ReLU unit.
                     assert(not self.last_layer_is_relu)
-                    a_out = torch.zeros((self.num_relu_units,),
-                                        dtype=self.dtype)
-                    for k in range(len(self.relu_unit_index[layer_count - 1])):
-                        a_out[self.relu_unit_index[layer_count - 1][k]] =\
-                            layer.weight[0][k]
-                    b_out = layer.bias[0] if layer.bias is not None else \
-                        torch.tensor(0., dtype=self.dtype)
+                    if layer.out_features > 1:
+                        a_out = torch.zeros((layer.out_features, self.num_relu_units), dtype=self.dtype)
+                        b_out = torch.zeros((layer.out_features,), dtype=self.dtype)
+                        for j in range(layer.out_features):
+                            for k in range(len(self.relu_unit_index[layer_count - 1])):
+                                a_out[j, self.relu_unit_index[layer_count - 1][k]] = layer.weight[j][k]
+                            b_out[j] = layer.bias[j] if layer.bias is not None else torch.tensor(0., dtype=self.dtype)
+                    else:
+                        a_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
+                        for k in range(len(self.relu_unit_index[layer_count - 1])):
+                            a_out[self.relu_unit_index[layer_count - 1][k]] = layer.weight[0][k]
+                        b_out = layer.bias[0] if layer.bias is not None else torch.tensor(0., dtype=self.dtype)
 
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.
@@ -518,6 +523,8 @@ class ReLUFreePattern:
 
                 layer_count += 1
         if self.last_layer_is_relu:
+            # TODO: implement multiple relu ouputs (not really needed)
+            assert(model[-2].out_features == 1)
             a_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
             a_out[-1] = 1
             b_out = 0
@@ -567,7 +574,10 @@ class ReLUFreePattern:
                                 " only supports linear, relu or leaky relu " +
                                 "units.")
         # The output layer
-        output = z_layer.item()
+        if len(z_layer) <= 1:
+            output = z_layer.item()
+        else:
+            output = z_layer.squeeze()
 
         return (z, beta, output)
 

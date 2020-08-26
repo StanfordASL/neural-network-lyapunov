@@ -55,6 +55,13 @@ class TestReLU(unittest.TestCase):
             self.linear1_no_bias, self.leaky_relus[0], self.linear2_no_bias,
             self.leaky_relus[1], self.linear3_no_bias)
 
+        # Model with multiple outputs, normal relu
+        self.model6 = nn.Sequential(
+            self.linear1, nn.ReLU(), self.linear2)
+        # Model with multiple outputs, leaky relu
+        self.model7 = nn.Sequential(
+            self.linear1, self.leaky_relus[0], self.linear2)
+
     def test_compute_relu_activation_pattern1(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
         activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
@@ -341,9 +348,15 @@ class TestReLU(unittest.TestCase):
                         z_opt_var, z.squeeze().detach().numpy())
                     np.testing.assert_array_almost_equal(
                         beta_opt_var, beta.squeeze().detach().numpy())
-                    self.assertAlmostEqual(
-                        (a_out @ z.squeeze() + b_out).item(),
-                        model.forward(x).item())
+                    if len(a_out.shape) > 1:
+                        out_opt = a_out @ z.squeeze() + b_out
+                        output = model.forward(x)
+                        for k in range(len(output)):
+                            self.assertAlmostEqual(output[k], out_opt[k], 3)
+                    else:
+                        self.assertAlmostEqual(
+                            (a_out @ z.squeeze() + b_out).item(),
+                            model.forward(x).item())
                 else:
                     self.assertEqual(prob.status, "infeasible")
 
@@ -367,7 +380,12 @@ class TestReLU(unittest.TestCase):
                 np.testing.assert_array_less(
                     z_post_relu_lo_numpy - 1E-10, z.squeeze().detach().numpy())
                 # Check the output
-                self.assertAlmostEqual(output, (a_out.T @ z + b_out).item(), 3)
+                if isinstance(output, torch.Tensor):
+                    out_opt = a_out @ z.squeeze() + b_out
+                    for k in range(len(output)):
+                        self.assertAlmostEqual(output[k], out_opt[k], 3)
+                else:
+                    self.assertAlmostEqual(output, (a_out.T @ z + b_out).item(), 3)
                 x_vec = x.reshape((-1, 1))
                 lhs_in = Ain1 @ x_vec + Ain2 @z + Ain3 @ beta
                 lhs_eq = Aeq1 @ x_vec + Aeq2 @z + Aeq3 @ beta
@@ -423,6 +441,8 @@ class TestReLU(unittest.TestCase):
         test_model(self.model3)
         test_model(self.model4)
         test_model(self.model5)
+        test_model(self.model6)
+        test_model(self.model7)
 
     def test_compute_alpha_index1(self):
         relu_free_pattern = relu_to_optimization.\
