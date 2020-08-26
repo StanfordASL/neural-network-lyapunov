@@ -1463,7 +1463,7 @@ class LyapunovDiscreteTimeReLUSystem(LyapunovHybridLinearSystem):
         milp.addMConstrs(
             [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s,
              -Aout_gamma], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
-             b=Cout)
+            b=Cout)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).

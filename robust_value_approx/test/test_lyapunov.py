@@ -130,7 +130,8 @@ def setup_relu_dyn(dtype, params=None):
         linear2.bias.data = params[21:25].clone()
     linear3 = nn.Linear(4, 2)
     if params is None:
-        linear3.weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]], dtype=dtype)
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]],
+                                           dtype=dtype)
         linear3.bias.data = torch.tensor([-9, 3], dtype=dtype)
     else:
         linear3.weight.data = params[25:33].clone().reshape((2, 4))
@@ -1832,7 +1833,8 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
         self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
         self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
         self.system1 = relu_system.ReLUSystem(2, self.dtype,
-            self.x_lo, self.x_up, self.relu_dyn)
+                                              self.x_lo, self.x_up,
+                                              self.relu_dyn)
 
     def test_lyapunov_derivative_as_milp(self):
         """
@@ -1863,7 +1865,8 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
             x_sol = np.array([var.x for var in x])
             x_next_sol = np.array([var.x for var in x_next])
             np.testing.assert_array_almost_equal(
-                self.system1.step_forward(torch.tensor(x_sol, dtype=self.dtype),
+                self.system1.step_forward(torch.tensor(
+                                    x_sol, dtype=self.dtype),
                     self.relu_dyn).detach().numpy(),
                 x_next_sol, decimal=5)
             v_next = dut.lyapunov_value(
@@ -1879,12 +1882,14 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
 
         # Now solve MILP to optimal for system1 and system2
         milp1 = dut1.lyapunov_derivative_as_milp(
-                relu1, self.relu_dyn, self.x_equilibrium1, V_rho, dV_epsilon)[0]
+                relu1, self.relu_dyn,
+                self.x_equilibrium1, V_rho, dV_epsilon)[0]
         milp1.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp1.gurobi_model.optimize()
         milp_optimal_cost1 = milp1.gurobi_model.ObjVal
         milp2 = dut1.lyapunov_derivative_as_milp(
-                relu2, self.relu_dyn, self.x_equilibrium1, V_rho, dV_epsilon)[0]
+                relu2, self.relu_dyn,
+                self.x_equilibrium1, V_rho, dV_epsilon)[0]
         milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp2.gurobi_model.optimize()
         milp_optimal_cost2 = milp2.gurobi_model.ObjVal
@@ -1925,15 +1930,19 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
 
         def sample_state():
             while True:
-                x_val = torch.rand(self.system1.x_dim, dtype=self.dtype) * (self.system1.x_up - self.system1.x_lo) + self.system1.x_lo
+                x_val = torch.rand(self.system1.x_dim, dtype=self.dtype) * (
+                  self.system1.x_up - self.system1.x_lo) + self.system1.x_lo
                 x_val_next = self.system1.step_forward(x_val, self.relu_dyn)
-                if torch.all(x_val_next <= self.system1.x_up) and torch.all(x_val_next >= self.system1.x_lo):
+                if (torch.all(x_val_next <= self.system1.x_up) and torch.all(
+                  x_val_next >= self.system1.x_lo)):
                     return x_val
 
         for _ in range(20):
             x_val = sample_state()
-            test_milp_cost(dut1, relu1, x_val, self.x_equilibrium1, milp_optimal_cost1)
-            test_milp_cost(dut1, relu2, x_val, self.x_equilibrium1, milp_optimal_cost2)
+            test_milp_cost(dut1, relu1, x_val, self.x_equilibrium1,
+                           milp_optimal_cost1)
+            test_milp_cost(dut1, relu2, x_val, self.x_equilibrium1,
+                           milp_optimal_cost2)
 
 
 if __name__ == "__main__":

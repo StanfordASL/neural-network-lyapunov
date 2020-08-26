@@ -367,17 +367,31 @@ class ReLUFreePattern:
                     # doesn't have a ReLU unit.
                     assert(not self.last_layer_is_relu)
                     if layer.out_features > 1:
-                        a_out = torch.zeros((layer.out_features, self.num_relu_units), dtype=self.dtype)
-                        b_out = torch.zeros((layer.out_features,), dtype=self.dtype)
+                        a_out = torch.zeros((layer.out_features,
+                                            self.num_relu_units),
+                                            dtype=self.dtype)
+                        b_out = torch.zeros((layer.out_features,),
+                                            dtype=self.dtype)
                         for j in range(layer.out_features):
-                            for k in range(len(self.relu_unit_index[layer_count - 1])):
-                                a_out[j, self.relu_unit_index[layer_count - 1][k]] = layer.weight[j][k]
-                            b_out[j] = layer.bias[j] if layer.bias is not None else torch.tensor(0., dtype=self.dtype)
+                            for k in range(len(
+                               self.relu_unit_index[layer_count - 1])):
+                                a_out[j, self.relu_unit_index[layer_count - 1][
+                                  k]] = layer.weight[j][k]
+                            if layer.bias is not None:
+                                b_out[j] = layer.bias[j]
+                            else:
+                                b_out[j] = torch.tensor(0., dtype=self.dtype)
                     else:
-                        a_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
-                        for k in range(len(self.relu_unit_index[layer_count - 1])):
-                            a_out[self.relu_unit_index[layer_count - 1][k]] = layer.weight[0][k]
-                        b_out = layer.bias[0] if layer.bias is not None else torch.tensor(0., dtype=self.dtype)
+                        a_out = torch.zeros((self.num_relu_units,),
+                                            dtype=self.dtype)
+                        for k in range(len(
+                          self.relu_unit_index[layer_count - 1])):
+                            a_out[self.relu_unit_index[layer_count - 1][k]] =\
+                              layer.weight[0][k]
+                        if layer.bias is not None:
+                            b_out = layer.bias[0]
+                        else:
+                            b_out = torch.tensor(0., dtype=self.dtype)
 
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.
