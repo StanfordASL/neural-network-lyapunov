@@ -256,7 +256,7 @@ class ReLUFreePattern:
         We will write the constraint in a more concise way
         Ain1 * x + Ain2 * z + Ain3 * β <= rhs_in  (case 1)
         Aeq1 * x + Aeq2 * z + Aeq3 * β = rhs_eq   (case 2 and 3)
-        ReLU(x) = aₒᵤₜᵀz + bₒᵤₜ
+        ReLU(x) = Aₒᵤₜ*z + bₒᵤₜ
         where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
         β = [β₀; β₁; ...; βₙ₋₁].
         @param model A ReLU network. This network must have the same structure
@@ -264,11 +264,12 @@ class ReLUFreePattern:
         different).
         @param x_lo A 1-D vector, the lower bound of input x.
         @param x_up A 1-D vector, the upper bound of input x.
-        @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
+        @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
         b_out, z_pre_relu_lo, z_pre_relu_up)
-        Ain1, Ain2, Ain3, Aeq1, Aeq2, Aeq3 are matrices, rhs_in, rhs_eq, a_out
-        column vectors, b_out is a scalar. z_pre_relu_lo and z_pre_relu_up are
-        1-D vectors.
+        Ain1, Ain2, Ain3, Aeq1, Aeq2, Aeq3, A_out are matrices, rhs_in, rhs_eq,
+        b_out column vectors. z_pre_relu_lo and z_pre_relu_up are 1-D vectors.
+        When the output is a scalar, then A_out is a vector, and b_out is a
+        scalar.
         Notice that z_pre_relu_lo[i] and z_pre_relu_up[i] are the bounds of
         z[i] BEFORE applying the ReLU activation function, note these are NOT
         the bounds on z.
@@ -366,14 +367,22 @@ class ReLUFreePattern:
                     # This is for the output layer when the output layer
                     # doesn't have a ReLU unit.
                     assert(not self.last_layer_is_relu)
-                    a_out = torch.zeros((self.num_relu_units,),
-                                        dtype=self.dtype)
-                    for k in range(len(self.relu_unit_index[layer_count - 1])):
-                        a_out[self.relu_unit_index[layer_count - 1][k]] =\
-                            layer.weight[0][k]
-                    b_out = layer.bias[0] if layer.bias is not None else \
-                        torch.tensor(0., dtype=self.dtype)
-
+                    A_out = torch.zeros((
+                        layer.out_features, self.num_relu_units),
+                        dtype=self.dtype)
+                    b_out = torch.zeros(
+                        (layer.out_features,), dtype=self.dtype)
+                    for j in range(layer.out_features):
+                        for k in range(len(
+                           self.relu_unit_index[layer_count - 1])):
+                            A_out[j, self.relu_unit_index[layer_count - 1][
+                              k]] = layer.weight[j][k]
+                        if layer.bias is not None:
+                            b_out[j] = layer.bias[j]
+                        else:
+                            b_out[j] = torch.tensor(0., dtype=self.dtype)
+                    A_out = A_out.squeeze()
+                    b_out = b_out.squeeze()
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 # The ReLU network can potentially change the bound on z.
                 negative_slope = layer.negative_slope if\
@@ -518,8 +527,10 @@ class ReLUFreePattern:
 
                 layer_count += 1
         if self.last_layer_is_relu:
-            a_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
-            a_out[-1] = 1
+            # TODO: implement multiple relu ouputs (not really needed)
+            assert(model[-2].out_features == 1)
+            A_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
+            A_out[-1] = 1
             b_out = 0
         Ain1 = Ain1[:ineq_constraint_count]
         Ain2 = Ain2[:ineq_constraint_count]
@@ -530,7 +541,7 @@ class ReLUFreePattern:
         Aeq3 = Aeq3[:eq_constraint_count]
         rhs_eq = rhs_eq[:eq_constraint_count]
 
-        return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
+        return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
                b_out, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
                z_post_relu_up)
 
@@ -567,7 +578,10 @@ class ReLUFreePattern:
                                 " only supports linear, relu or leaky relu " +
                                 "units.")
         # The output layer
-        output = z_layer.item()
+        if len(z_layer) <= 1:
+            output = z_layer.item()
+        else:
+            output = z_layer.squeeze()
 
         return (z, beta, output)
 
