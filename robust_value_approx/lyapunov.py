@@ -163,16 +163,16 @@ class LyapunovHybridLinearSystem:
         return (s, alpha)
 
     def lyapunov_value(
-            self, relu_model, x, x_equilibrium, V_rho,
+            self, relu_model, x, x_equilibrium, V_lambda,
             relu_at_equilibrium=None):
         """
         Compute the value of the Lyapunov function as
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
         where |x-x*|₁ is the 1-norm of x-x*.
         @param relu_model A ReLU (including leaky relu) model.
         @param x a torch tensor. Evaluate Lyapunov function at this point.
         @param x_equilibrium a torch tensor. The equilibrium state x*.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param relu_at_equilibrium. ReLU(x*). If set to None, then we compute
         ReLU(x*) in this function.
         """
@@ -181,18 +181,18 @@ class LyapunovHybridLinearSystem:
         if x.shape == (self.system.x_dim,):
             # A single state.
             return relu_model.forward(x) - relu_at_equilibrium +\
-                V_rho * torch.norm(x - x_equilibrium, p=1)
+                V_lambda * torch.norm(x - x_equilibrium, p=1)
         else:
             # A batch of states.
             assert(x.shape[1] == self.system.x_dim)
             return relu_model(x).squeeze() - relu_at_equilibrium + \
-                V_rho * torch.norm(x - x_equilibrium, p=1, dim=1)
+                V_lambda * torch.norm(x - x_equilibrium, p=1, dim=1)
 
     def lyapunov_positivity_as_milp(
-            self, relu_model, x_equilibrium, V_rho, V_epsilon):
+            self, relu_model, x_equilibrium, V_lambda, V_epsilon):
         """
         For a ReLU network, in order to determine if the function
-        V(x) = ReLU(x) - ReLU(x*) + ρ * |x - x*|₁
+        V(x) = ReLU(x) - ReLU(x*) + λ * |x - x*|₁
         where |x - x*|₁ is the 1-norm of the vector x - x*.
         satisfies the positivity constraint of Lyapunov condition
         V(x) > 0 ∀ x ≠ x*
@@ -200,21 +200,21 @@ class LyapunovHybridLinearSystem:
         V(x) ≥ ε |x - x*|₁ ∀ x
         where ε is a small positive number.To check if the stronger condition
         is satisfied, we can solve the following optimization problem
-        min x ReLU(x) - ReLU(x*) + (ρ-ε) * |x - x*|₁
+        min x ReLU(x) - ReLU(x*) + (λ-ε) * |x - x*|₁
         We can formulate this optimization problem as a mixed integer linear
         program, solve the for optimal solution of this program. If the optimal
         cost is no smaller than 0, then we proved the positivity constraint
         V(x) > 0 ∀ x ≠ x*
         @param relu_model A ReLU pytorch model.
         @param x_equilibrium The equilibrium state x*.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda ρ in the documentation above.
         @param V_epsilon A scalar. ε in the documentation above.
         @return (milp, x) milp is a GurobiTorchMILP instance, x is the decision
         variable for state.
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(V_epsilon, float))
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             relu_model, self.system.dtype)
@@ -238,25 +238,26 @@ class LyapunovHybridLinearSystem:
 
         milp.setObjective(
             [a_out,
-             (V_rho-V_epsilon)*torch.ones((self.system.x_dim,), dtype=dtype)],
+             (V_lambda-V_epsilon) *
+             torch.ones((self.system.x_dim,), dtype=dtype)],
             [z, s], constant=b_out - relu_x_equilibrium.squeeze(),
             sense=gurobipy.GRB.MINIMIZE)
         return (milp, x)
 
     def lyapunov_positivity_loss_at_samples(
             self, relu_model, relu_at_equilibrium, x_equilibrium,
-            state_samples, V_rho, epsilon, margin=0.):
+            state_samples, V_lambda, epsilon, margin=0.):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
         mean(max(-V(xⁱ) + ε |xⁱ - x*|₁ + margin, 0))
         @param relu_model  The Lyapunov function is
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
         @param relu_at_equilibrium A 0-D tensor. ReLU(x*)
         @param x_equilibrium x* in the documentation above.
         @param state_samples A batch of sampled states, state_samples[i] is
         the i'th sample xⁱ.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param epsilon ε in the documentation above.
         @param margin The margin used in the hinge loss.
         """
@@ -265,23 +266,23 @@ class LyapunovHybridLinearSystem:
         assert(state_samples.shape[1] == self.system.x_dim)
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(margin, float))
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             self.lyapunov_value(
-                relu_model, state_samples, x_equilibrium, V_rho,
+                relu_model, state_samples, x_equilibrium, V_lambda,
                 relu_at_equilibrium) - epsilon * torch.norm(
                     state_samples - x_equilibrium, p=1, dim=1),
             torch.tensor(-1.))
 
     def add_lyapunov_bounds_constraint(
-        self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_rho,
+        self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_lambda,
             relu_x_equilibrium, relu_z, state_error_s):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         Add constraint lower <= V(x) <= upper to @p milp, where the Lyapunov
-        function V(x) = ReLU(x) - ReLU(x*) + ρ |x-x*|₁.
+        function V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁.
         Also we have ReLU(x) = a_relu.dot(relu_z) + b_relu.
         |x-x*|₁ = sum(state_error_s).
         @param lyapunov_lower The lower bound of the Lyapunov function. Set to
@@ -292,7 +293,7 @@ class LyapunovHybridLinearSystem:
         @param a_relu The ReLU function can be written as
         a_relu.dot(relu_z) + b_relu. a_relu, b_relu, relu_z are returned from
         add_relu_output_constraint().
-        @param V_rho ρ.
+        @param V_lambda λ.
         @param relu_x_equilibrium ReLU(x*)
         @param state_error_s The slack variable returned from
         add_state_error_l1_constraint()
@@ -300,14 +301,14 @@ class LyapunovHybridLinearSystem:
         assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
         if lyapunov_lower is not None:
             milp.addLConstr(
-                [a_relu, V_rho * torch.ones((self.system.x_dim,),
-                                            dtype=self.system.dtype)],
+                [a_relu, V_lambda * torch.ones((self.system.x_dim,),
+                                               dtype=self.system.dtype)],
                 [relu_z, state_error_s], sense=gurobipy.GRB.GREATER_EQUAL,
                 rhs=lyapunov_lower - b_relu + relu_x_equilibrium)
         if lyapunov_upper is not None:
             milp.addLConstr(
-                [a_relu, V_rho * torch.ones((self.system.x_dim,),
-                                            dtype=self.system.dtype)],
+                [a_relu, V_lambda * torch.ones((self.system.x_dim,),
+                                               dtype=self.system.dtype)],
                 [relu_z, state_error_s], sense=gurobipy.GRB.LESS_EQUAL,
                 rhs=lyapunov_upper - b_relu + relu_x_equilibrium)
 
@@ -338,7 +339,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         super(LyapunovDiscreteTimeHybridSystem, self).__init__(system)
 
     def lyapunov_derivative(
-            self, x, relu_model, x_equilibrium, V_rho, epsilon):
+            self, x, relu_model, x_equilibrium, V_lambda, epsilon):
         """
         Compute the Lyapunov derivative condition
         V(x[n+1]) - V(x[n]) + εV(x[n])
@@ -354,18 +355,18 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         x_next_possible = self.system.possible_dx(x)
         relu_at_equilibrium = relu_model.forward(x_equilibrium)
         V_next_possible = [self.lyapunov_value(
-            relu_model, x_next, x_equilibrium, V_rho, relu_at_equilibrium) for
-            x_next in x_next_possible]
+            relu_model, x_next, x_equilibrium, V_lambda, relu_at_equilibrium)
+            for x_next in x_next_possible]
         V = self.lyapunov_value(
-            relu_model, x, x_equilibrium, V_rho, relu_at_equilibrium)
+            relu_model, x, x_equilibrium, V_lambda, relu_at_equilibrium)
         return [V_next - V + epsilon * V for V_next in V_next_possible]
 
     def lyapunov_derivative_as_milp(
-            self, relu_model, x_equilibrium, V_rho, epsilon,
+            self, relu_model, x_equilibrium, V_lambda, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
-        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
+        V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
         state.
         Formulate the Lyapunov condition
         V(x[n+1]) - V(x[n]) <= -ε * V(x[n]) ∀x[n] satisfying
@@ -376,7 +377,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         s.t lower <= V(x[n]) <= upper
         We would formulate this optimization problem as an MILP.
         @param relu_model A pytorch ReLU network.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
         @param lyapunov_upper the "upper" bound in the documentation above. If
@@ -395,7 +396,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_lower, float))
         if lyapunov_upper is not None:
             assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
@@ -442,9 +443,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             binary_var_name="beta_x_next_norm")
 
         # Now add the constraint
-        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
+        # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         self.add_lyapunov_bounds_constraint(
-            lyapunov_lower, lyapunov_upper, milp, a_out, b_out, V_rho,
+            lyapunov_lower, lyapunov_upper, milp, a_out, b_out, V_lambda,
             relu_x_equilibrium, z, s_x_norm)
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
@@ -453,13 +454,14 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             relu_model, relu_free_pattern, milp, x_next)
 
         # The cost function is
-        # max ReLU(x[n+1]) + ρ|x[n+1]-x*|₁ - ReLU(x[n]) - ρ|x[n]-x*|₁ +
-        #     epsilon * (ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁)
+        # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
+        #     epsilon * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
         milp.setObjective(
             [a_out, (epsilon - 1) * a_out,
-             V_rho * torch.ones((self.system.x_dim,), dtype=self.system.dtype),
-             (epsilon-1) * V_rho*torch.ones((self.system.x_dim,),
-                                            dtype=self.system.dtype)],
+             V_lambda *
+             torch.ones((self.system.x_dim,), dtype=self.system.dtype),
+             (epsilon-1) * V_lambda*torch.ones((self.system.x_dim,),
+                                               dtype=self.system.dtype)],
             [z_next, z, s_x_next_norm, s_x_norm],
             epsilon * (b_out - relu_x_equilibrium.squeeze()),
             gurobipy.GRB.MAXIMIZE)
@@ -467,7 +469,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
 
     def lyapunov_derivative_loss_at_samples(
-            self, relu_model, V_rho, epsilon, state_samples, x_equilibrium,
+            self, relu_model, V_lambda, epsilon, state_samples, x_equilibrium,
             margin=0.):
         """
         We will sample N states x̅ⁱ[n], i=1,...,N, compute the next state
@@ -475,8 +477,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         sampled state x̅ⁱ[n]. To do so, we define a loss as
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n])+ margin, 0))
         @param relu_model The lyapunov function is
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
-        @param V_rho ρ in the Lyapunov function.
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
+        @param V_lambda λ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
         @param state_samples The sampled state x̅[n], state_samples[i] is the
         i'th sample x̅ⁱ[n]
@@ -486,7 +488,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @return loss The loss
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n]) + margin, 0))
         """
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
@@ -503,11 +505,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         state_next = torch.stack(state_next)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
-            relu_model, V_rho, epsilon, state_samples, state_next,
+            relu_model, V_lambda, epsilon, state_samples, state_next,
             x_equilibrium, margin)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
-            self, relu_model, V_rho, epsilon, state_samples, state_next,
+            self, relu_model, V_lambda, epsilon, state_samples, state_next,
             x_equilibrium, margin=0.):
         """
         We will sample N states x̅ⁱ[n], i=1,...,N, compute the next state
@@ -515,8 +517,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         sampled state x̅ⁱ[n]. To do so, we define a loss as
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n])+ margin, 0))
         @param relu_model The lyapunov function is
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
-        @param V_rho ρ in the Lyapunov function.
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
+        @param V_lambda λ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
         @param state_samples The sampled state x̅[n], state_samples[i] is the
         i'th sample x̅ⁱ[n]
@@ -528,7 +530,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @return loss The loss
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n]) + margin, 0))
         """
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
@@ -537,10 +539,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(state_samples.shape[0] == state_next.shape[0])
         relu_at_equilibrium = relu_model.forward(x_equilibrium)
         v1 = self.lyapunov_value(
-            relu_model, state_samples, x_equilibrium, V_rho,
+            relu_model, state_samples, x_equilibrium, V_lambda,
             relu_at_equilibrium)
         v2 = self.lyapunov_value(
-            relu_model, state_next, x_equilibrium, V_rho, relu_at_equilibrium)
+            relu_model, state_next, x_equilibrium, V_lambda,
+            relu_at_equilibrium)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             -(v2 - v1 + epsilon * v1),
             torch.tensor(-1.))
@@ -564,7 +567,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         super(LyapunovContinuousTimeHybridSystem, self).__init__(system)
 
     def lyapunov_derivative(
-            self, x, relu_model, x_equilibrium, V_rho, epsilon):
+            self, x, relu_model, x_equilibrium, V_lambda, epsilon):
         """
         Compute V̇(x) + εV(x) for a given x.
         Notice that V̇(x) can have multiple values for a given x, for two
@@ -577,7 +580,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         @param x The state to be evaluated at.
         @param relu_model A (leaky) ReLU network.
         @param x_equilbrium The equilibrium state.
-        @param V_rho ρ in defining Lyapunov as V(x)=ReLU(x) - ReLU(x*)+ρ|x-x*|₁
+        @param V_lambda λ in defining Lyapunov as
+        V(x)=ReLU(x) - ReLU(x*)+λ|x-x*|₁
         @param epsilon ε in V̇(x) + εV(x)
         @return possible_lyapunov_derivatives A list of torch tensors
         representing all possible V̇(x) + εV(x).
@@ -586,9 +590,9 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(x.shape == (self.system.x_dim,))
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
-        V = self.lyapunov_value(relu_model, x, x_equilibrium, V_rho)
+        V = self.lyapunov_value(relu_model, x, x_equilibrium, V_lambda)
         xdot_all = self.system.possible_dx(x)
         possible_activation_patterns = relu_to_optimization.\
             compute_all_relu_activation_patterns(relu_model, x)
@@ -628,7 +632,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             for j in range(len(state_error_grad)):
                 dV_dx[i * len(state_error_grad) + j] = \
                     dReLU_dx_all[i].squeeze() + \
-                    V_rho * state_error_grad[j].squeeze()
+                    V_lambda * state_error_grad[j].squeeze()
         Vdot_all = [None] * (len(dV_dx) * len(xdot_all))
         for i in range(len(dV_dx)):
             for j in range(len(xdot_all)):
@@ -964,11 +968,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (z, z_coeff, xdot_coeff)
 
     def lyapunov_derivative_as_milp2(
-            self, relu_model, x_equilibrium, V_rho, epsilon,
+            self, relu_model, x_equilibrium, V_lambda, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
-        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
+        V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
         state.
         Formulate the Lyapunov condition
         V̇(x) ≤ -ε V(x) for all x satisfying
@@ -981,7 +985,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         @param relu_model A pytorch ReLU network.
         @param x_equilibrium The equilibrium state.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param epsilon The exponential convergence rate.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x).
@@ -1005,7 +1009,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_lower, float))
         if lyapunov_upper is not None:
             assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
@@ -1017,7 +1021,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # V̇ = ∂V/∂x(∑ᵢ Aᵢsᵢ + gᵢγᵢ)
         #   = ∑ᵢ(∂ReLU(x)/∂x*Aᵢsᵢ + ∂ReLU(x)/∂x*gᵢγᵢ
-        #       + ρ*sign(x-x*) * Aᵢsᵢ + ρ*sign(x-x*)*gᵢγᵢ)
+        #       + λ*sign(x-x*) * Aᵢsᵢ + λ*sign(x-x*)*gᵢγᵢ)
         # In order to compute ∂ReLU(x)/∂x*Aᵢsᵢ, ∂ReLU(x)/∂x*gᵢγᵢ, we first
         # introduce the binary variable β, which represents the activation of
         # each (leaky) ReLU unit in the network. Then we can call
@@ -1030,8 +1034,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 relu_model, relu_free_pattern, milp, x)
 
         # for each mode, we want to compute ∂V/∂x*Aᵢsᵢ, ∂V/∂x*gᵢγᵢ.
-        # where ∂V/∂x=∂ReLU(x)/∂x + ρ*sign(x-x*)
-        # In order to handle the part on ρ*sign(x-x*) * Aᵢsᵢ, ρ*sign(x-x*)*gᵢγᵢ
+        # where ∂V/∂x=∂ReLU(x)/∂x + λ*sign(x-x*)
+        # In order to handle the part on λ*sign(x-x*) * Aᵢsᵢ, λ*sign(x-x*)*gᵢγᵢ
         # we first introduce binary variable α, such that
         # α(j) = 1 => x(j) - x*(j) >= 0
         # α(j) = 0 => x(j) - x*(j) <= 0
@@ -1042,11 +1046,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 binary_var_name="alpha")
 
         # Now add the constraint
-        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
+        # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         relu_x_equilibrium = relu_model.forward(x_equilibrium)
         self.add_lyapunov_bounds_constraint(
             lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
-            V_rho, relu_x_equilibrium, relu_z, t)
+            V_lambda, relu_x_equilibrium, relu_z, t)
 
         # z1[i] is the slack variable to write ∂ReLU(x)/∂x*Aᵢsᵢ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
@@ -1064,29 +1068,29 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         z3, z3_coef, s_coef = self.add_sign_state_error_times_Aisi(
             milp, s, alpha, Aisi_lower, Aisi_upper, slack_name="z3")
         # cost_z3_coef[i] is the coefficient of z3[i] in the cost function.
-        cost_z3_coef = [coef * V_rho for coef in z3_coef]
-        cost_s_coef = [coef * V_rho for coef in s_coef]
+        cost_z3_coef = [coef * V_lambda for coef in z3_coef]
+        cost_s_coef = [coef * V_lambda for coef in s_coef]
         # z4[i] is the slack variable to write sign(x-x*)*gᵢγᵢ as mixed-integer
         # linear constraints.
         z4, z4_coef, gamma_coef = self.add_sign_state_error_times_gigammai(
             milp, gamma, alpha, gigammai_lower, gigammai_upper,
             slack_name="z4")
         # cost_z4_coef[i] is the coefficient of z4[i] in the cost function.
-        cost_z4_coef = [coef * V_rho for coef in z3_coef]
+        cost_z4_coef = [coef * V_lambda for coef in z3_coef]
         # cost_gamma_coef[i] is the coefficient of gamma[i] in the cost
         # function.
-        cost_gamma_coef = [coef * V_rho for coef in gamma_coef]
+        cost_gamma_coef = [coef * V_lambda for coef in gamma_coef]
 
         # The cost is
         # max V̇ + εV
-        #   = ∑ᵢ∂V/∂x(Aᵢsᵢ + gᵢγᵢ) + ε(ReLU(x) - ReLU(x*) + ρ|x-x*|₁)
+        #   = ∑ᵢ∂V/∂x(Aᵢsᵢ + gᵢγᵢ) + ε(ReLU(x) - ReLU(x*) + λ|x-x*|₁)
         # We know that ∂V/∂x = ∂ReLU(x)/∂x + ρ*sign(x-x*) and
         # ∂ReLU(x)/∂x * Aᵢsᵢ = z1_coef[i].dot(z1)
         # ∂ReLU(x)/∂x * gᵢγᵢ = z2_coef[i].dot(z2)
         # ρ*sign(x-x*) * Aᵢsᵢ = z3_coeff[i].dot(z3) * s_coef[i].dot(sᵢ)
         # ρ*sign(x-x*) * gᵢγᵢ = z4_coeff[i].dot(z4) * gamma_coef[i].dot(γᵢ)
         # ReLU(x) = a_relu_out.dot(relu_z) + b_relu_out
-        # ρ|x-x*|₁ = ρ * sum(t)
+        # λ|x-x*|₁ = λ * sum(t)
         cost_vars = [mode_var for var_list in [z1, z2, z3, z4] for mode_var
                      in var_list]
         cost_coeffs = [mode_coef for coef_list in [
@@ -1102,7 +1106,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         cost_vars.append(t)
         cost_coeffs.append(
-            epsilon * V_rho * torch.ones(
+            epsilon * V_lambda * torch.ones(
                 self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
@@ -1112,11 +1116,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, relu_beta, gamma)
 
     def lyapunov_derivative_as_milp(
-            self, relu_model, x_equilibrium, V_rho, epsilon,
+            self, relu_model, x_equilibrium, V_lambda, epsilon,
             lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
-        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
+        V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
         state.
         Formulate the Lyapunov condition
         V̇(x) ≤ -ε V(x) for all x satisfying
@@ -1131,7 +1135,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         @param relu_model A pytorch ReLU network.
         @param x_equilibrium The equilibrium state.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param epsilon The exponential convergence rate.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x).
@@ -1155,7 +1159,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_lower, float))
         if lyapunov_upper is not None:
             assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
 
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
@@ -1176,7 +1180,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
 
         # V̇ = ∂V/∂x * ẋ
-        #   = ∂ReLU(x)/∂x*ẋ + ρ*sign(x-x*) *ẋ
+        #   = ∂ReLU(x)/∂x*ẋ + λ*sign(x-x*) *ẋ
         # In order to compute ∂ReLU(x)/∂x*ẋ, we first
         # introduce the binary variable β, which represents the activation of
         # each (leaky) ReLU unit in the network. Then we can call
@@ -1189,8 +1193,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 relu_model, relu_free_pattern, milp, x)
 
         # for each mode, we want to compute ∂V/∂x*ẋ
-        # where ∂V/∂x=∂ReLU(x)/∂x + ρ*sign(x-x*)
-        # In order to handle the part on ρ*sign(x-x*) * ẋ
+        # where ∂V/∂x=∂ReLU(x)/∂x + λ*sign(x-x*)
+        # In order to handle the part on λ*sign(x-x*) * ẋ
         # we first introduce binary variable α, such that
         # α(j) = 1 => x(j) - x*(j) >= 0
         # α(j) = 0 => x(j) - x*(j) <= 0
@@ -1201,11 +1205,11 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 binary_var_name="alpha")
 
         # Now add the constraint
-        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
+        # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         relu_x_equilibrium = relu_model.forward(x_equilibrium)
         self.add_lyapunov_bounds_constraint(
             lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
-            V_rho, relu_x_equilibrium, relu_z, t)
+            V_lambda, relu_x_equilibrium, relu_z, t)
 
         # z1 is the slack variable to write ∂ReLU(x)/∂x*ẋ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
@@ -1220,17 +1224,17 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         z2, z2_coef, xdot_coef = self.add_sign_state_error_times_xdot(
             milp, xdot, alpha, xdot_lower, xdot_upper, slack_name="z2")
         # cost_z3_coef[i] is the coefficient of z3[i] in the cost function.
-        cost_z2_coef = z2_coef * V_rho
-        cost_xdot_coef = xdot_coef * V_rho
+        cost_z2_coef = z2_coef * V_lambda
+        cost_xdot_coef = xdot_coef * V_lambda
 
         # The cost is
         # max V̇ + εV
-        #   = ∑ᵢ∂V/∂x * ẋᵢ + ε(ReLU(x) - ReLU(x*) + ρ|x-x*|₁)
-        # We know that ∂V/∂x = ∂ReLU(x)/∂x + ρ*sign(x-x*) and
+        #   = ∑ᵢ∂V/∂x * ẋᵢ + ε(ReLU(x) - ReLU(x*) + λ|x-x*|₁)
+        # We know that ∂V/∂x = ∂ReLU(x)/∂x + λ*sign(x-x*) and
         # ∂ReLU(x)/∂x * ẋ = z1_coef.dot(z1)
         # ρ*sign(x-x*) * ẋ = cost_z2_coeff.dot(z2) * cost_xdot_coef.dot(xdot)
         # ReLU(x) = a_relu_out.dot(relu_z) + b_relu_out
-        # ρ|x-x*|₁ = ρ * sum(t)
+        # λ|x-x*|₁ = λ * sum(t)
         cost_vars = [z1, z2, xdot]
         cost_coeffs = [cost_z1_coef, cost_z2_coef, cost_xdot_coef]
 
@@ -1239,7 +1243,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         cost_vars.append(t)
         cost_coeffs.append(
-            epsilon * V_rho * torch.ones(
+            epsilon * V_lambda * torch.ones(
                 self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
@@ -1249,15 +1253,15 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, relu_beta, gamma)
 
     def lyapunov_derivative_loss_at_samples(
-        self, relu_model, V_rho, epsilon, state_samples, x_equilibrium,
+        self, relu_model, V_lambda, epsilon, state_samples, x_equilibrium,
             margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. To do so, we define
         a loss as mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         @param relu_model The lyapunov function is
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
-        @param V_rho ρ in the Lyapunov function.
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
+        @param V_lambda ρ in the Lyapunov function.
         @param state_samples The sampled state x̅. state_samples[i] is the i'th
         sampled state x̅ⁱ
         @param x_equilibrium x*.
@@ -1265,7 +1269,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         loss.
         @return loss The loss mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         """
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
@@ -1283,19 +1287,19 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             xdot[i] = self.system.step_forward(state_samples[i], mode)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
-            relu_model, V_rho, epsilon, state_samples, xdot, x_equilibrium,
+            relu_model, V_lambda, epsilon, state_samples, xdot, x_equilibrium,
             margin)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
-            self, relu_model, V_rho, epsilon, state_samples, xdot_samples,
+            self, relu_model, V_lambda, epsilon, state_samples, xdot_samples,
             x_equilibrium, margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. To do so, we define
         a loss as mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         @param relu_model The lyapunov function is
-        ReLU(x) - ReLU(x*) + ρ|x-x*|₁
-        @param V_rho ρ in the Lyapunov function.
+        ReLU(x) - ReLU(x*) + λ|x-x*|₁
+        @param V_lambda λ in the Lyapunov function.
         @param state_samples The sampled state x̅. state_samples[i] is the i'th
         sampled state x̅ⁱ
         @param xdot_samples The state derivative dx̅/dt
@@ -1304,7 +1308,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         loss.
         @return loss The loss mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         """
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
@@ -1324,10 +1328,10 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
                 relu_output, x_var, create_graph=True, allow_unused=True)[0]
         dReLU_dx_tensor = torch.stack(dReLU_dx)
         dV_dx = dReLU_dx_tensor + \
-            V_rho * torch.sign(state_samples - x_equilibrium)
+            V_lambda * torch.sign(state_samples - x_equilibrium)
         Vdot = torch.sum(dV_dx * xdot_samples, dim=1)
         V = self.lyapunov_value(
-            relu_model, state_samples, x_equilibrium, V_rho).squeeze()
+            relu_model, state_samples, x_equilibrium, V_lambda).squeeze()
         loss = torch.nn.HingeEmbeddingLoss(margin=margin)(
             -(Vdot + epsilon * V), torch.tensor(-1))
         return loss

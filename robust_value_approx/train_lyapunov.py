@@ -38,7 +38,7 @@ class ProjectGradientMethod(Enum):
 class TrainLyapunovReLU:
     """
     We will train a ReLU network, such that the function
-    V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁ is a Lyapunov function that certifies
+    V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁ is a Lyapunov function that certifies
     (exponential) convergence. Namely V(x) should satisfy the following
     conditions
     1. V(x) > 0 ∀ x ≠ x*
@@ -55,7 +55,7 @@ class TrainLyapunovReLU:
     hinge(z) = max(z + margin, 0) where margin is a given scalar.
     """
 
-    def __init__(self, lyapunov_hybrid_system, V_rho, x_equilibrium):
+    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium):
         """
         @param lyapunov_hybrid_system This input should define a common
         interface
@@ -67,12 +67,12 @@ class TrainLyapunovReLU:
         lyapunov_derivative_loss_at_samples() (which represents
         mean(hinge(dV(xⁱ) + ε V(xⁱ))).
         One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
-        @param V_rho ρ in the documentation above.
+        @param V_lambda λ in the documentation above.
         @param x_equilibrium The equilibrium state.
         """
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
-        assert(isinstance(V_rho, float))
-        self.V_rho = V_rho
+        assert(isinstance(V_lambda, float))
+        self.V_lambda = V_lambda
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim,))
         self.x_equilibrium = x_equilibrium
@@ -187,7 +187,7 @@ class TrainLyapunovReLU:
         dtype = self.lyapunov_hybrid_system.system.dtype
         lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                relu, self.x_equilibrium, self.V_rho,
+                relu, self.x_equilibrium, self.V_lambda,
                 self.lyapunov_positivity_epsilon)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
@@ -202,7 +202,7 @@ class TrainLyapunovReLU:
 
         lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
-                relu, self.x_equilibrium, self.V_rho,
+                relu, self.x_equilibrium, self.V_lambda,
                 self.lyapunov_derivative_epsilon)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
@@ -250,7 +250,7 @@ class TrainLyapunovReLU:
                 self.lyapunov_hybrid_system.\
                 lyapunov_positivity_loss_at_samples(
                     relu, relu_at_equilibrium, self.x_equilibrium,
-                    positivity_state_samples_in_pool, self.V_rho,
+                    positivity_state_samples_in_pool, self.V_lambda,
                     self.lyapunov_positivity_epsilon,
                     margin=self.lyapunov_positivity_sample_margin)
         else:
@@ -272,7 +272,7 @@ class TrainLyapunovReLU:
             derivative_sample_loss = lyapunov_derivative_sample_cost_weight *\
                 self.lyapunov_hybrid_system.\
                 lyapunov_derivative_loss_at_samples_and_next_states(
-                    relu, self.V_rho, self.lyapunov_derivative_epsilon,
+                    relu, self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
                     margin=self.lyapunov_derivative_sample_margin)
@@ -602,7 +602,7 @@ class TrainValueApproximator:
     Given a piecewise affine system and some sampled initial state, compute the
     cost-to-go for these sampled states, and then train a network to
     approximate the cost-to-go, such that
-    network(x) - network(x*) + ρ |x-x*|₁ ≈ cost_to_go(x)
+    network(x) - network(x*) + λ|x-x*|₁ ≈ cost_to_go(x)
     """
     def __init__(self):
         self.max_epochs = 100
@@ -610,7 +610,7 @@ class TrainValueApproximator:
         self.learning_rate = 0.02
 
     def train_with_cost_to_go(
-            self, network, x0_value_samples, V_rho, x_equilibrium):
+            self, network, x0_value_samples, V_lambda, x_equilibrium):
         """
         Similar to train() function, but with given samples on initial_state
         and cost-to-go.
@@ -625,7 +625,7 @@ class TrainValueApproximator:
             relu_output = network(state_samples_all)
             relu_x_equilibrium = network.forward(x_equilibrium)
             value_relu = relu_output.squeeze() - relu_x_equilibrium +\
-                V_rho * torch.norm(
+                V_lambda * torch.norm(
                     state_samples_all - x_equilibrium.reshape((1, -1)).
                     expand(state_samples_all.shape[0], -1), dim=1, p=1)
             loss = torch.nn.MSELoss()(value_relu, value_samples_all)
@@ -636,14 +636,14 @@ class TrainValueApproximator:
         return False, loss.item()
 
     def train(
-        self, system, network, V_rho, x_equilibrium, instantaneous_cost_fun,
+        self, system, network, V_lambda, x_equilibrium, instantaneous_cost_fun,
             x0_samples, T, discrete_time_flag, x_goal=None, pruner=None):
         """
         Train a network such that
-        network(x) - network(x*) + ρ*|x-x*|₁ ≈ cost_to_go(x)
+        network(x) - network(x*) + λ*|x-x*|₁ ≈ cost_to_go(x)
         @param system An AutonomousHybridLinearSystem instance.
         @param network a pytorch neural network.
-        @param V_rho ρ.
+        @param V_lambda λ.
         @param x_equilibrium x*.
         @param instantaneous_cost_fun A callable to evaluate the instantaneous
         cost for a state.
@@ -665,10 +665,10 @@ class TrainValueApproximator:
             system, hybrid_linear_system.AutonomousHybridLinearSystem))
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (system.x_dim,))
-        assert(isinstance(V_rho, float))
+        assert(isinstance(V_lambda, float))
         assert(isinstance(x0_samples, torch.Tensor))
         x0_value_samples = hybrid_linear_system.generate_cost_to_go_samples(
             system, [x0_samples[i] for i in range(x0_samples.shape[0])], T,
             instantaneous_cost_fun, discrete_time_flag, x_goal, pruner)
         return self.train_with_cost_to_go(
-            network, x0_value_samples, V_rho, x_equilibrium)
+            network, x0_value_samples, V_lambda, x_equilibrium)
