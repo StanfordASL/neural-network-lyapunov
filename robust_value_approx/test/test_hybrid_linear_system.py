@@ -885,7 +885,7 @@ class TestComputeContinuousTimeSystemCostToGo(unittest.TestCase):
             compute_continuous_time_system_cost_to_go(
                 system, x0, 15., lambda x: torch.norm(x, p=2))
         np.testing.assert_allclose(
-            x_traj[:, -1].detach().numpy(), np.zeros(2), atol=1e-6)
+            x_traj[:, -1].detach().numpy(), np.zeros(2), atol=1.2e-6)
         self.assertAlmostEqual(cost_to_go_traj[-1], 0)
         self.assertTrue(torch.all(
             cost_to_go_traj[:-1] - cost_to_go_traj[1:] > 0))
