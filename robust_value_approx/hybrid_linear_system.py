@@ -503,11 +503,11 @@ class AutonomousHybridLinearSystem:
                 self.P[mode_index].detach().numpy() @ x <= self.q[mode_index]]
             prob = cp.Problem(
                 cp.Maximize(self.A[mode_index][j].detach().numpy() @ x), con)
-            prob.solve()
+            prob.solve(solver=cp.GUROBI)
             upper[j] = prob.value
             prob = cp.Problem(
                 cp.Minimize(self.A[mode_index][j].detach().numpy() @ x), con)
-            prob.solve()
+            prob.solve(solver=cp.GUROBI)
             lower[j] = prob.value
         return (lower, upper)
 
@@ -741,7 +741,7 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
                    for k in range(num_breaks_x[i])]
         grid_limits.append(limits)
         grid_samples.append(samples)
-        grid_indices.append(np.arange(num_breaks_x[i]))
+        grid_indices.append(np.arange(num_breaks_x[i].item()))
     for i in range(u_dim):
         limits_ = np.linspace(u_lo[i], u_up[i], num_breaks_u[i] + 1)
         limits = [(limits_[k], limits_[k+1]) for k in range(num_breaks_u[i])]
@@ -749,7 +749,7 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
                    for k in range(num_breaks_u[i])]
         grid_limits.append(limits)
         grid_samples.append(samples)
-        grid_indices.append(np.arange(num_breaks_u[i]))
+        grid_indices.append(np.arange(num_breaks_u[i].item()))
     grid = np.meshgrid(*grid_indices)
     indices_cart_product = np.concatenate(
         [g.reshape(-1, 1) for g in grid], axis=1)
