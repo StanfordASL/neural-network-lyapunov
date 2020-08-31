@@ -1819,7 +1819,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 grad, grad_numerical.squeeze(), atol=1e-7)
 
 
-class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
+class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
 
     def setUp(self):
         self.dtype = torch.float64
@@ -1827,15 +1827,15 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
         self.relu_dyn = setup_relu_dyn(self.dtype)
         self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
         self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
-        self.system1 = relu_system.ReLUSystem(2, self.dtype,
-                                              self.x_lo, self.x_up,
-                                              self.relu_dyn)
+        self.system1 = relu_system.AutonomousReLUSystem(2, self.dtype,
+                                                        self.x_lo, self.x_up,
+                                                        self.relu_dyn)
 
     def test_lyapunov_derivative_as_milp(self):
         """
         Test lyapunov_derivative_as_milp without bounds on V(x[n])
         """
-        dut1 = lyapunov.LyapunovDiscreteTimeReLUSystem(self.system1)
+        dut1 = lyapunov.LyapunovDiscreteTimeAutonomousReLUSystem(self.system1)
 
         relu1 = setup_leaky_relu(self.dtype)
         relu2 = setup_relu(self.dtype)
@@ -1860,9 +1860,8 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
             x_sol = np.array([var.x for var in x])
             x_next_sol = np.array([var.x for var in x_next])
             np.testing.assert_array_almost_equal(
-                self.system1.step_forward(torch.tensor(
-                                    x_sol, dtype=self.dtype),
-                    self.relu_dyn).detach().numpy(),
+                self.relu_dyn(
+                    torch.tensor(x_sol, dtype=self.dtype)).detach().numpy(),
                 x_next_sol, decimal=5)
             v_next = dut.lyapunov_value(
                 relu, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
@@ -1896,7 +1895,7 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
         # cost function of the MILP, and then check if it is the same as
         # evaluating the ReLU network on x[n] and x[n+1]
         def test_milp_cost(dut, relu, x_val, x_equilibrium, milp_optimal_cost):
-            x_next_val = self.system1.step_forward(x_val, self.relu_dyn)
+            x_next_val = self.relu_dyn(x_val)
             v_next = dut.lyapunov_value(
                 relu, x_next_val, x_equilibrium, V_rho)
             v = dut.lyapunov_value(relu, x_val, x_equilibrium, V_rho)
@@ -1927,7 +1926,7 @@ class TestLyapunovDiscreteTimeReLUSystem(unittest.TestCase):
             while True:
                 x_val = torch.rand(self.system1.x_dim, dtype=self.dtype) * (
                   self.system1.x_up - self.system1.x_lo) + self.system1.x_lo
-                x_val_next = self.system1.step_forward(x_val, self.relu_dyn)
+                x_val_next = self.relu_dyn(x_val)
                 if (torch.all(x_val_next <= self.system1.x_up) and torch.all(
                   x_val_next >= self.system1.x_lo)):
                     return x_val

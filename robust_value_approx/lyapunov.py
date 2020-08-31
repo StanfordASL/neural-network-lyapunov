@@ -30,7 +30,7 @@ class LyapunovHybridLinearSystem:
                 system, hybrid_linear_system.AutonomousHybridLinearSystem)
             or
             isinstance(
-                system, relu_system.ReLUSystem)
+                system, relu_system.AutonomousReLUSystem)
         )
         self.system = system
         self.lyapunov_relu = lyapunov_relu
@@ -86,7 +86,7 @@ class LyapunovHybridLinearSystem:
         assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
 
         # add the milp constraint to formulate the relu system.
-        (Aout_s, Aout_gamma, Cout, Ain_x, Ain_s, Ain_gamma, rhs_in,
+        (Aout_s, Cout, Ain_x, Ain_s, Ain_gamma, rhs_in,
          Aeq_x, Aeq_s, Aeq_gamma, rhs_eq) = \
             self.system.mixed_integer_constraints(relu_dyn)
         # create the decision variables
@@ -118,7 +118,7 @@ class LyapunovHybridLinearSystem:
                 sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
                 name="relu_dynamics_eq")
 
-        return (x, s, gamma, Aout_s, Aout_gamma, Cout)
+        return (x, s, gamma, Aout_s, Cout)
 
     def add_relu_output_constraint(
             self, milp, x, slack_name="relu_z", binary_var_name="relu_beta"):
@@ -1357,7 +1357,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return loss
 
 
-class LyapunovDiscreteTimeReLUSystem(LyapunovHybridLinearSystem):
+class LyapunovDiscreteTimeAutonomousReLUSystem(LyapunovHybridLinearSystem):
     """
     For a discrete time relu system
     x[n+1] = relu(x[n])
@@ -1378,7 +1378,7 @@ class LyapunovDiscreteTimeReLUSystem(LyapunovHybridLinearSystem):
         """
         @param system A AutonomousHybridLinearSystem instance.
         """
-        super(LyapunovDiscreteTimeReLUSystem, self).__init__(system)
+        super(LyapunovDiscreteTimeAutonomousReLUSystem, self).__init__(system)
 
     def lyapunov_derivative_as_milp(
             self, relu_model, relu_dyn, x_equilibrium, V_rho, epsilon,
@@ -1426,18 +1426,17 @@ class LyapunovDiscreteTimeReLUSystem(LyapunovHybridLinearSystem):
 
         # x is the variable x[n]
         (x, s, gamma,
-         Aout_s, Aout_gamma, Cout) = self.add_relu_system_constraint(
+         Aout_s, Cout) = self.add_relu_system_constraint(
             milp, relu_dyn)
         # x_next is the variable x[n+1]
         x_next = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
 
-        # Add the constraint x[n+1] = Aout_s * s + Aout_gamma * gamma + Cout
+        # Add the constraint x[n+1] = Aout_s * s + Cout
         milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s,
-             -Aout_gamma], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
-            b=Cout)
+            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s],
+            [x_next, s], sense=gurobipy.GRB.EQUAL, b=Cout)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
