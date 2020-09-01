@@ -226,9 +226,9 @@ class TrainLyapunovReLU:
                 self.lyapunov_hybrid_system.system.dtype)
         if self.output_flag:
             print(f"relu gradient {relu_gradient.squeeze().detach().numpy()}")
-            print(f"lyapunov derivative MIP Relu activation: "
+            print("lyapunov derivative MIP Relu activation: "
                   f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
-            print(f"adversarial x " +
+            print("adversarial x " +
                   f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
 
         loss = torch.tensor(0., dtype=dtype)
@@ -380,7 +380,7 @@ class TrainLyapunovReLU:
                 = self.total_loss(
                     relu, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next)
-            print(f"derivative mip loss " +
+            print("derivative mip loss " +
                   f"{lyapunov_derivative_mip_costs[iter_count]}")
             return loss
 
@@ -416,7 +416,7 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_convergence_tol:
                 return True
             print(f"iter {iter_count}, loss {losses[iter_count]}," +
-                  f"positivity mip cost " +
+                  "positivity mip cost " +
                   f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
                   f"mip cost {lyapunov_derivative_mip_costs[iter_count]}\n")
             if self.summary_writer_folder is not None:
@@ -484,9 +484,9 @@ class TrainLyapunovReLU:
                     lyapunov_derivative_mip_costs[iter_count], iter_count)
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
-                      f"positivity cost " +
+                      "positivity cost " +
                       f"{lyapunov_positivity_mip_costs[iter_count]}, " +
-                      f"derivative_cost " +
+                      "derivative_cost " +
                       f"{lyapunov_derivative_mip_costs[iter_count]}")
             if lyapunov_positivity_mip_costs[iter_count] >=\
                 -self.lyapunov_positivity_convergence_tol and\
@@ -586,9 +586,9 @@ class TrainLyapunovReLU:
             previous_mip_loss = mip_loss
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
-                      f"positivity cost " +
+                      "positivity cost " +
                       f"{lyapunov_positivity_mip_cost}, " +
-                      f"derivative_cost " +
+                      "derivative_cost " +
                       f"{lyapunov_derivative_mip_cost}, " +
                       f"mip loss {mip_loss}\n")
             loss.backward()

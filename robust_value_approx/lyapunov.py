@@ -496,9 +496,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             mode = self.system.mode(state_samples[i])
             if mode is None:
                 raise Exception(
-                    f"lyapunov_derivative_loss_at_samples: the input " +
+                    "lyapunov_derivative_loss_at_samples: the input " +
                     f"state_sample {state_samples[i]}" +
-                    f" is not in any mode of the hybrid system.")
+                    " is not in any mode of the hybrid system.")
             state_next[i] = self.system.step_forward(state_samples[i], mode)
         state_next = torch.stack(state_next)
 
@@ -1277,8 +1277,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             mode = self.system.mode(state_samples[i])
             if mode is None:
                 raise Exception(
-                    f"lyapunov_derivative_loss_at_samples: the input " +
-                    "state_sample {state_samples[i]} is not in any mode of " +
+                    "lyapunov_derivative_loss_at_samples: the input " +
+                    f"state_sample {state_samples[i]} is not in any mode of " +
                     "the hybrid system.")
             xdot[i] = self.system.step_forward(state_samples[i], mode)
 
