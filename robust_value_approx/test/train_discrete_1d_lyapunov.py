@@ -94,5 +94,5 @@ if __name__ == "__main__":
     dut.output_flag = True
     dut.max_iterations = 3000
     dut.learning_rate = 1e-4
-    result = dut.train(relu, state_samples_all)
+    result = dut.train(state_samples_all)
     plot_relu(relu, system, V_lambda, x_equilibrium)

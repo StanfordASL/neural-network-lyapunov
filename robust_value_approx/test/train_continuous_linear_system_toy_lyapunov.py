@@ -239,8 +239,8 @@ if __name__ == "__main__":
     if args.load_relu is None:
         if args.train_on_sample:
             # Train the Lyapunov loss on many sampled states
-            relu = dut.train_lyapunov_on_samples(
-                relu, state_samples_all, args.train_on_samples_iterations, 10)
+            dut.train_lyapunov_on_samples(
+                state_samples_all, args.train_on_samples_iterations, 10)
         else:
             # First train a ReLU to approximate the value function.
             approximator = train_lyapunov.TrainValueApproximator()
@@ -285,10 +285,10 @@ if __name__ == "__main__":
             [state_samples[i, :] for i in range(state_samples.shape[0])
              if state_samples[i, 0] + state_samples[i, 1] >= 0])
     if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
-        result = dut.train_with_line_search(relu, state_samples)
+        result = dut.train_with_line_search(state_samples)
     else:
         start_time = time.time()
-        result = dut.train(relu, state_samples)
+        result = dut.train(state_samples)
         print(f"training time: {time.time()-start_time}s")
     if args.visualize:
         fig = plt.figure()

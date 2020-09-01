@@ -73,7 +73,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             positivity_mip_loss, derivative_mip_loss,\
             positivity_state_samples_new, derivative_state_samples_new,\
             derivative_state_samples_next_new = dut.total_loss(
-                relu, positivity_state_samples, derivative_state_samples,
+                positivity_state_samples, derivative_state_samples,
                 state_samples_next)
 
         self.assertEqual(

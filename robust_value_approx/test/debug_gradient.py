@@ -32,7 +32,7 @@ def compute_total_loss(
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_positivity_epsilon = lyapunov_positivity_epsilon
     dut.lyapunov_derivative_epsilon = lyapunov_derivative_epsilon
-    total_loss = dut.total_loss(relu, state_samples, state_samples_next)
+    total_loss = dut.total_loss(state_samples, state_samples_next)
     if requires_grad:
         total_loss[0].backward()
         grad = np.concatenate(
