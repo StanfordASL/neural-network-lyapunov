@@ -730,7 +730,7 @@ class ValueFunction:
             if self.alphatraj is not None:
                 if Z is not None:
                     obj += .5 * \
-                        (alpha_val - self.alphatraj[:, n])@Z@\
+                        (alpha_val - self.alphatraj[:, n]) @ Z @\
                         (alpha_val - self.alphatraj[:, n])
                 if z is not None:
                     obj += (alpha_val - self.alphatraj[:, n])@z

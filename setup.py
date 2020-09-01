@@ -14,7 +14,7 @@ def main():
         f.write(f"""
         export PYTHONPATH={cur_dir}:${{PYTHONPATH}}
         """)
-    print(f"""
+    print("""
     To use robust_value_approx functionality:
         source ./config/setup_environments.sh
     """)

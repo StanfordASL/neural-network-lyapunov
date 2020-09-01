@@ -121,7 +121,7 @@ class SimplePWLLyapunov:
             else:
                 raise Exception(
                     f"add_lyapunov_positivity_in_mode: sign_v_minus_xstar[{j}]"
-                    + f"has to be either 1 or -1")
+                    + "has to be either 1 or -1")
         self.constraints.extend(
             [self.s2[0] >= -(self.c[:, mode_index] -
              self.lyapunov_positivity_epsilon * sign_v_minus_xstar) @

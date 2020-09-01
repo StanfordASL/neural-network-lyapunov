@@ -58,7 +58,7 @@ class TestDoubleIntegratorLQR(unittest.TestCase):
         def test_lqr_util(Q, R):
             (K, P) = double_integrator_lqr(Q, R)
             # Check the Riccati equation.
-            riccati_lhs = A.T @ P + P @ A - (P @ B @ B.T @P) / R + Q
+            riccati_lhs = A.T @ P + P @ A - (P @ B @ B.T @ P) / R + Q
             self.assertTrue(torch.all(torch.abs(riccati_lhs) < 1E-10))
             # Check if P is positive definite.
             self.assertGreater(P[0][0], 0)
