@@ -174,7 +174,7 @@ if __name__ == "__main__":
             (2, 8, 4), negative_gradient=-1., bias=False, symmetric_x=True)
 
     lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
-        system)
+        system, relu)
 
     V_lambda = 0.
 

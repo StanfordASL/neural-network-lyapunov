@@ -187,7 +187,7 @@ class TrainLyapunovReLU:
         dtype = self.lyapunov_hybrid_system.system.dtype
         lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                relu, self.x_equilibrium, self.V_lambda,
+                self.x_equilibrium, self.V_lambda,
                 self.lyapunov_positivity_epsilon)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
@@ -202,7 +202,7 @@ class TrainLyapunovReLU:
 
         lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
-                relu, self.x_equilibrium, self.V_lambda,
+                self.x_equilibrium, self.V_lambda,
                 self.lyapunov_derivative_epsilon)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
@@ -249,7 +249,7 @@ class TrainLyapunovReLU:
             positivity_sample_loss = lyapunov_positivity_sample_cost_weight *\
                 self.lyapunov_hybrid_system.\
                 lyapunov_positivity_loss_at_samples(
-                    relu, relu_at_equilibrium, self.x_equilibrium,
+                    relu_at_equilibrium, self.x_equilibrium,
                     positivity_state_samples_in_pool, self.V_lambda,
                     self.lyapunov_positivity_epsilon,
                     margin=self.lyapunov_positivity_sample_margin)
@@ -272,7 +272,7 @@ class TrainLyapunovReLU:
             derivative_sample_loss = lyapunov_derivative_sample_cost_weight *\
                 self.lyapunov_hybrid_system.\
                 lyapunov_derivative_loss_at_samples_and_next_states(
-                    relu, self.V_lambda, self.lyapunov_derivative_epsilon,
+                    self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
                     margin=self.lyapunov_derivative_sample_margin)

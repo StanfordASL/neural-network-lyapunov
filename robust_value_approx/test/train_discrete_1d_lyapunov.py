@@ -87,7 +87,8 @@ if __name__ == "__main__":
         state_samples_all, 100, True)
     plot_relu(relu, system, V_lambda, x_equilibrium)
 
-    lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
+    lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
+        system, relu)
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium)
     dut.output_flag = True
