@@ -16,11 +16,11 @@ import argparse
 
 
 def compute_total_loss(
-    system, x_equilibrium, relu_layer_width, params_val, V_rho,
+    system, x_equilibrium, relu_layer_width, params_val, V_lambda,
     lyapunov_positivity_epsilon, lyapunov_derivative_epsilon, state_samples,
         state_samples_next, bias, requires_grad):
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov.LyapunovContinuousTimeHybridSystem(system), V_rho,
+        lyapunov.LyapunovContinuousTimeHybridSystem(system), V_lambda,
         x_equilibrium)
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_sample_cost_weight = 0.
@@ -44,7 +44,7 @@ def compute_total_loss(
 
 
 def compute_milp_cost_given_relu(
-    system, x_equilibrium, relu_layer_width, params_val, V_rho,
+    system, x_equilibrium, relu_layer_width, params_val, V_lambda,
     lyapunov_positivity_epsilon, lyapunov_derivative_epsilon, bias,
         requires_grad, positivity_milp):
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
@@ -52,10 +52,10 @@ def compute_milp_cost_given_relu(
     dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
     if positivity_milp:
         milp = dut.lyapunov_positivity_as_milp(
-            relu, x_equilibrium, V_rho, lyapunov_positivity_epsilon)[0]
+            relu, x_equilibrium, V_lambda, lyapunov_positivity_epsilon)[0]
     else:
         milp = dut.lyapunov_derivative_as_milp(
-            relu, x_equilibrium, V_rho, lyapunov_derivative_epsilon,
+            relu, x_equilibrium, V_lambda, lyapunov_derivative_epsilon,
             None, None)[0]
     milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     milp.gurobi_model.optimize()
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     relu_layer_width = tuple(relu_layer_width)
     relu_params_val = torch.cat(tuple(
         param.reshape((-1,)) for param in relu.parameters())).detach()
-    V_rho = 0.
+    V_lambda = 0.
     lyapunov_positivity_epsilon = 0.01
     lyapunov_derivative_epsilon = 0.01
     state_samples = train_2d_lyapunov_utils.setup_state_samples_all(
@@ -117,24 +117,24 @@ if __name__ == "__main__":
 
     if args.function == "positivity" or args.function == "derivative":
         grad = compute_milp_cost_given_relu(
-            system, x_equilibrium, relu_layer_width, relu_params_val, V_rho,
+            system, x_equilibrium, relu_layer_width, relu_params_val, V_lambda,
             lyapunov_positivity_epsilon, lyapunov_derivative_epsilon,
             args.bias, True, args.function == "positivity")
         grad_numerical = utils.compute_numerical_gradient(
             lambda p: compute_milp_cost_given_relu(
                 system, x_equilibrium, relu_layer_width, torch.from_numpy(p),
-                V_rho, lyapunov_positivity_epsilon,
+                V_lambda, lyapunov_positivity_epsilon,
                 lyapunov_derivative_epsilon, args.bias, False,
                 args.function == "positivity"), relu_params_val, dx=1e-8)
     elif args.function == "loss":
         grad = compute_total_loss(
-            system, x_equilibrium, relu_layer_width, relu_params_val, V_rho,
+            system, x_equilibrium, relu_layer_width, relu_params_val, V_lambda,
             lyapunov_positivity_epsilon, lyapunov_derivative_epsilon,
             state_samples, state_samples_next, args.bias, True)
         grad_numerical = utils.compute_numerical_gradient(
             lambda p: compute_total_loss(
                 system, x_equilibrium, relu_layer_width, torch.from_numpy(p),
-                V_rho, lyapunov_positivity_epsilon,
+                V_lambda, lyapunov_positivity_epsilon,
                 lyapunov_derivative_epsilon, state_samples, state_samples_next,
                 args.bias, False),
             relu_params_val, dx=1e-8)

@@ -137,7 +137,7 @@ if __name__ == "__main__":
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
 
-    V_rho = 0.
+    V_lambda = 0.
 
     x_lower = torch.tensor([-1 + 1e-6, -1 + 1e-6], dtype=torch.float64)
     x_upper = torch.tensor([1 - 1e-6, 1 - 1e-6], dtype=torch.float64)
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     approximator.convergence_tolerance = 0.003
     if args.system == 1:
         result1 = approximator.train(
-            system_simulate, relu, V_rho, x_equilibrium,
+            system_simulate, relu, V_lambda, x_equilibrium,
             lambda x: torch.norm(x - x_equilibrium, p=1),
             state_samples_all1, 100, True)
         print(f"value function approximation error {result1[1]}")
@@ -161,7 +161,7 @@ if __name__ == "__main__":
                     setup_state_samples_on_boundary(
                         x_equilibrium, x_lower, x_upper, (21, 21), theta)
                 result1 = approximator.train(
-                    system_simulate, relu, V_rho, x_equilibrium,
+                    system_simulate, relu, V_lambda, x_equilibrium,
                     lambda x: 0.02 * torch.norm(x - x_equilibrium, p=1),
                     state_samples_all1, 3000, True, x_equilibrium,
                     lambda x: torch.norm(x - x_equilibrium, 1) < 0.01 and
@@ -170,7 +170,7 @@ if __name__ == "__main__":
             else:
                 x0_value_samples = torch.load(args.load_cost_to_go_data)
                 result1 = approximator.train_with_cost_to_go(
-                    relu, x0_value_samples, V_rho, x_equilibrium)
+                    relu, x0_value_samples, V_lambda, x_equilibrium)
 
             print(f"value function approximation error {result1[1]}")
         else:
@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     state_samples_all = state_samples_all1
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_rho, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium)
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     if args.save_model is not None:
         lyapunov = {
             "relu": relu,
-            "V_rho": V_rho,
+            "V_lambda": V_lambda,
             "x_equilibrium": x_equilibrium,
             "theta": theta,
             "lyapunov_positivity_epsilon": dut.lyapunov_positivity_epsilon,

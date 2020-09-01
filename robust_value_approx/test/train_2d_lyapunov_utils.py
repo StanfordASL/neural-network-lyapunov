@@ -111,7 +111,7 @@ def plot_relu_domain_boundary(ax, relu, **kwargs):
 
 
 def plot_lyapunov(
-    ax, relu, V_rho, x_equilibrium, x_lower, x_upper, mesh_size, fontsize,
+    ax, relu, V_lambda, x_equilibrium, x_lower, x_upper, mesh_size, fontsize,
         **kwargs):
     """
     Plot V(x) in 3D.
@@ -138,11 +138,11 @@ def plot_lyapunov(
 
 
 def plot_lyapunov_colormap(
-    fig, ax, relu, V_rho, lyapunov_positivity_epsilon, x_equilibrium, x_lower,
-        x_upper, mesh_size, title_fontsize, **kwargs):
+    fig, ax, relu, V_lambda, lyapunov_positivity_epsilon, x_equilibrium,
+        x_lower, x_upper, mesh_size, title_fontsize, **kwargs):
     """
     Plot V(x) - epsilon |x - x*|₁ as a color map.
-    where V(x) = relu(x) + ρ|x-x*|₁
+    where V(x) = relu(x) + λ|x-x*|₁
     """
     with torch.no_grad():
         state_samples_all = setup_state_samples_all(
@@ -174,8 +174,9 @@ def plot_lyapunov_colormap(
 
 
 def plot_lyapunov_dot_colormap(
-    fig, ax, relu, system, V_rho, lyapunov_derivative_epsilon, x_equilibrium,
-        x_lower, x_upper, mesh_size, discrete_time, fontsize, **kwargs):
+    fig, ax, relu, system, V_lambda, lyapunov_derivative_epsilon,
+    x_equilibrium, x_lower, x_upper, mesh_size, discrete_time, fontsize,
+        **kwargs):
     if discrete_time:
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
     else:
@@ -196,7 +197,7 @@ def plot_lyapunov_dot_colormap(
                 state_sample = torch.tensor(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 dV[i, j] = torch.max(torch.cat(dut.lyapunov_derivative(
-                    state_sample, relu, x_equilibrium, V_rho,
+                    state_sample, relu, x_equilibrium, V_lambda,
                     lyapunov_derivative_epsilon)))
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
@@ -215,10 +216,11 @@ def plot_lyapunov_dot_colormap(
         cb.ax.tick_params(labelsize=fontsize)
 
 
-def plot_sublevel_set(ax, relu, V_rho, x_equilibrium, upper_bound, **kwargs):
+def plot_sublevel_set(
+        ax, relu, V_lambda, x_equilibrium, upper_bound, **kwargs):
     """
     Plot the sub-level set of V(x) <= upper_bound where
-    V(x) = network(x) + ρ |x-x*|₁
+    V(x) = network(x) + λ |x-x*|₁
     currently we only accept network with linear and (leaky) ReLU units. The
     linear unit cannot have bias term.
     """
@@ -234,7 +236,7 @@ def plot_sublevel_set(ax, relu, V_rho, x_equilibrium, upper_bound, **kwargs):
     x[:, 0] = torch.cos(theta)
     x[:, 1] = torch.sin(theta)
     lyapunov_val = relu(x).squeeze() + \
-        V_rho * torch.norm(x - x_equilibrium, p=1, dim=1)
+        V_lambda * torch.norm(x - x_equilibrium, p=1, dim=1)
     x = x * (((upper_bound / lyapunov_val).unsqueeze(1)).repeat([1, 2]))
     ax.plot(x[:, 0].detach().numpy(), x[:, 1].detach().numpy(), **kwargs)
     return x
@@ -278,7 +280,7 @@ def plot_phase_portrait(
 
 
 def plot_cost_to_go_approximator(
-    relu, x0_value_samples, x_equilibrium, V_rho, lower, upper, mesh_size,
+    relu, x0_value_samples, x_equilibrium, V_lambda, lower, upper, mesh_size,
         theta):
     """
     Plot the cost-to-go approximator and the cost-to-go samples.
@@ -301,7 +303,7 @@ def plot_cost_to_go_approximator(
                 state_sample = torch.tensor(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 V[i, j] = relu(state_sample) - relu_at_equilibrium + \
-                    V_rho * torch.norm(state_sample - x_equilibrium, p=1)
+                    V_lambda * torch.norm(state_sample - x_equilibrium, p=1)
 
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()

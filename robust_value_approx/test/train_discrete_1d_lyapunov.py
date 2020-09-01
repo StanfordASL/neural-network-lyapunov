@@ -42,7 +42,7 @@ def setup_relu():
     return relu
 
 
-def plot_relu(relu, system, V_rho, x_equilibrium):
+def plot_relu(relu, system, V_lambda, x_equilibrium):
     num_samples = 1001
     x_samples = torch.linspace(-1, 1, num_samples).type(torch.float64).\
         reshape((-1, 1))
@@ -54,9 +54,9 @@ def plot_relu(relu, system, V_rho, x_equilibrium):
         relu_at_equilibrium = relu.forward(x_equilibrium)
         for i in range(num_samples):
             V[i] = relu.forward(x_samples[i]) - relu_at_equilibrium +\
-                V_rho * torch.norm(x_samples[i] - x_equilibrium, p=1)
+                V_lambda * torch.norm(x_samples[i] - x_equilibrium, p=1)
             V_next[i] = relu.forward(x_next[i]) - relu_at_equilibrium +\
-                V_rho * torch.norm(x_next[i] - x_equilibrium, p=1)
+                V_lambda * torch.norm(x_next[i] - x_equilibrium, p=1)
             dV[i] = V_next[i] - V[i]
     fig = plt.figure()
     ax1 = fig.add_subplot(2, 1, 1)
@@ -75,7 +75,7 @@ def plot_relu(relu, system, V_rho, x_equilibrium):
 if __name__ == "__main__":
     system = setup_system()
     relu = setup_relu()
-    V_rho = 0.1
+    V_lambda = 0.1
     x_equilibrium = torch.tensor([0], dtype=torch.float64)
     state_samples_all = torch.linspace(-1, 1, 20).type(torch.float64).\
         reshape((-1, 1))
@@ -83,15 +83,15 @@ if __name__ == "__main__":
     train_value_approximator.max_epochs = 500
     train_value_approximator.convergence_tolerance = 0.001
     result1 = train_value_approximator.train(
-        system, relu, V_rho, x_equilibrium, lambda x: torch.norm(x, p=1),
+        system, relu, V_lambda, x_equilibrium, lambda x: torch.norm(x, p=1),
         state_samples_all, 100, True)
-    plot_relu(relu, system, V_rho, x_equilibrium)
+    plot_relu(relu, system, V_lambda, x_equilibrium)
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_rho, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium)
     dut.output_flag = True
     dut.max_iterations = 3000
     dut.learning_rate = 1e-4
     result = dut.train(relu, state_samples_all)
-    plot_relu(relu, system, V_rho, x_equilibrium)
+    plot_relu(relu, system, V_lambda, x_equilibrium)
