@@ -284,8 +284,7 @@ class TestReLU(unittest.TestCase):
             x_up = torch.tensor([2, 3], dtype=self.dtype)
             (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
                 z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up)\
-                = relu_free_pattern.output_constraint(
-                model, x_lo, x_up)
+                = relu_free_pattern.output_constraint(x_lo, x_up)
             # print("z_pre_relu_lo:{}\nz_pre_relu_up:{}".format(
             #    z_pre_relu_lo, z_pre_relu_up))
             num_z_pre_relu_lo_positive = np.sum([
@@ -317,7 +316,7 @@ class TestReLU(unittest.TestCase):
             def test_input_output(x):
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
-                    model, x)
+                    x)
                 # Now formulate an optimization problem, with fixed input,
                 # search for z and beta. There should be only one solution.
                 z_var = cp.Variable(relu_free_pattern.num_relu_units)
@@ -370,7 +369,7 @@ class TestReLU(unittest.TestCase):
                 assert(torch.all(torch.le(x, x_up.squeeze())))
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
-                    model, x)
+                    x)
                 z_post_relu_up_numpy =\
                     np.array([zi.detach().numpy() for zi in z_post_relu_up])
                 z_post_relu_lo_numpy =\
@@ -481,7 +480,7 @@ class TestReLU(unittest.TestCase):
         def test_model(model):
             relu_free_pattern = relu_to_optimization.\
                 ReLUFreePattern(model, self.dtype)
-            (M, B1, B2, d) = relu_free_pattern.output_gradient(model)
+            (M, B1, B2, d) = relu_free_pattern.output_gradient()
             num_alpha = 12
             self.assertListEqual(list(M.shape), [num_alpha, 2])
 
@@ -568,7 +567,7 @@ class TestReLU(unittest.TestCase):
             output_expected = g.squeeze() @ y
             (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) =\
                 relu_free_pattern.output_gradient_times_vector(
-                    model, y_lo, y_up)
+                    y_lo, y_up)
 
             # Now compute z manually
             z_expected = torch.empty((relu_free_pattern.num_relu_units),

@@ -84,7 +84,7 @@ class LyapunovHybridLinearSystem:
          Aeq_relu_z, Aeq_relu_beta, rhs_relu_eq, a_relu_out, b_relu_out, _,
          _, _, _) = \
             relu_free_pattern.output_constraint(
-                 relu_model, torch.from_numpy(self.system.x_lo_all),
+                 torch.from_numpy(self.system.x_lo_all),
                  torch.from_numpy(self.system.x_up_all))
         # relu_z is the slack variable for the constraints encoding the relu
         # activation binary variable beta and the network input x.
@@ -711,7 +711,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             # First write ∂ReLU(x)/∂x*Aᵢsᵢ
             a_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
                 relu_free_pattern.output_gradient_times_vector(
-                    relu_model, Aisi_lower[i], Aisi_upper[i])
+                    Aisi_lower[i], Aisi_upper[i])
             z[i] = milp.addVars(
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
@@ -752,7 +752,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         # First write ∂ReLU(x)/∂x*ẋ
         a_out, A_xdot, A_z, A_beta, rhs, _, _ = \
             relu_free_pattern.output_gradient_times_vector(
-                relu_model, torch.from_numpy(xdot_lower),
+                torch.from_numpy(xdot_lower),
                 torch.from_numpy(xdot_upper))
         z = milp.addVars(
             A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
@@ -803,7 +803,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         for i in range(self.system.num_modes):
             a_out[i], A_gigammai, A_z, A_beta, rhs, _, _ =\
                 relu_free_pattern.output_gradient_times_vector(
-                    relu_model, gigammai_lower[i], gigammai_upper[i])
+                    gigammai_lower[i], gigammai_upper[i])
             z[i] = milp.addVars(
                 A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)

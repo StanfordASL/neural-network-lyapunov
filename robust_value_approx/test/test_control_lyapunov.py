@@ -89,8 +89,7 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
                 for j in range(x.shape[0]):
                     s[i * x.shape[0] + j][0] = alpha[i][0] * x[j][0]
             # Now compute t = min_i αᵀMBuᵢ
-            (M, _, _, _) = self.dut.relu_free_pattern.output_gradient(
-                self.model)
+            (M, _, _, _) = self.dut.relu_free_pattern.output_gradient()
             t = torch.tensor(
                 [[torch.min(alpha.T @ M @ B_dyn @ u_vertices).item()]]
             ).to(dtype=self.dtype)

@@ -192,11 +192,16 @@ class ReLUFreePattern:
         # We index each ReLU unit in the network. The units on the i'th layer
         # come before these on the i+1'th layer. self.relu_unit_index[i][j] is
         # the index of the j'th ReLU unit on the i'th layer.
+
+        # Note that self.model is a reference to @p model. If @p model is
+        # changed outside of ReLUFreePattern class, self.model would also
+        # change accordingly.
+        self.model = model
         self.relu_unit_index = []
         self.num_relu_units = 0
         self.dtype = dtype
         layer_count = 0
-        for layer in model:
+        for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 self.relu_unit_index.append(list(range(
                     self.num_relu_units,
@@ -216,7 +221,7 @@ class ReLUFreePattern:
             self.num_relu_units -= len(self.relu_unit_index[-1])
             self.relu_unit_index = self.relu_unit_index[:-1]
 
-    def output_constraint(self, model, x_lo, x_up):
+    def output_constraint(self, x_lo, x_up):
         """
         The output of (leaky) ReLU network is a piecewise linear function of
         the input.
@@ -259,9 +264,6 @@ class ReLUFreePattern:
         ReLU(x) = Aₒᵤₜ*z + bₒᵤₜ
         where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
         β = [β₀; β₁; ...; βₙ₋₁].
-        @param model A ReLU network. This network must have the same structure
-        as the network in the class constructor (but the weights can be
-        different).
         @param x_lo A 1-D vector, the lower bound of input x.
         @param x_up A 1-D vector, the upper bound of input x.
         @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
@@ -312,7 +314,7 @@ class ReLUFreePattern:
         z_pre_relu_up = [None] * self.num_relu_units
         z_post_relu_lo = [None] * self.num_relu_units
         z_post_relu_up = [None] * self.num_relu_units
-        for layer in model:
+        for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
                 bi = layer.bias if layer.bias is not None else\
@@ -528,7 +530,7 @@ class ReLUFreePattern:
                 layer_count += 1
         if self.last_layer_is_relu:
             # TODO: implement multiple relu ouputs (not really needed)
-            assert(model[-2].out_features == 1)
+            assert(self.model[-2].out_features == 1)
             A_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
             A_out[-1] = 1
             b_out = 0
@@ -545,14 +547,11 @@ class ReLUFreePattern:
                b_out, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
                z_post_relu_up)
 
-    def compute_relu_unit_outputs_and_activation(self, model, x):
+    def compute_relu_unit_outputs_and_activation(self, x):
         """
         This is a utility function for output_constraint(). Given a network
         input x, this function computes the vector containing each ReLU unit
         output z, and the activation of each ReLU unit β.
-        @param model A ReLU network. This network must have the same structure
-        as the network in the class constructor (but the weights can be
-        different).
         @param x The input to the ReLU network. A 1-D tensor.
         @return (z, β, output) z, β are column vectors. Refer to
         output_constraint()
@@ -562,7 +561,7 @@ class ReLUFreePattern:
         beta = torch.empty((self.num_relu_units, 1), dtype=self.dtype)
         relu_unit_count = 0
         z_layer = x
-        for layer in model:
+        for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 z_layer = layer.forward(z_layer)
             elif (isinstance(layer, nn.ReLU) or
@@ -607,7 +606,7 @@ class ReLUFreePattern:
                 len(self.relu_unit_index[i]) + relu_unit_layer_indices[i]
         return index
 
-    def output_gradient(self, model):
+    def output_gradient(self):
         """
         The ReLU network output is a piecewise linear function of the input x.
         Hence the gradient of the output w.r.t the input can be expressed as
@@ -660,9 +659,6 @@ class ReLUFreePattern:
         We will write these linear constraints as
         B1 * α + B2 * β ≤ d
 
-        @param model A ReLU network. This network must have the same structure
-        as the network in the class constructor (but the weights can be
-        different).
         @return (M, B1, B2, d) M, B1, B2 are matrices, d is a column vector.
         """
 
@@ -690,7 +686,7 @@ class ReLUFreePattern:
 
         layer_linear_unit_gradients = queue.Queue(maxsize=num_alpha)
         layer_count = 0
-        for layer in model:
+        for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 if layer_count == 0:
                     linear_unit_gradient = LinearUnitGradient(
@@ -773,7 +769,7 @@ class ReLUFreePattern:
 
         return (M, B1, B2, d)
 
-    def output_gradient_times_vector(self, model, vector_lower, vector_upper):
+    def output_gradient_times_vector(self, vector_lower, vector_upper):
         """
         We want to compute the gradient of the network ∂ReLU(x)/∂x times a
         vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
@@ -801,9 +797,6 @@ class ReLUFreePattern:
         where z = [z₁; z₂;...;zₙ]
         Note that we do NOT require that β is the right activation pattern for
         the input x. This constraint should be imposed in output() function.
-        @param model A ReLU network. This network must have the same structure
-        as the network in the class constructor (but the weights can be
-        different).
         @param vector_lower The lower bound of the vector y.
         @param vector_upper The upper bound of the vector y.
         @return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) z_lo and z_up are
@@ -827,7 +820,7 @@ class ReLUFreePattern:
         a_out = torch.zeros(self.num_relu_units, dtype=self.dtype)
         if self.last_layer_is_relu:
             a_out[self.relu_unit_index[-1]] = 1
-        for layer in model:
+        for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
                 if layer_count == len(self.relu_unit_index) and not\

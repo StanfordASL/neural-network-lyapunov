@@ -100,7 +100,7 @@ def verify_control_lyapunov(model, x_lo, x_up):
         + Ain5.to_dense().detach().numpy() * beta\
         <= rhs.squeeze()
     (Ain6, Ain7, Ain8, rhs_in, Aeq6, Aeq7, Aeq8, rhs_eq, _, _, _, _, _, _) =\
-        verifier.relu_free_pattern.output_constraint(model, x_lo, x_up)
+        verifier.relu_free_pattern.output_constraint(x_lo, x_up)
     z = cp.Variable(Ain7.shape[1])
     constraints = [
         constraint1, Ain6.detach().numpy() * x + Ain7.detach().numpy() * z
