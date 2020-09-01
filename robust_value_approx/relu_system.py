@@ -1,4 +1,3 @@
-import torch
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 
 
