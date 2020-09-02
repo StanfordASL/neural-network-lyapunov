@@ -113,7 +113,7 @@ class LyapunovHybridLinearSystem:
                 sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in.squeeze(),
                 name="relu_dynamics_ineq")
         if rhs_eq.shape[0] > 0:
-            # Aeq_x * x + Aeq_s * s + Aeq_gamma * gamma <= rhs_eq
+            # Aeq_x * x + Aeq_s * s + Aeq_gamma * gamma = rhs_eq
             milp.addMConstrs(
                 [Aeq_x, Aeq_s, Aeq_gamma], [x, s, gamma],
                 sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
