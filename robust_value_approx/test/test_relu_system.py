@@ -54,7 +54,7 @@ class TestAutonomousReluSystem(unittest.TestCase):
         self.relu_dyn = setup_relu_dyn(self.dtype)
         self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
         self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
-        self.system = relu_system.AutonomousReLUSystem(2, self.dtype,
+        self.system = relu_system.AutonomousReLUSystem(self.dtype,
                                                        self.x_lo, self.x_up,
                                                        self.relu_dyn)
 
@@ -62,7 +62,7 @@ class TestAutonomousReluSystem(unittest.TestCase):
         (Aout_s, Cout,
          Ain_x, Ain_s, Ain_gamma, rhs_in,
          Aeq_x, Aeq_s, Aeq_gamma, rhs_eq) = \
-            self.system.mixed_integer_constraints(self.relu_dyn)
+            self.system.mixed_integer_constraints()
 
         def check_transition(x0):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)

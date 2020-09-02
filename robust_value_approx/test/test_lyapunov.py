@@ -1827,7 +1827,7 @@ class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
         self.relu_dyn = setup_relu_dyn(self.dtype)
         self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
         self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
-        self.system1 = relu_system.AutonomousReLUSystem(2, self.dtype,
+        self.system1 = relu_system.AutonomousReLUSystem(self.dtype,
                                                         self.x_lo, self.x_up,
                                                         self.relu_dyn)
 
@@ -1835,17 +1835,17 @@ class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
         """
         Test lyapunov_derivative_as_milp without bounds on V(x[n])
         """
-        dut1 = lyapunov.LyapunovDiscreteTimeAutonomousReLUSystem(self.system1)
-
         relu1 = setup_leaky_relu(self.dtype)
+        dut1 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1, relu1)
         relu2 = setup_relu(self.dtype)
-        V_rho = 2.
+        dut2 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1, relu2)
+        V_lambda = 2.
         dV_epsilon = 0.1
 
-        def test_milp(dut, x_equilibrium, relu):
+        def test_milp(dut, x_equilibrium):
             (milp, x, beta, gamma, x_next, s, z, z_next, beta_next) =\
                 dut.lyapunov_derivative_as_milp(
-                    relu, self.relu_dyn, x_equilibrium, V_rho, dV_epsilon)
+                    x_equilibrium, V_lambda, dV_epsilon)
             # First solve this MILP. The solution has to satisfy that
             # x_next = Ai * x + g_i where i is the active mode inferred from
             # gamma.
@@ -1864,26 +1864,24 @@ class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
                     torch.tensor(x_sol, dtype=self.dtype)).detach().numpy(),
                 x_next_sol, decimal=5)
             v_next = dut.lyapunov_value(
-                relu, torch.from_numpy(x_next_sol), x_equilibrium, V_rho)
+                torch.from_numpy(x_next_sol), x_equilibrium, V_lambda)
             v = dut.lyapunov_value(
-                relu, torch.from_numpy(x_sol), x_equilibrium, V_rho)
+                torch.from_numpy(x_sol), x_equilibrium, V_lambda)
             self.assertAlmostEqual(
                 milp.gurobi_model.objVal,
                 (v_next - v + dV_epsilon * v).item())
 
-        test_milp(dut1, self.x_equilibrium1, relu1)
-        test_milp(dut1, self.x_equilibrium1, relu2)
+        test_milp(dut1, self.x_equilibrium1)
+        test_milp(dut2, self.x_equilibrium1)
 
         # Now solve MILP to optimal for system1 and system2
         milp1 = dut1.lyapunov_derivative_as_milp(
-                relu1, self.relu_dyn,
-                self.x_equilibrium1, V_rho, dV_epsilon)[0]
+            self.x_equilibrium1, V_lambda, dV_epsilon)[0]
         milp1.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp1.gurobi_model.optimize()
         milp_optimal_cost1 = milp1.gurobi_model.ObjVal
-        milp2 = dut1.lyapunov_derivative_as_milp(
-                relu2, self.relu_dyn,
-                self.x_equilibrium1, V_rho, dV_epsilon)[0]
+        milp2 = dut2.lyapunov_derivative_as_milp(
+            self.x_equilibrium1, V_lambda, dV_epsilon)[0]
         milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp2.gurobi_model.optimize()
         milp_optimal_cost2 = milp2.gurobi_model.ObjVal
@@ -1894,15 +1892,14 @@ class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
         # mixed-integer linear program. We fix x[n] to some value, compute the
         # cost function of the MILP, and then check if it is the same as
         # evaluating the ReLU network on x[n] and x[n+1]
-        def test_milp_cost(dut, relu, x_val, x_equilibrium, milp_optimal_cost):
+        def test_milp_cost(dut, x_val, x_equilibrium, milp_optimal_cost):
             x_next_val = self.relu_dyn(x_val)
-            v_next = dut.lyapunov_value(
-                relu, x_next_val, x_equilibrium, V_rho)
-            v = dut.lyapunov_value(relu, x_val, x_equilibrium, V_rho)
+            v_next = dut.lyapunov_value(x_next_val, x_equilibrium, V_lambda)
+            v = dut.lyapunov_value(x_val, x_equilibrium, V_lambda)
             cost_expected = (v_next - v + dV_epsilon * v).item()
             (milp_test, x_test, _, _, _, _, _, _, _) =\
                 dut.lyapunov_derivative_as_milp(
-                    relu, self.relu_dyn, x_equilibrium, V_rho, dV_epsilon)
+                    x_equilibrium, V_lambda, dV_epsilon)
             for i in range(dut.system.x_dim):
                 milp_test.addLConstr(
                     [torch.tensor([1.], dtype=milp_test.dtype)], [[x_test[i]]],
@@ -1933,9 +1930,9 @@ class TestLyapunovDiscreteTimeAutonomousReLUSystem(unittest.TestCase):
 
         for _ in range(20):
             x_val = sample_state()
-            test_milp_cost(dut1, relu1, x_val, self.x_equilibrium1,
+            test_milp_cost(dut1, x_val, self.x_equilibrium1,
                            milp_optimal_cost1)
-            test_milp_cost(dut1, relu2, x_val, self.x_equilibrium1,
+            test_milp_cost(dut2, x_val, self.x_equilibrium1,
                            milp_optimal_cost2)
 
 

@@ -21,7 +21,8 @@ class LyapunovHybridLinearSystem:
 
     def __init__(self, system, lyapunov_relu):
         """
-        @param system A AutonomousHybridLinearSystem instance.
+        @param system A AutonomousHybridLinearSystem or AutonomousReLUSystem
+        instance.
         @param lyapunov_relu A ReLU network used to represent the Lyapunov
         function. The Lyapunov function is ReLU(x) - ReLU(x*) + λ|x-x*|₁
         """
@@ -76,7 +77,7 @@ class LyapunovHybridLinearSystem:
             [gamma], sense=gurobipy.GRB.EQUAL, rhs=1.)
         return (x, s, gamma, Aeq_s, Aeq_gamma)
 
-    def add_relu_system_constraint(self, milp, relu_dyn):
+    def add_relu_system_constraint(self, milp):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -88,7 +89,7 @@ class LyapunovHybridLinearSystem:
         # add the milp constraint to formulate the relu system.
         (Aout_s, Cout, Ain_x, Ain_s, Ain_gamma, rhs_in,
          Aeq_x, Aeq_s, Aeq_gamma, rhs_eq) = \
-            self.system.mixed_integer_constraints(relu_dyn)
+            self.system.mixed_integer_constraints()
         # create the decision variables
         x = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
@@ -447,18 +448,30 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
-        # x is the variable x[n]
-        (x, s, gamma, Aeq_s1, Aeq_gamma1) = self.add_hybrid_system_constraint(
-            milp)
         # x_next is the variable x[n+1]
         x_next = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
-        # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
-        milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s1,
-             -Aeq_gamma1], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
-            b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
+
+        if isinstance(self.system,
+                      hybrid_linear_system.AutonomousHybridLinearSystem):
+            # x is the variable x[n]
+            (x, s, gamma, Aeq_s1, Aeq_gamma1) = \
+                self.add_hybrid_system_constraint(milp)
+            # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
+            milp.addMConstrs(
+                [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s1,
+                 -Aeq_gamma1], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
+                b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
+        elif isinstance(self.system, relu_system.AutonomousReLUSystem):
+            # x is the variable x[n]
+            (x, s, gamma, Aout_s, Cout) = self.add_relu_system_constraint(milp)
+            # Add the constraint x[n+1] = Aout_s * s + Cout
+            milp.addMConstrs(
+                [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s],
+                [x_next, s], sense=gurobipy.GRB.EQUAL, b=Cout)
+        else:
+            raise(NotImplementedError)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
@@ -1355,135 +1368,3 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         loss = torch.nn.HingeEmbeddingLoss(margin=margin)(
             -(Vdot + epsilon * V), torch.tensor(-1))
         return loss
-
-
-class LyapunovDiscreteTimeAutonomousReLUSystem(LyapunovHybridLinearSystem):
-    """
-    For a discrete time relu system
-    x[n+1] = relu(x[n])
-    we want to learn a ReLU network as the Lyapunov function for the system.
-    The condition for the Lyapunov function is that
-    V(x*) = 0
-    V(x) > 0 ∀ x ≠ x*
-    V(x[n+1]) - V(x[n]) ≤ -ε * V(x[n])
-    where x* is the equilibrium point.
-    We will first formulate this condition as the optimal cost of a certain
-    mixed-integer linear program (MILP) being non-positive. The optimal cost
-    is the loss function of our neural network. We will compute the gradient of
-    this loss function w.r.t to network weights/bias, and then call gradient
-    based optimization (SGD/Adam) to reduce the loss.
-    """
-
-    def __init__(self, system):
-        """
-        @param system A AutonomousHybridLinearSystem instance.
-        """
-        super(LyapunovDiscreteTimeAutonomousReLUSystem, self).__init__(system)
-
-    def lyapunov_derivative_as_milp(
-            self, relu_model, relu_dyn, x_equilibrium, V_rho, epsilon,
-            lyapunov_lower=None, lyapunov_upper=None):
-        """
-        We assume that the Lyapunov function
-        V(x) = ReLU(x) - ReLU(x*) + ρ|x-x*|₁, where x* is the equilibrium
-        state.
-        Formulate the Lyapunov condition
-        V(x[n+1]) - V(x[n]) <= -ε * V(x[n]) ∀x[n] satisfying
-        lower <= V(x[n]) <= upper
-        as the maximal of following optimization problem is no larger
-        than 0.
-        max V(x[n+1]) - V(x[n]) + ε * V(x[n])
-        s.t lower <= V(x[n]) <= upper
-        We would formulate this optimization problem as an MILP.
-        @param relu_model A pytorch ReLU network.
-        @param relu_dyn A pytorch ReLU network (modeling the dynamics)
-        @param V_rho ρ in the documentation above.
-        @param lyapunov_lower the "lower" bound in the documentation above. If
-        lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
-        @param lyapunov_upper the "upper" bound in the documentation above. If
-        lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
-        @param epsilon The rate of exponential convergence. If the goal is to
-        verify convergence but not exponential convergence, then set epsilon
-        to 0.
-        @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
-        where milp is a GurobiTorchMILP object.
-        The decision variables of the MILP are
-        (x[n], beta[n], gamma[n], x[n+1], s[n], z[n], z[n+1], beta[n+1])
-        """
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (self.system.x_dim,))
-        if lyapunov_lower is not None:
-            assert(isinstance(lyapunov_lower, float))
-        if lyapunov_upper is not None:
-            assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_rho, float))
-        assert(isinstance(epsilon, float))
-
-        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
-            relu_model, self.system.dtype)
-
-        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
-
-        # x is the variable x[n]
-        (x, s, gamma,
-         Aout_s, Cout) = self.add_relu_system_constraint(
-            milp, relu_dyn)
-        # x_next is the variable x[n+1]
-        x_next = milp.addVars(
-            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
-
-        # Add the constraint x[n+1] = Aout_s * s + Cout
-        milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s],
-            [x_next, s], sense=gurobipy.GRB.EQUAL, b=Cout)
-
-        # Add the mixed-integer constraint that formulates the output of
-        # ReLU(x[n]).
-        # z is the slack variable to write the output of ReLU(x[n]) with mixed
-        # integer linear constraints.
-        (z, beta, a_out, b_out) = self.add_relu_output_constraint(
-            relu_model, relu_free_pattern, milp, x)
-
-        # Now compute ReLU(x*)
-        relu_x_equilibrium = relu_model.forward(x_equilibrium)
-
-        # Now add the mixed-integer linear constraint to represent
-        # |x[n] - x*|₁. To do so, we introduce the slack variable
-        # s_x_norm, beta_x_norm.
-        # s_x_norm(i) = |x[n](i) - x*(i)|
-        (s_x_norm, beta_x_norm) = self.add_state_error_l1_constraint(
-            milp, x_equilibrium, x, slack_name="|x[n]-x*|",
-            binary_var_name="beta_x_norm")
-        # Now add the mixed-integer linear constraint to represent
-        # |x[n+1] - x*|₁. To do so, we introduce the slack variable
-        # s_x_next_norm, beta_x_next_norm.
-        # s_x_next_norm(i) = |x[n+1](i) - x*(i)|
-        (s_x_next_norm, beta_x_next_norm) = self.add_state_error_l1_constraint(
-            milp, x_equilibrium, x_next, slack_name="|x[n+1]-x*|",
-            binary_var_name="beta_x_next_norm")
-
-        # Now add the constraint
-        # lower <= ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁ <= upper
-        self.add_lyapunov_bounds_constraint(
-            lyapunov_lower, lyapunov_upper, milp, a_out, b_out, V_rho,
-            relu_x_equilibrium, z, s_x_norm)
-
-        # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
-        # constraints
-        (z_next, beta_next, _, _) = self.add_relu_output_constraint(
-            relu_model, relu_free_pattern, milp, x_next)
-
-        # The cost function is
-        # max ReLU(x[n+1]) + ρ|x[n+1]-x*|₁ - ReLU(x[n]) - ρ|x[n]-x*|₁ +
-        #     epsilon * (ReLU(x[n]) - ReLU(x*) + ρ|x[n]-x*|₁)
-        milp.setObjective(
-            [a_out, (epsilon - 1) * a_out,
-             V_rho * torch.ones((self.system.x_dim,), dtype=self.system.dtype),
-             (epsilon-1) * V_rho*torch.ones((self.system.x_dim,),
-                                            dtype=self.system.dtype)],
-            [z_next, z, s_x_next_norm, s_x_norm],
-            epsilon * (b_out - relu_x_equilibrium.squeeze()),
-            gurobipy.GRB.MAXIMIZE)
-
-        return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
