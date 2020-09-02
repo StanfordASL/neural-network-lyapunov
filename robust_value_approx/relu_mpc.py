@@ -99,7 +99,7 @@ class ReLUMPC:
         self.vf = vf
         self.model = model
         relu = relu_to_optimization.ReLUFreePattern(model, vf.dtype)
-        relu_con = relu.output_constraint(model, vf.x_lo, vf.x_up)
+        relu_con = relu.output_constraint(vf.x_lo, vf.x_up)
         (Pin1, Pin2, Pin3, Prhs_in,
          Peq1, Peq2, Peq3, Prhs_eq,
          a_out, b_out,
@@ -218,7 +218,7 @@ class QReLUMPC:
         relu = relu_to_optimization.ReLUFreePattern(model, self.dtype)
         xu_lo = torch.cat((x_lo, u_lo), 0)
         xu_up = torch.cat((x_up, u_up), 0)
-        relu_con = relu.output_constraint(model, xu_lo, xu_up)
+        relu_con = relu.output_constraint(xu_lo, xu_up)
         (Pin1, Pin2, Pin3, Prhs_in,
          Peq1, Peq2, Peq3, Prhs_eq,
          a_out, b_out,

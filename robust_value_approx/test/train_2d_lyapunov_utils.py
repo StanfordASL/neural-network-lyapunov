@@ -178,9 +178,9 @@ def plot_lyapunov_dot_colormap(
     x_equilibrium, x_lower, x_upper, mesh_size, discrete_time, fontsize,
         **kwargs):
     if discrete_time:
-        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
     else:
-        dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+        dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
     dtype = torch.float64
     with torch.no_grad():
         state_samples_all = setup_state_samples_all(
@@ -197,7 +197,7 @@ def plot_lyapunov_dot_colormap(
                 state_sample = torch.tensor(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 dV[i, j] = torch.max(torch.cat(dut.lyapunov_derivative(
-                    state_sample, relu, x_equilibrium, V_lambda,
+                    state_sample, x_equilibrium, V_lambda,
                     lyapunov_derivative_epsilon)))
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()

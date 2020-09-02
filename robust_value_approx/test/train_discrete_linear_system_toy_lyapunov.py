@@ -135,7 +135,8 @@ if __name__ == "__main__":
         system_simulate = test_hybrid_linear_system.setup_xu_system(5.)
         relu = setup_relu((2, 8, 8), bias=False)
 
-    lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(system)
+    lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
+        system, relu)
 
     V_lambda = 0.
 
@@ -207,7 +208,7 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_epsilon = 1e-5
     dut.summary_writer_folder = args.summary_writer_folder
     start_time = time.time()
-    result = dut.train(relu, state_samples_all)
+    result = dut.train(state_samples_all)
     print(f"training time {time.time()-start_time}s")
 
     if args.save_model is not None:
@@ -219,3 +220,5 @@ if __name__ == "__main__":
             "lyapunov_positivity_epsilon": dut.lyapunov_positivity_epsilon,
             "lyapunov_derivative_epsilon": dut.lyapunov_derivative_epsilon}
         torch.save(lyapunov, args.save_model)
+    # Should converge to a valid Lyapunov function.
+    assert(result[0])

@@ -139,7 +139,7 @@ class TrainLyapunovReLU:
         self.max_sample_pool_size = 500
 
     def total_loss(
-            self, relu, positivity_state_samples, derivative_state_samples,
+            self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
             lyapunov_positivity_sample_cost_weight=None,
             lyapunov_derivative_sample_cost_weight=None,
@@ -151,7 +151,6 @@ class TrainLyapunovReLU:
         2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
         3. -min_x V(x) - ε₂ |x - x*|₁
         4. max_x dV(x) + ε V(x)
-        @param relu The ReLU network.
         @param positivity_state_samples All sample states on which we compute
         the violation of Lyapunov positivity constraint.
         @param derivative_state_samples All sample states on which we compute
@@ -187,7 +186,7 @@ class TrainLyapunovReLU:
         dtype = self.lyapunov_hybrid_system.system.dtype
         lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                relu, self.x_equilibrium, self.V_lambda,
+                self.x_equilibrium, self.V_lambda,
                 self.lyapunov_positivity_epsilon)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
@@ -202,7 +201,7 @@ class TrainLyapunovReLU:
 
         lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
-                relu, self.x_equilibrium, self.V_lambda,
+                self.x_equilibrium, self.V_lambda,
                 self.lyapunov_derivative_epsilon)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
@@ -218,10 +217,12 @@ class TrainLyapunovReLU:
         relu_zeta_val = np.array([
             np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
         relu_activation_pattern = relu_to_optimization.\
-            relu_activation_binary_to_pattern(relu, relu_zeta_val)
+            relu_activation_binary_to_pattern(
+                self.lyapunov_hybrid_system.lyapunov_relu, relu_zeta_val)
         relu_gradient, _, _, _ = relu_to_optimization.\
             ReLUGivenActivationPattern(
-                relu, self.lyapunov_hybrid_system.system.x_dim,
+                self.lyapunov_hybrid_system.lyapunov_relu,
+                self.lyapunov_hybrid_system.system.x_dim,
                 relu_activation_pattern,
                 self.lyapunov_hybrid_system.system.dtype)
         if self.output_flag:
@@ -232,7 +233,9 @@ class TrainLyapunovReLU:
                   f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
 
         loss = torch.tensor(0., dtype=dtype)
-        relu_at_equilibrium = relu.forward(self.x_equilibrium)
+        relu_at_equilibrium = \
+            self.lyapunov_hybrid_system.lyapunov_relu.forward(
+                self.x_equilibrium)
 
         def set_weight(val, default_val):
             return val if val is not None else default_val
@@ -249,7 +252,7 @@ class TrainLyapunovReLU:
             positivity_sample_loss = lyapunov_positivity_sample_cost_weight *\
                 self.lyapunov_hybrid_system.\
                 lyapunov_positivity_loss_at_samples(
-                    relu, relu_at_equilibrium, self.x_equilibrium,
+                    relu_at_equilibrium, self.x_equilibrium,
                     positivity_state_samples_in_pool, self.V_lambda,
                     self.lyapunov_positivity_epsilon,
                     margin=self.lyapunov_positivity_sample_margin)
@@ -272,7 +275,7 @@ class TrainLyapunovReLU:
             derivative_sample_loss = lyapunov_derivative_sample_cost_weight *\
                 self.lyapunov_hybrid_system.\
                 lyapunov_derivative_loss_at_samples_and_next_states(
-                    relu, self.V_lambda, self.lyapunov_derivative_epsilon,
+                    self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
                     margin=self.lyapunov_derivative_sample_margin)
@@ -353,7 +356,7 @@ class TrainLyapunovReLU:
             positivity_state_samples, derivative_state_samples,\
             derivative_state_samples_next
 
-    def train_with_line_search(self, relu, state_samples_all):
+    def train_with_line_search(self, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
         assert(
             state_samples_all.shape[1] ==
@@ -374,11 +377,11 @@ class TrainLyapunovReLU:
         iter_count = 0
 
         def closure():
-            relu.zero_grad()
+            self.lyapunov_hybrid_system.lyapunov_relu.zero_grad()
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], _, _, _, _, _, _, _\
                 = self.total_loss(
-                    relu, positivity_state_samples, derivative_state_samples,
+                    positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next)
             print("derivative mip loss " +
                   f"{lyapunov_derivative_mip_costs[iter_count]}")
@@ -390,17 +393,20 @@ class TrainLyapunovReLU:
         loss.backward()
         losses[0] = loss.item()
         relu_params[iter_count] = torch.cat(
-            [p.data.reshape((-1,)) for p in relu.parameters()])
+            [p.data.reshape((-1,)) for p in
+             self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
         iter_count = 1
         if self.optimizer == "GD":
             optimizer = line_search_gd.LineSearchGD(
-                relu.parameters(), lr=self.learning_rate,
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+                lr=self.learning_rate,
                 momentum=self.momentum, min_step_size_decrease=1e-4,
                 loss_minimal_decrement=self.loss_minimal_decrement,
                 step_size_reduction=0.2, min_improvement=self.min_improvement)
         elif self.optimizer == "LineSearchAdam":
             optimizer = line_search_adam.LineSearchAdam(
-                relu.parameters(), lr=self.learning_rate,
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+                lr=self.learning_rate,
                 min_step_size_decrease=1e-4,
                 loss_minimal_decrement=self.loss_minimal_decrement,
                 step_size_reduction=0.2, min_improvement=self.min_improvement)
@@ -409,7 +415,8 @@ class TrainLyapunovReLU:
             loss.backward()
             losses[iter_count] = loss.item()
             relu_params[iter_count] = torch.cat(
-                [p.data.reshape((-1,)) for p in relu.parameters()])
+                [p.data.reshape((-1,)) for p in
+                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
             if lyapunov_positivity_mip_costs[iter_count] < \
                 self.lyapunov_positivity_convergence_tol and \
                 lyapunov_derivative_mip_costs[iter_count] < \
@@ -431,7 +438,7 @@ class TrainLyapunovReLU:
             iter_count += 1
         return False
 
-    def train(self, relu, state_samples_all):
+    def train(self, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
         assert(
             state_samples_all.shape[1] ==
@@ -445,10 +452,12 @@ class TrainLyapunovReLU:
         iter_count = 0
         if self.optimizer == "Adam":
             optimizer = torch.optim.Adam(
-                relu.parameters(), lr=self.learning_rate)
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+                lr=self.learning_rate)
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
-                relu.parameters(), lr=self.learning_rate,
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+                lr=self.learning_rate,
                 momentum=self.momentum)
         else:
             raise Exception(
@@ -470,7 +479,7 @@ class TrainLyapunovReLU:
                 positivity_state_samples, derivative_state_samples,\
                 derivative_state_samples_next\
                 = self.total_loss(
-                    relu, positivity_state_samples, derivative_state_samples,
+                    positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next)
             losses[iter_count] = loss.item()
 
@@ -515,20 +524,23 @@ class TrainLyapunovReLU:
                 loss.backward()
             else:
                 (need_projection, n1, n2) = train_utils.project_gradient(
-                    relu, positivity_sample_loss + positivity_mip_loss,
+                    self.lyapunov_hybrid_system.lyapunov_relu,
+                    positivity_sample_loss + positivity_mip_loss,
                     derivative_sample_loss + derivative_mip_loss,
                     project_gradient_mode, retain_graph=False)
             relu_params[iter_count] = torch.cat(
-                [p.data.reshape((-1,)) for p in relu.parameters()])
+                [p.data.reshape((-1,)) for p in
+                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
             gradients[iter_count] = torch.cat(
-                [p.grad.reshape((-1,)) for p in relu.parameters()])
+                [p.grad.reshape((-1,)) for p in
+                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
             optimizer.step()
             iter_count += 1
         return (False, losses, lyapunov_positivity_mip_costs,
                 lyapunov_derivative_mip_costs)
 
     def train_lyapunov_on_samples(
-        self, relu, state_samples_all, max_iterations,
+        self, state_samples_all, max_iterations,
             max_increasing_iterations):
         """
         Train a ReLU network on given state samples (not the adversarial states
@@ -539,7 +551,6 @@ class TrainLyapunovReLU:
         MIP costs keeps increasing (which means the network overfits to the
         training data). Return the best network (the one with the minimal
         MIP loss) found so far.
-        @param relu The neural network
         @param state_samples_all A torch tensor, state_samples_all[i] is the
         i'th sample
         @param max_iterations The maximal number of iterations.
@@ -557,14 +568,15 @@ class TrainLyapunovReLU:
         best_loss = np.inf
         num_increasing_iterations = 0
         optimizer = torch.optim.Adam(
-            relu.parameters(), lr=self.learning_rate)
+            self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+            lr=self.learning_rate)
         previous_mip_loss = np.inf
         for iter_count in range(max_iterations):
             optimizer.zero_grad()
             loss, lyapunov_positivity_mip_cost, lyapunov_derivative_mip_cost, \
                 _, _, _, _, _, _, _\
                 = self.total_loss(
-                    relu, state_samples_all, state_samples_all,
+                    state_samples_all, state_samples_all,
                     state_samples_next,
                     lyapunov_positivity_mip_cost_weight=0.,
                     lyapunov_derivative_mip_cost_weight=0.)
@@ -574,12 +586,13 @@ class TrainLyapunovReLU:
                 lyapunov_derivative_mip_cost
             if mip_loss < best_loss:
                 best_loss = mip_loss
-                best_relu = copy.deepcopy(relu)
+                best_relu = copy.deepcopy(
+                    self.lyapunov_hybrid_system.lyapunov_relu)
             if mip_loss > previous_mip_loss:
                 num_increasing_iterations += 1
                 if num_increasing_iterations == max_increasing_iterations:
                     print(f"best loss {best_loss}")
-                    return best_relu
+                    break
             else:
                 # reset the counter.
                 num_increasing_iterations = 0
@@ -594,7 +607,8 @@ class TrainLyapunovReLU:
             loss.backward()
             optimizer.step()
         print(f"best loss {best_loss}")
-        return best_relu
+        self.lyapunov_hybrid_system.lyapunov_relu.load_state_dict(
+            best_relu.state_dict())
 
 
 class TrainValueApproximator:

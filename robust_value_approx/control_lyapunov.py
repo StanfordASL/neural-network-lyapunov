@@ -158,7 +158,7 @@ class ControlLyapunovFreeActivationPattern:
         assert(x_up.shape == (x_size,))
         assert(torch.all(torch.le(x_lo, x_up)))
 
-        (M, B1, B2, e) = self.relu_free_pattern.output_gradient(self.model)
+        (M, B1, B2, e) = self.relu_free_pattern.output_gradient()
         num_alpha = M.shape[0]
         num_s = num_alpha * x_size
         MA = M @ A_dyn

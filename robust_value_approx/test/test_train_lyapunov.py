@@ -51,15 +51,15 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
         V_lambda = 0.1
         x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
+        relu = setup_relu()
         lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
-            system)
+            system, relu)
         dut = train_lyapunov.TrainLyapunovReLU(
             lyapunov_hybrid_system, V_lambda, x_equilibrium)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.add_adversarial_state_to_training = True
         dut.max_sample_pool_size = 400
-        relu = setup_relu()
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = torch.stack([
             system.step_forward(state_samples_all[i]) for i in
@@ -73,7 +73,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             positivity_mip_loss, derivative_mip_loss,\
             positivity_state_samples_new, derivative_state_samples_new,\
             derivative_state_samples_next_new = dut.total_loss(
-                relu, positivity_state_samples, derivative_state_samples,
+                positivity_state_samples, derivative_state_samples,
                 state_samples_next)
 
         self.assertEqual(
@@ -94,19 +94,19 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         relu_at_equilibrium = relu.forward(x_equilibrium)
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
-                relu, relu_at_equilibrium, x_equilibrium,
+                relu_at_equilibrium, x_equilibrium,
                 state_samples_all[-dut.max_sample_pool_size:], V_lambda,
                 dut.lyapunov_positivity_sample_margin)
         loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
-                relu, V_lambda, dut.lyapunov_derivative_epsilon,
+                V_lambda, dut.lyapunov_derivative_epsilon,
                 state_samples_all[-dut.max_sample_pool_size:],
                 state_samples_next[-dut.max_sample_pool_size:], x_equilibrium,
                 dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                relu, x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon)
+                x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon)
         lyapunov_positivity_mip = lyapunov_positivity_mip_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -119,7 +119,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
 
         lyapunov_derivative_mip_return = lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
-                relu, x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
+                x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
                 None, None)
         lyapunov_derivative_mip = lyapunov_derivative_mip_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(

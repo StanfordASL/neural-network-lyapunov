@@ -19,8 +19,10 @@ def compute_total_loss(
     system, x_equilibrium, relu_layer_width, params_val, V_lambda,
     lyapunov_positivity_epsilon, lyapunov_derivative_epsilon, state_samples,
         state_samples_next, bias, requires_grad):
+    relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
+        relu_layer_width, params_val, bias=bias)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov.LyapunovContinuousTimeHybridSystem(system), V_lambda,
+        lyapunov.LyapunovContinuousTimeHybridSystem(system, relu), V_lambda,
         x_equilibrium)
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_sample_cost_weight = 0.
@@ -30,9 +32,7 @@ def compute_total_loss(
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_positivity_epsilon = lyapunov_positivity_epsilon
     dut.lyapunov_derivative_epsilon = lyapunov_derivative_epsilon
-    relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
-        relu_layer_width, params_val, bias=bias)
-    total_loss = dut.total_loss(relu, state_samples, state_samples_next)
+    total_loss = dut.total_loss(state_samples, state_samples_next)
     if requires_grad:
         total_loss[0].backward()
         grad = np.concatenate(
@@ -49,13 +49,13 @@ def compute_milp_cost_given_relu(
         requires_grad, positivity_milp):
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
         relu_layer_width, params_val, bias=bias)
-    dut = lyapunov.LyapunovContinuousTimeHybridSystem(system)
+    dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
     if positivity_milp:
         milp = dut.lyapunov_positivity_as_milp(
-            relu, x_equilibrium, V_lambda, lyapunov_positivity_epsilon)[0]
+            x_equilibrium, V_lambda, lyapunov_positivity_epsilon)[0]
     else:
         milp = dut.lyapunov_derivative_as_milp(
-            relu, x_equilibrium, V_lambda, lyapunov_derivative_epsilon,
+            x_equilibrium, V_lambda, lyapunov_derivative_epsilon,
             None, None)[0]
     milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     milp.gurobi_model.optimize()
