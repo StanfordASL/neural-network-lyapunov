@@ -453,20 +453,18 @@ class TestReLU(unittest.TestCase):
         # extensively to compute the gradient of the loss w.r.t the network
         # weights/biases, so it is important to make sure that this gradient
         # is correct.
-        def compute_loss(network_parameters_np, requires_grad):
-            network_parameters = \
-                torch.from_numpy(network_parameters_np).type(self.dtype)
+        def compute_loss(network_parameters):
             param_count = 0
             for layer in model:
                 if (isinstance(layer, torch.nn.Linear)):
                     layer.weight.data = network_parameters[
                         param_count:param_count + layer.weight.numel()
-                        ].clone().reshape(layer.weight.size())
+                        ].reshape(layer.weight.size())
                     param_count += layer.weight.numel()
                     if (layer.bias is not None):
                         layer.bias.data = network_parameters[
                             param_count: param_count + layer.bias.numel()
-                            ].clone().reshape(layer.bias.size())
+                            ].reshape(layer.bias.size())
                         param_count += layer.bias.numel()
             relu_free_pattern = relu_to_optimization.ReLUFreePattern(
                 model, self.dtype)
@@ -483,39 +481,19 @@ class TestReLU(unittest.TestCase):
                 rhs_eq.sum() + a_out.sum()
             if isinstance(b_out, torch.Tensor):
                 objective1 += b_out.sum()
-            if requires_grad:
-                objective1.backward()
-                grad_list = []
-                for layer in model:
-                    if isinstance(layer, torch.nn.Linear):
-                        grad_list.append(
-                            layer.weight.grad.detach().numpy().reshape(
-                                (-1,)))
-                        if layer.bias is not None:
-                            grad_list.append(
-                                layer.bias.grad.detach().numpy().reshape((
-                                    -1,)))
-
-                gradient = np.concatenate(grad_list)
-                return gradient
-            else:
-                return objective1.item()
+            return objective1
             # end of compute_loss
 
         # Now extract all the parameters in the model
         params_list = []
         for layer in model:
             if isinstance(layer, torch.nn.Linear):
-                params_list.append(
-                    layer.weight.data.detach().numpy().reshape((-1,)))
+                params_list.append(layer.weight.data.reshape((-1,)))
                 if layer.bias is not None:
-                    params_list.append(
-                        layer.bias.data.detach().numpy().reshape((-1,)))
-        params = np.concatenate(params_list)
-        grad_numerical = utils.compute_numerical_gradient(
-                lambda params: compute_loss(params, False), params, dx=1e-6)
-        grad_auto = compute_loss(params, True)
-        np.testing.assert_allclose(grad_numerical, grad_auto, atol=1e-6)
+                    params_list.append(layer.bias.data.reshape((-1,)))
+        params = torch.cat(params_list)
+        params.requires_grad=True
+        torch.autograd.gradcheck(compute_loss, params, atol=1e-6)
 
     def test_relu_free_pattern_output_constraint_gradient1(self):
         self.relu_free_pattern_output_constraint_gradient_tester(self.model1)
