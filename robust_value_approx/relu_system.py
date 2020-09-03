@@ -55,3 +55,8 @@ class AutonomousReLUSystem:
         return (Aout_s, Cout,
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq)
+
+    def possible_dx(self, x):
+        assert(isinstance(x, torch.Tensor))
+        assert(len(x) == self.x_dim)
+        return [self.dynamics_relu(x)]
