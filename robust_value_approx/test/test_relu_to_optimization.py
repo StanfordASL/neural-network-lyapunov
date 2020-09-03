@@ -1,4 +1,5 @@
 import robust_value_approx.relu_to_optimization as relu_to_optimization
+import robust_value_approx.utils as utils
 import unittest
 import numpy as np
 import torch
@@ -443,6 +444,99 @@ class TestReLU(unittest.TestCase):
         test_model(self.model5)
         test_model(self.model6)
         test_model(self.model7)
+
+    def relu_free_pattern_output_constraint_gradient_tester(self, model):
+        # This is the utility function for
+        # test_relu_free_pattern_output_constraint_gradient()
+        # Test the gradient of the returned argument in
+        # ReLUFreePattern.output_constraint. Later we will use this gradient
+        # extensively to compute the gradient of the loss w.r.t the network
+        # weights/biases, so it is important to make sure that this gradient
+        # is correct.
+        def compute_loss(network_parameters_np, requires_grad):
+            network_parameters = \
+                torch.from_numpy(network_parameters_np).type(self.dtype)
+            param_count = 0
+            for layer in model:
+                if (isinstance(layer, torch.nn.Linear)):
+                    layer.weight.data = network_parameters[
+                        param_count:param_count + layer.weight.numel()
+                        ].clone().reshape(layer.weight.size())
+                    param_count += layer.weight.numel()
+                    if (layer.bias is not None):
+                        layer.bias.data = network_parameters[
+                            param_count: param_count + layer.bias.numel()
+                            ].clone().reshape(layer.bias.size())
+                        param_count += layer.bias.numel()
+            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+                model, self.dtype)
+            x_lo = torch.tensor([-1, -2], dtype=self.dtype)
+            x_up = torch.tensor([2, 3], dtype=self.dtype)
+            (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
+             b_out, _, _, _, _) = relu_free_pattern.output_constraint(
+                 x_lo, x_up)
+            # This function compute the sum of all the return terms. If any of
+            # the term has a wrong gradient, the gradient of the sum will also
+            # be wrong.
+            objective1 = Ain1.sum() + Ain2.sum() + Ain3.sum() + \
+                rhs_in.sum() + Aeq1.sum() + Aeq2.sum() + Aeq3.sum() + \
+                rhs_eq.sum() + a_out.sum()
+            if isinstance(b_out, torch.Tensor):
+                objective1 += b_out.sum()
+            if requires_grad:
+                objective1.backward()
+                grad_list = []
+                for layer in model:
+                    if isinstance(layer, torch.nn.Linear):
+                        grad_list.append(
+                            layer.weight.grad.detach().numpy().reshape(
+                                (-1,)))
+                        if layer.bias is not None:
+                            grad_list.append(
+                                layer.bias.grad.detach().numpy().reshape((
+                                    -1,)))
+
+                gradient = np.concatenate(grad_list)
+                return gradient
+            else:
+                return objective1.item()
+            # end of compute_loss
+
+        # Now extract all the parameters in the model
+        params_list = []
+        for layer in model:
+            if isinstance(layer, torch.nn.Linear):
+                params_list.append(
+                    layer.weight.data.detach().numpy().reshape((-1,)))
+                if layer.bias is not None:
+                    params_list.append(
+                        layer.bias.data.detach().numpy().reshape((-1,)))
+        params = np.concatenate(params_list)
+        grad_numerical = utils.compute_numerical_gradient(
+                lambda params: compute_loss(params, False), params, dx=1e-6)
+        grad_auto = compute_loss(params, True)
+        np.testing.assert_allclose(grad_numerical, grad_auto, atol=1e-6)
+
+    def test_relu_free_pattern_output_constraint_gradient1(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model1)
+
+    def test_relu_free_pattern_output_constraint_gradient2(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model2)
+
+    def test_relu_free_pattern_output_constraint_gradient3(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model3)
+
+    def test_relu_free_pattern_output_constraint_gradient4(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model4)
+
+    def test_relu_free_pattern_output_constraint_gradient5(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model5)
+
+    def test_relu_free_pattern_output_constraint_gradient6(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model6)
+
+    def test_relu_free_pattern_output_constraint_gradient7(self):
+        self.relu_free_pattern_output_constraint_gradient_tester(self.model7)
 
     def test_compute_alpha_index1(self):
         relu_free_pattern = relu_to_optimization.\
