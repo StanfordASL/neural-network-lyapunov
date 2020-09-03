@@ -7,6 +7,7 @@ import queue
 
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.relu_system as relu_system
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import robust_value_approx.utils as utils
 
@@ -20,12 +21,18 @@ class LyapunovHybridLinearSystem:
 
     def __init__(self, system, lyapunov_relu):
         """
-        @param system A AutonomousHybridLinearSystem instance.
+        @param system A AutonomousHybridLinearSystem or AutonomousReLUSystem
+        instance.
         @param lyapunov_relu A ReLU network used to represent the Lyapunov
         function. The Lyapunov function is ReLU(x) - ReLU(x*) + λ|x-x*|₁
         """
-        assert(isinstance(
-            system, hybrid_linear_system.AutonomousHybridLinearSystem))
+        assert(
+            isinstance(
+                system, hybrid_linear_system.AutonomousHybridLinearSystem)
+            or
+            isinstance(
+                system, relu_system.AutonomousReLUSystem)
+        )
         self.system = system
         self.lyapunov_relu = lyapunov_relu
         self.lyapunov_relu_free_pattern = \
@@ -69,6 +76,50 @@ class LyapunovHybridLinearSystem:
             [torch.ones((self.system.num_modes,), dtype=self.system.dtype)],
             [gamma], sense=gurobipy.GRB.EQUAL, rhs=1.)
         return (x, s, gamma, Aeq_s, Aeq_gamma)
+
+    def add_relu_system_constraint(self, milp):
+        """
+        This function is intended for internal usage only (but I expose it
+        as a public function for unit test).
+        Add the constraint and variables to write the relu system
+        dynamics as mixed-integer linear constraints.
+        """
+        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+
+        # add the milp constraint to formulate the relu system.
+        (Aout_s, Cout, Ain_x, Ain_s, Ain_gamma, rhs_in,
+         Aeq_x, Aeq_s, Aeq_gamma, rhs_eq) = \
+            self.system.mixed_integer_constraints()
+        # create the decision variables
+        x = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x")
+        # s is the slack variable to convert relu system to
+        # mixed-integer linear constraint. Each element of s corresponds
+        # to a unit in the neural network
+        s = milp.addVars(
+            Ain_s.shape[1], lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="s")
+        # gamma is the binary variable determining the hybrid mode of x.
+        gamma = milp.addVars(
+            Ain_gamma.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
+            name="gamma")
+
+        # Now add the constraint
+        # Ain_x * x + Ain_s * s + Ain_gamma * gamma <= rhs_in
+        if rhs_in.shape[0] > 0:
+            milp.addMConstrs(
+                [Ain_x, Ain_s, Ain_gamma], [x, s, gamma],
+                sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in.squeeze(),
+                name="relu_dynamics_ineq")
+        if rhs_eq.shape[0] > 0:
+            # Aeq_x * x + Aeq_s * s + Aeq_gamma * gamma = rhs_eq
+            milp.addMConstrs(
+                [Aeq_x, Aeq_s, Aeq_gamma], [x, s, gamma],
+                sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
+                name="relu_dynamics_eq")
+
+        return (x, s, gamma, Aout_s, Cout)
 
     def add_relu_output_constraint(
             self, milp, x, slack_name="relu_z", binary_var_name="relu_beta"):
@@ -397,18 +448,30 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
-        # x is the variable x[n]
-        (x, s, gamma, Aeq_s1, Aeq_gamma1) = self.add_hybrid_system_constraint(
-            milp)
         # x_next is the variable x[n+1]
         x_next = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
-        # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
-        milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s1,
-             -Aeq_gamma1], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
-            b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
+
+        if isinstance(self.system,
+                      hybrid_linear_system.AutonomousHybridLinearSystem):
+            # x is the variable x[n]
+            (x, s, gamma, Aeq_s1, Aeq_gamma1) = \
+                self.add_hybrid_system_constraint(milp)
+            # Add the constraint x[n+1] = Aeq_s1 * s + Aeq_gamma1 * gamma
+            milp.addMConstrs(
+                [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aeq_s1,
+                 -Aeq_gamma1], [x_next, s, gamma], sense=gurobipy.GRB.EQUAL,
+                b=torch.zeros(self.system.x_dim, dtype=milp.dtype))
+        elif isinstance(self.system, relu_system.AutonomousReLUSystem):
+            # x is the variable x[n]
+            (x, s, gamma, Aout_s, Cout) = self.add_relu_system_constraint(milp)
+            # Add the constraint x[n+1] = Aout_s * s + Cout
+            milp.addMConstrs(
+                [torch.eye(self.system.x_dim, dtype=milp.dtype), -Aout_s],
+                [x_next, s], sense=gurobipy.GRB.EQUAL, b=Cout)
+        else:
+            raise(NotImplementedError)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).

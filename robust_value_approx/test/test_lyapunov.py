@@ -10,6 +10,7 @@ import robust_value_approx.lyapunov as lyapunov
 import robust_value_approx.relu_to_optimization as relu_to_optimization
 import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 import robust_value_approx.hybrid_linear_system as hybrid_linear_system
+import robust_value_approx.relu_system as relu_system
 import robust_value_approx.utils as utils
 import robust_value_approx.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -101,6 +102,45 @@ def setup_leaky_relu(dtype, params=None, bias=True):
     relu = nn.Sequential(
         linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3)
     return relu
+
+
+def setup_relu_dyn(dtype, params=None):
+    # Construct a simple ReLU model with 2 hidden layers
+    # params is the value of weights/bias after concatenation.
+    # the network has the same number of outputs as inputs (2)
+    if params is not None:
+        assert(isinstance(params, torch.Tensor))
+        assert(params.shape == (35,))
+    linear1 = nn.Linear(2, 3)
+    if params is None:
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=dtype)
+        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
+    else:
+        linear1.weight.data = params[:6].clone().reshape((3, 2))
+        linear1.bias.data = params[6:9].clone()
+    linear2 = nn.Linear(3, 4)
+    if params is None:
+        linear2.weight.data = torch.tensor(
+                [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+                dtype=dtype)
+        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
+    else:
+        linear2.weight.data = params[9:21].clone().reshape((4, 3))
+        linear2.bias.data = params[21:25].clone()
+    linear3 = nn.Linear(4, 2)
+    if params is None:
+        linear3.weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]],
+                                           dtype=dtype)
+        linear3.bias.data = torch.tensor([-9, 3], dtype=dtype)
+    else:
+        linear3.weight.data = params[25:33].clone().reshape((2, 4))
+        linear3.bias.data = params[33:35].clone().reshape((2))
+    relu1 = nn.Sequential(
+        linear1, nn.ReLU(), linear2, nn.ReLU(), linear3)
+    assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype))[0].item() == 0)
+    assert(not relu1.forward(torch.tensor([0, 0], dtype=dtype))[1].item() == 0)
+    return relu1
 
 
 class TestLyapunovHybridSystem(unittest.TestCase):
@@ -449,6 +489,12 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         self.system2 = \
             test_hybrid_linear_system.setup_transformed_trecate_system(
                 self.theta2, self.x_equilibrium2)
+        relu_dyn = setup_relu_dyn(self.dtype)
+        x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
+        x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
+        self.system3 = relu_system.AutonomousReLUSystem(self.dtype,
+                                                        x_lo, x_up,
+                                                        relu_dyn)
 
     def test_lyapunov_derivative(self):
         relu = setup_relu(torch.float64)
@@ -483,6 +529,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 self.system2,
                 self.R2 @ torch.tensor(x, dtype=self.system2.dtype) +
                 self.x_equilibrium2, self.x_equilibrium2)
+            test_fun(
+                self.system3,
+                torch.tensor(x, dtype=self.system3.dtype),
+                self.x_equilibrium1)
 
     def test_lyapunov_positivity_as_milp(self):
         relu1 = setup_relu(self.dtype)
@@ -514,24 +564,25 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         relu_x_equilibrium2 = relu1.forward(self.x_equilibrium2)
         relu_x_equilibrium3 = relu2.forward(self.x_equilibrium1)
 
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([0, 0], dtype=self.dtype))
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([0, 0.5], dtype=self.dtype))
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([0.1, 0.5], dtype=self.dtype))
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([-0.3, 0.8], dtype=self.dtype))
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([-0.3, -0.2], dtype=self.dtype))
-        test_fun(
-            self.system1, relu1, self.x_equilibrium1, relu_x_equilibrium1,
-            torch.tensor([0.6, -0.2], dtype=self.dtype))
+        for system in [self.system1, self.system3]:
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([0, 0], dtype=self.dtype))
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([0, 0.5], dtype=self.dtype))
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([0.1, 0.5], dtype=self.dtype))
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([-0.3, 0.8], dtype=self.dtype))
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([-0.3, -0.2], dtype=self.dtype))
+            test_fun(
+                system, relu1, self.x_equilibrium1, relu_x_equilibrium1,
+                torch.tensor([0.6, -0.2], dtype=self.dtype))
         test_fun(
             self.system2, relu1, self.x_equilibrium2, relu_x_equilibrium2,
             self.x_equilibrium2)
@@ -589,20 +640,29 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
             x_sol = np.array([var.x for var in x])
             x_next_sol = np.array([var.x for var in x_next])
-            gamma_sol = np.array([var.x for var in gamma])
-            self.assertAlmostEqual(np.sum(gamma_sol), 1)
-            for mode in range(self.system1.num_modes):
-                if np.abs(gamma_sol[mode] - 1) < 1E-4:
-                    # This mode is active.
-                    # Pi * x <= qi
-                    np.testing.assert_array_less(
-                        dut.system.P[mode].detach().numpy() @ x_sol,
-                        dut.system.q[mode].detach().numpy() + 1E-5)
-                    # x_next = Ai * x + gi
-                    np.testing.assert_array_almost_equal(
-                        dut.system.A[mode].detach().numpy() @ x_sol +
-                        dut.system.g[mode].detach().numpy(),
-                        x_next_sol, decimal=5)
+            if isinstance(system,
+                          hybrid_linear_system.AutonomousHybridLinearSystem):
+                gamma_sol = np.array([var.x for var in gamma])
+                self.assertAlmostEqual(np.sum(gamma_sol), 1)
+                for mode in range(self.system1.num_modes):
+                    if np.abs(gamma_sol[mode] - 1) < 1E-4:
+                        # This mode is active.
+                        # Pi * x <= qi
+                        np.testing.assert_array_less(
+                            dut.system.P[mode].detach().numpy() @ x_sol,
+                            dut.system.q[mode].detach().numpy() + 1E-5)
+                        # x_next = Ai * x + gi
+                        np.testing.assert_array_almost_equal(
+                            dut.system.A[mode].detach().numpy() @ x_sol +
+                            dut.system.g[mode].detach().numpy(),
+                            x_next_sol, decimal=5)
+            elif isinstance(system, relu_system.AutonomousReLUSystem):
+                np.testing.assert_array_almost_equal(
+                    system.dynamics_relu(torch.tensor(
+                        x_sol, dtype=self.dtype)).detach().numpy(),
+                    x_next_sol, decimal=5)
+            else:
+                raise(NotImplementedError)
             v_next = dut.lyapunov_value(
                 torch.from_numpy(x_next_sol), x_equilibrium, V_lambda)
             v = dut.lyapunov_value(
@@ -615,8 +675,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         test_milp(self.system1, self.x_equilibrium1, relu2)
         test_milp(self.system2, self.x_equilibrium2, relu1)
         test_milp(self.system2, self.x_equilibrium2, relu2)
+        test_milp(self.system3, self.x_equilibrium1, relu1)
+        test_milp(self.system3, self.x_equilibrium1, relu2)
 
-        # Now solve MILP to optimal for system1 and system2
+        # Now solve MILP to optimal for system1, system2 and system2
         dut11 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system1, relu1)
         milp1 = dut11.lyapunov_derivative_as_milp(
                 self.x_equilibrium1, V_lambda, dV_epsilon)[0]
@@ -629,6 +691,12 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp2.gurobi_model.optimize()
         milp_optimal_cost2 = milp2.gurobi_model.ObjVal
+        dut31 = lyapunov.LyapunovDiscreteTimeHybridSystem(self.system3, relu1)
+        milp3 = dut31.lyapunov_derivative_as_milp(
+                self.x_equilibrium1, V_lambda, dV_epsilon)[0]
+        milp3.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+        milp3.gurobi_model.optimize()
+        milp_optimal_cost3 = milp3.gurobi_model.ObjVal
 
         # Now test reformulating
         # ReLU(x[n+1]) + ρ|x[n+1]-x*|₁ - ReLU(x[n]) - ρ|x[n]-x*|₁ +
@@ -636,10 +704,18 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         # mixed-integer linear program. We fix x[n] to some value, compute the
         # cost function of the MILP, and then check if it is the same as
         # evaluating the ReLU network on x[n] and x[n+1]
-        def test_milp_cost(dut, mode, x_val, x_equilibrium, milp_optimal_cost):
-            assert(torch.all(
-                dut.system.P[mode] @ x_val <= dut.system.q[mode]))
-            x_next_val = dut.system.A[mode] @ x_val + dut.system.g[mode]
+        def test_milp_cost(dut, x_val, x_equilibrium,
+                           milp_optimal_cost, mode=None):
+            if isinstance(dut.system,
+                          hybrid_linear_system.AutonomousHybridLinearSystem):
+                assert(mode is not None)
+                assert(torch.all(dut.system.P[mode] @
+                                 x_val <= dut.system.q[mode]))
+                x_next_val = dut.system.A[mode] @ x_val + dut.system.g[mode]
+            elif isinstance(dut.system, relu_system.AutonomousReLUSystem):
+                x_next_val = dut.system.dynamics_relu(x_val)
+            else:
+                raise(NotImplementedError)
             v_next = dut.lyapunov_value(
                 x_next_val, x_equilibrium, V_lambda)
             v = dut.lyapunov_value(x_val, x_equilibrium, V_lambda)
@@ -667,23 +743,42 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         np.random.seed(0)
 
         def sample_state(system):
-            while True:
-                x_val = torch.tensor(
-                    [np.random.uniform(system.x_lo_all[i], system.x_up_all[i])
-                     for i in range(self.system1.x_dim)]).type(system.dtype)
-                if torch.all(system.P[i] @ x_val <= system.q[i]):
-                    return x_val
+            if isinstance(system,
+                          hybrid_linear_system.AutonomousHybridLinearSystem):
+                while True:
+                    x_val = torch.tensor(
+                        [np.random.uniform(system.x_lo_all[i],
+                                           system.x_up_all[i])
+                         for i in range(system.x_dim)]).type(system.dtype)
+                    if torch.all(system.P[i] @ x_val <= system.q[i]):
+                        return x_val
+            elif isinstance(system, relu_system.AutonomousReLUSystem):
+                while True:
+                    x_val = torch.rand(system.x_dim, dtype=system.dtype) * (
+                      system.x_up - system.x_lo) + system.x_lo
+                    x_val_next = system.dynamics_relu(x_val)
+                    if (torch.all(x_val_next <= system.x_up) and torch.all(
+                      x_val_next >= system.x_lo)):
+                        return x_val
+            else:
+                raise(NotImplementedError)
 
         for i in range(self.system1.num_modes):
             for _ in range(20):
                 x_val1 = sample_state(self.system1)
                 test_milp_cost(
-                    dut11, i, x_val1, self.x_equilibrium1, milp_optimal_cost1)
+                    dut11, x_val1, self.x_equilibrium1, milp_optimal_cost1,
+                    mode=i)
         for i in range(self.system2.num_modes):
             for _ in range(20):
                 x_val2 = sample_state(self.system2)
                 test_milp_cost(
-                    dut21, i, x_val2, self.x_equilibrium2, milp_optimal_cost2)
+                    dut21, x_val2, self.x_equilibrium2, milp_optimal_cost2,
+                    mode=i)
+        for _ in range(20):
+            x_val3 = sample_state(self.system3)
+            test_milp_cost(dut31, x_val3, self.x_equilibrium1,
+                           milp_optimal_cost3)
 
     def test_lyapunov_derivative_as_milp_bounded(self):
         """
@@ -912,7 +1007,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 lambda weight, bias: compute_milp_cost_given_relu(
                     weight, bias, False), weight_all, bias_all, dx=1e-6)
             np.testing.assert_allclose(
-                    weight_grad, grad_numerical[0].squeeze(), atol=4e-6)
+                    weight_grad, grad_numerical[0].squeeze(), atol=6e-5)
             np.testing.assert_allclose(
                     bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
 
