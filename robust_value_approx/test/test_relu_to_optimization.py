@@ -1,5 +1,4 @@
 import robust_value_approx.relu_to_optimization as relu_to_optimization
-import robust_value_approx.utils as utils
 import unittest
 import numpy as np
 import torch
@@ -31,7 +30,7 @@ class TestReLU(unittest.TestCase):
         self.linear3.weight.data = torch.tensor(
             [[4, 5, 6, 7]], dtype=self.dtype)
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
-        self.linear3_no_bias = nn.Linear(4, 1)
+        self.linear3_no_bias = nn.Linear(4, 1, bias=False)
         self.linear3_no_bias.weight.data = self.linear3.weight.data.clone()
         # Model with a ReLU unit in the output layer
         self.model1 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
@@ -453,21 +452,15 @@ class TestReLU(unittest.TestCase):
         # extensively to compute the gradient of the loss w.r.t the network
         # weights/biases, so it is important to make sure that this gradient
         # is correct.
-        def compute_loss(network_parameters_np, requires_grad):
-            network_parameters = \
-                torch.from_numpy(network_parameters_np).type(self.dtype)
-            param_count = 0
+        def compute_loss(*network_parameters):
+            param_index = 0
             for layer in model:
                 if (isinstance(layer, torch.nn.Linear)):
-                    layer.weight.data = network_parameters[
-                        param_count:param_count + layer.weight.numel()
-                        ].clone().reshape(layer.weight.size())
-                    param_count += layer.weight.numel()
+                    layer.weight = network_parameters[param_index]
+                    param_index += 1
                     if (layer.bias is not None):
-                        layer.bias.data = network_parameters[
-                            param_count: param_count + layer.bias.numel()
-                            ].clone().reshape(layer.bias.size())
-                        param_count += layer.bias.numel()
+                        layer.bias = network_parameters[param_index]
+                        param_index += 1
             relu_free_pattern = relu_to_optimization.ReLUFreePattern(
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
@@ -483,39 +476,17 @@ class TestReLU(unittest.TestCase):
                 rhs_eq.sum() + a_out.sum()
             if isinstance(b_out, torch.Tensor):
                 objective1 += b_out.sum()
-            if requires_grad:
-                objective1.backward()
-                grad_list = []
-                for layer in model:
-                    if isinstance(layer, torch.nn.Linear):
-                        grad_list.append(
-                            layer.weight.grad.detach().numpy().reshape(
-                                (-1,)))
-                        if layer.bias is not None:
-                            grad_list.append(
-                                layer.bias.grad.detach().numpy().reshape((
-                                    -1,)))
-
-                gradient = np.concatenate(grad_list)
-                return gradient
-            else:
-                return objective1.item()
+            return objective1
             # end of compute_loss
 
         # Now extract all the parameters in the model
         params_list = []
         for layer in model:
             if isinstance(layer, torch.nn.Linear):
-                params_list.append(
-                    layer.weight.data.detach().numpy().reshape((-1,)))
+                params_list.append(layer.weight)
                 if layer.bias is not None:
-                    params_list.append(
-                        layer.bias.data.detach().numpy().reshape((-1,)))
-        params = np.concatenate(params_list)
-        grad_numerical = utils.compute_numerical_gradient(
-                lambda params: compute_loss(params, False), params, dx=1e-6)
-        grad_auto = compute_loss(params, True)
-        np.testing.assert_allclose(grad_numerical, grad_auto, atol=1e-6)
+                    params_list.append(layer.bias)
+        torch.autograd.gradcheck(compute_loss, params_list, atol=1e-6)
 
     def test_relu_free_pattern_output_constraint_gradient1(self):
         self.relu_free_pattern_output_constraint_gradient_tester(self.model1)
