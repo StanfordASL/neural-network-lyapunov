@@ -100,6 +100,8 @@ class TestAutonomousReluSystem(unittest.TestCase):
                                                     x0).detach().numpy(),
                                                  decimal=5)
 
+        torch.manual_seed(0)
+
         for i in range(10):
             x0 = torch.rand(2, dtype=self.dtype)
             check_transition(x0)
