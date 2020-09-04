@@ -115,7 +115,7 @@ def setup_relu_dyn(dtype, params=None):
     if params is None:
         linear1.weight.data = torch.tensor([[.01, .02], [.03, .04],
                                             [.05, .06]], dtype=dtype)
-        linear1.bias.data = torch.tensor([-.1, .2, .5], dtype=dtype)
+        linear1.bias.data = torch.tensor([0., 0., 0.], dtype=dtype)
     else:
         linear1.weight.data = params[:6].clone().reshape((3, 2))
         linear1.bias.data = params[6:9].clone()
@@ -125,7 +125,7 @@ def setup_relu_dyn(dtype, params=None):
                 [[-.1, -0.05, .15], [.2, .5, .6], [-.2, -.3, -.4],
                  [.15, .4, .6]],
                 dtype=dtype)
-        linear2.bias.data = torch.tensor([-.1, .1, .1, 1.5], dtype=dtype)
+        linear2.bias.data = torch.tensor([0., 0., 0., 0.], dtype=dtype)
     else:
         linear2.weight.data = params[9:21].clone().reshape((4, 3))
         linear2.bias.data = params[21:25].clone()
@@ -134,7 +134,7 @@ def setup_relu_dyn(dtype, params=None):
         linear3.weight.data = torch.tensor([[.04, .5, .06, .7],
                                             [.08, .07, 5.5, 4.5]],
                                            dtype=dtype)
-        linear3.bias.data = torch.tensor([-.1, .1], dtype=dtype)
+        linear3.bias.data = torch.tensor([0., 0.], dtype=dtype)
     else:
         linear3.weight.data = params[25:33].clone().reshape((2, 4))
         linear3.bias.data = params[33:35].clone().reshape((2))
@@ -490,8 +490,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             test_hybrid_linear_system.setup_transformed_trecate_system(
                 self.theta2, self.x_equilibrium2)
         relu_dyn = setup_relu_dyn(self.dtype)
-        x_lo = torch.tensor([-1e3, -1e3], dtype=self.dtype)
-        x_up = torch.tensor([1e3, 1e3], dtype=self.dtype)
+        x_lo = torch.tensor([-1, -1], dtype=self.dtype)
+        x_up = torch.tensor([1, 1], dtype=self.dtype)
         self.system3 = relu_system.AutonomousReLUSystem(self.dtype,
                                                         x_lo, x_up,
                                                         relu_dyn)
@@ -1000,27 +1000,18 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         bias_all_list.append(np.array(
             [4.25, 2.37, 0.39, -0.24, 1.49, -4.31, 82.5, -12.5]))
 
-        for weight_all, bias_all in zip(weight_all_list, bias_all_list):
-            (weight_grad, bias_grad) = compute_milp_cost_given_relu(
-                self.system1, weight_all, bias_all, True)
-            grad_numerical = utils.compute_numerical_gradient(
-                lambda weight, bias: compute_milp_cost_given_relu(
-                    self.system1, weight, bias, False), weight_all, bias_all,
-                dx=1e-6)
-            np.testing.assert_allclose(
-                    weight_grad, grad_numerical[0].squeeze(), atol=6e-5)
-            np.testing.assert_allclose(
-                    bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
-            (weight_grad, bias_grad) = compute_milp_cost_given_relu(
-                self.system3, weight_all * .1, bias_all * .1, True)
-            grad_numerical = utils.compute_numerical_gradient(
-                lambda weight, bias: compute_milp_cost_given_relu(
-                    self.system3, weight, bias, False),
-                weight_all * .1, bias_all * .1, dx=10e-6)
-            np.testing.assert_allclose(
-                    weight_grad, grad_numerical[0].squeeze(), atol=6e-5)
-            np.testing.assert_allclose(
-                    bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
+        for system in [self.system1, self.system3]:
+            for weight_all, bias_all in zip(weight_all_list, bias_all_list):
+                (weight_grad, bias_grad) = compute_milp_cost_given_relu(
+                    system, weight_all, bias_all, True)
+                grad_numerical = utils.compute_numerical_gradient(
+                    lambda weight, bias: compute_milp_cost_given_relu(
+                        system, weight, bias, False), weight_all, bias_all,
+                    dx=1e-6)
+                np.testing.assert_allclose(
+                        weight_grad, grad_numerical[0].squeeze(), atol=6e-5)
+                np.testing.assert_allclose(
+                        bias_grad, grad_numerical[1].squeeze(), atol=1e-6)
 
     def test_lyapunov_derivative_loss_at_samples(self):
         # Construct a simple ReLU model with 2 hidden layers
