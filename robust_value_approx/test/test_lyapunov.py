@@ -113,8 +113,8 @@ def setup_relu_dyn(dtype, params=None):
         assert(params.shape == (35,))
     linear1 = nn.Linear(2, 3)
     if params is None:
-        linear1.weight.data = torch.tensor([[.01, .02], [.03, .04],
-                                            [.05, .06]], dtype=dtype)
+        linear1.weight.data = torch.tensor([[.1, .2], [.3, .4],
+                                            [.5, .6]], dtype=dtype)
         linear1.bias.data = torch.tensor([0., 0., 0.], dtype=dtype)
     else:
         linear1.weight.data = params[:6].clone().reshape((3, 2))
@@ -131,10 +131,10 @@ def setup_relu_dyn(dtype, params=None):
         linear2.bias.data = params[21:25].clone()
     linear3 = nn.Linear(4, 2)
     if params is None:
-        linear3.weight.data = torch.tensor([[.04, .5, .06, .7],
-                                            [.08, .07, 5.5, 4.5]],
+        linear3.weight.data = torch.tensor([[.4, .5, .6, .7],
+                                            [.8, .7, 0.5, 0.5]],
                                            dtype=dtype)
-        linear3.bias.data = torch.tensor([0., 0.], dtype=dtype)
+        linear3.bias.data = torch.tensor([0.01, 0.01], dtype=dtype)
     else:
         linear3.weight.data = params[25:33].clone().reshape((2, 4))
         linear3.bias.data = params[33:35].clone().reshape((2))
@@ -490,8 +490,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             test_hybrid_linear_system.setup_transformed_trecate_system(
                 self.theta2, self.x_equilibrium2)
         relu_dyn = setup_relu_dyn(self.dtype)
-        x_lo = torch.tensor([-1, -1], dtype=self.dtype)
-        x_up = torch.tensor([1, 1], dtype=self.dtype)
+        x_lo = torch.tensor([-3, -3], dtype=self.dtype)
+        x_up = torch.tensor([3, 3], dtype=self.dtype)
         self.system3 = relu_system.AutonomousReLUSystem(self.dtype,
                                                         x_lo, x_up,
                                                         relu_dyn)
