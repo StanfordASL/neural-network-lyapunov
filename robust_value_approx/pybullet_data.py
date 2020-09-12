@@ -7,60 +7,44 @@ import matplotlib.pyplot as plt
 
 def show_sample(X_sample, X_next_sample=None, clamp=False):
     if clamp:
-        X_sample = torch.clamp(X_sample, 0, 255)
+        X_sample = torch.clamp(X_sample, 0, 1)
         if X_next_sample is not None:
             X_next_sample = torch.clamp(X_next_sample)
+    if X_sample.shape[0] == 6:
+        num_channels = 3
+        cmap = None
+    elif X_sample.shape[0] == 2:
+        num_channels = 1
+        cmap = 'gray'
+    elif X_sample.shape[0] == 1:
+        num_channels = 1
+        cmap = 'gray'
+    else:
+        raise(NotImplementedError)
     fig = plt.figure(figsize=(10, 10))
     if X_next_sample is not None:
-        if X_sample.shape[0] == 6:
-            fig.add_subplot(1, 3, 1)
-            plt.imshow(X_sample[:3, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0))
-            fig.add_subplot(1, 3, 2)
-            plt.imshow(X_sample[3:, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0))
-            fig.add_subplot(1, 3, 3)
-            plt.imshow(X_next_sample[:3, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0))
-        elif X_sample.shape[0] == 2:
-            fig.add_subplot(1, 3, 1)
-            plt.imshow(X_sample[:1, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-            fig.add_subplot(1, 3, 2)
-            plt.imshow(X_sample[1:, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-            fig.add_subplot(1, 3, 3)
-            plt.imshow(X_next_sample[:1, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-        else:
-            raise(NotImplementedError)
+        fig.add_subplot(1, 3, 1)
+        plt.imshow(X_sample[:num_channels, :, :].to(
+            'cpu').detach().numpy().transpose(1, 2, 0),
+            cmap=cmap, vmin=0, vmax=1)
+        fig.add_subplot(1, 3, 2)
+        plt.imshow(X_sample[num_channels:, :, :].to(
+            'cpu').detach().numpy().transpose(1, 2, 0),
+            cmap=cmap, vmin=0, vmax=1)
+        fig.add_subplot(1, 3, 3)
+        plt.imshow(X_next_sample[:num_channels, :, :].to(
+            'cpu').detach().numpy().transpose(1, 2, 0),
+            cmap=cmap, vmin=0, vmax=1)
     else:
-        if X_sample.shape[0] == 6:
-            fig.add_subplot(1, 2, 1)
-            plt.imshow(X_sample[:3, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0))
+        fig.add_subplot(1, 2, 1)
+        plt.imshow(X_sample[:num_channels, :, :].to(
+            'cpu').detach().numpy().transpose(1, 2, 0),
+            cmap=cmap, vmin=0, vmax=1)
+        if X_sample.shape[0] == 2 or X_sample.shape[0] == 6:
             fig.add_subplot(1, 2, 2)
-            plt.imshow(X_sample[3:, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0))
-        elif X_sample.shape[0] == 2:
-            fig.add_subplot(1, 2, 1)
-            plt.imshow(X_sample[:1, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-            fig.add_subplot(1, 2, 2)
-            plt.imshow(X_sample[1:, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-        elif X_sample.shape[0] == 1:
-            fig.add_subplot(1, 2, 1)
-            plt.imshow(X_sample[:1, :, :].to('cpu').type(
-                torch.uint8).detach().numpy().transpose(1, 2, 0),
-                cmap='gray', vmin=0, vmax=255)
-        else:
-            raise(NotImplementedError)
+            plt.imshow(X_sample[num_channels:, :, :].to(
+                'cpu').detach().numpy().transpose(1, 2, 0),
+                cmap=cmap, vmin=0, vmax=1)
     plt.show()
 
 
@@ -154,19 +138,41 @@ class PybulletSampleGenerator:
 
         return X, X_next, x1
 
-    def generate_dataset(self, x_lo, x_up, dt, num_samples):
+    def generate_dataset(self, x_lo, x_up, dt, num_samples, grayscale=False):
         X_data = torch.empty((num_samples, 6,
-                             self.image_width, self.image_height),
-                             dtype=torch.uint8)
+                             self.image_width, self.image_height))
         X_next_data = torch.empty((num_samples, 3,
-                                  self.image_width, self.image_height),
-                                  dtype=torch.uint8)
-        x_data = torch.empty((num_samples, self.x_dim), dtype=self.dtype)
-        x_next_data = torch.empty((num_samples, self.x_dim), dtype=self.dtype)
+                                  self.image_width, self.image_height))
+        x_data = torch.empty((num_samples, self.x_dim))
+        x_next_data = torch.empty((num_samples, self.x_dim))
         for i in range(num_samples):
-            x0 = torch.rand(self.x_dim, dtype=self.dtype) *\
-                (x_up - x_lo) + x_lo
+            x0 = torch.rand(self.x_dim) * (x_up - x_lo) + x_lo
             x_data[i, :] = x0
             X_data[i, :, :, :], X_next_data[i, :, :, :], x_next_data[i, :] =\
                 self.generate_sample(x0, dt)
+        if grayscale:
+            grayscale_weight = [.2989, .5870, .1140]
+            X_data_gray = torch.zeros(X_data.shape[0], 2, X_data.shape[2],
+                                      X_data.shape[3])
+            X_data_gray[:, 0, :, :] = grayscale_weight[0] * X_data[:, 0, :, :]\
+                + grayscale_weight[1] * X_data[:, 1, :, :] +\
+                grayscale_weight[2] * X_data[:, 2, :, :]
+            X_data_gray[:, 1, :, :] = grayscale_weight[0] *\
+                X_data[:, 3, :, :] + grayscale_weight[1] *\
+                X_data[:, 4, :, :] + grayscale_weight[2] * X_data[:, 5, :, :]
+            X_next_data_gray = torch.zeros(X_next_data.shape[0],
+                                           1, X_next_data.shape[2],
+                                           X_next_data.shape[3])
+            X_next_data_gray[:, 0, :, :] = grayscale_weight[0] *\
+                X_next_data[:, 0, :, :] + grayscale_weight[1] *\
+                X_next_data[:, 1, :, :] + grayscale_weight[2] *\
+                X_next_data[:, 2, :, :]
+            X_data = X_data_gray
+            X_next_data = X_next_data_gray
+        X_data /= 255.
+        X_next_data /= 255.
+        x_data = x_data.type(self.dtype)
+        x_next_data = x_next_data.type(self.dtype)
+        X_data = X_data.type(self.dtype)
+        X_next_data = X_next_data.type(self.dtype)
         return x_data, x_next_data, X_data, X_next_data

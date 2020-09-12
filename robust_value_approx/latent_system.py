@@ -19,7 +19,6 @@ class Encoder(nn.Module):
             self.num_channels_in = 2
         else:
             self.num_channels_in = 6
-
         if use_conv:
             conv = [
                 nn.Conv2d(self.num_channels_in, 32, 5, stride=1, padding=0),
@@ -74,7 +73,6 @@ class Decoder(nn.Module):
             self.num_channels_out = 2
         else:
             self.num_channels_out = 6
-
         if use_conv:
             width_in = self.image_width - 4
             height_in = self.image_height - 4
@@ -110,6 +108,7 @@ class Decoder(nn.Module):
             self.linear = nn.ModuleList(linear)
             self.conv = []
         self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         for l_layer in self.linear[:-1]:
@@ -123,20 +122,19 @@ class Decoder(nn.Module):
         else:
             x = x.view(x.shape[0], self.num_channels_out,
                        self.image_width, self.image_height)
+        x = self.sigmoid(x)
         return x
 
 
 class LatentAutonomousReLUSystem():
 
     def __init__(self, relu_system, lyapunov,
-                 use_conv=False,
+                 use_conv=False, use_bce=True, use_variational=True,
                  image_width=48, image_height=48, grayscale=True):
         self.relu_system = relu_system
         self.lyapunov = lyapunov
         self.dtype = self.relu_system.dtype
         self.z_dim = self.relu_system.x_dim
-        self.z_lo = self.relu_system.x_lo
-        self.z_up = self.relu_system.x_up
         self.V_lambda = 0.
         self.V_eps = .01
         self.z_equilibrium = torch.zeros(self.z_dim, dtype=self.dtype)
@@ -144,6 +142,9 @@ class LatentAutonomousReLUSystem():
         self.image_height = image_height
         self.grayscale = grayscale
         self.use_conv = use_conv
+        self.use_bce = use_bce
+        self.use_variational = use_variational
+        self.bce_loss = nn.BCELoss(reduction='mean')
         self.encoder = Encoder(self.z_dim, use_conv=use_conv,
                                image_width=self.image_width,
                                image_height=self.image_height,
@@ -156,6 +157,7 @@ class LatentAutonomousReLUSystem():
             self.num_channels_in = 2
         else:
             self.num_channels_in = 6
+        self.sigmoid = torch.nn.Sigmoid()
 
     def check_input(self, x):
         assert(len(x.shape) == 4)
@@ -166,18 +168,19 @@ class LatentAutonomousReLUSystem():
 
     def vae_loss(self, x, x_next, x_decoded, x_next_pred_decoded,
                  z_mu, z_log_var):
-
         loss = 0.
-
-        loss += (x - x_decoded).pow(2).mean(dim=[1, 2, 3])[0]
-
-        x_next_ = torch.cat((x[:, int(self.num_channels_in/2):, :, :], x_next),
-                            dim=1)
-        loss += (x_next_ - x_next_pred_decoded).pow(2).mean(dim=[1, 2, 3])[0]
-
-        # loss += torch.mean(-.5 * torch.sum(-torch.pow(z_mu, 2) -
-                           # torch.exp(z_log_var) + z_log_var + 1., dim=1))
-
+        x_next_ = torch.cat((x[:, int(self.num_channels_in/2):, :, :],
+                             x_next), dim=1)
+        if self.use_bce:
+            loss += self.bce_loss(x_decoded, x)
+            loss += self.bce_loss(x_next_pred_decoded, x_next_)
+        else:
+            loss += (x - x_decoded).pow(2).mean(dim=[1, 2, 3])[0]
+            loss += (x_next_ - x_next_pred_decoded).pow(2).mean(
+                dim=[1, 2, 3])[0]
+        if self.use_variational:
+            loss += torch.mean(-.5 * torch.sum(-torch.pow(z_mu, 2) -
+                               torch.exp(z_log_var) + z_log_var + 1., dim=1))
         return loss
 
     def lyapunov_loss(self):
@@ -198,14 +201,14 @@ class LatentAutonomousReLUSystem():
     def vae_forward(self, x):
         batch_size = self.check_input(x)
 
-        # TODO enforce z_lo, z_up
         z_mu, z_log_var = self.encoder(x)
-        z_std = torch.exp(0.5 * z_log_var)
-        eps = torch.autograd.Variable(torch.Tensor(z_mu.shape).normal_())
-        # z = eps * z_std + z_mu
-        z = z_mu
+        if self.use_variational:
+            z_std = torch.exp(0.5 * z_log_var)
+            eps = torch.autograd.Variable(torch.Tensor(z_mu.shape).normal_())
+            z = eps * z_std + z_mu
+        else:
+            z = z_mu
 
-        # TODO enforce z_lo, z_up
         z_next = self.relu_system.dynamics_relu(z)
 
         x_decoded = self.decoder(z)
@@ -224,12 +227,9 @@ class LatentAutonomousReLUSystem():
                 x_decoded, x_next_pred_decoded, z_mu, z_log_var = \
                     self.vae_forward(torch.cat((x_traj[n, :], x_traj[n+1, :]),
                                                dim=0).unsqueeze(0))
-                # print(z_mu)
-                # print(z_log_var)
-                # print("-")
                 if clamp:
                     x_next_pred_decoded = torch.clamp(
-                        x_next_pred_decoded, 0, 255)
+                        x_next_pred_decoded, 0, 1)
                 x_traj[n+2, :] = x_next_pred_decoded[0,
                                                      int(x_init.shape[0]/2):,
                                                      :, :]
