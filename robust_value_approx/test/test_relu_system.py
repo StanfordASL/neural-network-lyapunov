@@ -107,5 +107,91 @@ class TestAutonomousReluSystem(unittest.TestCase):
             check_transition(x0)
 
 
+class TestReLUSystem(unittest.TestCase):
+    def test_mixed_integer_constraints(self):
+        # Construct a ReLU system with nx = 2 and nu = 1
+        self.dtype = torch.float64
+        linear1 = torch.nn.Linear(3, 5, bias=True)
+        linear1.weight.data = torch.tensor(
+            [[0.1, 0.2, 0.3], [0.5, -0.2, 0.4], [0.1, 0.3, -1.2],
+             [1.5, 0.3, 0.3], [0.2, 1.5, 0.1]], dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            [0.1, -1.2, 0.3, 0.2, -0.5], dtype=self.dtype)
+        linear2 = torch.nn.Linear(5, 2, bias=True)
+        linear2.weight.data = torch.tensor(
+            [[0.1, -2.3, 1.5, 0.4, 0.2], [0.1, -1.2, -1.3, 0.3, 0.8]],
+            dtype=self.dtype)
+        linear2.bias.data = torch.tensor([0.2, -1.4], dtype=self.dtype)
+        dynamics_relu = torch.nn.Sequential(
+            linear1, torch.nn.LeakyReLU(0.1), linear2)
+
+        x_lo = torch.tensor([-2, -2], dtype=self.dtype)
+        x_up = torch.tensor([2, 2], dtype=self.dtype)
+        u_lo = torch.tensor([-1], dtype=self.dtype)
+        u_up = torch.tensor([1], dtype=self.dtype)
+        dut = relu_system.ReLUSystem(
+            self.dtype, x_lo, x_up, u_lo, u_up, dynamics_relu)
+        self.assertEqual(dut.x_dim, 2)
+        self.assertEqual(dut.u_dim, 1)
+
+        (Aout_s, Cout,
+         Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
+         Aeq_x, Aeq_u, Aeq_s, Aeq_gamma, rhs_eq) = \
+            dut.mixed_integer_constraints()
+
+        def check_transition(x_val, u_val):
+            milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            x = milp.addVars(
+                dut.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name="x")
+            u = milp.addVars(
+                dut.u_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name="u")
+            s = milp.addVars(
+                Ain_s.shape[1], lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name="s")
+            gamma = milp.addVars(
+                Ain_gamma.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
+                name="gamma")
+            if rhs_in.shape[0] > 0:
+                milp.addMConstrs(
+                    [Ain_x, Ain_u, Ain_s, Ain_gamma], [x, u, s, gamma],
+                    sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in.squeeze(),
+                    name="relu_dynamics_ineq")
+            if rhs_eq.shape[0] > 0:
+                milp.addMConstrs(
+                    [Aeq_x, Aeq_u, Aeq_s, Aeq_gamma], [x, u, s, gamma],
+                    sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
+                    name="relu_dynamics_eq")
+            for i in range(dut.x_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
+                    sense=gurobipy.GRB.EQUAL, rhs=x_val[i])
+            for i in range(dut.u_dim):
+                milp.addLConstr(
+                    [torch.tensor([1.], dtype=self.dtype)], [[u[i]]],
+                    sense=gurobipy.GRB.EQUAL, rhs=u_val[i])
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+            milp.gurobi_model.optimize()
+
+            s_val = torch.tensor([si.X for si in s], dtype=self.dtype)
+            x_next_val = Aout_s @ s_val + Cout
+            x_next_val_expected = dynamics_relu(torch.cat((x_val, u_val)))
+            np.testing.assert_array_almost_equal(
+                x_next_val.detach().numpy(),
+                x_next_val_expected.detach().numpy(), decimal=5)
+
+        check_transition(
+            torch.tensor([0.2, 0.5], dtype=self.dtype),
+            torch.tensor([0.1], dtype=self.dtype))
+        check_transition(
+            torch.tensor([1.2, 0.5], dtype=self.dtype),
+            torch.tensor([0.1], dtype=self.dtype))
+        check_transition(
+            torch.tensor([-1.2, 0.3], dtype=self.dtype),
+            torch.tensor([0.5], dtype=self.dtype))
+
+
 if __name__ == "__main__":
     unittest.main()
