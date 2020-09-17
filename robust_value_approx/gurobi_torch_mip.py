@@ -3,6 +3,37 @@ import torch
 import numpy as np
 
 
+class MixedIntegerConstraintsReturn:
+    """
+    We often convert a piecewise linear(affine) function y=f(x) to mixed
+    integer linear constraints, where `x` is our input, and `y` is our output.
+    The mixed integer linear constraints have this form
+    y = Aout_input * x + Aout_slack * slack + Aout_binary * binary + Cout
+    Ain_input * x + Ain_slack * slack + Ain_binary * binary <= rhs_in
+    Aeq_input * x + Aeq_slack * slack + Aeq_binary * binary = rhs_eq
+    where `slack` are the slack continuous variables introduced for converting
+    piecewise affine function to mixed-integer linear constraints. `binary` are
+    the binary variables in the mixed-integer linear constraints.
+    This class wraps up Aout_input, Aout_slack, Aout_binary, Cout, Ain_input,
+    Ain_slack, Ain_binary, rhs_in, Aeq_input, Aeq_slack, Aeq_binary, rhs_eq.
+    If the mixed integer constraints doesn't contain some terms, then we set
+    that term to None.
+    """
+    def __init__(self):
+        self.Aout_input = None
+        self.Aout_slack = None
+        self.Aout_binary = None
+        self.Cout = None
+        self.Ain_input = None
+        self.Ain_slack = None
+        self.Ain_binary = None
+        self.rhs_in = None
+        self.Aeq_input = None
+        self.Aeq_slack = None
+        self.Aeq_binary = None
+        self.rhs_eq = None
+
+
 class GurobiTorchMIP:
     """
     This class will be used in computing the gradient of an MIP optimal cost
@@ -276,6 +307,95 @@ class GurobiTorchMIP:
                 self.Ain_zeta_val.extend([-val for val in A_zeta_val])
                 self.rhs_in.extend([-b[i] for i in range(num_constraints)])
         return constr
+
+    def add_mixed_integer_linear_constraints(
+        self, mixed_integer_constraints_return, add_output_constraint: bool,
+        input_vars, output_vars, slack_var_name, binary_var_name,
+            ineq_constr_name, eq_constr_name, out_constr_name):
+        """
+        Given a MixedIntegerConstraintsReturn
+        @p mixed_integer_constraints_return, add the mixed-integer linear
+        constraints to the program. We assume that the input variable and
+        output variables are already created, and we will create the slack
+        variable and binary variables within this function.
+        @p add_output_constraint If true, add the constraint
+        output = Aout_in * input + Aout_slack * slack + Aout_binary * binary +
+        Cout
+        """
+        # Do some check
+        assert(isinstance(
+            mixed_integer_constraints_return, MixedIntegerConstraintsReturn))
+        assert(isinstance(add_output_constraint, bool))
+        # First add the slack variables
+        slack_size = 0
+        if mixed_integer_constraints_return.Ain_slack is not None:
+            slack_size = mixed_integer_constraints_return.Ain_slack.shape[1]
+        elif mixed_integer_constraints_return.Aeq_slack is not None:
+            slack_size = mixed_integer_constraints_return.Aeq_slack.shape[1]
+        if slack_size != 0:
+            assert(isinstance(slack_var_name, str))
+            slack = self.addVars(
+                slack_size, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name=slack_var_name)
+        # Now add the binary variables
+        binary_size = 0
+        if mixed_integer_constraints_return.Ain_binary is not None:
+            binary_size = mixed_integer_constraints_return.Ain_binary.shape[1]
+        elif mixed_integer_constraints_return.Aeq_binary is not None:
+            binary_size = mixed_integer_constraints_return.Aeq_binary.shape[1]
+        if binary_size != 0:
+            assert(isinstance(binary_var_name, str))
+            binary = self.addVars(
+                binary_size, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.BINARY, name=binary_var_name)
+        # Now add the inequality constraint
+        # Ain_input * input + Ain_slack * slack + Ain_binary * binary <= rhs_in
+        if mixed_integer_constraints_return.rhs_in is not None and\
+                mixed_integer_constraints_return.rhs_in.shape[0] > 0:
+            self.addMConstrs(
+                [mixed_integer_constraints_return.Ain_input,
+                 mixed_integer_constraints_return.Ain_slack,
+                 mixed_integer_constraints_return.Ain_binary],
+                [input_vars, slack, binary], sense=gurobipy.GRB.LESS_EQUAL,
+                b=mixed_integer_constraints_return.rhs_in.reshape((-1)),
+                name=ineq_constr_name)
+        # Now add the equality constraint
+        # Aeq_input * input + Aeq_slack * slack + Aeq_binary * binary = rhs_eq
+        if mixed_integer_constraints_return.rhs_eq is not None and\
+                mixed_integer_constraints_return.rhs_eq.shape[0] > 0:
+            self.addMConstrs(
+                [mixed_integer_constraints_return.Aeq_input,
+                 mixed_integer_constraints_return.Aeq_slack,
+                 mixed_integer_constraints_return.Aeq_binary],
+                [input_vars, slack, binary], sense=gurobipy.GRB.EQUAL,
+                b=mixed_integer_constraints_return.rhs_eq.reshape((-1)),
+                name=eq_constr_name)
+        if add_output_constraint:
+            # Now add the equality constraint
+            # out = Aout_input * input + Aout_slack * slack +
+            # Aout_binary * binary + Cout
+            out_constraint_matrix = \
+                [-torch.eye(len(output_vars), dtype=self.dtype)]
+            out_constraint_vars = [output_vars]
+            if mixed_integer_constraints_return.Aout_input is not None:
+                out_constraint_matrix.append(
+                    mixed_integer_constraints_return.Aout_input)
+                out_constraint_vars.append(input_vars)
+            if mixed_integer_constraints_return.Aout_slack is not None:
+                out_constraint_matrix.append(
+                    mixed_integer_constraints_return.Aout_slack)
+                out_constraint_vars.append(slack)
+            if mixed_integer_constraints_return.Aout_binary is not None:
+                out_constraint_matrix.append(
+                    mixed_integer_constraints_return.Aout_binary)
+                out_constraint_vars.append(binary)
+            out_constraint_rhs = -mixed_integer_constraints_return.Cout.\
+                reshape((-1)) if mixed_integer_constraints_return.Cout is not\
+                None else torch.zeros((len(output_vars)), dtype=self.dtype)
+            self.addMConstrs(
+                out_constraint_matrix, out_constraint_vars, gurobipy.GRB.EQUAL,
+                b=out_constraint_rhs, name=out_constr_name)
+        return (slack, binary)
 
     def get_active_constraints(self, active_ineq_row_indices, zeta_sol):
         """
