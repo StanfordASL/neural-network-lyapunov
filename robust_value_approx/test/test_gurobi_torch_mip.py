@@ -458,6 +458,135 @@ class TestGurobiTorchMIP(unittest.TestCase):
         self.assertEqual(active_ineq_row_indices, {1, 2, 3, 4})
         np.testing.assert_allclose(zeta_sol, np.array([1, 0]), atol=1e-12)
 
+    def add_mixed_integer_linear_constraints_tester(
+        self, dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
+            Aeq_r_expected, Aeq_zeta_expected, rhs_eq_expected):
+        Ain_r = torch.zeros(len(dut.rhs_in), len(dut.r), dtype=dut.dtype)
+        for i in range(len(dut.Ain_r_val)):
+            Ain_r[dut.Ain_r_row[i], dut.Ain_r_col[i]] = dut.Ain_r_val[i]
+        np.testing.assert_allclose(
+            Ain_r_expected.detach().numpy(), Ain_r.detach().numpy())
+        Ain_zeta = torch.zeros(len(dut.rhs_in), len(dut.zeta), dtype=dut.dtype)
+        for i in range(len(dut.Ain_zeta_val)):
+            Ain_zeta[dut.Ain_zeta_row[i], dut.Ain_zeta_col[i]] = \
+                dut.Ain_zeta_val[i]
+        np.testing.assert_allclose(
+            Ain_zeta_expected.detach().numpy(), Ain_zeta.detach().numpy())
+        np.testing.assert_allclose(
+            rhs_in_expected.detach().numpy(),
+            np.array(dut.rhs_in).reshape((-1, 1)))
+        Aeq_r = torch.zeros(len(dut.rhs_eq), len(dut.r), dtype=dut.dtype)
+        for i in range(len(dut.Aeq_r_val)):
+            Aeq_r[dut.Aeq_r_row[i], dut.Aeq_r_col[i]] = dut.Aeq_r_val[i]
+        np.testing.assert_allclose(
+            Aeq_r_expected.detach().numpy(), Aeq_r.detach().numpy())
+        Aeq_zeta = torch.zeros(len(dut.rhs_eq), len(dut.zeta), dtype=dut.dtype)
+        for i in range(len(dut.Aeq_zeta_val)):
+            Aeq_zeta[dut.Aeq_zeta_row[i], dut.Aeq_zeta_col[i]] =\
+                dut.Aeq_zeta_val[i]
+        np.testing.assert_allclose(
+            Aeq_zeta_expected.detach().numpy(), Aeq_zeta.detach().numpy())
+        np.testing.assert_allclose(
+            rhs_eq_expected.detach().numpy(),
+            np.array(dut.rhs_eq).reshape((-1, 1)))
+
+    def setup_mixed_integer_constraints_return(self):
+        mip_constr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        dtype = torch.float64
+        mip_constr_return.Aout_input = torch.tensor([[1, 3]], dtype=dtype)
+        mip_constr_return.Aout_slack = torch.tensor([[0, 2, 3]], dtype=dtype)
+        mip_constr_return.Aout_binary = torch.tensor([[1, -1]], dtype=dtype)
+        mip_constr_return.Cout = torch.tensor([[2]], dtype=dtype)
+        mip_constr_return.Ain_input = torch.tensor(
+            [[1, 2], [0, 1]], dtype=dtype)
+        mip_constr_return.Ain_slack = torch.tensor(
+            [[0, 2, 3], [1, 2, 4]], dtype=dtype)
+        mip_constr_return.Ain_binary = torch.tensor(
+            [[1, -1], [0, 1]], dtype=dtype)
+        mip_constr_return.rhs_in = torch.tensor([[1], [3]], dtype=dtype)
+        mip_constr_return.Aeq_input = torch.tensor([[1, 3]], dtype=dtype)
+        mip_constr_return.Aeq_slack = torch.tensor([[1, 4, 5]], dtype=dtype)
+        mip_constr_return.Aeq_binary = torch.tensor([[0, 2]], dtype=dtype)
+        mip_constr_return.rhs_eq = torch.tensor([[4]], dtype=dtype)
+        return mip_constr_return, dtype
+
+    def test_add_mixed_integer_linear_constraints1(self):
+        """
+        Test with MixedIntegerConstraintsReturn that doesn't contain any None
+        items, it also adds the output constraint.
+        """
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype=dtype)
+        x = dut.addVars(
+            2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="x")
+        y = dut.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="y")
+        (slack, binary) = dut.add_mixed_integer_linear_constraints(
+            mip_constr_return, True, x, y, "s", "gamma", "ineq_constr",
+            "eq_constr", "out_constr")
+        self.assertEqual(len(slack), 3)
+        self.assertEqual(len(binary), 2)
+        self.assertEqual(len(dut.zeta), 2)
+        self.assertEqual(len(dut.r), 6)
+        Ain_r_expected = torch.cat((
+            mip_constr_return.Ain_input, torch.zeros(2, len(y), dtype=dtype),
+            mip_constr_return.Ain_slack), dim=1)
+        Ain_zeta_expected = mip_constr_return.Ain_binary
+        rhs_in_expected = mip_constr_return.rhs_in
+        Aeq_r_expected = torch.cat((
+            torch.cat((mip_constr_return.Aeq_input,
+                       torch.zeros((1, len(y)), dtype=dtype),
+                       mip_constr_return.Aeq_slack), dim=1),
+            torch.cat((mip_constr_return.Aout_input,
+                       -torch.eye(1, dtype=dtype),
+                       mip_constr_return.Aout_slack), dim=1)), dim=0)
+        Aeq_zeta_expected = torch.cat(
+            (mip_constr_return.Aeq_binary, mip_constr_return.Aout_binary),
+            dim=0)
+        rhs_eq_expected = torch.cat(
+            (mip_constr_return.rhs_eq, -mip_constr_return.Cout), dim=0)
+        self.add_mixed_integer_linear_constraints_tester(
+            dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
+            Aeq_r_expected, Aeq_zeta_expected, rhs_eq_expected)
+
+    def test_add_mixed_integer_linear_constraints2(self):
+        """
+        Test with MixedIntegerConstraintsReturn that doesn't contain any None
+        items, it does NOT adds the output constraint.
+        """
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype=dtype)
+        x = dut.addVars(
+            2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="x")
+        y = dut.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="y")
+        (slack, binary) = dut.add_mixed_integer_linear_constraints(
+            mip_constr_return, False, x, y, "s", "gamma", "ineq_constr",
+            "eq_constr", "out_constr")
+        self.assertEqual(len(slack), 3)
+        self.assertEqual(len(binary), 2)
+        self.assertEqual(len(dut.zeta), 2)
+        self.assertEqual(len(dut.r), 6)
+        Ain_r_expected = torch.cat((
+            mip_constr_return.Ain_input, torch.zeros(2, len(y), dtype=dtype),
+            mip_constr_return.Ain_slack), dim=1)
+        Ain_zeta_expected = mip_constr_return.Ain_binary
+        rhs_in_expected = mip_constr_return.rhs_in
+        Aeq_r_expected = torch.cat((
+            mip_constr_return.Aeq_input, torch.zeros((1, len(y)), dtype=dtype),
+            mip_constr_return.Aeq_slack), dim=1)
+        Aeq_zeta_expected = mip_constr_return.Aeq_binary
+        rhs_eq_expected = mip_constr_return.rhs_eq
+        self.add_mixed_integer_linear_constraints_tester(
+            dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
+            Aeq_r_expected, Aeq_zeta_expected, rhs_eq_expected)
+
 
 class TestGurobiTorchMILP(unittest.TestCase):
     def test_setObjective(self):
