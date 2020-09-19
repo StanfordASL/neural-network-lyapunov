@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 
 import robust_value_approx.utils as utils
+import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 
 
 def ComputeReLUActivationPattern(model_relu, x):
@@ -543,9 +544,20 @@ class ReLUFreePattern:
         Aeq3 = Aeq3[:eq_constraint_count]
         rhs_eq = rhs_eq[:eq_constraint_count]
 
-        return(Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
-               b_out, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-               z_post_relu_up)
+        mip_constr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        mip_constr_return.Aout_slack = A_out
+        mip_constr_return.Cout = b_out
+        mip_constr_return.Ain_input = Ain1
+        mip_constr_return.Ain_slack = Ain2
+        mip_constr_return.Ain_binary = Ain3
+        mip_constr_return.rhs_in = rhs_in
+        mip_constr_return.Aeq_input = Aeq1
+        mip_constr_return.Aeq_slack = Aeq2
+        mip_constr_return.Aeq_binary = Aeq3
+        mip_constr_return.rhs_eq = rhs_eq
+
+        return (mip_constr_return, z_pre_relu_lo, z_pre_relu_up,
+                z_post_relu_lo, z_post_relu_up)
 
     def compute_relu_unit_outputs_and_activation(self, x):
         """

@@ -169,8 +169,11 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
             relu = setup_leaky_relu(self.dtype)
             dut = lyapunov.LyapunovHybridLinearSystem(system, relu)
-            (x, s, gamma, Aeq_s, Aeq_gamma) = \
-                dut.add_hybrid_system_constraint(milp)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
+            mip_cnstr_return = system.mixed_integer_constraints()
+            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
             # Now fix x to x_val
             for i in range(system.x_dim):
                 milp.addLConstr(
@@ -194,8 +197,8 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                 gamma_sol = np.array([v.x for v in gamma])
                 np.testing.assert_allclose(gamma_sol, gamma_expected)
                 np.testing.assert_allclose(
-                    Aeq_s @ torch.from_numpy(s_sol) +
-                    Aeq_gamma @ torch.from_numpy(gamma_sol),
+                    mip_cnstr_return.Aout_slack @ torch.from_numpy(s_sol) +
+                    mip_cnstr_return.Aout_binary @ torch.from_numpy(gamma_sol),
                     system.A[mode_index] @ x_val + system.g[mode_index])
             else:
                 self.assertEqual(
@@ -813,24 +816,13 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         milp_relu = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
         relu1_free_pattern = relu_to_optimization.ReLUFreePattern(
             relu1, dut.system.dtype)
-        Ain_x, Ain_z, Ain_beta, rhs_in, Aeq_x, Aeq_z, Aeq_beta, rhs_eq, a_out,\
-            b_out, _, _, _, _ = relu1_free_pattern.output_constraint(
+        mip_constr_return, _, _, _, _ = relu1_free_pattern.output_constraint(
                 torch.tensor([-1.0, -1.0], dtype=dut.system.dtype),
                 torch.tensor([1.0, 1.0], dtype=dut.system.dtype))
         x = milp_relu.addVars(
             2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)
-        z = milp_relu.addVars(
-            Ain_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS)
-        beta = milp_relu.addVars(Ain_beta.shape[1], vtype=gurobipy.GRB.BINARY)
-        for i in range(Ain_x.shape[0]):
-            milp_relu.addLConstr(
-                [Ain_x[i], Ain_z[i], Ain_beta[i]], [x, z, beta],
-                rhs=rhs_in[i], sense=gurobipy.GRB.LESS_EQUAL)
-        for i in range(Aeq_x.shape[0]):
-            milp_relu.addLConstr(
-                [Aeq_x[i], Aeq_z[i], Aeq_beta[i]], [x, z, beta],
-                rhs=rhs_eq[i], sense=gurobipy.GRB.EQUAL)
+        z, beta = milp_relu.add_mixed_integer_linear_constraints(
+            mip_constr_return, False, x, None, "z", "beta", "", "", "")
         # Add rho * |x - x*|₁. To do so, we introduce slack variable s_x_norm,
         # such that s_x_norm(i) = x(i) - x*(i).
         s_x_norm = milp_relu.addVars(
@@ -854,9 +846,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     sense=gurobipy.GRB.LESS_EQUAL)
         relu_x_equilibrium = relu1.forward(x_equilibrium).item()
         milp_relu.setObjective(
-            [a_out, V_lambda *
+            [mip_constr_return.Aout_slack, V_lambda *
              torch.ones((self.system1.x_dim,), dtype=self.system1.dtype)],
-            [z, s_x_norm], float(b_out) - relu_x_equilibrium,
+            [z, s_x_norm], float(mip_constr_return.Cout) - relu_x_equilibrium,
             sense=gurobipy.GRB.MAXIMIZE)
         milp_relu.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp_relu.gurobi_model.optimize()
@@ -868,9 +860,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             x_sol, x_equilibrium, V_lambda, relu_x_equilibrium).item(),
             v_upper)
         milp_relu.setObjective(
-            [a_out, V_lambda *
+            [mip_constr_return.Aout_slack, V_lambda *
              torch.ones((self.system1.x_dim,), dtype=self.system1.dtype)],
-            [z, s_x_norm], float(b_out) - relu_x_equilibrium,
+            [z, s_x_norm], float(mip_constr_return.Cout) - relu_x_equilibrium,
             sense=gurobipy.GRB.MINIMIZE)
         milp_relu.gurobi_model.optimize()
         self.assertEqual(
@@ -1269,7 +1261,10 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             """
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
             milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
-            (x, s, gamma, _, _) = dut.add_hybrid_system_constraint(milp)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
+            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
             (_, beta, _, _) = dut.add_relu_output_constraint(milp, x)
             if Aisi_flag:
                 (z, cost_z_coeff) = dut.add_relu_gradient_times_Aisi(
@@ -1347,15 +1342,13 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             """
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
             milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
-            (x, s, gamma, Aeq_s, Aeq_gamma) = \
-                dut.add_hybrid_system_constraint(milp)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
             xdot = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            milp.addMConstrs(
-                [torch.eye(system.x_dim, dtype=system.dtype), -Aeq_s,
-                 -Aeq_gamma], [xdot, s, gamma], sense=gurobipy.GRB.EQUAL,
-                b=torch.zeros(system.x_dim, dtype=system.dtype))
+            s, gamma = dut.add_hybrid_system_constraint(milp, x, xdot)
             (_, beta, _, _) = dut.add_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta,
@@ -1421,7 +1414,10 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         def test_fun(system, x_equilibrium, x_val, Aisi_flag):
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
             milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
-            (x, s, gamma, _, _) = dut.add_hybrid_system_constraint(milp)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
+            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
             if Aisi_flag:
@@ -1523,17 +1519,15 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         def test_fun(system, x_equilibrium, x_val):
             dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
             milp = gurobi_torch_mip.GurobiTorchMILP(system.dtype)
-            (x, s, gamma, Aeq_s, Aeq_gamma) = \
-                dut.add_hybrid_system_constraint(milp)
-            (_, alpha) = dut.add_state_error_l1_constraint(
-                milp, x_equilibrium, x)
+            x = milp.addVars(
+                system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS)
             xdot = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            milp.addMConstrs(
-                [torch.eye(system.x_dim, dtype=system.dtype), -Aeq_s,
-                 -Aeq_gamma], [xdot, s, gamma], sense=gurobipy.GRB.EQUAL,
-                b=torch.zeros(system.x_dim, dtype=system.dtype))
+            s, gamma = dut.add_hybrid_system_constraint(milp, x, xdot)
+            (_, alpha) = dut.add_state_error_l1_constraint(
+                milp, x_equilibrium, x)
             (z, z_coeff, xdot_coeff) = dut.add_sign_state_error_times_xdot(
                 milp, xdot, alpha, system.dx_lower, system.dx_upper)
             milp.addMConstrs(
@@ -1709,7 +1703,8 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 lambda p: compute_milp_cost_given_relu(
                     system, relu_index, x_equilibrium, torch.from_numpy(p),
                     formulation, False), params_val, dx=1e-7)
-            np.testing.assert_allclose(grad, grad_numerical, atol=1.2e-5)
+            np.testing.assert_allclose(
+                grad, grad_numerical, atol=1.2e-5, rtol=1e-6)
 
         relu_params = []
         relu_params.append(torch.tensor([

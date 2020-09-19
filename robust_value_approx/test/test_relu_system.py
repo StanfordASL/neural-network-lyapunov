@@ -59,32 +59,18 @@ class TestAutonomousReluSystem(unittest.TestCase):
                                                        self.relu_dyn)
 
     def test_relu_system_as_milp(self):
-        (Aout_s, Cout,
-         Ain_x, Ain_s, Ain_gamma, rhs_in,
-         Aeq_x, Aeq_s, Aeq_gamma, rhs_eq) = \
-            self.system.mixed_integer_constraints()
+        mip_cnstr_return = self.system.mixed_integer_constraints()
+        self.assertIsNone(mip_cnstr_return.Aout_input)
+        self.assertIsNone(mip_cnstr_return.Aout_binary)
 
         def check_transition(x0):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
             x = milp.addVars(
                 self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name="x")
-            s = milp.addVars(
-                Ain_s.shape[1], lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name="s")
-            gamma = milp.addVars(
-                Ain_gamma.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
-                name="gamma")
-            if rhs_in.shape[0] > 0:
-                milp.addMConstrs(
-                    [Ain_x, Ain_s, Ain_gamma], [x, s, gamma],
-                    sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in.squeeze(),
-                    name="relu_dynamics_ineq")
-            if rhs_eq.shape[0] > 0:
-                milp.addMConstrs(
-                    [Aeq_x, Aeq_s, Aeq_gamma], [x, s, gamma],
-                    sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
-                    name="relu_dynamics_eq")
+            s, gamma = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, False, x, None, "s", "gamma",
+                "relu_dynamics_ineq", "relu_dynamics_eq", "")
             for i in range(self.system.x_dim):
                 milp.addLConstr(
                     [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
@@ -94,7 +80,8 @@ class TestAutonomousReluSystem(unittest.TestCase):
             milp.gurobi_model.optimize()
 
             s_val = torch.tensor([si.X for si in s], dtype=self.dtype)
-            x_next_val = Aout_s @ s_val + Cout
+            x_next_val = mip_cnstr_return.Aout_slack @ s_val +\
+                mip_cnstr_return.Cout
             np.testing.assert_array_almost_equal(x_next_val.detach().numpy(),
                                                  self.relu_dyn(
                                                     x0).detach().numpy(),
@@ -134,10 +121,9 @@ class TestReLUSystem(unittest.TestCase):
         self.assertEqual(dut.x_dim, 2)
         self.assertEqual(dut.u_dim, 1)
 
-        (Aout_s, Cout,
-         Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
-         Aeq_x, Aeq_u, Aeq_s, Aeq_gamma, rhs_eq) = \
-            dut.mixed_integer_constraints()
+        mip_cnstr_return = dut.mixed_integer_constraints()
+        self.assertIsNone(mip_cnstr_return.Aout_input)
+        self.assertIsNone(mip_cnstr_return.Aout_binary)
 
         def check_transition(x_val, u_val):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
@@ -147,22 +133,9 @@ class TestReLUSystem(unittest.TestCase):
             u = milp.addVars(
                 dut.u_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name="u")
-            s = milp.addVars(
-                Ain_s.shape[1], lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name="s")
-            gamma = milp.addVars(
-                Ain_gamma.shape[1], lb=0., vtype=gurobipy.GRB.BINARY,
-                name="gamma")
-            if rhs_in.shape[0] > 0:
-                milp.addMConstrs(
-                    [Ain_x, Ain_u, Ain_s, Ain_gamma], [x, u, s, gamma],
-                    sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in.squeeze(),
-                    name="relu_dynamics_ineq")
-            if rhs_eq.shape[0] > 0:
-                milp.addMConstrs(
-                    [Aeq_x, Aeq_u, Aeq_s, Aeq_gamma], [x, u, s, gamma],
-                    sense=gurobipy.GRB.EQUAL, b=rhs_eq.squeeze(),
-                    name="relu_dynamics_eq")
+            s, gamma = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, False, x+u, None, "s", "gamma",
+                "relu_dynamics_ineq", "relu_dynamics_eq", "")
             for i in range(dut.x_dim):
                 milp.addLConstr(
                     [torch.tensor([1.], dtype=self.dtype)], [[x[i]]],
@@ -176,7 +149,8 @@ class TestReLUSystem(unittest.TestCase):
             milp.gurobi_model.optimize()
 
             s_val = torch.tensor([si.X for si in s], dtype=self.dtype)
-            x_next_val = Aout_s @ s_val + Cout
+            x_next_val = mip_cnstr_return.Aout_slack @ s_val +\
+                mip_cnstr_return.Cout
             x_next_val_expected = dynamics_relu(torch.cat((x_val, u_val)))
             np.testing.assert_array_almost_equal(
                 x_next_val.detach().numpy(),

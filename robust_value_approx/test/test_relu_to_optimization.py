@@ -282,9 +282,11 @@ class TestReLU(unittest.TestCase):
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
-            (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out, b_out,
+            (mip_constr_return,
                 z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up)\
                 = relu_free_pattern.output_constraint(x_lo, x_up)
+            self.assertIsNone(mip_constr_return.Aout_input)
+            self.assertIsNone(mip_constr_return.Aout_binary)
             # print("z_pre_relu_lo:{}\nz_pre_relu_up:{}".format(
             #    z_pre_relu_lo, z_pre_relu_up))
             num_z_pre_relu_lo_positive = np.sum([
@@ -297,21 +299,21 @@ class TestReLU(unittest.TestCase):
             num_eq = (num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative)\
                 * 2
             self.assertListEqual(
-                list(Ain1.shape), [num_ineq, 2])
-            self.assertListEqual(list(Ain2.shape), [
+                list(mip_constr_return.Ain_input.shape), [num_ineq, 2])
+            self.assertListEqual(list(mip_constr_return.Ain_slack.shape), [
                                  num_ineq, relu_free_pattern.num_relu_units])
-            self.assertListEqual(list(Ain3.shape), [
+            self.assertListEqual(list(mip_constr_return.Ain_binary.shape), [
                                  num_ineq, relu_free_pattern.num_relu_units])
             self.assertListEqual(
-                list(rhs_in.shape), [num_ineq, 1])
+                list(mip_constr_return.rhs_in.shape), [num_ineq, 1])
             self.assertListEqual(
-                list(Aeq1.shape), [num_eq, 2])
-            self.assertListEqual(list(Aeq2.shape), [
+                list(mip_constr_return.Aeq_input.shape), [num_eq, 2])
+            self.assertListEqual(list(mip_constr_return.Aeq_slack.shape), [
                                  num_eq, relu_free_pattern.num_relu_units])
-            self.assertListEqual(list(Aeq3.shape), [
+            self.assertListEqual(list(mip_constr_return.Aeq_binary.shape), [
                                  num_eq, relu_free_pattern.num_relu_units])
             self.assertListEqual(
-                list(rhs_eq.shape), [num_eq, 1])
+                list(mip_constr_return.rhs_eq.shape), [num_eq, 1])
 
             def test_input_output(x):
                 (z, beta, output) = \
@@ -324,18 +326,20 @@ class TestReLU(unittest.TestCase):
                                        boolean=True)
                 x_np = x.detach().numpy()
                 con = []
-                if rhs_in.shape[0] != 0:
+                if mip_constr_return.rhs_in.shape[0] != 0:
                     con.append(
-                        Ain1.detach().numpy() @ x_np +
-                        Ain2.detach().numpy() @ z_var +
-                        Ain3.detach().numpy() @ beta_var <=
-                        rhs_in.squeeze().detach().numpy())
-                if rhs_eq.shape[0] != 0:
+                        mip_constr_return.Ain_input.detach().numpy() @ x_np +
+                        mip_constr_return.Ain_slack.detach().numpy() @ z_var +
+                        mip_constr_return.Ain_binary.detach().numpy() @
+                        beta_var <=
+                        mip_constr_return.rhs_in.squeeze().detach().numpy())
+                if mip_constr_return.rhs_eq.shape[0] != 0:
                     con.append(
-                        Aeq1.detach().numpy() @ x_np +
-                        Aeq2.detach().numpy() @ z_var +
-                        Aeq3.detach().numpy() @ beta_var ==
-                        rhs_eq.squeeze().detach().numpy())
+                        mip_constr_return.Aeq_input.detach().numpy() @ x_np +
+                        mip_constr_return.Aeq_slack.detach().numpy() @ z_var +
+                        mip_constr_return.Aeq_binary.detach().numpy() @
+                        beta_var ==
+                        mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
                 prob.solve(solver=cp.GUROBI)
@@ -347,14 +351,16 @@ class TestReLU(unittest.TestCase):
                         z_opt_var, z.squeeze().detach().numpy())
                     np.testing.assert_array_almost_equal(
                         beta_opt_var, beta.squeeze().detach().numpy())
-                    if len(a_out.shape) > 1:
-                        out_opt = a_out @ z.squeeze() + b_out
+                    if len(mip_constr_return.Aout_slack.shape) > 1:
+                        out_opt = mip_constr_return.Aout_slack @ z.squeeze()\
+                            + mip_constr_return.Cout
                         output = model.forward(x)
                         for k in range(len(output)):
                             self.assertAlmostEqual(output[k], out_opt[k])
                     else:
                         self.assertAlmostEqual(
-                            (a_out @ z.squeeze() + b_out).item(),
+                            (mip_constr_return.Aout_slack @ z.squeeze() +
+                             mip_constr_return.Cout).item(),
                             model.forward(x).item())
                 else:
                     self.assertEqual(prob.status, "infeasible")
@@ -380,36 +386,49 @@ class TestReLU(unittest.TestCase):
                     z_post_relu_lo_numpy - 1E-10, z.squeeze().detach().numpy())
                 # Check the output
                 if isinstance(output, torch.Tensor):
-                    out_opt = a_out @ z.squeeze() + b_out
+                    out_opt = mip_constr_return.Aout_slack @ z.squeeze() +\
+                        mip_constr_return.Cout
                     for k in range(len(output)):
                         self.assertAlmostEqual(output[k], out_opt[k], 3)
                 else:
                     self.assertAlmostEqual(
-                        output, (a_out.T @ z + b_out).item(), 3)
+                        output, (mip_constr_return.Aout_slack.T @ z +
+                                 mip_constr_return.Cout).item(), 3)
                 x_vec = x.reshape((-1, 1))
-                lhs_in = Ain1 @ x_vec + Ain2 @ z + Ain3 @ beta
-                lhs_eq = Aeq1 @ x_vec + Aeq2 @ z + Aeq3 @ beta
+                lhs_in = mip_constr_return.Ain_input @ x_vec +\
+                    mip_constr_return.Ain_slack @ z +\
+                    mip_constr_return.Ain_binary @ beta
+                lhs_eq = mip_constr_return.Aeq_input @ x_vec +\
+                    mip_constr_return.Aeq_slack @ z +\
+                    mip_constr_return.Aeq_binary @ beta
                 precision = 1E-10
                 np.testing.assert_array_less(
                     lhs_in.squeeze().detach().numpy(),
-                    rhs_in.squeeze().detach().numpy() + precision)
-                np.testing.assert_allclose(lhs_eq.squeeze().detach().numpy(),
-                                           rhs_eq.squeeze().detach().numpy())
+                    mip_constr_return.rhs_in.squeeze().detach().numpy() +
+                    precision)
+                np.testing.assert_allclose(
+                    lhs_eq.squeeze().detach().numpy(),
+                    mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 # Now perturb beta by changing some entry from 1 to 0, and vice
                 # versa. Now it should not satisfy the constraint.
                 perturbed_beta_entry = np.random.randint(0, beta.numel())
                 beta_perturbed = beta.clone()
                 beta_perturbed[perturbed_beta_entry] =\
                     1 - beta[perturbed_beta_entry]
-                lhs_in_perturbed = Ain1 @ x_vec + Ain2 @ z +\
-                    Ain3 @ beta_perturbed
-                lhs_eq_perturbed = Aeq1 @ x_vec + Aeq2 @ z +\
-                    Aeq3 @ beta_perturbed
+                lhs_in_perturbed = mip_constr_return.Ain_input @ x_vec +\
+                    mip_constr_return.Ain_slack @ z +\
+                    mip_constr_return.Ain_slack @ beta_perturbed
+                lhs_eq_perturbed = mip_constr_return.Aeq_input @ x_vec +\
+                    mip_constr_return.Aeq_slack @ z +\
+                    mip_constr_return.Aeq_binary @ beta_perturbed
                 self.assertFalse(torch.all(
-                    torch.le(lhs_in_perturbed.squeeze(),
-                             rhs_in.squeeze() + torch.tensor(precision))) and
-                    torch.all(torch.le(torch.abs(lhs_eq_perturbed - rhs_eq),
-                                       precision)))
+                    torch.le(
+                        lhs_in_perturbed.squeeze(),
+                        mip_constr_return.rhs_in.squeeze() +
+                        torch.tensor(precision))) and
+                    torch.all(torch.le(torch.abs(
+                        lhs_eq_perturbed - mip_constr_return.rhs_eq),
+                        precision)))
                 test_input_output(x)
 
             # Test with different input x.
@@ -465,17 +484,22 @@ class TestReLU(unittest.TestCase):
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
-            (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, a_out,
-             b_out, _, _, _, _) = relu_free_pattern.output_constraint(
-                 x_lo, x_up)
+            mip_constr_return, _, _, _, _ = \
+                relu_free_pattern.output_constraint(x_lo, x_up)
             # This function compute the sum of all the return terms. If any of
             # the term has a wrong gradient, the gradient of the sum will also
             # be wrong.
-            objective1 = Ain1.sum() + Ain2.sum() + Ain3.sum() + \
-                rhs_in.sum() + Aeq1.sum() + Aeq2.sum() + Aeq3.sum() + \
-                rhs_eq.sum() + a_out.sum()
-            if isinstance(b_out, torch.Tensor):
-                objective1 += b_out.sum()
+            objective1 = mip_constr_return.Ain_input.sum() +\
+                mip_constr_return.Ain_slack.sum() +\
+                mip_constr_return.Ain_binary.sum() + \
+                mip_constr_return.rhs_in.sum() +\
+                mip_constr_return.Aeq_input.sum() +\
+                mip_constr_return.Aeq_slack.sum() +\
+                mip_constr_return.Aeq_binary.sum() + \
+                mip_constr_return.rhs_eq.sum() +\
+                mip_constr_return.Aout_slack.sum()
+            if isinstance(mip_constr_return.Cout, torch.Tensor):
+                objective1 += mip_constr_return.Cout.sum()
             return objective1
             # end of compute_loss
 

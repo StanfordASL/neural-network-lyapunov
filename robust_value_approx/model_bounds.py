@@ -53,32 +53,30 @@ class ModelBounds:
         @param x_up: upper bound for the input to the neural net (x0)
         @return Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b
         """
-        (Pin1, Pin2, Pin3, qrhs_in,
-         Peq1, Peq2, Peq3, qrhs_eq,
-         a_out, b_out,
-         z_lo, z_up, _, _) = self.relu_opt.output_constraint(x_lo, x_up)
+        relu_output_return, _, _, _, _ = self.relu_opt.output_constraint(
+            x_lo, x_up)
         (Ain1, Ain2, Ain3, rhs_in,
          Aeq1, Aeq2, Aeq3, rhs_eq,
          Q1_val, Q2_val, Q3_val, q1_val, q2_val, q3_val, c) = self.traj_opt
 
         # x size equal in both program
-        assert(Pin1.shape[1] == Ain1.shape[1])
+        assert(relu_output_return.Ain_input.shape[1] == Ain1.shape[1])
 
         num_x = Ain1.shape[1]
         num_s = Ain2.shape[1]
         num_alpha = Ain3.shape[1]
-        num_z = Pin2.shape[1]
-        num_beta = Pin3.shape[1]
+        num_z = relu_output_return.Ain_slack.shape[1]
+        num_beta = relu_output_return.Ain_binary.shape[1]
 
         num_y = num_s + num_z
         num_gamma = num_alpha + num_beta
 
         num_Ain = rhs_in.shape[0]
-        num_Pin = qrhs_in.shape[0]
+        num_Pin = relu_output_return.rhs_in.shape[0]
         num_in = num_Pin + num_Ain + 2*num_x
 
         num_Aeq = rhs_eq.shape[0]
-        num_Peq = qrhs_eq.shape[0]
+        num_Peq = relu_output_return.rhs_eq.shape[0]
         num_eq = num_Peq + num_Aeq
 
         s_index_s = 0
@@ -93,7 +91,7 @@ class ModelBounds:
 
         G0 = torch.zeros(num_in, num_x, dtype=self.dtype)
         G0[0:num_Ain, :] = Ain1
-        G0[num_Ain:num_Ain+num_Pin, :] = Pin1
+        G0[num_Ain:num_Ain+num_Pin, :] = relu_output_return.Ain_input
         G0[num_Ain+num_Pin:num_Ain+num_Pin+num_x,
             :] = torch.eye(num_x, dtype=self.dtype)
         G0[num_Ain+num_Pin+num_x:num_Ain+num_Pin+2*num_x, :] = - \
@@ -101,27 +99,32 @@ class ModelBounds:
 
         G1 = torch.zeros(num_in, num_y, dtype=self.dtype)
         G1[0:num_Ain, s_index_s:s_index_e] = Ain2
-        G1[num_Ain:num_Ain+num_Pin, z_index_s:z_index_e] = Pin2
+        G1[num_Ain:num_Ain+num_Pin, z_index_s:z_index_e] =\
+            relu_output_return.Ain_slack
 
         G2 = torch.zeros(num_in, num_gamma, dtype=self.dtype)
         G2[0:num_Ain, alpha_index_s:alpha_index_e] = Ain3
-        G2[num_Ain:num_Ain+num_Pin, beta_index_s:beta_index_e] = Pin3
+        G2[num_Ain:num_Ain+num_Pin, beta_index_s:beta_index_e] =\
+            relu_output_return.Ain_binary
 
-        h = torch.cat((rhs_in, qrhs_in.squeeze(), x_up, -x_lo), 0)
+        h = torch.cat((
+            rhs_in, relu_output_return.rhs_in.squeeze(), x_up, -x_lo), 0)
 
         A0 = torch.zeros(num_eq, num_x, dtype=self.dtype)
         A0[0:num_Aeq, :] = Aeq1
-        A0[num_Aeq:num_Aeq+num_Peq, :] = Peq1
+        A0[num_Aeq:num_Aeq+num_Peq, :] = relu_output_return.Aeq_input
 
         A1 = torch.zeros(num_eq, num_y, dtype=self.dtype)
         A1[0:num_Aeq, s_index_s:s_index_e] = Aeq2
-        A1[num_Aeq:num_Aeq+num_Peq, z_index_s:z_index_e] = Peq2
+        A1[num_Aeq:num_Aeq+num_Peq, z_index_s:z_index_e] =\
+            relu_output_return.Aeq_slack
 
         A2 = torch.zeros(num_eq, num_gamma, dtype=self.dtype)
         A2[0:num_Aeq, alpha_index_s:alpha_index_e] = Aeq3
-        A2[num_Aeq:num_Aeq+num_Peq, beta_index_s:beta_index_e] = Peq3
+        A2[num_Aeq:num_Aeq+num_Peq, beta_index_s:beta_index_e] =\
+            relu_output_return.Aeq_binary
 
-        b = torch.cat((rhs_eq, qrhs_eq.squeeze()), 0)
+        b = torch.cat((rhs_eq, relu_output_return.rhs_eq.squeeze()), 0)
 
         Q0 = Q1_val.clone()
 
@@ -135,11 +138,11 @@ class ModelBounds:
 
         q1 = torch.zeros(num_y, dtype=self.dtype)
         q1[s_index_s:s_index_e] = q2_val
-        q1[z_index_s:z_index_e] = -a_out.squeeze()
+        q1[z_index_s:z_index_e] = -relu_output_return.Aout_slack.squeeze()
 
         q2 = torch.zeros(num_gamma, dtype=self.dtype)
         q2[alpha_index_s:alpha_index_e] = q3_val
 
-        k = c - b_out
+        k = c - relu_output_return.Cout
 
         return(Q0, Q1, Q2, q0, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)

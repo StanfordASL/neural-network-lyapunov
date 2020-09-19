@@ -4,7 +4,6 @@ import unittest
 import numpy as np
 import torch
 import cvxpy as cp
-from robust_value_approx.utils import torch_to_numpy
 # import matplotlib.pyplot as plt
 
 
@@ -28,11 +27,16 @@ class BallPaddleHybridLinearSystemTest(unittest.TestCase):
             self.dtype, self.dt, self.x_lo, self.x_up, self.u_lo, self.u_up)
 
     def test_ball_paddle_sim(self):
-        (Aeq_slack, Aeq_alpha,
-         Ain_x, Ain_u, Ain_slack, Ain_alpha,
-         rhs_in) = torch_to_numpy(
-                self.sys.mixed_integer_constraints(
-                        self.x_lo, self.x_up, self.u_lo, self.u_up))
+
+        mip_cnstr_return = self.sys.mixed_integer_constraints(
+            self.x_lo, self.x_up, self.u_lo, self.u_up)
+        Aeq_slack = mip_cnstr_return.Aout_slack.detach().numpy()
+        Aeq_alpha = mip_cnstr_return.Aout_binary.detach().numpy()
+        Ain_x = mip_cnstr_return.Ain_input[:, :self.sys.x_dim].detach().numpy()
+        Ain_u = mip_cnstr_return.Ain_input[:, self.sys.x_dim:].detach().numpy()
+        Ain_slack = mip_cnstr_return.Ain_slack.detach().numpy()
+        Ain_alpha = mip_cnstr_return.Ain_binary.detach().numpy()
+        rhs_in = mip_cnstr_return.rhs_in.detach().numpy()
 
         if len(Aeq_slack.shape) == 1:
             Aeq_slack = Aeq_slack.reshape((-1, 1))
@@ -90,10 +94,14 @@ class BallPaddleHybridLinearSystemVelCtrlTest(unittest.TestCase):
             midpoint=True)
 
     def test_ball_paddle_sim(self):
-        (Aeq_slack, Aeq_alpha,
-         Ain_x, Ain_u, Ain_slack, Ain_alpha,
-         rhs_in) = torch_to_numpy(self.sys.mixed_integer_constraints(),
-                                  squeeze=False)
+        mip_cnstr_return = self.sys.mixed_integer_constraints()
+        Aeq_slack = mip_cnstr_return.Aout_slack.detach().numpy()
+        Aeq_alpha = mip_cnstr_return.Aout_binary.detach().numpy()
+        Ain_x = mip_cnstr_return.Ain_input[:, :self.sys.x_dim].detach().numpy()
+        Ain_u = mip_cnstr_return.Ain_input[:, self.sys.x_dim:].detach().numpy()
+        Ain_slack = mip_cnstr_return.Ain_slack.detach().numpy()
+        Ain_alpha = mip_cnstr_return.Ain_binary.detach().numpy()
+        rhs_in = mip_cnstr_return.rhs_in.detach().numpy()
         slack = cp.Variable(Ain_slack.shape[1])
         alpha = cp.Variable(Ain_alpha.shape[1], boolean=True)
         x0 = np.array([0., 1., .5, .5, 0., 0., 0.])

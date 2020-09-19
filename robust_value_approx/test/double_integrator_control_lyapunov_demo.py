@@ -99,14 +99,18 @@ def verify_control_lyapunov(model, x_lo, x_up):
         + Ain4.to_dense().detach().numpy() * alpha\
         + Ain5.to_dense().detach().numpy() * beta\
         <= rhs.squeeze()
-    (Ain6, Ain7, Ain8, rhs_in, Aeq6, Aeq7, Aeq8, rhs_eq, _, _, _, _, _, _) =\
+    (mip_constr_return,  _, _, _, _) =\
         verifier.relu_free_pattern.output_constraint(x_lo, x_up)
-    z = cp.Variable(Ain7.shape[1])
+    z = cp.Variable(mip_constr_return.Ain_slack.shape[1])
     constraints = [
-        constraint1, Ain6.detach().numpy() * x + Ain7.detach().numpy() * z
-        + Ain8.detach().numpy() * beta <= rhs_in.squeeze().detach().numpy(),
-        Aeq6.detach().numpy() * x + Aeq7.detach().numpy() * z +
-        Aeq8.detach().numpy() * beta == rhs_eq.squeeze().detach().numpy()]
+        constraint1, mip_constr_return.Ain_input.detach().numpy() * x +
+        mip_constr_return.Ain_slack.detach().numpy() * z
+        + mip_constr_return.Ain_binary.detach().numpy() * beta <=
+        mip_constr_return.rhs_in.squeeze().detach().numpy(),
+        mip_constr_return.Aeq_input.detach().numpy() * x +
+        mip_constr_return.Aeq_slack.detach().numpy() * z +
+        mip_constr_return.Aeq_binary.detach().numpy() * beta ==
+        mip_constr_return.rhs_eq.squeeze().detach().numpy()]
     objective = cp.Maximize(
         c1.detach().numpy().T * s + t + c2.detach().numpy().T * alpha)
     cp_prob = cp.Problem(objective, constraints)
