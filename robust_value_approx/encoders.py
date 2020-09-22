@@ -20,7 +20,7 @@ class Encoder(nn.Module):
                                 self.image_width, self.image_height))
             for c_layer in self.conv:
                 x_tmp = c_layer(x_tmp)
-            return x_tmp.shape[1], x_tmp.shape[2], x_tmp.shape[3]
+        return x_tmp.shape[1], x_tmp.shape[2], x_tmp.shape[3]
 
 
 class Decoder(nn.Module):
@@ -93,8 +93,10 @@ class CNNEncoder1(Encoder):
             nn.Conv2d(32, 10, 5, stride=2, padding=0),
         ]
         self.conv = nn.ModuleList(conv)
+        conv_out_shape = self.conv_output_size(self.conv)
         linear = [
-            nn.Linear(self.conv_output_size(self.conv), 500),
+            nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
+                      conv_out_shape[2], 500),
             nn.Linear(500, self.z_dim * 2),
         ]
         self.linear = nn.ModuleList(linear)
@@ -110,10 +112,10 @@ class CNNEncoder1(Encoder):
         return x[:, :self.z_dim], x[:, self.z_dim:]
 
 
-class CNNDecoder2(Decoder):
-    def __init__(self, z_dim, use_conv, image_width, image_height, grayscale):
-        super(Decoder, self).__init__(z_dim, image_width, image_height,
-                                      grayscale)
+class CNNDecoder1(Decoder):
+    def __init__(self, z_dim, image_width, image_height, grayscale):
+        super(CNNDecoder1, self).__init__(z_dim, image_width, image_height,
+                                          grayscale)
         width_in = self.image_width - 4
         height_in = self.image_height - 4
         for k in range(2):
@@ -164,8 +166,10 @@ class CNNEncoder2(Encoder):
             nn.MaxPool2d(2, 2),
         ]
         self.conv = nn.ModuleList(conv)
+        conv_out_shape = self.conv_output_size(self.conv)
         linear = [
-            nn.Linear(self.conv_output_size(self.conv), self.z_dim * 2),
+            nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
+                      conv_out_shape[2], self.z_dim * 2),
         ]
         self.linear = nn.ModuleList(linear)
         self.relu = nn.ReLU()
@@ -181,7 +185,7 @@ class CNNEncoder2(Encoder):
 
 
 class CNNDecoder2(Decoder):
-    def __init__(self, z_dim, use_conv, image_width, image_height, grayscale):
+    def __init__(self, z_dim, image_width, image_height, grayscale):
         super(CNNDecoder2, self).__init__(z_dim, image_width, image_height,
                                           grayscale)
         width_in = int(self.image_width / 4)

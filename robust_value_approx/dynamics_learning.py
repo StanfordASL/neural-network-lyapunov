@@ -179,6 +179,9 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         if self.use_bce:
             self.bce_loss = nn.BCELoss(reduction='mean')
         self.use_variational = use_variational
+        self.encoder_optimizer = None
+        self.encoder_writer = None
+        self.encoder_n_iter = 0
 
     def get_trainable_parameters(self):
         params = [self.relu_system.dynamics_relu.parameters(),
@@ -187,7 +190,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                   self.decoder.parameters()]
         return params
 
-    def reparam(z_mu, z_log_var):
+    def reparam(self, z_mu, z_log_var):
         z_std = torch.exp(0.5 * z_log_var)
         eps = torch.randn(z_mu.shape, dtype=z_mu.dtype)
         z = eps * z_std + z_mu
@@ -215,7 +218,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         x_next_pred_decoded = self.decoder(z_next)
         return x_decoded, x_next_pred_decoded, z_mu, z_log_var
 
-    def kl_loss(z_mu, z_log_var):
+    def kl_loss(self, z_mu, z_log_var):
         loss = torch.mean(-.5 * torch.sum(-torch.pow(z_mu, 2) -
                           torch.exp(z_log_var) + z_log_var + 1., dim=1))
         return loss
@@ -238,6 +241,45 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         if self.use_variational:
             loss += self.kl_loss(z_mu, z_log_var)
         return loss
+
+    def encoder_validation_loss(self):
+        with torch.no_grad():
+            val_loss = torch.zeros(1, dtype=self.dtype)
+            for x, x_next in self.validation_dataloader:
+                x_decoded, z_mu, z_log_var = self.encode_decode(x)
+                loss = self.reconstruction_loss(x, x_decoded)
+                if self.use_variational:
+                    loss += self.kl_loss(z_mu, z_log_var)
+                val_loss += loss
+        return val_loss
+
+    def train_encoder(self, num_epoch, validate=False, device='cpu'):
+        if self.encoder_optimizer is None:
+            params_list = [self.encoder.parameters(),
+                           self.decoder.parameters()]
+            params = [{'params': p} for p in params_list]
+            self.encoder_optimizer = torch.optim.Adam(params)
+        if self.encoder_writer is None:
+            self.encoder_writer = SummaryWriter()
+            self.encoder_n_iter = 0
+
+        for epoch_i in range(num_epoch):
+            for x, x_next in self.train_dataloader:
+                self.encoder_optimizer.zero_grad()
+                x_decoded, z_mu, z_log_var = self.encode_decode(x)
+                loss = self.reconstruction_loss(x, x_decoded)
+                if self.use_variational:
+                    loss += self.kl_loss(z_mu, z_log_var)
+                loss.backward()
+                self.encoder_optimizer.step()
+                self.encoder_n_iter += 1
+                self.encoder_writer.add_scalar('Encoder/train', loss.item(),
+                                               self.encoder_n_iter)
+            if validate:
+                val_loss = self.encoder_validation_loss()
+                self.encoder_writer.add_scalar('Encoder/validate',
+                                               val_loss.item(),
+                                               self.encoder_n_iter)
 
     def rollout(self, x_init, N, clamp=False):
         assert(len(x_init.shape) == 3)
