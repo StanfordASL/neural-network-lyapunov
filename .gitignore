@@ -134,11 +134,10 @@ gurobi.log
 *.pt
 
 # trained model used in tests
-!*/test/data/double_integrator_model.pt
-!*/test/data/double_integrator_q_model.pt
+!*/test/data/*.pt
 
 # pytorch logs
-robust_value_approx/notebooks/runs
-robust_value_approx/notebooks/*.p
+neural_network_lyapunov/notebooks/runs
+neural_network_lyapunov/notebooks/*.p
 
 *.DS_Store

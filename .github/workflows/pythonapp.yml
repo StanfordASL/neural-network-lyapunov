@@ -26,7 +26,7 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --statistics
     - name: Test with python unittest
       run: |
-        python3 -m unittest discover robust_value_approx/test
+        python3 -m unittest discover neural_network_lyapunov/test
         export PYTHONPATH=${PWD}:${PYTHONPATH}
-        python3 robust_value_approx/test/train_discrete_linear_system_toy_lyapunov.py
-        python3 robust_value_approx/test/train_continuous_linear_system_toy_lyapunov.py --train_on_sample --train_on_samples_iterations=2 --max_iterations=2
+        python3 neural_network_lyapunov/test/train_discrete_linear_system_toy_lyapunov.py
+        python3 neural_network_lyapunov/test/train_continuous_linear_system_toy_lyapunov.py --train_on_sample --train_on_samples_iterations=2 --max_iterations=2
