@@ -20,7 +20,7 @@
   <link name="pole">
     <visual>
       <geometry>
-        <box size="0.1 0.1 1.0"/>	
+        <box size="0.15 0.15 1.0"/>	
       </geometry>
       <origin rpy="0 0 0" xyz="0 0 -0.5"/>
       <material name="white">
