@@ -138,9 +138,7 @@ gurobi.log
 !*/test/data/double_integrator_q_model.pt
 
 # pytorch logs
-robust_value_approx/test/notebooks/runs
-robust_value_approx/test/notebooks/*.p
+robust_value_approx/notebooks/runs
+robust_value_approx/notebooks/*.p
 
 *.DS_Store
-
-robust_value_approx/test/notebooks/panda_traj.json
