@@ -47,14 +47,10 @@ class AutonomousReLUSystem:
                 Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
-        (Ain_x, Ain_s, Ain_gamma, rhs_in, Aeq_x, Aeq_s, Aeq_gamma, rhs_eq,
-         Aout_s, Cout, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
+        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
             self.x_lo, self.x_up)
-
-        return (Aout_s, Cout,
-                Ain_x, Ain_s, Ain_gamma, rhs_in,
-                Aeq_x, Aeq_s, Aeq_gamma, rhs_eq)
+        return result
 
     def possible_dx(self, x):
         assert(isinstance(x, torch.Tensor))
@@ -127,15 +123,8 @@ class ReLUSystem:
         """
         xu_lo = torch.cat((self.x_lo, self.u_lo))
         xu_up = torch.cat((self.x_up, self.u_up))
-        (Ain_xu, Ain_s, Ain_gamma, rhs_in, Aeq_xu, Aeq_s, Aeq_gamma, rhs_eq,
-         Aout_s, Cout, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
+        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
             xu_lo, xu_up)
-        Ain_x = Ain_xu[:, :self.x_dim]
-        Ain_u = Ain_xu[:, self.x_dim:]
-        Aeq_x = Aeq_xu[:, :self.x_dim]
-        Aeq_u = Aeq_xu[:, self.x_dim:]
 
-        return (Aout_s, Cout,
-                Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
-                Aeq_x, Aeq_u, Aeq_s, Aeq_gamma, rhs_eq)
+        return result

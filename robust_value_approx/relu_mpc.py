@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import robust_value_approx.relu_to_optimization as relu_to_optimization
-import robust_value_approx.utils as utils
 
 import torch
 import cvxpy as cp
@@ -99,16 +98,26 @@ class ReLUMPC:
         self.vf = vf
         self.model = model
         relu = relu_to_optimization.ReLUFreePattern(model, vf.dtype)
-        relu_con = relu.output_constraint(vf.x_lo, vf.x_up)
-        (Pin1, Pin2, Pin3, Prhs_in,
-         Peq1, Peq2, Peq3, Prhs_eq,
-         a_out, b_out,
-         z_pre_relu_lo, z_pre_relu_up, _, _) = utils.torch_to_numpy(
-             relu_con, squeeze=False)
-        (Aeq_slack, Aeq_alpha,
-         Ain_x, Ain_u, Ain_slack,
-         Ain_alpha, Arhs_in) = utils.torch_to_numpy(
-            vf.sys.mixed_integer_constraints(), squeeze=False)
+        relu_con, _, _, _, _ = relu.output_constraint(vf.x_lo, vf.x_up)
+        Pin1 = relu_con.Ain_input.detach().numpy()
+        Pin2 = relu_con.Ain_slack.detach().numpy()
+        Pin3 = relu_con.Ain_binary.detach().numpy()
+        Prhs_in = relu_con.rhs_in.detach().numpy()
+        Peq1 = relu_con.Aeq_input.detach().numpy()
+        Peq2 = relu_con.Aeq_slack.detach().numpy()
+        Peq3 = relu_con.Aeq_binary.detach().numpy()
+        Prhs_eq = relu_con.rhs_eq.detach().numpy()
+        a_out = relu_con.Aout_slack.detach().numpy()
+        b_out = relu_con.Cout.detach().numpy()
+        mip_constr_return = vf.sys.mixed_integer_constraints()
+        Aeq_slack = mip_constr_return.Aout_slack.detach().numpy()
+        Aeq_alpha = mip_constr_return.Aout_binary.detach().numpy()
+        Ain_xu = mip_constr_return.Ain_input.detach().numpy()
+        Ain_x = Ain_xu[:, :vf.sys.x_dim]
+        Ain_u = Ain_xu[:, vf.sys.x_dim:]
+        Ain_slack = mip_constr_return.Ain_slack.detach().numpy()
+        Ain_alpha = mip_constr_return.Ain_binary.detach().numpy()
+        Arhs_in = mip_constr_return.rhs_in.detach().numpy()
         self.x0 = cp.Parameter(self.vf.sys.x_dim)
         self.u0 = cp.Variable(self.vf.sys.u_dim)
         self.slack = cp.Variable(Ain_slack.shape[1])
@@ -218,12 +227,17 @@ class QReLUMPC:
         relu = relu_to_optimization.ReLUFreePattern(model, self.dtype)
         xu_lo = torch.cat((x_lo, u_lo), 0)
         xu_up = torch.cat((x_up, u_up), 0)
-        relu_con = relu.output_constraint(xu_lo, xu_up)
-        (Pin1, Pin2, Pin3, Prhs_in,
-         Peq1, Peq2, Peq3, Prhs_eq,
-         a_out, b_out,
-         z_pre_relu_lo, z_pre_relu_up, _, _) = utils.torch_to_numpy(
-             relu_con, squeeze=False)
+        relu_con, _, _, _, _ = relu.output_constraint(xu_lo, xu_up)
+        Pin1 = relu_con.Ain_input.detach().numpy()
+        Pin2 = relu_con.Ain_slack.detach().numpy()
+        Pin3 = relu_con.Ain_binary.detach().numpy()
+        Prhs_in = relu_con.rhs_in.detach().numpy()
+        Peq1 = relu_con.Aeq_input.detach().numpy()
+        Peq2 = relu_con.Aeq_slack.detach().numpy()
+        Peq3 = relu_con.Aeq_binary.detach().numpy()
+        Prhs_eq = relu_con.rhs_eq.detach().numpy()
+        a_out = relu_con.Aout_slack.detach().numpy()
+        b_out = relu_con.Cout.detach().numpy()
         self.x0 = cp.Parameter(self.x_dim)
         self.u0 = cp.Variable(self.u_dim)
         self.z = cp.Variable(Pin2.shape[1])

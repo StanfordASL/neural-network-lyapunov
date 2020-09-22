@@ -322,8 +322,9 @@ class TestJohanssonSystem3(unittest.TestCase):
             system.x_up_all,
             np.array([2., 1.]) + x_equilibrium.detach().numpy(), atol=2e-6)
 
-        Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in =\
-            system.mixed_integer_constraints()
+        mip_cnstr_return = system.mixed_integer_constraints()
+        self.assertIsNone(mip_cnstr_return.Aout_input)
+        self.assertIsNone(mip_cnstr_return.Cout)
 
         def test_fun(mode, state, satisfied):
             s_val = torch.zeros(6, dtype=torch.float64)
@@ -331,13 +332,17 @@ class TestJohanssonSystem3(unittest.TestCase):
             s_val[2 * mode: 2 * (mode+1)] = state
             gamma_val[mode] = 1
             if satisfied:
-                np.testing.assert_array_less(
-                    (Ain_x @ state + Ain_s @ s_val + Ain_gamma @ gamma_val).
-                    detach().numpy(), rhs_in.detach().numpy() + 1e-7)
+                np.testing.assert_array_less((
+                    mip_cnstr_return.Ain_input @ state +
+                    mip_cnstr_return.Ain_slack @ s_val +
+                    mip_cnstr_return.Ain_binary @ gamma_val).detach().numpy(),
+                    mip_cnstr_return.rhs_in.detach().numpy() + 1e-7)
             else:
-                self.assertFalse(
-                    torch.all(Ain_x @ state + Ain_s @ s_val +
-                              Ain_gamma @ gamma_val <= rhs_in + 1e-7))
+                self.assertFalse(torch.all(
+                    mip_cnstr_return.Ain_input @ state +
+                    mip_cnstr_return.Ain_slack @ s_val +
+                    mip_cnstr_return.Ain_binary @ gamma_val <=
+                    mip_cnstr_return.rhs_in + 1e-7))
 
         test_fun(
             2, torch.tensor([1.5, 0.3], dtype=torch.float64) + x_equilibrium,
@@ -559,8 +564,10 @@ class HybridLinearSystemTest(unittest.TestCase):
             return (x, u)
 
         def test_mode(mode, x_lo, x_up, u_lo, u_up):
-            (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha, rhs_in)\
-                = dut.mixed_integer_constraints(x_lo, x_up, u_lo, u_up)
+            mip_cnstr_return = dut.mixed_integer_constraints(
+                x_lo, x_up, u_lo, u_up)
+            self.assertIsNone(mip_cnstr_return.Aout_input)
+            self.assertIsNone(mip_cnstr_return.Cout)
             (x, u) = generate_xu(mode, True)
             # First find x and u in this mode.
             x_next = dut.A[mode] @ x + dut.B[mode] @ u + dut.c[mode]
@@ -572,12 +579,14 @@ class HybridLinearSystemTest(unittest.TestCase):
             s[dut.x_dim * mode: dut.x_dim * (mode + 1)] = x
             t[dut.u_dim * mode: dut.u_dim * (mode + 1)] = u
             slack = torch.cat((s, t), dim=0)
-            self.assertTrue(
-                torch.all(torch.abs(x_next - (Aeq_slack @ slack
-                                              + Aeq_alpha @ alpha)) < 1E-12))
-            lhs_in = Ain_x @ x + Ain_u @ u + Ain_slack @ slack\
-                + Ain_alpha @ alpha
-            self.assertTrue(torch.all(lhs_in <= rhs_in + 1E-12))
+            self.assertTrue(torch.all(torch.abs(x_next - (
+                mip_cnstr_return.Aout_slack @ slack
+                + mip_cnstr_return.Aout_binary @ alpha)) < 1E-12))
+            lhs_in = mip_cnstr_return.Ain_input @ torch.cat((x, u)) +\
+                mip_cnstr_return.Ain_slack @ slack\
+                + mip_cnstr_return.Ain_binary @ alpha
+            self.assertTrue(torch.all(
+                lhs_in <= mip_cnstr_return.rhs_in + 1E-12))
 
         for mode in range(dut.num_modes):
             test_mode(mode, x_lo, x_up, u_lo, u_up)
@@ -598,8 +607,10 @@ class HybridLinearSystemTest(unittest.TestCase):
             # Randomly sample x and u. If x and u are not in that mode, then
             # there should be no slack variables such that the inequality
             # constraints are satisfied.
-            (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha, rhs_in)\
-                = dut.mixed_integer_constraints(x_lo, x_up, u_lo, u_up)
+            mip_cnstr_return = dut.mixed_integer_constraints(
+                x_lo, x_up, u_lo, u_up)
+            self.assertIsNone(mip_cnstr_return.Aout_input)
+            self.assertIsNone(mip_cnstr_return.Cout)
             (x, u) = generate_xu(mode, False)
             alpha = torch.zeros(dut.num_modes, 1, dtype=dut.dtype)
             alpha[mode] = 1
@@ -608,8 +619,10 @@ class HybridLinearSystemTest(unittest.TestCase):
             s[dut.x_dim * mode: dut.x_dim * (mode + 1)] = x
             t[dut.u_dim * mode: dut.u_dim * (mode + 1)] = u
             slack = torch.cat((s, t), dim=0)
-            lhs = Ain_x @ x + Ain_u @ u + Ain_slack @ slack + Ain_alpha @ alpha
-            self.assertFalse(torch.all(lhs < rhs_in + 1E-12))
+            lhs = mip_cnstr_return.Ain_input @ torch.cat((x, u)) +\
+                mip_cnstr_return.Ain_slack @ slack +\
+                mip_cnstr_return.Ain_binary @ alpha
+            self.assertFalse(torch.all(lhs < mip_cnstr_return.rhs_in + 1E-12))
 
         for mode in range(dut.num_modes):
             test_ineq(mode, x_lo, x_up, u_lo, u_up)
@@ -678,9 +691,10 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             # We want to generate a random state in the admissible region of
             # the given mode.
             is_in_mode = False
-            (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in) =\
-                dut.mixed_integer_constraints(
-                    None, torch.tensor([4, 1], dtype=dut.dtype))
+            mip_cnstr_return = dut.mixed_integer_constraints(
+                None, torch.tensor([4, 1], dtype=dut.dtype))
+            self.assertIsNone(mip_cnstr_return.Aout_input)
+            self.assertIsNone(mip_cnstr_return.Cout)
             while not is_in_mode:
                 x_sample = torch.from_numpy(np.random.uniform(-4, 4, (2,)))
                 if torch.all(dut.P[mode] @ x_sample <= dut.q[mode]):
@@ -692,11 +706,13 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             gamma = torch.zeros(dut.num_modes, dtype=dut.dtype)
             gamma[mode] = 1
             np.testing.assert_allclose(
-                Aeq_s @ s + Aeq_gamma @ gamma, xdot_expected)
+                mip_cnstr_return.Aout_slack @ s +
+                mip_cnstr_return.Aout_binary @ gamma, xdot_expected)
             np.testing.assert_array_less(
-                (Ain_x @ x_sample + Ain_s @ s +
-                 Ain_gamma @ gamma).detach().numpy(),
-                (rhs_in + 1E-14).detach().numpy())
+                (mip_cnstr_return.Ain_input @ x_sample +
+                 mip_cnstr_return.Ain_slack @ s +
+                 mip_cnstr_return.Ain_binary @ gamma).detach().numpy(),
+                (mip_cnstr_return.rhs_in + 1E-14).detach().numpy())
             # Now solve the problem with the given constraints, the only
             # solution should be gamma and s
             gamma_var = cp.Variable(dut.num_modes, boolean=True)
@@ -704,10 +720,11 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
             objective = cp.Maximize(0)
             prob = cp.Problem(
                 objective,
-                [(Ain_x @ x_sample).detach().numpy() +
-                 Ain_s.detach().numpy() @ s_var +
-                 Ain_gamma.detach().numpy() @ gamma_var <=
-                 rhs_in.detach().numpy(), cp.sum(gamma_var) == 1])
+                [(mip_cnstr_return.Ain_input @ x_sample).detach().numpy() +
+                 mip_cnstr_return.Ain_slack.detach().numpy() @ s_var +
+                 mip_cnstr_return.Ain_binary.detach().numpy() @ gamma_var <=
+                 mip_cnstr_return.rhs_in.detach().numpy(),
+                 cp.sum(gamma_var) == 1])
             prob.solve()
             self.assertEqual(prob.status, 'optimal')
             np.testing.assert_allclose(gamma.detach().numpy(), gamma_var.value)

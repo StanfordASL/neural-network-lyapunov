@@ -174,16 +174,15 @@ class ValueFunction:
             assert(self.utraj.shape[1] == N)
         if self.alphatraj is not None:
             assert(self.alphatraj.shape[1] == N)
-        (Aeq_slack,
-         Aeq_alpha,
-         Ain_x,
-         Ain_u,
-         Ain_slack,
-         Ain_alpha,
-         rhs_in_dyn) = self.sys.mixed_integer_constraints(self.x_lo,
-                                                          self.x_up,
-                                                          self.u_lo,
-                                                          self.u_up)
+        mip_cnstr_return = self.sys.mixed_integer_constraints(
+            self.x_lo, self.x_up, self.u_lo, self.u_up)
+        Aeq_slack = mip_cnstr_return.Aout_slack
+        Aeq_alpha = mip_cnstr_return.Aout_binary
+        Ain_x = mip_cnstr_return.Ain_input[:, :self.sys.x_dim]
+        Ain_u = mip_cnstr_return.Ain_input[:, self.sys.x_dim:]
+        Ain_slack = mip_cnstr_return.Ain_slack
+        Ain_alpha = mip_cnstr_return.Ain_binary
+        rhs_in_dyn = mip_cnstr_return.rhs_in
         xdim = Ain_x.shape[1]
         udim = Ain_u.shape[1]
         slackdim = Ain_slack.shape[1]

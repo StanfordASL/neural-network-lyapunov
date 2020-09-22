@@ -4,6 +4,7 @@ import cvxpy as cp
 from scipy.integrate import solve_ivp
 
 import robust_value_approx.utils as utils
+import robust_value_approx.gurobi_torch_mip as gurobi_torch_mip
 from robust_value_approx.utils import (
     check_shape_and_type,
     replace_binary_continuous_product,
@@ -213,9 +214,14 @@ class HybridLinearSystem:
             Ain_alpha[ineq_count: ineq_count +
                       self.P[i].shape[0], i] = -self.q[i]
             ineq_count += self.P[i].shape[0]
-
-        return (Aeq_slack, Aeq_alpha, Ain_x, Ain_u, Ain_slack, Ain_alpha,
-                rhs_in)
+        mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        mip_cnstr_return.Aout_slack = Aeq_slack
+        mip_cnstr_return.Aout_binary = Aeq_alpha
+        mip_cnstr_return.Ain_input = torch.cat((Ain_x, Ain_u), dim=1)
+        mip_cnstr_return.Ain_slack = Ain_slack
+        mip_cnstr_return.Ain_binary = Ain_alpha
+        mip_cnstr_return.rhs_in = rhs_in
+        return mip_cnstr_return
 
     def mode(self, x_start, u_start):
         """
@@ -438,7 +444,14 @@ class AutonomousHybridLinearSystem:
                       self.P[i].shape[0], i] = -self.q[i]
             ineq_count += self.P[i].shape[0]
 
-        return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
+        mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        mip_cnstr_return.Aout_slack = Aeq_s
+        mip_cnstr_return.Aout_binary = Aeq_gamma
+        mip_cnstr_return.Ain_input = Ain_x
+        mip_cnstr_return.Ain_slack = Ain_s
+        mip_cnstr_return.Ain_binary = Ain_gamma
+        mip_cnstr_return.rhs_in = rhs_in
+        return mip_cnstr_return
 
     def mode(self, x):
         """
