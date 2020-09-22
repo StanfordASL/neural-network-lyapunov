@@ -15,7 +15,7 @@ def main():
         export PYTHONPATH={cur_dir}:${{PYTHONPATH}}
         """)
     print("""
-    To use robust_value_approx functionality:
+    To use neural_network_lyapunov functionality:
         source ./config/setup_environments.sh
     """)
 

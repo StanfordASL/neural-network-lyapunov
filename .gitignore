@@ -138,7 +138,7 @@ gurobi.log
 !*/test/data/double_integrator_q_model.pt
 
 # pytorch logs
-robust_value_approx/notebooks/runs
-robust_value_approx/notebooks/*.p
+neural_network_lyapunov/notebooks/runs
+neural_network_lyapunov/notebooks/*.p
 
 *.DS_Store
