@@ -134,10 +134,7 @@ gurobi.log
 *.pt
 
 # trained model used in tests
-!*/test/data/double_integrator_model.pt
-!*/test/data/double_integrator_q_model.pt
-!*/test/data/negative_loss_relu_1.pt
-!*/test/data/johansson_system1_lyapunov_no_bias.pt
+!*/test/data/*.pt
 
 # pytorch logs
 neural_network_lyapunov/notebooks/runs
