@@ -131,8 +131,6 @@ class HybridLinearSystem:
         rhs_in)
         @note 1. This function doesn't require the polytope
                  Pᵢ * [x[n]; u[n]] <= qᵢ to be mutually exclusive.
-              2. We do not impose the constraint that one and only one mode
-                 is active. The user should impose this constraint separately.
         """
         def check_and_to_numpy(array, shape, dtype):
             if (isinstance(array, torch.Tensor)):
@@ -221,6 +219,9 @@ class HybridLinearSystem:
         mip_cnstr_return.Ain_slack = Ain_slack
         mip_cnstr_return.Ain_binary = Ain_alpha
         mip_cnstr_return.rhs_in = rhs_in
+        mip_cnstr_return.Aeq_binary = torch.ones(
+            (1, self.num_modes), dtype=self.dtype)
+        mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
     def mode(self, x_start, u_start):
@@ -451,6 +452,9 @@ class AutonomousHybridLinearSystem:
         mip_cnstr_return.Ain_slack = Ain_s
         mip_cnstr_return.Ain_binary = Ain_gamma
         mip_cnstr_return.rhs_in = rhs_in
+        mip_cnstr_return.Aeq_binary = torch.ones(
+            (1, self.num_modes,), dtype=self.dtype)
+        mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
     def mode(self, x):

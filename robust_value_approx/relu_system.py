@@ -128,3 +128,8 @@ class ReLUSystem:
             xu_lo, xu_up)
 
         return result
+
+    def step_forward(self, x_start, u_start):
+        assert(isinstance(x_start, torch.Tensor))
+        assert(isinstance(u_start, torch.Tensor))
+        return self.dynamics_relu(torch.cat((x_start, u_start)))

@@ -39,7 +39,7 @@ class LyapunovHybridLinearSystem:
             relu_to_optimization.ReLUFreePattern(
                 lyapunov_relu, self.system.dtype)
 
-    def add_hybrid_system_constraint(self, milp, x, x_next):
+    def add_system_constraint(self, milp, x, x_next):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -48,35 +48,12 @@ class LyapunovHybridLinearSystem:
         """
         assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
         mip_cnstr_return = self.system.mixed_integer_constraints()
-        add_output_constraint = x_next is not None
         s, gamma = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_return, add_output_constraint, x, x_next, "s", "gamma",
+            mip_cnstr_return, x, x_next, "s", "gamma",
             "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
             "hybrid_output_dynamics")
 
-        # Now add the constraint that sum gamma = 1
-        milp.addLConstr(
-            [torch.ones((self.system.num_modes,), dtype=self.system.dtype)],
-            [gamma], sense=gurobipy.GRB.EQUAL, rhs=1.)
         return s, gamma
-
-    def add_relu_system_constraint(self, milp, x, x_next):
-        """
-        This function is intended for internal usage only (but I expose it
-        as a public function for unit test).
-        Add the constraint and variables to write the relu system
-        dynamics as mixed-integer linear constraints.
-        """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-
-        # add the milp constraint to formulate the relu system.
-        mip_cnstr_return = self.system.mixed_integer_constraints()
-        add_output_constraint = x_next is not None
-        s, gamma = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_return, add_output_constraint, x, x_next, "s", "gamma",
-            "relu_dynamics_ineq", "relu_dynamics_eq", "relu_dynamics_output")
-
-        return (s, gamma)
 
     def add_relu_output_constraint(
             self, milp, x, slack_name="relu_z", binary_var_name="relu_beta"):
@@ -96,7 +73,7 @@ class LyapunovHybridLinearSystem:
                  torch.from_numpy(self.system.x_lo_all),
                  torch.from_numpy(self.system.x_up_all))
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
-            mip_constr_return, False, x, None, slack_name, binary_var_name,
+            mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "")
         return (relu_z, relu_beta, mip_constr_return.Aout_slack,
                 mip_constr_return.Cout)
@@ -401,12 +378,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             vtype=gurobipy.GRB.CONTINUOUS, name="x")
 
         if isinstance(self.system,
-                      hybrid_linear_system.AutonomousHybridLinearSystem):
+                      hybrid_linear_system.AutonomousHybridLinearSystem) or\
+                isinstance(self.system, relu_system.AutonomousReLUSystem):
             # x is the variable x[n]
-            s, gamma = self.add_hybrid_system_constraint(milp, x, x_next)
-        elif isinstance(self.system, relu_system.AutonomousReLUSystem):
-            # x is the variable x[n]
-            s, gamma = self.add_relu_system_constraint(milp, x, x_next)
+            s, gamma = self.add_system_constraint(milp, x, x_next)
         else:
             raise(NotImplementedError)
 
@@ -671,8 +646,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         as a public function for unit test).
         Add sum_i ∂ReLU(x)/∂x*Aᵢsᵢ as mixed-integer linear constraints.
         @param s The slack variable to write the hybrid linear dynamics as
-        mixed-integer linear constraint. Returned from
-        add_hybrid_system_constraint()
+        mixed-integer linear constraint. Returned from add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
         add_relu_output_constraint()
@@ -755,8 +729,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         as a public function for unit test).
         Add sum_i ∂ReLU(x)/∂x *gᵢγᵢ as mixed-integer linear constraints.
         @param gamma The binary variable indicating the active mode in the
-        hybrid dynamical system. Returned from
-        add_hybrid_system_constraint()
+        hybrid dynamical system. Returned from add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
         add_relu_output_constraint()
@@ -805,7 +778,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(Aᵢsᵢ)(j) as mixed-integer linear
         constraints.
         @param s The slack variable representing x in each mode. This is
-        returned from add_hybrid_system_constraint().
+        returned from add_system_constraint().
         @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
         α(i)=0 => x(i)≤x*(i). This is returned from
         add_state_error_l1_constraint()
@@ -860,7 +833,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(gᵢγᵢ)(j) as mixed-integer linear
         constraints.
         @param gamma The binary variable representing the active mode. This is
-        returned from add_hybrid_system_constraint().
+        returned from add_system_constraint().
         @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
         α(i)=0 => x(i)≤x*(i). This is returned from
         add_state_error_l1_constraint()
@@ -998,7 +971,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         x = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x")
-        s, gamma = self.add_hybrid_system_constraint(milp, x, None)
+        s, gamma = self.add_system_constraint(milp, x, None)
 
         # V̇ = ∂V/∂x(∑ᵢ Aᵢsᵢ + gᵢγᵢ)
         #   = ∑ᵢ(∂ReLU(x)/∂x*Aᵢsᵢ + ∂ReLU(x)/∂x*gᵢγᵢ
@@ -1148,7 +1121,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         xdot = milp.addVars(
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="xdot")
-        s, gamma = self.add_hybrid_system_constraint(milp, x, xdot)
+        s, gamma = self.add_system_constraint(milp, x, xdot)
 
         # V̇ = ∂V/∂x * ẋ
         #   = ∂ReLU(x)/∂x*ẋ + λ*sign(x-x*) *ẋ

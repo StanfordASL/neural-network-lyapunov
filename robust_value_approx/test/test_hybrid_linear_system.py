@@ -325,6 +325,8 @@ class TestJohanssonSystem3(unittest.TestCase):
         mip_cnstr_return = system.mixed_integer_constraints()
         self.assertIsNone(mip_cnstr_return.Aout_input)
         self.assertIsNone(mip_cnstr_return.Cout)
+        self.assertIsNone(mip_cnstr_return.Aeq_input)
+        self.assertIsNone(mip_cnstr_return.Aeq_slack)
 
         def test_fun(mode, state, satisfied):
             s_val = torch.zeros(6, dtype=torch.float64)
@@ -568,6 +570,8 @@ class HybridLinearSystemTest(unittest.TestCase):
                 x_lo, x_up, u_lo, u_up)
             self.assertIsNone(mip_cnstr_return.Aout_input)
             self.assertIsNone(mip_cnstr_return.Cout)
+            self.assertIsNone(mip_cnstr_return.Aeq_input)
+            self.assertIsNone(mip_cnstr_return.Aeq_slack)
             (x, u) = generate_xu(mode, True)
             # First find x and u in this mode.
             x_next = dut.A[mode] @ x + dut.B[mode] @ u + dut.c[mode]
@@ -587,6 +591,11 @@ class HybridLinearSystemTest(unittest.TestCase):
                 + mip_cnstr_return.Ain_binary @ alpha
             self.assertTrue(torch.all(
                 lhs_in <= mip_cnstr_return.rhs_in + 1E-12))
+            np.testing.assert_allclose(
+                mip_cnstr_return.Aeq_binary.detach().numpy(),
+                np.ones((1, dut.num_modes)))
+            np.testing.assert_allclose(
+                mip_cnstr_return.rhs_eq.detach().numpy(), np.array([[1.]]))
 
         for mode in range(dut.num_modes):
             test_mode(mode, x_lo, x_up, u_lo, u_up)
@@ -611,6 +620,8 @@ class HybridLinearSystemTest(unittest.TestCase):
                 x_lo, x_up, u_lo, u_up)
             self.assertIsNone(mip_cnstr_return.Aout_input)
             self.assertIsNone(mip_cnstr_return.Cout)
+            self.assertIsNone(mip_cnstr_return.Aeq_input)
+            self.assertIsNone(mip_cnstr_return.Aeq_slack)
             (x, u) = generate_xu(mode, False)
             alpha = torch.zeros(dut.num_modes, 1, dtype=dut.dtype)
             alpha[mode] = 1
@@ -623,6 +634,11 @@ class HybridLinearSystemTest(unittest.TestCase):
                 mip_cnstr_return.Ain_slack @ slack +\
                 mip_cnstr_return.Ain_binary @ alpha
             self.assertFalse(torch.all(lhs < mip_cnstr_return.rhs_in + 1E-12))
+            np.testing.assert_allclose(
+                mip_cnstr_return.Aeq_binary.detach().numpy(),
+                np.ones((1, dut.num_modes)))
+            np.testing.assert_allclose(
+                mip_cnstr_return.rhs_eq, np.array([[1.]]))
 
         for mode in range(dut.num_modes):
             test_ineq(mode, x_lo, x_up, u_lo, u_up)

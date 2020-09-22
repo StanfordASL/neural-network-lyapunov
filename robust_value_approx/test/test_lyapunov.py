@@ -163,7 +163,7 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             setup_johansson_continuous_time_system1()
         self.x_equilibrium3 = torch.tensor([0, 0], dtype=self.dtype)
 
-    def test_add_hybrid_system_constraint(self):
+    def test_add_system_constraint(self):
 
         def test_fun(system, x_val, is_x_valid):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
@@ -173,7 +173,7 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
             mip_cnstr_return = system.mixed_integer_constraints()
-            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
+            s, gamma = dut.add_system_constraint(milp, x, None)
             # Now fix x to x_val
             for i in range(system.x_dim):
                 milp.addLConstr(
@@ -822,7 +822,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         x = milp_relu.addVars(
             2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)
         z, beta = milp_relu.add_mixed_integer_linear_constraints(
-            mip_constr_return, False, x, None, "z", "beta", "", "", "")
+            mip_constr_return, x, None, "z", "beta", "", "", "")
         # Add rho * |x - x*|₁. To do so, we introduce slack variable s_x_norm,
         # such that s_x_norm(i) = x(i) - x*(i).
         s_x_norm = milp_relu.addVars(
@@ -1264,7 +1264,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
+            s, gamma = dut.add_system_constraint(milp, x, None)
             (_, beta, _, _) = dut.add_relu_output_constraint(milp, x)
             if Aisi_flag:
                 (z, cost_z_coeff) = dut.add_relu_gradient_times_Aisi(
@@ -1348,7 +1348,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_hybrid_system_constraint(milp, x, xdot)
+            s, gamma = dut.add_system_constraint(milp, x, xdot)
             (_, beta, _, _) = dut.add_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta,
@@ -1417,7 +1417,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_hybrid_system_constraint(milp, x, None)
+            s, gamma = dut.add_system_constraint(milp, x, None)
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
             if Aisi_flag:
@@ -1525,7 +1525,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(
                 system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_hybrid_system_constraint(milp, x, xdot)
+            s, gamma = dut.add_system_constraint(milp, x, xdot)
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
             (z, z_coeff, xdot_coeff) = dut.add_sign_state_error_times_xdot(

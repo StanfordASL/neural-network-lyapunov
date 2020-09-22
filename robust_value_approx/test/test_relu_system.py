@@ -69,7 +69,7 @@ class TestAutonomousReluSystem(unittest.TestCase):
                 self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name="x")
             s, gamma = milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_return, False, x, None, "s", "gamma",
+                mip_cnstr_return, x, None, "s", "gamma",
                 "relu_dynamics_ineq", "relu_dynamics_eq", "")
             for i in range(self.system.x_dim):
                 milp.addLConstr(
@@ -134,7 +134,7 @@ class TestReLUSystem(unittest.TestCase):
                 dut.u_dim, lb=-gurobipy.GRB.INFINITY,
                 vtype=gurobipy.GRB.CONTINUOUS, name="u")
             s, gamma = milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_return, False, x+u, None, "s", "gamma",
+                mip_cnstr_return, x+u, None, "s", "gamma",
                 "relu_dynamics_ineq", "relu_dynamics_eq", "")
             for i in range(dut.x_dim):
                 milp.addLConstr(
