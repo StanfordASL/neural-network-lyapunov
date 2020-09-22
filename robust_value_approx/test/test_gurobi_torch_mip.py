@@ -525,7 +525,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
             1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
             name="y")
         (slack, binary) = dut.add_mixed_integer_linear_constraints(
-            mip_constr_return, True, x, y, "s", "gamma", "ineq_constr",
+            mip_constr_return, x, y, "s", "gamma", "ineq_constr",
             "eq_constr", "out_constr")
         self.assertEqual(len(slack), 3)
         self.assertEqual(len(binary), 2)
@@ -567,7 +567,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
             1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
             name="y")
         (slack, binary) = dut.add_mixed_integer_linear_constraints(
-            mip_constr_return, False, x, y, "s", "gamma", "ineq_constr",
+            mip_constr_return, x, None, "s", "gamma", "ineq_constr",
             "eq_constr", "out_constr")
         self.assertEqual(len(slack), 3)
         self.assertEqual(len(binary), 2)
@@ -582,6 +582,43 @@ class TestGurobiTorchMIP(unittest.TestCase):
             mip_constr_return.Aeq_input, torch.zeros((1, len(y)), dtype=dtype),
             mip_constr_return.Aeq_slack), dim=1)
         Aeq_zeta_expected = mip_constr_return.Aeq_binary
+        rhs_eq_expected = mip_constr_return.rhs_eq
+        self.add_mixed_integer_linear_constraints_tester(
+            dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
+            Aeq_r_expected, Aeq_zeta_expected, rhs_eq_expected)
+
+    def test_add_mixed_integer_linear_constraints3(self):
+        # Test add_mixed_integer_linear_constraints with None items in both
+        # inequality and equality constraints.
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        mip_constr_return.Ain_input = None
+        mip_constr_return.Aeq_binary = None
+        dut = gurobi_torch_mip.GurobiTorchMILP(dtype=dtype)
+        x = dut.addVars(
+            2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="x")
+        y = dut.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="y")
+        (slack, binary) = dut.add_mixed_integer_linear_constraints(
+            mip_constr_return, x, None, "s", "gamma", "ineq_constr",
+            "eq_constr", "out_constr")
+        self.assertEqual(len(slack), 3)
+        self.assertEqual(len(binary), 2)
+        self.assertEqual(len(dut.zeta), 2)
+        self.assertEqual(len(dut.r), 6)
+        Ain_r_expected = torch.cat((
+            torch.zeros(2, len(x), dtype=dtype),
+            torch.zeros(2, len(y), dtype=dtype),
+            mip_constr_return.Ain_slack), dim=1)
+        Ain_zeta_expected = mip_constr_return.Ain_binary
+        rhs_in_expected = mip_constr_return.rhs_in
+        Aeq_r_expected = torch.cat((
+            mip_constr_return.Aeq_input, torch.zeros((1, len(y)), dtype=dtype),
+            mip_constr_return.Aeq_slack), dim=1)
+        Aeq_zeta_expected = torch.zeros(
+            (mip_constr_return.rhs_eq.numel(), len(binary)), dtype=dtype)
         rhs_eq_expected = mip_constr_return.rhs_eq
         self.add_mixed_integer_linear_constraints_tester(
             dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
