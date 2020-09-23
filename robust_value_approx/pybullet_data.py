@@ -13,6 +13,9 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
     if X_sample.shape[0] == 6:
         num_channels = 3
         cmap = None
+    elif X_sample.shape[0] == 3:
+        num_channels = 3
+        cmap = None
     elif X_sample.shape[0] == 2:
         num_channels = 1
         cmap = 'gray'
@@ -49,9 +52,7 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
 
 
 class PybulletSampleGenerator:
-
-    def __init__(self, urdf,
-                 image_width=80, image_height=80,
+    def __init__(self, urdf, image_width=80, image_height=80, grayscale=False,
                  dtype=torch.float64):
         self.dtype = dtype
 
@@ -60,6 +61,12 @@ class PybulletSampleGenerator:
         pb.setGravity(0, 0, 9.8)
         pb.setTimeStep(1./240.)
 
+        self.grayscale = grayscale
+        self.grayscale_weight = [.2989, .5870, .1140]
+        if self.grayscale:
+            self.num_channels = 1
+        else:
+            self.num_channels = 3
         self.image_width = image_width
         self.image_height = image_height
         self.view_matrix = pb.computeViewMatrix(
@@ -130,49 +137,74 @@ class PybulletSampleGenerator:
         X[3:, :, :] = rgb1[:, :, :3].transpose(2, 0, 1)
         X_next[:3, :, :] = rgb2[:, :, :3].transpose(2, 0, 1)
 
-        X = torch.tensor(X, dtype=torch.uint8)
-        X_next = torch.tensor(X_next, dtype=torch.uint8)
+        X = torch.tensor(X, dtype=torch.float64)
+        X_next = torch.tensor(X_next, dtype=torch.float64)
         q1 = torch.tensor(q1, dtype=self.dtype)
         v1 = torch.tensor(v1, dtype=self.dtype)
         x1 = torch.cat((q1, v1))
 
+        if self.grayscale:
+            X_gray = torch.zeros(2, X.shape[1], X.shape[2],
+                                 dtype=torch.float64)
+            X_gray[0, :] = self.grayscale_weight[0] * X[0, :, :] +\
+                self.grayscale_weight[1] * X[1, :, :] +\
+                self.grayscale_weight[2] * X[2, :, :]
+            X_gray[1, :] = self.grayscale_weight[0] * X[3, :, :] +\
+                self.grayscale_weight[1] * X[4, :, :] +\
+                self.grayscale_weight[2] * X[5, :, :]
+            X_next_gray = torch.zeros(1, X_next.shape[1], X_next.shape[2],
+                                      dtype=torch.float64)
+            X_next_gray[0, :, :] = \
+                self.grayscale_weight[0] * X_next[0, :, :] +\
+                self.grayscale_weight[1] * X_next[1, :, :] +\
+                self.grayscale_weight[2] * X_next[2, :, :]
+            X = X_gray
+            X_next = X_next_gray
+
+        X /= 255.
+        X_next /= 255.
+        X = torch.clamp(X, 0., 1.)
+        X_next = torch.clamp(X_next, 0., 1.)
+
+        X = X.type(self.dtype)
+        X_next = X_next.type(self.dtype)
+
         return X, X_next, x1
 
-    def generate_dataset(self, x_lo, x_up, dt, num_samples, grayscale=False):
-        X_data = torch.empty((num_samples, 6,
-                             self.image_width, self.image_height))
-        X_next_data = torch.empty((num_samples, 3,
-                                  self.image_width, self.image_height))
-        x_data = torch.empty((num_samples, self.x_dim))
-        x_next_data = torch.empty((num_samples, self.x_dim))
+    def generate_rollout(self, x0, dt, N):
+        X_data = torch.empty((N+2, self.num_channels,
+                             self.image_width, self.image_height),
+                             dtype=self.dtype)
+        x_data = torch.empty((N+1, self.x_dim), dtype=self.dtype)
+        X, _, _ = self.generate_sample(x0, dt)
+        X_data[0, :] = X[:self.num_channels, :]
+        X_data[1, :] = X[self.num_channels:, :]
+        x_data[0, :] = x0
+        for n in range(N):
+            _, X_next, x_next = self.generate_sample(x_data[n], dt)
+            X_data[n+2] = X_next
+            x_data[n+1] = x_next
+        return X_data, x_data
+
+    def generate_dataset(self, x_lo, x_up, dt, N, num_samples):
+        assert(N >= 1)
+        X_data = torch.empty((num_samples * N, 2*self.num_channels,
+                             self.image_width, self.image_height),
+                             dtype=self.dtype)
+        X_next_data = torch.empty((num_samples * N, self.num_channels,
+                                  self.image_width, self.image_height),
+                                  dtype=self.dtype)
+        x_data = torch.empty((num_samples * N, self.x_dim), dtype=self.dtype)
+        x_next_data = torch.empty((num_samples * N, self.x_dim),
+                                  dtype=self.dtype)
         for i in range(num_samples):
             x0 = torch.rand(self.x_dim) * (x_up - x_lo) + x_lo
-            x_data[i, :] = x0
-            X_data[i, :, :, :], X_next_data[i, :, :, :], x_next_data[i, :] =\
-                self.generate_sample(x0, dt)
-        if grayscale:
-            grayscale_weight = [.2989, .5870, .1140]
-            X_data_gray = torch.zeros(X_data.shape[0], 2, X_data.shape[2],
-                                      X_data.shape[3])
-            X_data_gray[:, 0, :, :] = grayscale_weight[0] * X_data[:, 0, :, :]\
-                + grayscale_weight[1] * X_data[:, 1, :, :] +\
-                grayscale_weight[2] * X_data[:, 2, :, :]
-            X_data_gray[:, 1, :, :] = grayscale_weight[0] *\
-                X_data[:, 3, :, :] + grayscale_weight[1] *\
-                X_data[:, 4, :, :] + grayscale_weight[2] * X_data[:, 5, :, :]
-            X_next_data_gray = torch.zeros(X_next_data.shape[0],
-                                           1, X_next_data.shape[2],
-                                           X_next_data.shape[3])
-            X_next_data_gray[:, 0, :, :] = grayscale_weight[0] *\
-                X_next_data[:, 0, :, :] + grayscale_weight[1] *\
-                X_next_data[:, 1, :, :] + grayscale_weight[2] *\
-                X_next_data[:, 2, :, :]
-            X_data = X_data_gray
-            X_next_data = X_next_data_gray
-        X_data /= 255.
-        X_next_data /= 255.
-        x_data = x_data.type(self.dtype)
-        x_next_data = x_next_data.type(self.dtype)
-        X_data = X_data.type(self.dtype)
-        X_next_data = X_next_data.type(self.dtype)
+            X_data_rollout, x_data_rollout = self.generate_rollout(x0, dt, N)
+            for n in range(N):
+                X_data[i * N + n, :self.num_channels, :] = X_data_rollout[n, :]
+                X_data[i * N + n, self.num_channels:, :] = X_data_rollout[
+                    n+1, :]
+                X_next_data[i * N + n, :] = X_data_rollout[n+2, :]
+                x_data[i * N + n, :] = x_data_rollout[n, :]
+                x_next_data[i * N + n, :] = x_data_rollout[n+1, :]
         return x_data, x_next_data, X_data, X_next_data
