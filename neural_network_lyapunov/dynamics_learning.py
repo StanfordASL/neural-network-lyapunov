@@ -5,7 +5,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import gurobipy
 
-import robust_value_approx.relu_system as relu_system
+import neural_network_lyapunov.relu_system as relu_system
 
 
 def get_ff_network(dtype, input_dim, output_dim, width, depth,
