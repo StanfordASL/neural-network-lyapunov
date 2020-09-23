@@ -18,6 +18,19 @@ def get_ff_network(dtype, input_dim, output_dim, width, depth,
     return model
 
 
+def add_noise(x_data, noise_std_percent):
+    """
+    @param noise_std tensor with standard deviation of the noise,
+    as percent of the mean of the magnitude for that dimension
+    """
+    assert(isinstance(x_data, torch.Tensor))
+    x_data_ = torch.clone(x_data)
+    noise_std = noise_std_percent * torch.mean(torch.abs(x_data), dim=0)
+    eps = torch.randn(x_data.shape, dtype=x_data.dtype)
+    x_data_ += eps * noise_std
+    return x_data_
+
+
 def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
     x_dataset = TensorDataset(x_data, x_next_data)
     train_size = int((1. - validation_ratio) * len(x_dataset))

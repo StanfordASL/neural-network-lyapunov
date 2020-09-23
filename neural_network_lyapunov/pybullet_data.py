@@ -52,7 +52,8 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
 
 
 class PybulletSampleGenerator:
-    def __init__(self, urdf, image_width=80, image_height=80, grayscale=False,
+    def __init__(self, urdf,
+                 image_width=80, image_height=80, grayscale=False,
                  dtype=torch.float64):
         self.dtype = dtype
 
