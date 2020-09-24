@@ -48,6 +48,25 @@ def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
     return train_dataloader, validation_dataloader
 
 
+def dataloader_to_rollouts(pbsg, dataloader, dt, N, max_rollouts=None):
+    if max_rollouts is None:
+        max_rollouts = len(dataloader)
+    num_rollouts = 0
+    X_rollouts = []
+    x_rollouts = []
+    for x0, _ in dataloader:
+        for i in range(x0.shape[0]):
+            rX, rx = pbsg.generate_rollout(x0[i, :], dt, N)
+            X_rollouts.append(rX)
+            x_rollouts.append(rx)
+            num_rollouts += 1
+            if num_rollouts >= max_rollouts:
+                break
+        if num_rollouts >= max_rollouts:
+            break
+    return X_rollouts, x_rollouts
+
+
 class DynamicsLearningOptions():
     def __init__(self):
         self.dynynamics_loss_weight = 0.
@@ -177,6 +196,14 @@ class DynamicsLearning:
                 self.writer.add_scalar('LyapunovSamples/validate',
                                        val_lyap_loss_samples, self.n_iter)
 
+    def rollout_validation(self, rollouts):
+        assert(isinstance(rollouts, list))
+        assert(len(rollouts) >= 1)
+        validation_loss = torch.zeros(rollouts[0].shape[0], dtype=self.dtype)
+        for r_actual in rollouts:
+            validation_loss += self.rollout_loss(r_actual)
+        return validation_loss
+
 
 class LatentSpaceDynamicsLearning(DynamicsLearning):
     def __init__(self, train_dataloader, validation_dataloader,
@@ -191,6 +218,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         self.use_bce = use_bce
         if self.use_bce:
             self.bce_loss = nn.BCELoss(reduction='mean')
+            self.bce_loss_none = nn.BCELoss(reduction='none')
         self.use_variational = use_variational
         self.encoder_optimizer = None
         self.encoder_writer = None
@@ -313,6 +341,15 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                                                      :, :]
         return x_traj
 
+    def rollout_loss(self, r_actual):
+        x0 = torch.cat([r_actual[0, :], r_actual[1, :]], dim=0)
+        r_pred = self.rollout(x0, r_actual.shape[0] - 2)
+        if self.use_bce:
+            loss = self.bce_loss_none(r_actual, r_pred).mean(dim=[1, 2, 3])
+        else:
+            loss = (r_actual - r_pred).pow(2).mean(dim=[1, 2, 3])
+        return loss
+
 
 class StateSpaceDynamicsLearning(DynamicsLearning):
     def __init__(self, train_dataloader, validation_dataloader,
@@ -343,3 +380,9 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
                                                              :]))
                 x_traj[n+1, :] = x_next_pred[0, :]
         return x_traj
+
+    def rollout_loss(self, r_actual):
+        x0 = r_actual[0, :]
+        r_pred = self.rollout(x0, r_actual.shape[0] - 1)
+        loss = (r_actual - r_pred).pow(2).mean(dim=[1])
+        return loss
