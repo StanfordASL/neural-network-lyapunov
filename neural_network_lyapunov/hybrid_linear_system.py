@@ -96,6 +96,10 @@ class HybridLinearSystem:
         self.u_lo.append(u_lo)
         self.u_up.append(u_up)
         self.num_modes += 1
+        self.x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
+        self.x_up_all = np.amax(np.stack(self.x_up, axis=1), axis=1)
+        self.u_lo_all = np.amin(np.stack(self.u_lo, axis=1), axis=1)
+        self.u_up_all = np.amax(np.stack(self.u_up, axis=1), axis=1)
 
     def mixed_integer_constraints(
             self, x_lo=None, x_up=None, u_lo=None, u_up=None):
@@ -143,18 +147,18 @@ class HybridLinearSystem:
         x_up_np = check_and_to_numpy(x_up, (self.x_dim,), self.dtype)
         u_lo_np = check_and_to_numpy(u_lo, (self.u_dim,), self.dtype)
         u_up_np = check_and_to_numpy(u_up, (self.u_dim,), self.dtype)
-        x_lo_all = np.amin(np.stack(self.x_lo, axis=1), axis=1)
-        x_up_all = np.amax(np.stack(self.x_up, axis=1), axis=1)
-        u_lo_all = np.amin(np.stack(self.u_lo, axis=1), axis=1)
-        u_up_all = np.amax(np.stack(self.u_up, axis=1), axis=1)
+        x_lo_all = self.x_lo_all
+        x_up_all = self.x_up_all
+        u_lo_all = self.u_lo_all
+        u_up_all = self.u_up_all
         if x_lo is not None:
-            x_lo_all = np.maximum(x_lo_all, x_lo_np)
+            x_lo_all = np.maximum(self.x_lo_all, x_lo_np)
         if x_up is not None:
-            x_up_all = np.minimum(x_up_all, x_up_np)
+            x_up_all = np.minimum(self.x_up_all, x_up_np)
         if u_lo is not None:
-            u_lo_all = np.maximum(u_lo_all, u_lo_np)
+            u_lo_all = np.maximum(self.u_lo_all, u_lo_np)
         if u_up is not None:
-            u_up_all = np.minimum(u_up_all, u_up_np)
+            u_up_all = np.minimum(self.u_up_all, u_up_np)
         assert(np.all(x_lo_all <= x_up_all))
         assert(np.all(u_lo_all <= u_up_all))
         Aeq_slack = torch.cat((torch.cat(self.A, dim=1),
