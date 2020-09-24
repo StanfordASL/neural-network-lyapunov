@@ -119,9 +119,19 @@ class DynamicsLearning:
             lyap_der_mip.compute_objective_from_mip_data_and_solution()
         return loss
 
-    def lyapunov_loss_at_samples(self, x):
-        # TODO
-        return torch.zeros(1, dtype=self.dtype)
+    def lyapunov_loss_at_samples(self, z):
+        z_next = self.relu_system.dynamics_relu(z)
+        relu_at_equilibrium = self.lyapunov.lyapunov_relu.forward(
+            self.z_equilibrium)
+        positivity_sample_loss = \
+            self.lyapunov.lyapunov_positivity_loss_at_samples(
+                relu_at_equilibrium, self.z_equilibrium,
+                z, self.V_lambda, self.V_eps)
+        derivative_sample_loss = \
+            self.lyapunov.lyapunov_derivative_loss_at_samples_and_next_states(
+                self.V_lambda, self.V_eps, z, z_next, self.z_equilibrium)
+        loss = positivity_sample_loss + derivative_sample_loss
+        return loss
 
     def equilibrium_loss(self):
         loss = torch.sum(torch.pow(self.relu_system.dynamics_relu(
@@ -293,6 +303,15 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                     loss += self.kl_loss(z_mu, z_log_var)
                 val_loss += loss
         return val_loss
+
+    def lyapunov_loss_at_samples(self, x):
+        z_mu, z_log_var = self.encoder(x)
+        if self.use_variational:
+            z = self.reparam(z_mu, z_log_var)
+        else:
+            z = z_mu
+        return super(LatentSpaceDynamicsLearning, self).\
+            lyapunov_loss_at_samples(z)
 
     def train_encoder(self, num_epoch, validate=False, device='cpu'):
         if self.encoder_optimizer is None:
