@@ -87,6 +87,7 @@ class ReLUSystem:
         assert(len(x_lo.shape) == 1)
         assert(x_lo.shape == x_up.shape)
         assert(torch.all(x_lo <= x_up))
+        self.dtype = dtype
         self.x_dim = x_lo.numel()
         self.x_lo = x_lo
         self.x_up = x_up
