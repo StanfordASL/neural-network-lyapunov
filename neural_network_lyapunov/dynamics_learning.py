@@ -179,32 +179,35 @@ class DynamicsLearning:
             self.writer = SummaryWriter()
             self.n_iter = 0
 
-        for epoch_i in range(num_epoch):
-            for x, x_next in self.train_dataloader:
+        try:
+            for epoch_i in range(num_epoch):
+                for x, x_next in self.train_dataloader:
 
-                self.optimizer.zero_grad()
-                loss, dyn_loss, lyap_loss_samples, lyap_loss, equ_loss = \
-                    self.total_loss(x, x_next)
-                loss.backward()
-                self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    loss, dyn_loss, lyap_loss_samples, lyap_loss, equ_loss = \
+                        self.total_loss(x, x_next)
+                    loss.backward()
+                    self.optimizer.step()
 
-                self.n_iter += 1
-                self.writer.add_scalar('Loss/train', loss.item(), self.n_iter)
-                self.writer.add_scalar('Dynamics/train', dyn_loss.item(),
-                                       self.n_iter)
-                self.writer.add_scalar('LyapunovSamples/train',
-                                       lyap_loss_samples, self.n_iter)
-                self.writer.add_scalar('Lyapunov/train', lyap_loss.item(),
-                                       self.n_iter)
-                self.writer.add_scalar('Equilibrium/train',
-                                       equ_loss, self.n_iter)
+                    self.n_iter += 1
+                    self.writer.add_scalar('Loss/train', loss.item(), self.n_iter)
+                    self.writer.add_scalar('Dynamics/train', dyn_loss.item(),
+                                           self.n_iter)
+                    self.writer.add_scalar('LyapunovSamples/train',
+                                           lyap_loss_samples, self.n_iter)
+                    self.writer.add_scalar('Lyapunov/train', lyap_loss.item(),
+                                           self.n_iter)
+                    self.writer.add_scalar('Equilibrium/train',
+                                           equ_loss, self.n_iter)
 
-            if validate:
-                val_dyn_loss, val_lyap_loss_samples = self.validation_loss()
-                self.writer.add_scalar('Dynamics/validate',
-                                       val_dyn_loss.item(), self.n_iter)
-                self.writer.add_scalar('LyapunovSamples/validate',
-                                       val_lyap_loss_samples, self.n_iter)
+                if validate:
+                    val_dyn_loss, val_lyap_loss_samples = self.validation_loss()
+                    self.writer.add_scalar('Dynamics/validate',
+                                           val_dyn_loss.item(), self.n_iter)
+                    self.writer.add_scalar('LyapunovSamples/validate',
+                                           val_lyap_loss_samples, self.n_iter)
+        except KeyboardInterrupt:
+            pass
 
     def rollout_validation(self, rollouts):
         assert(isinstance(rollouts, list))
@@ -243,7 +246,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
 
     def reparam(self, z_mu, z_log_var):
         z_std = torch.exp(0.5 * z_log_var)
-        eps = torch.randn(z_mu.shape, dtype=z_mu.dtype)
+        eps = torch.randn(z_mu.shape, dtype=z_mu.dtype).to(z_mu.device)
         z = eps * z_std + z_mu
         return z
 
@@ -294,9 +297,11 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         return loss
 
     def encoder_validation_loss(self):
+        device = next(self.encoder.parameters()).device
         with torch.no_grad():
-            val_loss = torch.zeros(1, dtype=self.dtype)
-            for x, x_next in self.validation_dataloader:
+            val_loss = torch.zeros(1, dtype=self.dtype).to(device)
+            for x, _ in self.validation_dataloader:
+                x = x.to(device)
                 x_decoded, z_mu, z_log_var = self.encode_decode(x)
                 loss = self.reconstruction_loss(x, x_decoded)
                 if self.use_variational:
@@ -314,6 +319,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             lyapunov_loss_at_samples(z)
 
     def train_encoder(self, num_epoch, validate=False, device='cpu'):
+        self.encoder.to(device)
+        self.decoder.to(device)
         if self.encoder_optimizer is None:
             params_list = [self.encoder.parameters(),
                            self.decoder.parameters()]
@@ -322,24 +329,30 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         if self.encoder_writer is None:
             self.encoder_writer = SummaryWriter()
             self.encoder_n_iter = 0
-
-        for epoch_i in range(num_epoch):
-            for x, x_next in self.train_dataloader:
-                self.encoder_optimizer.zero_grad()
-                x_decoded, z_mu, z_log_var = self.encode_decode(x)
-                loss = self.reconstruction_loss(x, x_decoded)
-                if self.use_variational:
-                    loss += self.kl_loss(z_mu, z_log_var)
-                loss.backward()
-                self.encoder_optimizer.step()
-                self.encoder_n_iter += 1
-                self.encoder_writer.add_scalar('Encoder/train', loss.item(),
-                                               self.encoder_n_iter)
-            if validate:
-                val_loss = self.encoder_validation_loss()
-                self.encoder_writer.add_scalar('Encoder/validate',
-                                               val_loss.item(),
-                                               self.encoder_n_iter)
+        try:
+            for epoch_i in range(num_epoch):
+                for x, _ in self.train_dataloader:
+                    x = x.to(device)
+                    self.encoder_optimizer.zero_grad()
+                    x_decoded, z_mu, z_log_var = self.encode_decode(x)
+                    loss = self.reconstruction_loss(x, x_decoded)
+                    if self.use_variational:
+                        loss += self.kl_loss(z_mu, z_log_var)
+                    loss.backward()
+                    self.encoder_optimizer.step()
+                    self.encoder_n_iter += 1
+                    self.encoder_writer.add_scalar('Encoder/train', loss.item(),
+                                                   self.encoder_n_iter)
+                if validate:
+                    val_loss = self.encoder_validation_loss()
+                    self.encoder_writer.add_scalar('Encoder/validate',
+                                                   val_loss.item(),
+                                                   self.encoder_n_iter)
+        except KeyboardInterrupt:
+            self.encoder.to('cpu')
+            self.decoder.to('cpu')
+        self.encoder.to('cpu')
+        self.decoder.to('cpu')
 
     def rollout(self, x_init, N, clamp=False):
         assert(len(x_init.shape) == 3)
