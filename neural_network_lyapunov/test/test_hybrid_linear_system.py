@@ -479,7 +479,7 @@ class HybridLinearSystemTest(unittest.TestCase):
         dut.add_mode(A0, B0, c0, P0, q0, True)
         self.assertEqual(dut.num_modes, 1)
 
-    def test_mode(self):
+    def construct_hybrid_linear_system_example(self):
         dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
         A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
         B0 = torch.tensor([[2], [3]], dtype=dut.dtype)
@@ -504,7 +504,10 @@ class HybridLinearSystemTest(unittest.TestCase):
                         torch.tensor([[4, 2, 1]], dtype=dut.dtype)), dim=0)
         q2 = torch.tensor([1, 3, 3, -1, 1, 3, 4], dtype=dut.dtype)
         dut.add_mode(A2, B2, c2, P2, q2)
+        return dut
 
+    def test_mode(self):
+        dut = self.construct_hybrid_linear_system_example()
         self.assertEqual(
             dut.mode(torch.tensor([0, 0], dtype=dut.dtype),
                      torch.tensor([0], dtype=dut.dtype)), 0)
@@ -516,30 +519,7 @@ class HybridLinearSystemTest(unittest.TestCase):
                      torch.tensor([5], dtype=dut.dtype)))
 
     def test_mixed_integer_constraints(self):
-        dut = hybrid_linear_system.HybridLinearSystem(2, 1, torch.float64)
-        A0 = torch.tensor([[1, 2], [2, 1]], dtype=dut.dtype)
-        B0 = torch.tensor([[2], [3]], dtype=dut.dtype)
-        c0 = torch.tensor([-1, 2], dtype=dut.dtype)
-        P0 = torch.cat((torch.eye(3, dtype=dut.dtype),
-                        -torch.eye(3, dtype=dut.dtype)), dim=0)
-        q0 = torch.tensor([1, 2, 3, 1, 2, 3], dtype=dut.dtype)
-        dut.add_mode(A0, B0, c0, P0, q0, True)
-        A1 = torch.tensor([[3, 2], [-2, 1]], dtype=dut.dtype)
-        B1 = torch.tensor([[-2], [4]], dtype=dut.dtype)
-        c1 = torch.tensor([3, -2], dtype=dut.dtype)
-        P1 = torch.cat((3 * torch.eye(3, dtype=dut.dtype),
-                        -2 * torch.eye(3, dtype=dut.dtype),
-                        torch.tensor([[1, 2, 3]], dtype=dut.dtype)), dim=0)
-        q1 = torch.tensor([12, 2, 4, -1, 1, 3, 7], dtype=dut.dtype)
-        dut.add_mode(A1, B1, c1, P1, q1)
-        A2 = torch.tensor([[3, -2], [6, 1]], dtype=dut.dtype)
-        B2 = torch.tensor([[2], [7]], dtype=dut.dtype)
-        c2 = torch.tensor([1, -4], dtype=dut.dtype)
-        P2 = torch.cat((2 * torch.eye(3, dtype=dut.dtype),
-                        -5 * torch.eye(3, dtype=dut.dtype),
-                        torch.tensor([[4, 2, 1]], dtype=dut.dtype)), dim=0)
-        q2 = torch.tensor([1, 3, 3, -1, 1, 3, 4], dtype=dut.dtype)
-        dut.add_mode(A2, B2, c2, P2, q2)
+        dut = self.construct_hybrid_linear_system_example()
 
         x_lo = torch.tensor([-3, -2], dtype=dut.dtype)
         x_up = torch.tensor([10, 8], dtype=dut.dtype)
@@ -654,6 +634,47 @@ class HybridLinearSystemTest(unittest.TestCase):
             test_ineq(mode, x_lo, None, None, u_up)
             test_ineq(mode, None, None, u_lo, None)
             test_ineq(mode, None, None, None, None)
+
+    def test_possible_dx(self):
+        dtype = torch.float64
+        dut = hybrid_linear_system.HybridLinearSystem(2, 1, dtype)
+        P = torch.cat(
+            (torch.eye(3, dtype=dtype), -torch.eye(3, dtype=dtype)), dim=0)
+        dut.add_mode(
+            torch.eye(2, dtype=dtype), torch.tensor([[1], [1]], dtype=dtype),
+            torch.tensor([0.1, 0.2], dtype=dtype), P,
+            torch.tensor([1, 1, 1, 0, 1, 1], dtype=dtype))
+        dut.add_mode(
+            0.1*torch.eye(2, dtype=dtype),
+            torch.tensor([[1], [1]], dtype=dtype),
+            torch.tensor([-0.1, 0.4], dtype=dtype), P,
+            torch.tensor([0, 1, 1, 1, 1, 1], dtype=dtype))
+        # x,u is in the interior of mode 0
+        x = torch.tensor([0.1, 0.1], dtype=dtype)
+        u = torch.tensor([0.1], dtype=dtype)
+        dx = dut.possible_dx(x, u)
+        self.assertEqual(len(dx), 1)
+        np.testing.assert_allclose(
+            dx[0].detach().numpy(),
+            (dut.A[0] @ x + dut.B[0] @ u + dut.c[0]).detach().numpy())
+
+        # x, u is on the boundary of mode 0 and 1
+        x = torch.tensor([0, 0.5], dtype=dtype)
+        u = torch.tensor([0.5], dtype=dtype)
+        dx = dut.possible_dx(x, u)
+        self.assertEqual(len(dx), 2)
+        np.testing.assert_allclose(
+            dx[0].detach().numpy(),
+            (dut.A[0] @ x + dut.B[0] @ u + dut.c[0]).detach().numpy())
+        np.testing.assert_allclose(
+            dx[1].detach().numpy(),
+            (dut.A[1] @ x + dut.B[1] @ u + dut.c[1]).detach().numpy())
+
+        # x, u is not in any mode
+        x = torch.tensor([1.5, 0.5], dtype=dtype)
+        u = torch.tensor([0.5], dtype=dtype)
+        dx = dut.possible_dx(x, u)
+        self.assertEqual(len(dx), 0)
 
 
 class AutonomousHybridLinearSystemTest(unittest.TestCase):

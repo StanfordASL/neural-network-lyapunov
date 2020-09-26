@@ -74,7 +74,7 @@ class TestFeedbackSystem(unittest.TestCase):
         np.testing.assert_allclose(
             x_next_val.detach().numpy(), x_next_expected.detach().numpy())
 
-    def test_add_dynamics_mip_constraint_hybrid_linear_system(self):
+    def construct_hybrid_linear_system_example(self):
         forward_system = hybrid_linear_system.HybridLinearSystem(
             3, 2, self.dtype)
         # x[n+1] = x[n] + [u[n]; 0] + [1;0;0] if [0, -1, -1] <= x[n] <= [1,1,1]
@@ -96,7 +96,10 @@ class TestFeedbackSystem(unittest.TestCase):
             torch.tensor([[0, 0], [1, 0], [0, 1]], dtype=self.dtype),
             torch.tensor([1, 0, 0], dtype=self.dtype), P1,
             torch.tensor([0, 1, 1, 1, 1, 1, 10, 10, 10, 10], dtype=self.dtype))
+        return forward_system
 
+    def test_add_dynamics_mip_constraint_hybrid_linear_system(self):
+        forward_system = self.construct_hybrid_linear_system_example()
         # Our network should work even if the constraint x* = f(x*, u*) is not
         # satisfied at the equilibrium.
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)

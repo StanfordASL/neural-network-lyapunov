@@ -42,6 +42,9 @@ class FeedbackSystem:
             forward_system, hybrid_linear_system.HybridLinearSystem) or
             isinstance(forward_system, relu_system.ReLUSystem))
         self.forward_system = forward_system
+        self.x_dim = self.forward_system.x_dim
+        self.x_lo_all = self.forward_system.x_lo_all
+        self.x_up_all = self.forward_system.x_up_all
         self.dtype = self.forward_system.dtype
         assert(controller_network[0].in_features == self.forward_system.x_dim)
         assert(controller_network[-1].out_features ==
@@ -97,3 +100,15 @@ class FeedbackSystem:
             - controller_mip_cnstr.Cout, name="controller_output")
         return u, forward_slack, controller_slack, forward_binary,\
             controller_binary
+
+    def compute_u(self, x):
+        """
+        The controller is defined as
+        u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
+        """
+        return self.controller_network(x) - \
+            self.controller_network(self.x_equilibrium) + self.u_equilibrium
+
+    def possible_dx(self, x):
+        u = self.compute_u(x)
+        return self.forward_system.possible_dx(x, u)

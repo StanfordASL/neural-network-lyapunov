@@ -269,6 +269,29 @@ class HybridLinearSystem:
         return (self.A[mode] @ x_start + self.B[mode] @ u_start +
                 self.c[mode], mode)
 
+    def possible_dx(self, x, u):
+        """
+        For state/control on the boundary of two modes, we regard that both
+        modes are possible (because in numerical optimization we can't impose
+        strict inequality constraint). So we return all Aᵢx+Bᵢu + gᵢ if
+        Pᵢ[x;u]≤ qᵢ
+        @param x The state
+        @param u The control
+        @return next_states A list. If x, u is on the boundary of the modes,
+        then return multiple possible next states, otherwise return a list of
+        single next state. If x is not in any hybrid mode, then return an
+        empty list.
+        """
+        assert(isinstance(x, torch.Tensor))
+        assert(x.shape == (self.x_dim,))
+        assert(isinstance(u, torch.Tensor))
+        assert(u.shape == (self.u_dim,))
+        next_states = []
+        for i in range(self.num_modes):
+            if torch.all(self.P[i] @ torch.cat((x, u)) <= self.q[i]):
+                next_states.append(self.A[i] @ x + self.B[i] @ u + self.c[i])
+        return next_states
+
 
 class AutonomousHybridLinearSystem:
     """
@@ -385,8 +408,6 @@ class AutonomousHybridLinearSystem:
         @return (Aeq_s, Aeq_gamma, Ain_x, Ain_s, Ain_gamma, rhs_in)
         @note 1. This function doesn't require the polytope
                  Pᵢ * x[n] <= qᵢ to be mutually exclusive.
-              2. We do not impose the constraint that one and only one mode
-                 is active. The user should impose this constraint separately.
         """
         if isinstance(x_lo, torch.Tensor):
             check_shape_and_type(x_lo, (self.x_dim,), self.dtype)

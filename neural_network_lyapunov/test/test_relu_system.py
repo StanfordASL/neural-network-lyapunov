@@ -95,7 +95,7 @@ class TestAutonomousReluSystem(unittest.TestCase):
 
 
 class TestReLUSystem(unittest.TestCase):
-    def test_mixed_integer_constraints(self):
+    def construct_relu_system_example(self):
         # Construct a ReLU system with nx = 2 and nu = 1
         self.dtype = torch.float64
         linear1 = torch.nn.Linear(3, 5, bias=True)
@@ -118,6 +118,10 @@ class TestReLUSystem(unittest.TestCase):
         u_up = torch.tensor([1], dtype=self.dtype)
         dut = relu_system.ReLUSystem(
             self.dtype, x_lo, x_up, u_lo, u_up, dynamics_relu)
+        return dut
+
+    def test_mixed_integer_constraints(self):
+        dut = self.construct_relu_system_example()
         self.assertEqual(dut.x_dim, 2)
         self.assertEqual(dut.u_dim, 1)
 
@@ -151,7 +155,7 @@ class TestReLUSystem(unittest.TestCase):
             s_val = torch.tensor([si.X for si in s], dtype=self.dtype)
             x_next_val = mip_cnstr_return.Aout_slack @ s_val +\
                 mip_cnstr_return.Cout
-            x_next_val_expected = dynamics_relu(torch.cat((x_val, u_val)))
+            x_next_val_expected = dut.dynamics_relu(torch.cat((x_val, u_val)))
             np.testing.assert_array_almost_equal(
                 x_next_val.detach().numpy(),
                 x_next_val_expected.detach().numpy(), decimal=5)
@@ -165,6 +169,16 @@ class TestReLUSystem(unittest.TestCase):
         check_transition(
             torch.tensor([-1.2, 0.3], dtype=self.dtype),
             torch.tensor([0.5], dtype=self.dtype))
+
+    def test_possible_dx(self):
+        dut = self.construct_relu_system_example()
+        x = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        u = torch.tensor([0.5], dtype=self.dtype)
+        x_next = dut.possible_dx(x, u)
+        self.assertEqual(len(x_next), 1)
+        np.testing.assert_allclose(
+            x_next[0].detach().numpy(),
+            dut.dynamics_relu(torch.cat((x, u))).detach().numpy())
 
 
 if __name__ == "__main__":
