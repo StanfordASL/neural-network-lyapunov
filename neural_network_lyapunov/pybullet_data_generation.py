@@ -51,16 +51,27 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
     plt.show()
 
 
+def load_urdf_callback(urdf):
+    def cb(pb):
+        robot_id = pb.loadURDF(urdf, flags=pb.URDF_USE_SELF_COLLISION)
+        return robot_id
+    return cb
+
+
 class PybulletSampleGenerator:
-    def __init__(self, urdf,
+    def __init__(self, load_world_cb, joint_space,
                  image_width=80, image_height=80, grayscale=False,
+                 camera_eye_position=[0, -3, 0],
+                 camera_target_position=[0, 0, 0],
+                 camera_up_vector=[0, 0, 1],
                  dtype=torch.float64):
         self.dtype = dtype
 
-        # physicsClient = pb.connect(pb.GUI)
+        # self.physics_client = pb.connect(pb.GUI)
         self.physics_client = pb.connect(pb.DIRECT)
-        pb.setGravity(0, 0, 9.8)
+        pb.setGravity(0, 0, -9.8)
         pb.setTimeStep(1./240.)
+        pb.setPhysicsEngineParameter(enableFileCaching=0)
 
         self.grayscale = grayscale
         self.grayscale_weight = [.2989, .5870, .1140]
@@ -71,22 +82,26 @@ class PybulletSampleGenerator:
         self.image_width = image_width
         self.image_height = image_height
         self.view_matrix = pb.computeViewMatrix(
-            cameraEyePosition=[0, -3, 0],
-            cameraTargetPosition=[0, 0, 0],
-            cameraUpVector=[0, 0, 1])
+            cameraEyePosition=camera_eye_position,
+            cameraTargetPosition=camera_target_position,
+            cameraUpVector=camera_up_vector)
         self.projection_matrix = pb.computeProjectionMatrixFOV(
             fov=45.0,
             aspect=1.0,
             nearVal=0.1,
             farVal=3.1)
 
-        pb.setAdditionalSearchPath(os.path.dirname(os.path.realpath(__file__)))
-        self.robot_id = pb.loadURDF(urdf, flags=pb.URDF_USE_SELF_COLLISION)
-        self.num_joints = pb.getNumJoints(self.robot_id)
-        self.x_dim = 2 * self.num_joints
-        for i in range(self.num_joints):
-            pb.setJointMotorControl2(self.robot_id, i, pb.VELOCITY_CONTROL,
-                                     force=0)
+        self.robot_id = load_world_cb(pb)
+        self.joint_space = joint_space
+
+        if self.joint_space:
+            self.num_joints = pb.getNumJoints(self.robot_id)
+            self.x_dim = 2 * self.num_joints
+            for i in range(self.num_joints):
+                pb.setJointMotorControl2(self.robot_id, i, pb.VELOCITY_CONTROL,
+                                         force=0)
+        else:
+            self.x_dim = 12
 
     def __del__(self):
         pb.disconnect(self.physics_client)
@@ -94,8 +109,6 @@ class PybulletSampleGenerator:
     def generate_sample(self, x0, dt):
         assert(isinstance(x0, torch.Tensor))
         assert(len(x0) == self.x_dim)
-        q0 = x0[:self.num_joints]
-        v0 = x0[self.num_joints:self.x_dim]
 
         num_step = int(dt*240.*.5)
 
@@ -103,8 +116,18 @@ class PybulletSampleGenerator:
         X_next = np.zeros((3, self.image_width, self.image_height),
                           dtype=np.uint8)
 
-        for i in range(len(q0)):
-            pb.resetJointState(self.robot_id, i, q0[i], v0[i])
+        if self.joint_space:
+            q0 = x0[:self.num_joints]
+            v0 = x0[self.num_joints:self.x_dim]
+            for i in range(len(q0)):
+                pb.resetJointState(self.robot_id, i, q0[i], v0[i])
+        else:
+            pos0 = x0[:3]
+            orn0 = pb.getQuaternionFromEuler(x0[3:6])
+            vel0 = x0[6:9]
+            w0 = x0[9:12]
+            pb.resetBasePositionAndOrientation(self.robot_id, pos0, orn0)
+            pb.resetBaseVelocity(self.robot_id, vel0, w0)
 
         width0, height0, rgb0, depth0, seg0 = pb.getCameraImage(
             width=self.image_width,
@@ -124,9 +147,22 @@ class PybulletSampleGenerator:
         for k in range(num_step):
             pb.stepSimulation()
 
-        state = pb.getJointStates(self.robot_id, list(range(len(q0))))
-        q1 = state[0][:len(q0)]
-        v1 = state[0][len(q0):len(q0)+len(v0)]
+        if self.joint_space:
+            state = pb.getJointStates(self.robot_id, list(range(len(q0))))
+            q1 = state[0][:len(q0)]
+            v1 = state[0][len(q0):len(q0)+len(v0)]
+            q1 = torch.tensor(q1, dtype=self.dtype)
+            v1 = torch.tensor(v1, dtype=self.dtype)
+            x1 = torch.cat((q1, v1))
+        else:
+            pos1, orn1_quat = pb.getBasePositionAndOrientation(self.robot_id)
+            orn1 = pb.getEulerFromQuaternion(orn1_quat)
+            vel1, w1 = pb.getBaseVelocity(self.robot_id)
+            pos1 = torch.tensor(pos1, dtype=self.dtype)
+            orn1 = torch.tensor(orn1, dtype=self.dtype)
+            vel1 = torch.tensor(vel1, dtype=self.dtype)
+            w1 = torch.tensor(w1, dtype=self.dtype)
+            x1 = torch.cat((pos1, orn1, vel1, w1))
 
         width2, height2, rgb2, depth2, seg2 = pb.getCameraImage(
             width=self.image_width,
@@ -140,9 +176,6 @@ class PybulletSampleGenerator:
 
         X = torch.tensor(X, dtype=torch.float64)
         X_next = torch.tensor(X_next, dtype=torch.float64)
-        q1 = torch.tensor(q1, dtype=self.dtype)
-        v1 = torch.tensor(v1, dtype=self.dtype)
-        x1 = torch.cat((q1, v1))
 
         if self.grayscale:
             X_gray = torch.zeros(2, X.shape[1], X.shape[2],

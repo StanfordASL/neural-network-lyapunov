@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot name="physics">
+<robot name="pendulum">
 
   <link name="base">
     <visual>
@@ -34,12 +34,13 @@
     </inertial>
   </link>
 
-  <joint name="base_to_pole" type="continuous">
+  <joint name="base_to_pole" type="prismatic">
     <axis xyz="0 1 0"/>
     <origin xyz="0.0 0.0 0"/>
     <parent link="base"/>
     <child link="pole"/>
     <dynamics damping=".025"/>
+    <limit effort="1000.0" lower="-100" upper="100" velocity="100"/>
   </joint>
 
 </robot>
