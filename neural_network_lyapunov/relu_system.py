@@ -134,3 +134,10 @@ class ReLUSystem:
         assert(isinstance(x_start, torch.Tensor))
         assert(isinstance(u_start, torch.Tensor))
         return self.dynamics_relu(torch.cat((x_start, u_start)))
+
+    def possible_dx(self, x, u):
+        assert(isinstance(x, torch.Tensor))
+        assert(len(x) == self.x_dim)
+        assert(isinstance(u, torch.Tensor))
+        assert(u.shape == (self.u_dim,))
+        return [self.dynamics_relu(torch.cat((x, u)))]

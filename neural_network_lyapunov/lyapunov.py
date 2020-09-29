@@ -8,6 +8,7 @@ import queue
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 
@@ -32,6 +33,7 @@ class LyapunovHybridLinearSystem:
             or
             isinstance(
                 system, relu_system.AutonomousReLUSystem)
+            or isinstance(system, feedback_system.FeedbackSystem)
         )
         self.system = system
         self.lyapunov_relu = lyapunov_relu
@@ -46,14 +48,27 @@ class LyapunovHybridLinearSystem:
         Add the constraint and variables to write the hybrid linear system
         dynamics as mixed-integer linear constraints.
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        mip_cnstr_return = self.system.mixed_integer_constraints()
-        s, gamma = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_return, x, x_next, "s", "gamma",
-            "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
-            "hybrid_output_dynamics")
+        if isinstance(
+            self.system, hybrid_linear_system.AutonomousHybridLinearSystem)\
+                or isinstance(self.system, relu_system.AutonomousReLUSystem):
+            assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+            mip_cnstr_return = self.system.mixed_integer_constraints()
+            s, gamma = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, x, x_next, "s", "gamma",
+                "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
+                "hybrid_output_dynamics")
+            return s, gamma
 
-        return s, gamma
+        elif isinstance(self.system, feedback_system.FeedbackSystem):
+            u, forward_slack, controller_slack, forward_binary,\
+                controller_binary = self.system.add_dynamics_mip_constraint(
+                    milp, x, x_next, "u", "forward_s", "forward_binary",
+                    "controller_s", "controller_binary")
+            slack = u + forward_slack + controller_slack
+            binary = forward_binary + controller_binary
+            return slack, binary
+        else:
+            raise(NotImplementedError)
 
     def add_relu_output_constraint(
             self, milp, x, slack_name="relu_z", binary_var_name="relu_beta"):
@@ -377,13 +392,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name="x")
 
-        if isinstance(self.system,
-                      hybrid_linear_system.AutonomousHybridLinearSystem) or\
-                isinstance(self.system, relu_system.AutonomousReLUSystem):
-            # x is the variable x[n]
-            s, gamma = self.add_system_constraint(milp, x, x_next)
-        else:
-            raise(NotImplementedError)
+        # x is the variable x[n]
+        s, gamma = self.add_system_constraint(milp, x, x_next)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
