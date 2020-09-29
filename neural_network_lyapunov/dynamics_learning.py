@@ -190,7 +190,8 @@ class DynamicsLearning:
                     self.optimizer.step()
 
                     self.n_iter += 1
-                    self.writer.add_scalar('Loss/train', loss.item(), self.n_iter)
+                    self.writer.add_scalar('Loss/train', loss.item(),
+                                           self.n_iter)
                     self.writer.add_scalar('Dynamics/train', dyn_loss.item(),
                                            self.n_iter)
                     self.writer.add_scalar('LyapunovSamples/train',
@@ -201,7 +202,8 @@ class DynamicsLearning:
                                            equ_loss, self.n_iter)
 
                 if validate:
-                    val_dyn_loss, val_lyap_loss_samples = self.validation_loss()
+                    (val_dyn_loss,
+                     val_lyap_loss_samples) = self.validation_loss()
                     self.writer.add_scalar('Dynamics/validate',
                                            val_dyn_loss.item(), self.n_iter)
                     self.writer.add_scalar('LyapunovSamples/validate',
@@ -216,6 +218,33 @@ class DynamicsLearning:
         for r_actual in rollouts:
             validation_loss += self.rollout_loss(r_actual)
         return validation_loss
+
+    def adversarial_samples(self):
+        lyap_pos_mip, x_var = self.lyapunov.lyapunov_positivity_as_milp(
+            self.z_equilibrium, self.V_lambda, self.V_eps)
+        lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                           False)
+        lyap_pos_mip.gurobi_model.optimize()
+        num_sol = lyap_pos_mip.gurobi_model.solCount
+        z_adv_pos = torch.zeros((num_sol, self.z_dim), dtype=self.dtype)
+        for i in range(num_sol):
+            lyap_pos_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.SolutionNumber, i)
+            z_adv_pos[i, :] = torch.tensor([r.xn for r in x_var],
+                                           dtype=self.dtype)
+        lyap_der_mip = self.lyapunov.lyapunov_derivative_as_milp(
+            self.z_equilibrium, self.V_lambda, self.V_eps)[0]
+        lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                           False)
+        lyap_der_mip.gurobi_model.optimize()
+        num_sol = lyap_der_mip.gurobi_model.solCount
+        z_adv_der = torch.zeros((num_sol, self.z_dim), dtype=self.dtype)
+        for i in range(num_sol):
+            lyap_der_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.SolutionNumber, i)
+            z_adv_der[i, :] = torch.tensor([r.xn for r in x_var],
+                                           dtype=self.dtype)
+        return z_adv_pos, z_adv_der
 
 
 class LatentSpaceDynamicsLearning(DynamicsLearning):
