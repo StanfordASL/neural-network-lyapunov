@@ -1,4 +1,4 @@
-<?xml version="1.0"?>
+<?xml version="0.0"?>
 <robot name="pendulum">
 
   <link name="base">
@@ -22,7 +22,7 @@
       <geometry>
         <box size="0.15 0.15 1.0"/>	
       </geometry>
-      <origin rpy="0 0 0" xyz="0 0 -0.5"/>
+      <origin rpy="0 0 0" xyz="0 0 0.5"/>
       <material name="white">
         <color rgba="1 1 1 1"/>
       </material>
@@ -34,13 +34,12 @@
     </inertial>
   </link>
 
-  <joint name="base_to_pole" type="prismatic">
+  <joint name="base_to_pole" type="continuous">
     <axis xyz="0 1 0"/>
     <origin xyz="0.0 0.0 0"/>
     <parent link="base"/>
     <child link="pole"/>
     <dynamics damping=".025"/>
-    <limit effort="1000.0" lower="-100" upper="100" velocity="100"/>
   </joint>
 
 </robot>
