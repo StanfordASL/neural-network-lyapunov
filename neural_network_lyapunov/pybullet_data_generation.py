@@ -64,11 +64,14 @@ class PybulletSampleGenerator:
                  camera_eye_position=[0, -3, 0],
                  camera_target_position=[0, 0, 0],
                  camera_up_vector=[0, 0, 1],
-                 dtype=torch.float64):
+                 dtype=torch.float64,
+                 gui=False):
         self.dtype = dtype
 
-        # self.physics_client = pb.connect(pb.GUI)
-        self.physics_client = pb.connect(pb.DIRECT)
+        if gui:
+            self.physics_client = pb.connect(pb.GUI)
+        else:
+            self.physics_client = pb.connect(pb.DIRECT)
         pb.setGravity(0, 0, -9.8)
         pb.setTimeStep(1./240.)
         pb.setPhysicsEngineParameter(enableFileCaching=0)
@@ -102,6 +105,13 @@ class PybulletSampleGenerator:
                                          force=0)
         else:
             self.x_dim = 12
+        self.state_id = self.get_stable_state()
+
+    def get_stable_state(self):
+        num_step = int(.1*240.*.5)
+        for i in range(num_step*10):
+            pb.stepSimulation()
+        return pb.saveState()
 
     def __del__(self):
         pb.disconnect(self.physics_client)
@@ -110,6 +120,7 @@ class PybulletSampleGenerator:
         assert(isinstance(x0, torch.Tensor))
         assert(len(x0) == self.x_dim)
 
+        pb.restoreState(self.state_id)
         num_step = int(dt*240.*.5)
 
         X = np.zeros((6, self.image_width, self.image_height), dtype=np.uint8)

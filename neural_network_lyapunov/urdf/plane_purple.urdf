@@ -14,8 +14,8 @@
       <geometry>
         <box size="500 500 10"/>
       </geometry>
-       <material name="white">
-        <color rgba="1 1 1 1"/>
+       <material name="purple">
+        <color rgba=".64 .64 .76 1"/>
       </material>
     </visual>
     <collision>
