@@ -6,6 +6,7 @@ import copy
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.train_utils as train_utils
+import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.line_search_gd as line_search_gd
 import neural_network_lyapunov.line_search_adam as line_search_adam
 
@@ -450,15 +451,25 @@ class TrainLyapunovReLU:
                 derivative_state_samples[i]) for i in
             range(derivative_state_samples.shape[0])], dim=0)
         iter_count = 0
+        if isinstance(self.lyapunov_hybrid_system.system,
+                      feedback_system.FeedbackSystem):
+            # For a feedback system, we train both the Lyapunov network
+            # parameters and the controller network parameters.
+            training_params = [
+                {'params': p} for p in
+                (self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
+                 self.lyapunov_hybrid_system.system.controller_network.
+                 parameters())]
+        else:
+            training_params = \
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters()
+
         if self.optimizer == "Adam":
             optimizer = torch.optim.Adam(
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                lr=self.learning_rate)
+                training_params, lr=self.learning_rate)
         elif self.optimizer == "SGD":
             optimizer = torch.optim.SGD(
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                lr=self.learning_rate,
-                momentum=self.momentum)
+                training_params, lr=self.learning_rate, momentum=self.momentum)
         else:
             raise Exception(
                 "train: unknown optimizer, only support Adam or SGD.")
@@ -472,6 +483,17 @@ class TrainLyapunovReLU:
         gradients = [None] * self.max_iterations
         while iter_count < self.max_iterations:
             optimizer.zero_grad()
+            if isinstance(self.lyapunov_hybrid_system.system,
+                          feedback_system.FeedbackSystem):
+                # If we train a feedback system, then we will modify the
+                # controller in each iteration, hence the next sample state
+                # changes in each iteration.
+                # TODO(hongkai.dai): if the forward system is a relu system,
+                # then we can compute the derivative in a batch.
+                derivative_state_samples_next = torch.stack([
+                    self.lyapunov_hybrid_system.system.step_forward(
+                        derivative_state_samples[i]) for i in
+                    range(derivative_state_samples.shape[0])], dim=0)
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], \
                 positivity_sample_loss, derivative_sample_loss,\

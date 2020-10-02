@@ -472,17 +472,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
-        state_next = [None] * state_samples.shape[0]
-        for i in range(state_samples.shape[0]):
-            # First compute the next state x̅[n+1]
-            mode = self.system.mode(state_samples[i])
-            if mode is None:
-                raise Exception(
-                    "lyapunov_derivative_loss_at_samples: the input " +
-                    f"state_sample {state_samples[i]}" +
-                    " is not in any mode of the hybrid system.")
-            state_next[i] = self.system.step_forward(state_samples[i], mode)
-        state_next = torch.stack(state_next)
+        # TODO(hongkai.dai): write this as a batched operation for relu
+        # systems.
+        state_next = torch.stack([
+            self.system.step_forward(state_samples[i]) for i in
+            range(state_samples.shape[0])], dim=0)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
             V_lambda, epsilon, state_samples, state_next,
