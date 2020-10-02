@@ -369,5 +369,59 @@ class TestProjectToPolyhedron(unittest.TestCase):
             np.array([1., 1.]))
 
 
+class TestSetupReLU(unittest.TestCase):
+    def test1(self):
+        # Test with params=None and bias=True
+        dut = utils.setup_relu(
+            (2, 4, 3), None, negative_slope=0.1, bias=True,
+            dtype=torch.float64)
+        self.assertEqual(len(dut), 3)
+        self.assertIsInstance(dut[0], torch.nn.Linear)
+        self.assertIsNotNone(dut[0].bias)
+        self.assertEqual(dut[0].in_features, 2)
+        self.assertEqual(dut[0].out_features, 4)
+        self.assertIsInstance(dut[1], torch.nn.LeakyReLU)
+        self.assertEqual(dut[1].negative_slope, 0.1)
+        self.assertIsInstance(dut[2], torch.nn.Linear)
+        self.assertIsNotNone(dut[2].bias)
+        self.assertEqual(dut[2].in_features, 4)
+        self.assertEqual(dut[2].out_features, 3)
+
+    def test2(self):
+        # Test with params=None and bias=False
+        dut = utils.setup_relu(
+            (2, 4, 3), None, negative_slope=0.1, bias=False,
+            dtype=torch.float64)
+        self.assertEqual(len(dut), 3)
+        self.assertIsInstance(dut[0], torch.nn.Linear)
+        self.assertIsNone(dut[0].bias)
+        self.assertEqual(dut[0].in_features, 2)
+        self.assertEqual(dut[0].out_features, 4)
+        self.assertIsInstance(dut[1], torch.nn.LeakyReLU)
+        self.assertEqual(dut[1].negative_slope, 0.1)
+        self.assertIsInstance(dut[2], torch.nn.Linear)
+        self.assertIsNone(dut[2].bias)
+        self.assertEqual(dut[2].in_features, 4)
+        self.assertEqual(dut[2].out_features, 3)
+
+    def test3(self):
+        # Test with params and with_bias=True
+        params = torch.tensor(list(range(27)), dtype=torch.float64)
+        dut = utils.setup_relu(
+            (2, 4, 3), params, negative_slope=0.1, bias=True,
+            dtype=torch.float64)
+        self.assertEqual(len(dut), 3)
+        np.testing.assert_allclose(
+            dut[0].weight.detach().numpy(),
+            params[:8].reshape((4, 2)).detach().numpy())
+        np.testing.assert_allclose(
+            dut[0].bias.detach().numpy(), params[8:12].detach().numpy())
+        np.testing.assert_allclose(
+            dut[2].weight.detach().numpy(),
+            params[12:24].reshape((3, 4)).detach().numpy())
+        np.testing.assert_allclose(
+            dut[2].bias.detach().numpy(), params[24:].detach().numpy())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,3 +112,7 @@ class FeedbackSystem:
     def possible_dx(self, x):
         u = self.compute_u(x)
         return self.forward_system.possible_dx(x, u)
+
+    def step_forward(self, x):
+        u = self.compute_u(x)
+        return self.forward_system.step_forward(x, u)[0]

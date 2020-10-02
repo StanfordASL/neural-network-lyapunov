@@ -572,3 +572,46 @@ def project_to_polyhedron(A, b, x):
         prob = cp.Problem(objective, [con])
         prob.solve()
         return torch.from_numpy(y.value).type(x.dtype)
+
+
+def setup_relu(
+    relu_layer_width: tuple, params=None, negative_slope: float = 0.01,
+        bias: bool = True, dtype=torch.float64):
+    """
+    Setup a relu network.
+    @param negative_slope The negative slope of the leaky relu units.
+    @param bias whether the linear layer has bias or not.
+    """
+    assert(isinstance(relu_layer_width, tuple))
+    if params is not None:
+        assert(isinstance(params, torch.Tensor))
+
+    def set_param(linear, param_count):
+        linear.weight.data = params[
+            param_count: param_count +
+            linear.in_features * linear.out_features].clone().reshape((
+                linear.out_features, linear.in_features))
+        param_count += linear.in_features * linear.out_features
+        if bias:
+            linear.bias.data = params[
+                param_count: param_count + linear.out_features].clone()
+            param_count += linear.out_features
+        return param_count
+
+    linear_layers = [None] * (len(relu_layer_width) - 1)
+    param_count = 0
+    for i in range(len(linear_layers)):
+        next_layer_width = relu_layer_width[i+1]
+        linear_layers[i] = torch.nn.Linear(
+            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
+        if params is None:
+            pass
+        else:
+            param_count = set_param(linear_layers[i], param_count)
+    layers = [None] * (len(linear_layers) * 2 - 1)
+    for i in range(len(linear_layers) - 1):
+        layers[2 * i] = linear_layers[i]
+        layers[2 * i + 1] = torch.nn.LeakyReLU(negative_slope)
+    layers[-1] = linear_layers[-1]
+    relu = torch.nn.Sequential(*layers)
+    return relu
