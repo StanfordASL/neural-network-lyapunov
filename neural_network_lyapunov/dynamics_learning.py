@@ -217,14 +217,16 @@ class DynamicsLearning:
                         self.optimizer.step()
                         self.writer.add_scalar('Lyapunov', lyap_loss.item(),
                                                self.n_iter)
+                    self.n_iter += 1
                 if validate:
                     (val_dyn_loss,
                      val_lyap_loss_samples) = self.validation_loss()
                     self.writer.add_scalar('Dynamics/validate',
-                                           val_dyn_loss.item(), self.n_iter)
+                                           val_dyn_loss.item(),
+                                           self.n_iter-1)
                     self.writer.add_scalar('LyapunovSamples/validate',
-                                           val_lyap_loss_samples, self.n_iter)
-                self.n_iter += 1
+                                           val_lyap_loss_samples,
+                                           self.n_iter-1)
         except KeyboardInterrupt:
             self.to_device('cpu')
         self.to_device('cpu')
