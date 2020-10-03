@@ -71,9 +71,9 @@ class DynamicsLearningOptions():
     def __init__(self):
         self.dynynamics_loss_weight = 0.
         self.lyapunov_loss_at_samples_weight = 0.
-        self.lyapunov_loss_weight = 0.
         self.equilibrium_loss_weight = 0.
-
+        self.lyapunov_loss_freq = 0
+        self.lyapunov_loss_weight = 0.
         self.V_lambda = 0.
         self.V_eps = 0.
 
@@ -97,8 +97,10 @@ class DynamicsLearning:
         self.dynynamics_loss_weight = opt.dynynamics_loss_weight
         self.lyapunov_loss_at_samples_weight = \
             opt.lyapunov_loss_at_samples_weight
-        self.lyapunov_loss_weight = opt.lyapunov_loss_weight
         self.equilibrium_loss_weight = opt.equilibrium_loss_weight
+
+        self.lyapunov_loss_freq = opt.lyapunov_loss_freq
+        self.lyapunov_loss_weight = opt.lyapunov_loss_weight
 
         self.optimizer = None
         self.writer = None
@@ -139,10 +141,10 @@ class DynamicsLearning:
         return loss
 
     def total_loss(self, x, x_next, validation=False):
-        dyn_loss = torch.zeros(1, dtype=self.dtype)
-        lyap_loss_samples = torch.zeros(1, dtype=self.dtype)
-        lyap_loss = torch.zeros(1, dtype=self.dtype)
-        equ_loss = torch.zeros(1, dtype=self.dtype)
+        device = next(self.encoder.parameters()).device
+        dyn_loss = torch.zeros(1, dtype=self.dtype).to(device)
+        lyap_loss_samples = torch.zeros(1, dtype=self.dtype).to(device)
+        equ_loss = torch.zeros(1, dtype=self.dtype).to(device)
         if self.dynynamics_loss_weight > 0:
             dyn_loss = self.dynynamics_loss_weight *\
                 self.dynamics_loss(x, x_next)
@@ -150,27 +152,29 @@ class DynamicsLearning:
             lyap_loss_samples = self.lyapunov_loss_at_samples_weight *\
                 self.lyapunov_loss_at_samples(x)
         if not validation:
-            if self.lyapunov_loss_weight > 0:
-                lyap_loss = self.lyapunov_loss_weight *\
-                    self.lyapunov_loss()
             if self.equilibrium_loss_weight > 0:
                 equ_loss = self.equilibrium_loss_weight *\
                     self.equilibrium_loss()
-        loss = dyn_loss + lyap_loss_samples + lyap_loss + equ_loss
-        return loss, dyn_loss, lyap_loss_samples, lyap_loss, equ_loss
+        loss = dyn_loss + lyap_loss_samples + equ_loss
+        return loss, dyn_loss, lyap_loss_samples, equ_loss
 
     def validation_loss(self):
         with torch.no_grad():
-            val_dyn_loss = torch.zeros(1, dtype=self.dtype)
-            val_lyapunov_loss_at_samples = torch.zeros(1, dtype=self.dtype)
+            device = next(self.encoder.parameters()).device
+            val_dyn_loss = torch.zeros(1, dtype=self.dtype).to(device)
+            val_lyapunov_loss_at_samples = torch.zeros(
+                1, dtype=self.dtype).to(device)
             for x, x_next in self.validation_dataloader:
-                loss, dyn_loss, lyap_loss_samples, lyap_loss, equ_loss = \
+                x = x.to(device)
+                x_next = x_next.to(device)
+                loss, dyn_loss, lyap_loss_samples, equ_loss = \
                     self.total_loss(x, x_next, validation=True)
                 val_dyn_loss += dyn_loss
                 val_lyapunov_loss_at_samples += lyap_loss_samples
         return val_dyn_loss, val_lyapunov_loss_at_samples
 
-    def train(self, num_epoch, validate=False):
+    def train(self, num_epoch, validate=False, device='cpu'):
+        self.to_device(device)
         if self.optimizer is None:
             params_list = self.get_trainable_parameters()
             params = [{'params': p} for p in params_list]
@@ -178,29 +182,41 @@ class DynamicsLearning:
         if self.writer is None:
             self.writer = SummaryWriter()
             self.n_iter = 0
-
         try:
             for epoch_i in range(num_epoch):
                 for x, x_next in self.train_dataloader:
-
+                    x = x.to(device)
+                    x_next = x_next.to(device)
                     self.optimizer.zero_grad()
-                    loss, dyn_loss, lyap_loss_samples, lyap_loss, equ_loss = \
+                    loss, dyn_loss, lyap_loss_samples, equ_loss = \
                         self.total_loss(x, x_next)
                     loss.backward()
                     self.optimizer.step()
-
-                    self.n_iter += 1
                     self.writer.add_scalar('Loss/train', loss.item(),
                                            self.n_iter)
                     self.writer.add_scalar('Dynamics/train', dyn_loss.item(),
                                            self.n_iter)
                     self.writer.add_scalar('LyapunovSamples/train',
                                            lyap_loss_samples, self.n_iter)
-                    self.writer.add_scalar('Lyapunov/train', lyap_loss.item(),
-                                           self.n_iter)
                     self.writer.add_scalar('Equilibrium/train',
                                            equ_loss, self.n_iter)
-
+                    if ((self.lyapunov_loss_weight > 0) and
+                            (self.lyapunov_loss_freq > 0) and
+                            ((self.n_iter % self.lyapunov_loss_freq) == 0)):
+                        self.optimizer.zero_grad()
+                        self.lyapunov.lyapunov_relu.to('cpu')
+                        self.lyapunov.system.dynamics_relu.to('cpu')
+                        self.z_equilibrium = self.z_equilibrium.to('cpu')
+                        lyap_loss = self.lyapunov_loss_weight *\
+                            self.lyapunov_loss()
+                        lyap_loss.backward()
+                        lyap_loss = lyap_loss.to(device)
+                        self.lyapunov.lyapunov_relu.to(device)
+                        self.lyapunov.system.dynamics_relu.to(device)
+                        self.z_equilibrium = self.z_equilibrium.to(device)
+                        self.optimizer.step()
+                        self.writer.add_scalar('Lyapunov', lyap_loss.item(),
+                                               self.n_iter)
                 if validate:
                     (val_dyn_loss,
                      val_lyap_loss_samples) = self.validation_loss()
@@ -208,8 +224,10 @@ class DynamicsLearning:
                                            val_dyn_loss.item(), self.n_iter)
                     self.writer.add_scalar('LyapunovSamples/validate',
                                            val_lyap_loss_samples, self.n_iter)
+                self.n_iter += 1
         except KeyboardInterrupt:
-            pass
+            self.to_device('cpu')
+        self.to_device('cpu')
 
     def rollout_validation(self, rollouts):
         assert(isinstance(rollouts, list))
@@ -272,6 +290,13 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                   self.encoder.parameters(),
                   self.decoder.parameters()]
         return params
+
+    def to_device(self, device):
+        self.z_equilibrium = self.z_equilibrium.to(device)
+        self.encoder.to(device)
+        self.decoder.to(device)
+        self.lyapunov.lyapunov_relu.to(device)
+        self.relu_system.dynamics_relu.to(device)
 
     def reparam(self, z_mu, z_log_var):
         z_std = torch.exp(0.5 * z_log_var)
@@ -370,7 +395,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                     loss.backward()
                     self.encoder_optimizer.step()
                     self.encoder_n_iter += 1
-                    self.encoder_writer.add_scalar('Encoder/train', loss.item(),
+                    self.encoder_writer.add_scalar('Encoder/train',
+                                                   loss.item(),
                                                    self.encoder_n_iter)
                 if validate:
                     val_loss = self.encoder_validation_loss()
@@ -424,6 +450,11 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         params = [self.relu_system.dynamics_relu.parameters(),
                   self.lyapunov.lyapunov_relu.parameters()]
         return params
+
+    def to_device(self, device):
+        self.z_equilibrium = self.z_equilibrium.to(device)
+        self.lyapunov.lyapunov_relu.to(device)
+        self.relu_system.dynamics_relu.to(device)
 
     def dynamics_loss(self, x, x_next):
         x_next_pred = self.relu_system.dynamics_relu(x)

@@ -261,7 +261,7 @@ class LyapunovHybridLinearSystem:
                 state_samples, x_equilibrium, V_lambda,
                 relu_at_equilibrium) - epsilon * torch.norm(
                     state_samples - x_equilibrium, p=1, dim=1),
-            torch.tensor(-1.))
+            torch.tensor(-1.).to(state_samples.device))
 
     def add_lyapunov_bounds_constraint(
         self, lyapunov_lower, lyapunov_upper, milp, a_relu, b_relu, V_lambda,
@@ -518,7 +518,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             state_next, x_equilibrium, V_lambda, relu_at_equilibrium)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             -(v2 - v1 + epsilon * v1),
-            torch.tensor(-1.))
+            torch.tensor(-1.).to(state_samples.device))
 
 
 class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
