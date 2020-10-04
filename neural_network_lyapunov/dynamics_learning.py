@@ -78,6 +78,17 @@ class DynamicsLearningOptions():
         self.V_eps = 0.
 
 
+def gurobi_terminate_if(model, where, less_than_zero=True):
+    if where == gurobipy.GRB.Callback.MIPNODE:
+        solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
+        if solcnt > 0:
+            objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
+            if not less_than_zero:
+                objbst *= -1
+            if objbst < 0:
+                model.terminate()
+
+
 class DynamicsLearning:
     def __init__(self, train_dataloader, validation_dataloader,
                  relu_system, lyapunov, opt):
@@ -106,19 +117,36 @@ class DynamicsLearning:
         self.writer = None
         self.n_iter = 0
 
-    def lyapunov_loss(self):
+    def lyapunov_loss(self, optimal=True):
         lyap_pos_mip = self.lyapunov.lyapunov_positivity_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)[0]
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
-        lyap_pos_mip.gurobi_model.optimize()
+        if optimal:
+            lyap_pos_mip.gurobi_model.optimize()
+            lyap_pos_mip_loss = -lyap_pos_mip.\
+                compute_objective_from_mip_data_and_solution()
+        else:
+            lyap_pos_mip.gurobi_model.optimize(
+                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
+            lyap_pos_mip_loss = -lyap_pos_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    active_constraint_tolerance=1e-3)
         lyap_der_mip = self.lyapunov.lyapunov_derivative_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)[0]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
-        lyap_der_mip.gurobi_model.optimize()
-        loss = -lyap_pos_mip.compute_objective_from_mip_data_and_solution() +\
-            lyap_der_mip.compute_objective_from_mip_data_and_solution()
+        if optimal:
+            lyap_der_mip.gurobi_model.optimize()
+            lyap_der_mip_loss = lyap_der_mip.\
+                compute_objective_from_mip_data_and_solution()
+        else:
+            lyap_der_mip.gurobi_model.optimize(
+                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
+            lyap_der_mip_loss = lyap_der_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    active_constraint_tolerance=1e-3)
+        loss = lyap_pos_mip_loss + lyap_der_mip_loss
         return loss
 
     def lyapunov_loss_at_samples(self, z):
@@ -239,31 +267,46 @@ class DynamicsLearning:
             validation_loss += self.rollout_loss(r_actual)
         return validation_loss
 
-    def adversarial_samples(self):
+    def adversarial_samples(self, optimal=True):
         lyap_pos_mip, x_var = self.lyapunov.lyapunov_positivity_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
-        lyap_pos_mip.gurobi_model.optimize()
+        if optimal:
+            lyap_pos_mip.gurobi_model.optimize()
+        else:
+            lyap_pos_mip.gurobi_model.optimize(
+                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
         num_sol = lyap_pos_mip.gurobi_model.solCount
-        z_adv_pos = torch.zeros((num_sol, self.z_dim), dtype=self.dtype)
+        z_adv_pos = []
         for i in range(num_sol):
             lyap_pos_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.SolutionNumber, i)
-            z_adv_pos[i, :] = torch.tensor([r.xn for r in x_var],
-                                           dtype=self.dtype)
+            obj = lyap_pos_mip.gurobi_model.PoolObjVal
+            if obj < 0:
+                z_adv_pos.append(
+                    torch.tensor(
+                        [r.xn for r in x_var], dtype=self.dtype).unsqueeze(0))
+        z_adv_pos = torch.cat(z_adv_pos, dim=0)
         lyap_der_mip = self.lyapunov.lyapunov_derivative_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)[0]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
-        lyap_der_mip.gurobi_model.optimize()
+        if optimal:
+            lyap_der_mip.gurobi_model.optimize()
+        else:
+            lyap_der_mip.gurobi_model.optimize(
+                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
         num_sol = lyap_der_mip.gurobi_model.solCount
-        z_adv_der = torch.zeros((num_sol, self.z_dim), dtype=self.dtype)
+        z_adv_der = []
         for i in range(num_sol):
             lyap_der_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.SolutionNumber, i)
-            z_adv_der[i, :] = torch.tensor([r.xn for r in x_var],
-                                           dtype=self.dtype)
+            obj = lyap_der_mip.gurobi_model.PoolObjVal
+            if obj > 0:
+                z_adv_der.append(torch.tensor([r.xn for r in x_var],
+                                              dtype=self.dtype).unsqueeze(0))
+        z_adv_der = torch.cat(z_adv_der, dim=0)
         return z_adv_pos, z_adv_der
 
 

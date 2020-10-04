@@ -558,7 +558,8 @@ class GurobiTorchMIP:
         """
         assert(solution_number >= 0 and
                solution_number < self.gurobi_model.solCount)
-        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL or
+               self.gurobi_model.status == gurobipy.GRB.Status.INTERRUPTED)
         self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
                                    solution_number)
         r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
