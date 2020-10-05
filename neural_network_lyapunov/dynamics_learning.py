@@ -72,6 +72,7 @@ class DynamicsLearningOptions():
         self.dynynamics_loss_weight = 0.
         self.lyapunov_loss_at_samples_weight = 0.
         self.equilibrium_loss_weight = 0.
+        self.lyapunov_loss_optimal = True
         self.lyapunov_loss_freq = 0
         self.lyapunov_loss_weight = 0.
         self.V_lambda = 0.
@@ -110,6 +111,7 @@ class DynamicsLearning:
             opt.lyapunov_loss_at_samples_weight
         self.equilibrium_loss_weight = opt.equilibrium_loss_weight
 
+        self.lyapunov_loss_optimal = opt.lyapunov_loss_optimal
         self.lyapunov_loss_freq = opt.lyapunov_loss_freq
         self.lyapunov_loss_weight = opt.lyapunov_loss_weight
 
@@ -236,7 +238,8 @@ class DynamicsLearning:
                         self.lyapunov.system.dynamics_relu.to('cpu')
                         self.z_equilibrium = self.z_equilibrium.to('cpu')
                         lyap_loss = self.lyapunov_loss_weight *\
-                            self.lyapunov_loss()
+                            self.lyapunov_loss(
+                                optimal=self.lyapunov_loss_optimal)
                         lyap_loss.backward()
                         lyap_loss = lyap_loss.to(device)
                         self.lyapunov.lyapunov_relu.to(device)
