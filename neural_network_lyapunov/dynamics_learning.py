@@ -83,11 +83,13 @@ def gurobi_terminate_if(model, where, less_than_zero=True):
     if where == gurobipy.GRB.Callback.MIPNODE:
         solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
         if solcnt > 0:
-            objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
-            if not less_than_zero:
-                objbst *= -1
-            if objbst < 0:
-                model.terminate()
+            status = model.cbGet(gurobipy.GRB.Callback.MIPNODE_STATUS)
+            if status == gurobipy.GRB.Status.OPTIMAL:
+                objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
+                if not less_than_zero:
+                    objbst *= -1
+                if objbst < 0:
+                    model.terminate()
 
 
 class DynamicsLearning:
@@ -133,7 +135,7 @@ class DynamicsLearning:
                 lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
             lyap_pos_mip_loss = -lyap_pos_mip.\
                 compute_objective_from_mip_data_and_solution(
-                    active_constraint_tolerance=1e-3)
+                    active_constraint_tolerance=1e-6)
         lyap_der_mip = self.lyapunov.lyapunov_derivative_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)[0]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -147,7 +149,7 @@ class DynamicsLearning:
                 lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
             lyap_der_mip_loss = lyap_der_mip.\
                 compute_objective_from_mip_data_and_solution(
-                    active_constraint_tolerance=1e-3)
+                    active_constraint_tolerance=1e-6)
         loss = lyap_pos_mip_loss + lyap_der_mip_loss
         return loss
 
@@ -214,6 +216,7 @@ class DynamicsLearning:
             self.n_iter = 0
         try:
             for epoch_i in range(num_epoch):
+                print(epoch_i)
                 for x, x_next in self.train_dataloader:
                     x = x.to(device)
                     x_next = x_next.to(device)
