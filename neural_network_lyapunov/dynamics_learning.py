@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.distributions as distributions
@@ -48,35 +49,31 @@ def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
     return train_dataloader, validation_dataloader
 
 
-def dataloader_to_rollouts(pbsg, dataloader, dt, N, max_rollouts=None):
-    if max_rollouts is None:
-        max_rollouts = len(dataloader)
-    num_rollouts = 0
+def data_to_rollouts(pbsg, data, dt, N):
     X_rollouts = []
     x_rollouts = []
-    for x0, _ in dataloader:
-        for i in range(x0.shape[0]):
-            rX, rx = pbsg.generate_rollout(x0[i, :], dt, N)
-            X_rollouts.append(rX)
-            x_rollouts.append(rx)
-            num_rollouts += 1
-            if num_rollouts >= max_rollouts:
-                break
-        if num_rollouts >= max_rollouts:
-            break
+    for k in range(data.shape[0]):
+        rX, rx = pbsg.generate_rollout(data[k, :], dt, N)
+        X_rollouts.append(rX)
+        x_rollouts.append(rx)
     return X_rollouts, x_rollouts
 
 
 class DynamicsLearningOptions():
-    def __init__(self):
-        self.dynynamics_loss_weight = 0.
-        self.lyapunov_loss_at_samples_weight = 0.
-        self.equilibrium_loss_weight = 0.
-        self.lyapunov_loss_optimal = True
-        self.lyapunov_loss_freq = 0
-        self.lyapunov_loss_weight = 0.
-        self.V_lambda = 0.
-        self.V_eps = 0.
+    def __init__(self, options_dict):
+        self.options = options_dict
+
+    def set_option(self, name, value):
+        self.options[name] = value
+
+    def set_options(self, options_dict):
+        for key in options_dict.keys():
+            self.options[key] = options_dict[key]
+
+    def __getattr__(self, attr):
+        if attr not in self.options.keys():
+            raise AttributeError("Option " + attr + " missing")
+        return self.options[attr]
 
 
 def gurobi_terminate_if(model, where, less_than_zero=True):
@@ -205,7 +202,8 @@ class DynamicsLearning:
                 val_lyapunov_loss_at_samples += lyap_loss_samples
         return val_dyn_loss, val_lyapunov_loss_at_samples
 
-    def train(self, num_epoch, validate=False, device='cpu'):
+    def train(self, num_epoch, validate=False, device='cpu',
+              save_rate=0, save_path=None):
         self.to_device(device)
         if self.optimizer is None:
             params_list = self.get_trainable_parameters()
@@ -261,16 +259,36 @@ class DynamicsLearning:
                     self.writer.add_scalar('LyapunovSamples/validate',
                                            val_lyap_loss_samples,
                                            self.n_iter-1)
+                if save_rate > 0 and epoch_i % save_rate == 0:
+                    assert(save_path is not None)
+                    import time
+                    start = time.time()
+                    torch.save(self.encoder, os.path.join(
+                        save_path, "encoder"))
+                    torch.save(self.decoder, os.path.join(
+                        save_path, "decoder"))
+                    torch.save(self.relu_system.dynamics_relu, os.path.join(
+                        save_path, "dynamics"))
+                    torch.save(self.lyapunov.lyapunov_relu, os.path.join(
+                        save_path, "lyapunov"))
+                    end = time.time()
+                    print(end - start)
         except KeyboardInterrupt:
             self.to_device('cpu')
         self.to_device('cpu')
 
-    def rollout_validation(self, rollouts):
+    def rollout_validation(self, rollouts, device='cpu'):
+        self.to_device(device)
         assert(isinstance(rollouts, list))
         assert(len(rollouts) >= 1)
-        validation_loss = torch.zeros(rollouts[0].shape[0], dtype=self.dtype)
-        for r_actual in rollouts:
-            validation_loss += self.rollout_loss(r_actual)
+        validation_loss = torch.zeros(rollouts[0].shape[0],
+                                      dtype=self.dtype).to(device)
+        with torch.no_grad():
+            for r_actual in rollouts:
+                r_actual = r_actual.to(device)
+                validation_loss += self.rollout_loss(r_actual)
+        self.to_device('cpu')
+        validation_loss = validation_loss.to('cpu')
         return validation_loss
 
     def adversarial_samples(self, optimal=True):
@@ -461,9 +479,10 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         self.decoder.to('cpu')
 
     def rollout(self, x_init, N, clamp=False):
+        device = x_init.device
         assert(len(x_init.shape) == 3)
         x_traj = torch.zeros(N+2, int(x_init.shape[0]/2), x_init.shape[1],
-                             x_init.shape[2], dtype=self.dtype)
+                             x_init.shape[2], dtype=self.dtype).to(device)
         x_traj[0, :] = x_init[:int(x_init.shape[0]/2), :, :]
         x_traj[1, :] = x_init[int(x_init.shape[0]/2):, :, :]
         for n in range(N):
