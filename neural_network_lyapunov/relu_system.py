@@ -120,7 +120,7 @@ class AutonomousReLUSystemGivenEquilibrium:
     def possible_dx(self, x):
         assert(isinstance(x, torch.Tensor))
         assert(len(x) == self.x_dim)
-        return [self.dynamics_relu(x)]
+        return [self.step_forward(x)]
 
     def step_forward(self, x_start):
         assert(isinstance(x_start, torch.Tensor))
