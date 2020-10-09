@@ -33,6 +33,9 @@ class LyapunovHybridLinearSystem:
             or
             isinstance(
                 system, relu_system.AutonomousReLUSystem)
+            or
+            isinstance(
+                system, relu_system.AutonomousReLUSystemGivenEquilibrium)
             or isinstance(system, feedback_system.FeedbackSystem)
         )
         self.system = system
@@ -50,7 +53,10 @@ class LyapunovHybridLinearSystem:
         """
         if isinstance(
             self.system, hybrid_linear_system.AutonomousHybridLinearSystem)\
-                or isinstance(self.system, relu_system.AutonomousReLUSystem):
+                or isinstance(self.system, relu_system.AutonomousReLUSystem)\
+                or isinstance(
+                    self.system,
+                    relu_system.AutonomousReLUSystemGivenEquilibrium):
             assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
             mip_cnstr_return = self.system.mixed_integer_constraints()
             s, gamma = milp.add_mixed_integer_linear_constraints(
