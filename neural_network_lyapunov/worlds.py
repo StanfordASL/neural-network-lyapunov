@@ -10,6 +10,13 @@ def urdf_path(file):
                         "urdf", file)
 
 
+def load_urdf_callback(urdf):
+    def cb(pb):
+        robot_id = pb.loadURDF(urdf, flags=pb.URDF_USE_SELF_COLLISION)
+        return robot_id
+    return cb
+
+
 def load_falling_cubes_callback():
     def cb(pb):
         plane_id = pb.loadURDF(urdf_path("plane_white.urdf"))

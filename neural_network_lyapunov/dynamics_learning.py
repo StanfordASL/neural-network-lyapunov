@@ -261,8 +261,6 @@ class DynamicsLearning:
                                            self.n_iter-1)
                 if save_rate > 0 and epoch_i % save_rate == 0:
                     assert(save_path is not None)
-                    import time
-                    start = time.time()
                     torch.save(self.encoder, os.path.join(
                         save_path, "encoder"))
                     torch.save(self.decoder, os.path.join(
@@ -271,8 +269,6 @@ class DynamicsLearning:
                         save_path, "dynamics"))
                     torch.save(self.lyapunov.lyapunov_relu, os.path.join(
                         save_path, "lyapunov"))
-                    end = time.time()
-                    print(end - start)
         except KeyboardInterrupt:
             self.to_device('cpu')
         self.to_device('cpu')
@@ -496,6 +492,22 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                 x_traj[n+2, :] = x_next_pred_decoded[0,
                                                      int(x_init.shape[0]/2):,
                                                      :, :]
+        return x_traj
+
+    def rollout_latent(self, x_init, N, clamp=False):
+        device = x_init.device
+        assert(len(x_init.shape) == 3)
+        x_traj = torch.zeros(N+2, int(x_init.shape[0]/2), x_init.shape[1],
+                             x_init.shape[2], dtype=self.dtype).to(device)
+        x_traj[0, :] = x_init[:int(x_init.shape[0]/2), :, :]
+        x_traj[1, :] = x_init[int(x_init.shape[0]/2):, :, :]
+        z, _ = self.encoder(x_init.unsqueeze(0))
+        print(z)
+        for n in range(N):
+            with torch.no_grad():
+                z = self.relu_system.dynamics_relu(z)
+                print(z)
+                x_traj[n+2, :] = self.decoder(z)[0, int(x_init.shape[0]/2):, :, :]
         return x_traj
 
     def rollout_loss(self, r_actual):

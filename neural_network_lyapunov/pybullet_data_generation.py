@@ -51,13 +51,6 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
     plt.show()
 
 
-def load_urdf_callback(urdf):
-    def cb(pb):
-        robot_id = pb.loadURDF(urdf, flags=pb.URDF_USE_SELF_COLLISION)
-        return robot_id
-    return cb
-
-
 class PybulletSampleGenerator:
     def __init__(self, load_world_cb, joint_space,
                  image_width=80, image_height=80, grayscale=False,
