@@ -716,7 +716,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                         x_next_sol, decimal=5)
         elif isinstance(system, relu_system.AutonomousReLUSystem):
             np.testing.assert_array_almost_equal(
-                system.dynamics_relu(torch.tensor(
+                system.step_forward(torch.tensor(
                     x_sol, dtype=self.dtype)).detach().numpy(),
                 x_next_sol, decimal=5)
         else:
@@ -759,7 +759,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                       hybrid_linear_system.AutonomousHybridLinearSystem):
             x_next_val = dut.system.step_forward(x_val)
         elif isinstance(dut.system, relu_system.AutonomousReLUSystem):
-            x_next_val = dut.system.dynamics_relu(x_val)
+            x_next_val = dut.system.step_forward(x_val)
         else:
             raise(NotImplementedError)
         v_next = dut.lyapunov_value(
@@ -801,7 +801,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             while True:
                 x_val = torch.rand(system.x_dim, dtype=system.dtype) * (
                   system.x_up - system.x_lo) + system.x_lo
-                x_val_next = system.dynamics_relu(x_val)
+                x_val_next = system.step_forward(x_val)
                 if (torch.all(x_val_next <= system.x_up) and torch.all(
                   x_val_next >= system.x_lo)):
                     return x_val
