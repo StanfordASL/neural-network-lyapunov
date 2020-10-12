@@ -7,6 +7,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.utils as utils
 
 import unittest
 
@@ -14,23 +15,13 @@ import unittest
 class TestFeedbackSystem(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
-        linear1 = torch.nn.Linear(3, 3)
-        linear1.weight.data = torch.tensor([
-            [0.2, 1.2, 0.4], [-0.1, 2.5, 1.3], [0.3, 0.1, 0.5]],
-            dtype=self.dtype)
-        linear1.bias.data = torch.tensor([0.3, 1.2, -0.5], dtype=self.dtype)
-        linear2 = torch.nn.Linear(3, 3)
-        linear2.weight.data = torch.tensor([
-            [0.2, 0.3, -0.5], [0.1, 1.2, -2.1], [0.3, 1.2, 0.5]],
-            dtype=self.dtype)
-        linear2.bias.data = torch.tensor([0.1, -0.5, 1.2], dtype=self.dtype)
-        linear3 = torch.nn.Linear(3, 2)
-        linear3.weight.data = torch.tensor([
-            [0.1, 1.2, -1.3], [0.3, 0.1, -0.8]], dtype=self.dtype)
-        linear3.bias.data = torch.tensor([0.3, -0.5], dtype=self.dtype)
-        self.controller_network = torch.nn.Sequential(
-            linear1, torch.nn.LeakyReLU(0.01), linear2,
-            torch.nn.LeakyReLU(0.01), linear3)
+        controller_network_params = torch.tensor([
+            0.2, 1.2, 0.4, -0.1, 2.5, 1.3, 0.3, 0.1, 0.5, 0.3, 1.2, -0.5,
+            0.2, 0.3, -0.5, 0.1, 1.2, -2.1, 0.3, 1.2, 0.5, 0.1, -0.5, 1.2,
+            0.1, 1.2, -1.3, 0.3, 0.1, -0.8, 0.3, -0.5], dtype=self.dtype)
+        self.controller_network = utils.setup_relu(
+            (3, 3, 3, 2), controller_network_params, negative_slope=0.01,
+            bias=True, dtype=self.dtype)
 
     def add_dynamics_mip_constraint_tester(
             self, forward_system, x_equilibrium, u_equilibrium, x_val):
@@ -66,7 +57,8 @@ class TestFeedbackSystem(unittest.TestCase):
             u_val.detach().numpy(), u_val_expected.detach().numpy())
 
         x_next_val = torch.tensor([xi.X for xi in x_next], dtype=self.dtype)
-        if isinstance(forward_system, relu_system.ReLUSystem):
+        if isinstance(forward_system, relu_system.ReLUSystem) or isinstance(
+                forward_system, relu_system.ReLUSystemGivenEquilibrium):
             x_next_expected = forward_system.step_forward(x_val, u_val)
         elif isinstance(forward_system,
                         hybrid_linear_system.HybridLinearSystem):
@@ -114,25 +106,24 @@ class TestFeedbackSystem(unittest.TestCase):
             forward_system, x_equilibrium, u_equilibrium,
             torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype))
 
-    def test_add_dynamics_mip_constraint_relu_system(self):
-        # Construct a relu network as the forward dynamical system.
-        linear1 = torch.nn.Linear(5, 3)
-        linear1.weight.data = torch.tensor([
-            [0.1, 0.4, 0.5, 0.5, 0.1], [0.2, -0.1, 1.2, 1.1, -1.2],
-            [0.5, -0.3, 0.2, 0.1, 0.4]], dtype=self.dtype)
-        linear1.bias.data = torch.tensor([1.1, 0.4, -0.5], dtype=self.dtype)
-        linear2 = torch.nn.Linear(3, 3)
-        linear2.weight.data = torch.tensor([
-            [0.1, 0.3, 0.2], [0.2, -0.5, -0.9], [0.8, 1.5, 0.3]],
+    def construct_relu_forward_system(self):
+        forward_network_params = torch.tensor(
+            [0.1, 0.4, 0.5, 0.5, 0.1, 0.2, -0.1, 1.2, 1.1, -1.2, 0.5, -0.3,
+             0.2, 0.1, 0.4, 1.1, 0.4, -0.5, 0.1, 0.3, 0.2, 0.2, -0.5, -0.9,
+             0.8, 1.5, 0.3, 0.3, 0.5, 0.1], dtype=self.dtype)
+        forward_network = utils.setup_relu(
+            (5, 3, 3), forward_network_params, negative_slope=0.01, bias=True,
             dtype=self.dtype)
-        linear2.bias.data = torch.tensor([0.3, 0.5, 0.1])
-        forward_network = torch.nn.Sequential(
-            linear1, torch.nn.LeakyReLU(0.01), linear2)
         forward_system = relu_system.ReLUSystem(
             self.dtype, torch.tensor([-2, -2, -2], dtype=self.dtype),
             torch.tensor([2, 2, 2], dtype=self.dtype),
             torch.tensor([-5, -5], dtype=self.dtype),
             torch.tensor([5, 5], dtype=self.dtype), forward_network)
+        return forward_system
+
+    def test_add_dynamics_mip_constraint_relu_system(self):
+        # Construct a relu network as the forward dynamical system.
+        forward_system = self.construct_relu_forward_system()
 
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
@@ -145,6 +136,70 @@ class TestFeedbackSystem(unittest.TestCase):
         self.add_dynamics_mip_constraint_tester(
             forward_system, x_equilibrium, u_equilibrium,
             torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype))
+
+    def construct_relu_forward_system_given_equilibrium(self):
+        forward_network_params = torch.tensor(
+            [0.1, 0.4, 0.5, 0.5, 0.1, 0.2, -0.1, 1.2, 1.1, -1.2, 0.5, -0.3,
+             0.2, 0.1, 0.4, 1.1, 0.4, -0.5, 0.1, 0.3, 0.2, 0.2, -0.5, -0.9,
+             0.8, 1.5, 0.3, 0.3, 0.5, 0.1], dtype=self.dtype)
+        forward_network = utils.setup_relu(
+            (5, 3, 3), forward_network_params, negative_slope=0.01, bias=True,
+            dtype=self.dtype)
+        x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        forward_system = relu_system.ReLUSystemGivenEquilibrium(
+            self.dtype, torch.tensor([-2, -2, -2], dtype=self.dtype),
+            torch.tensor([2, 2, 2], dtype=self.dtype),
+            torch.tensor([-5, -5], dtype=self.dtype),
+            torch.tensor([5, 5], dtype=self.dtype), forward_network,
+            x_equilibrium, u_equilibrium)
+        return forward_system
+
+    def test_add_dynamics_mip_constraint_relu_system_given_equilibrium(self):
+        # Construct a ReLUSystemGivenEquilibrium as the forward dynamical
+        # system.
+        forward_system = self.construct_relu_forward_system_given_equilibrium()
+
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([0.1, 0.2, 0.3], dtype=self.dtype))
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([-0.1, 0.2, 0.3], dtype=self.dtype))
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype))
+
+    def step_forward_test(self, forward_system, x_equilibrium, u_equilibrium):
+        closed_loop_system = feedback_system.FeedbackSystem(
+            forward_system, self.controller_network, x_equilibrium,
+            u_equilibrium)
+
+        x_next = closed_loop_system.step_forward(
+            torch.tensor([-1, 0.5, 0.2], dtype=self.dtype))
+        self.assertIsInstance(x_next, torch.Tensor)
+        self.assertEqual(x_next.shape, (3,))
+
+    def test_step_forward_hybrid_linear_system(self):
+        forward_system = self.construct_hybrid_linear_system_example()
+        x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        self.step_forward_test(forward_system, x_equilibrium, u_equilibrium)
+
+    def test_step_forward_relu_system(self):
+        forward_system = self.construct_relu_forward_system()
+        x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        self.step_forward_test(forward_system, x_equilibrium, u_equilibrium)
+
+    def test_step_forward_relu_system_given_equilibrium(self):
+        forward_system = self.construct_relu_forward_system_given_equilibrium()
+        self.step_forward_test(
+            forward_system, forward_system.x_equilibrium,
+            forward_system.u_equilibrium)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,8 @@ class FeedbackSystem:
         """
         assert(isinstance(
             forward_system, hybrid_linear_system.HybridLinearSystem) or
-            isinstance(forward_system, relu_system.ReLUSystem))
+            isinstance(forward_system, relu_system.ReLUSystem) or
+            isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium))
         self.forward_system = forward_system
         self.x_dim = self.forward_system.x_dim
         self.x_lo_all = self.forward_system.x_lo_all
@@ -93,7 +94,9 @@ class FeedbackSystem:
         # u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         # Namely Aout_slack * controller_slack -u[n] = ϕᵤ(x*) - u* -Cout
         mip.addMConstrs([
-            controller_mip_cnstr.Aout_slack, -torch.eye(
+            controller_mip_cnstr.Aout_slack.reshape(
+                (self.forward_system.u_dim, len(controller_slack))),
+            -torch.eye(
                 self.forward_system.u_dim, dtype=self.forward_system.dtype)],
             [controller_slack, u], sense=gurobipy.GRB.EQUAL,
             b=self.controller_network(self.x_equilibrium) - self.u_equilibrium
@@ -115,4 +118,8 @@ class FeedbackSystem:
 
     def step_forward(self, x):
         u = self.compute_u(x)
-        return self.forward_system.step_forward(x, u)[0]
+        if isinstance(self.forward_system,
+                      hybrid_linear_system.HybridLinearSystem):
+            return self.forward_system.step_forward(x, u)[0]
+        else:
+            return self.forward_system.step_forward(x, u)
