@@ -615,3 +615,17 @@ def setup_relu(
     layers[-1] = linear_layers[-1]
     relu = torch.nn.Sequential(*layers)
     return relu
+
+
+def extract_relu_parameters(relu):
+    """
+    For a feedforward network with (leaky) relu activation units, extract the
+    weights and bias into one tensor.
+    """
+    weights_biases = []
+    for layer in relu:
+        if isinstance(layer, torch.nn.Linear):
+            weights_biases.append(layer.weight.data.reshape((-1)))
+            if layer.bias is not None:
+                weights_biases.append(layer.bias.data.reshape((-1)))
+    return torch.cat(weights_biases)

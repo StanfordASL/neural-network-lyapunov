@@ -370,6 +370,9 @@ class TestProjectToPolyhedron(unittest.TestCase):
 
 
 class TestSetupReLU(unittest.TestCase):
+    """
+    test both setup_relu and extract_relu_parameters
+    """
     def test1(self):
         # Test with params=None and bias=True
         dut = utils.setup_relu(
@@ -386,6 +389,8 @@ class TestSetupReLU(unittest.TestCase):
         self.assertIsNotNone(dut[2].bias)
         self.assertEqual(dut[2].in_features, 4)
         self.assertEqual(dut[2].out_features, 3)
+        relu_params = utils.extract_relu_parameters(dut)
+        self.assertEqual(relu_params.shape, (27,))
 
     def test2(self):
         # Test with params=None and bias=False
@@ -403,6 +408,8 @@ class TestSetupReLU(unittest.TestCase):
         self.assertIsNone(dut[2].bias)
         self.assertEqual(dut[2].in_features, 4)
         self.assertEqual(dut[2].out_features, 3)
+        relu_params = utils.extract_relu_parameters(dut)
+        self.assertEqual(relu_params.shape, (20,))
 
     def test3(self):
         # Test with params and with_bias=True
@@ -421,6 +428,28 @@ class TestSetupReLU(unittest.TestCase):
             params[12:24].reshape((3, 4)).detach().numpy())
         np.testing.assert_allclose(
             dut[2].bias.detach().numpy(), params[24:].detach().numpy())
+
+        relu_params = utils.extract_relu_parameters(dut)
+        np.testing.assert_allclose(
+            relu_params.detach().numpy(), params.detach().numpy())
+
+    def test4(self):
+        # Test with params and with_bias=False
+        params = torch.tensor(list(range(20)), dtype=torch.float64)
+        dut = utils.setup_relu(
+            (2, 4, 3), params, negative_slope=0.1, bias=False,
+            dtype=torch.float64)
+        self.assertEqual(len(dut), 3)
+        np.testing.assert_allclose(
+            dut[0].weight.detach().numpy(),
+            params[:8].reshape((4, 2)).detach().numpy())
+        np.testing.assert_allclose(
+            dut[2].weight.detach().numpy(),
+            params[8:20].reshape((3, 4)).detach().numpy())
+
+        relu_params = utils.extract_relu_parameters(dut)
+        np.testing.assert_allclose(
+            relu_params.detach().numpy(), params.detach().numpy())
 
 
 if __name__ == "__main__":

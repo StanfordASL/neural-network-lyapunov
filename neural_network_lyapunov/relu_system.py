@@ -296,9 +296,10 @@ class ReLUSystemGivenEquilibrium:
     def step_forward(self, x_start, u_start):
         assert(isinstance(x_start, torch.Tensor))
         assert(isinstance(u_start, torch.Tensor))
-        return self.dynamics_relu(torch.cat((x_start, u_start))) - \
+        x_next = self.dynamics_relu(torch.cat((x_start, u_start))) - \
             self.dynamics_relu(torch.cat(
                 (self.x_equilibrium, self.u_equilibrium))) + self.x_equilibrium
+        return x_next
 
     def possible_dx(self, x, u):
         assert(isinstance(x, torch.Tensor))
