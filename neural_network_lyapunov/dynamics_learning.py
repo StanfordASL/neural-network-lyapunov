@@ -6,8 +6,6 @@ from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import gurobipy
 
-import neural_network_lyapunov.relu_system as relu_system
-
 
 def get_ff_network(dtype, input_dim, output_dim, width, depth,
                    activation=nn.ReLU):
@@ -99,8 +97,7 @@ class DynamicsLearning:
 
         self.dtype = self.relu_system.dtype
         self.z_dim = self.relu_system.x_dim
-
-        self.z_equilibrium = torch.zeros(self.z_dim, dtype=self.dtype)
+        self.z_equilibrium = self.relu_system.x_equilibrium
 
         self.V_lambda = opt.V_lambda
         self.V_eps = opt.V_eps
@@ -108,7 +105,6 @@ class DynamicsLearning:
         self.dynynamics_loss_weight = opt.dynynamics_loss_weight
         self.lyapunov_loss_at_samples_weight = \
             opt.lyapunov_loss_at_samples_weight
-        self.equilibrium_loss_weight = opt.equilibrium_loss_weight
 
         self.lyapunov_loss_optimal = opt.lyapunov_loss_optimal
         self.lyapunov_loss_freq = opt.lyapunov_loss_freq
@@ -131,8 +127,7 @@ class DynamicsLearning:
             lyap_pos_mip.gurobi_model.optimize(
                 lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
             lyap_pos_mip_loss = -lyap_pos_mip.\
-                compute_objective_from_mip_data_and_solution(
-                    active_constraint_tolerance=1e-6)
+                compute_objective_from_mip_data_and_solution()
         lyap_der_mip = self.lyapunov.lyapunov_derivative_as_milp(
             self.z_equilibrium, self.V_lambda, self.V_eps)[0]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -145,13 +140,12 @@ class DynamicsLearning:
             lyap_der_mip.gurobi_model.optimize(
                 lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
             lyap_der_mip_loss = lyap_der_mip.\
-                compute_objective_from_mip_data_and_solution(
-                    active_constraint_tolerance=1e-6)
+                compute_objective_from_mip_data_and_solution()
         loss = lyap_pos_mip_loss + lyap_der_mip_loss
         return loss
 
     def lyapunov_loss_at_samples(self, z):
-        z_next = self.relu_system.dynamics_relu(z)
+        z_next = self.relu_system.step_forward(z)
         relu_at_equilibrium = self.lyapunov.lyapunov_relu.forward(
             self.z_equilibrium)
         positivity_sample_loss = \
@@ -164,28 +158,18 @@ class DynamicsLearning:
         loss = positivity_sample_loss + derivative_sample_loss
         return loss
 
-    def equilibrium_loss(self):
-        loss = torch.sum(torch.pow(self.relu_system.dynamics_relu(
-            self.z_equilibrium) - self.z_equilibrium, 2))
-        return loss
-
     def total_loss(self, x, x_next, validation=False):
         device = next(self.encoder.parameters()).device
         dyn_loss = torch.zeros(1, dtype=self.dtype).to(device)
         lyap_loss_samples = torch.zeros(1, dtype=self.dtype).to(device)
-        equ_loss = torch.zeros(1, dtype=self.dtype).to(device)
         if self.dynynamics_loss_weight > 0:
             dyn_loss = self.dynynamics_loss_weight *\
                 self.dynamics_loss(x, x_next)
         if self.lyapunov_loss_at_samples_weight > 0:
             lyap_loss_samples = self.lyapunov_loss_at_samples_weight *\
                 self.lyapunov_loss_at_samples(x)
-        if not validation:
-            if self.equilibrium_loss_weight > 0:
-                equ_loss = self.equilibrium_loss_weight *\
-                    self.equilibrium_loss()
-        loss = dyn_loss + lyap_loss_samples + equ_loss
-        return loss, dyn_loss, lyap_loss_samples, equ_loss
+        loss = dyn_loss + lyap_loss_samples
+        return loss, dyn_loss, lyap_loss_samples
 
     def validation_loss(self):
         with torch.no_grad():
@@ -196,8 +180,8 @@ class DynamicsLearning:
             for x, x_next in self.validation_dataloader:
                 x = x.to(device)
                 x_next = x_next.to(device)
-                loss, dyn_loss, lyap_loss_samples, equ_loss = \
-                    self.total_loss(x, x_next, validation=True)
+                loss, dyn_loss, lyap_loss_samples = self.total_loss(
+                    x, x_next, validation=True)
                 val_dyn_loss += dyn_loss
                 val_lyapunov_loss_at_samples += lyap_loss_samples
         return val_dyn_loss, val_lyapunov_loss_at_samples
@@ -219,8 +203,8 @@ class DynamicsLearning:
                     x = x.to(device)
                     x_next = x_next.to(device)
                     self.optimizer.zero_grad()
-                    loss, dyn_loss, lyap_loss_samples, equ_loss = \
-                        self.total_loss(x, x_next)
+                    loss, dyn_loss, lyap_loss_samples = self.total_loss(
+                        x, x_next)
                     loss.backward()
                     self.optimizer.step()
                     self.writer.add_scalar('Loss/train', loss.item(),
@@ -229,14 +213,14 @@ class DynamicsLearning:
                                            self.n_iter)
                     self.writer.add_scalar('LyapunovSamples/train',
                                            lyap_loss_samples, self.n_iter)
-                    self.writer.add_scalar('Equilibrium/train',
-                                           equ_loss, self.n_iter)
                     if ((self.lyapunov_loss_weight > 0) and
                             (self.lyapunov_loss_freq > 0) and
                             ((self.n_iter % self.lyapunov_loss_freq) == 0)):
                         self.optimizer.zero_grad()
                         self.lyapunov.lyapunov_relu.to('cpu')
                         self.lyapunov.system.dynamics_relu.to('cpu')
+                        self.lyapunov.system.x_equilibrium = self.lyapunov.\
+                            system.x_equilibrium.to('cpu')
                         self.z_equilibrium = self.z_equilibrium.to('cpu')
                         lyap_loss = self.lyapunov_loss_weight *\
                             self.lyapunov_loss(
@@ -245,6 +229,8 @@ class DynamicsLearning:
                         lyap_loss = lyap_loss.to(device)
                         self.lyapunov.lyapunov_relu.to(device)
                         self.lyapunov.system.dynamics_relu.to(device)
+                        self.lyapunov.system.x_equilibrium = self.lyapunov.\
+                            system.x_equilibrium.to(device)
                         self.z_equilibrium = self.z_equilibrium.to(device)
                         self.optimizer.step()
                         self.writer.add_scalar('Lyapunov', lyap_loss.item(),
@@ -362,6 +348,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         self.decoder.to(device)
         self.lyapunov.lyapunov_relu.to(device)
         self.relu_system.dynamics_relu.to(device)
+        self.relu_system.x_equilibrium = self.relu_system.x_equilibrium.to(
+            device)
 
     def reparam(self, z_mu, z_log_var):
         z_std = torch.exp(0.5 * z_log_var)
@@ -387,7 +375,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             z = z_mu
             z_log_var = None
         x_decoded = self.decoder(z)
-        z_next = self.relu_system.dynamics_relu(z)
+        z_next = self.relu_system.step_forward(z)
         x_next_pred_decoded = self.decoder(z_next)
         return x_decoded, x_next_pred_decoded, z_mu, z_log_var
 
@@ -474,45 +462,55 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         self.encoder.to('cpu')
         self.decoder.to('cpu')
 
-    def rollout(self, x_init, N, clamp=False):
+    def rollout(self, x_init, N,
+                decode_intermediate=False, clamp=False):
         device = x_init.device
         assert(len(x_init.shape) == 3)
         x_traj = torch.zeros(N+2, int(x_init.shape[0]/2), x_init.shape[1],
                              x_init.shape[2], dtype=self.dtype).to(device)
         x_traj[0, :] = x_init[:int(x_init.shape[0]/2), :, :]
         x_traj[1, :] = x_init[int(x_init.shape[0]/2):, :, :]
+        z_traj = []
+        V_traj = []
+        z_traj.append(self.encoder(x_init.unsqueeze(0))[0])
+        V_traj.append(self.lyapunov.lyapunov_value(z_traj[-1].squeeze(),
+                                                   self.z_equilibrium,
+                                                   self.V_lambda).item())
         for n in range(N):
             with torch.no_grad():
-                x_decoded, x_next_pred_decoded, z_mu, z_log_var = \
-                    self.vae_forward(torch.cat((x_traj[n, :], x_traj[n+1, :]),
-                                               dim=0).unsqueeze(0))
-                if clamp:
-                    x_next_pred_decoded = torch.clamp(
-                        x_next_pred_decoded, 0, 1)
-                x_traj[n+2, :] = x_next_pred_decoded[0,
+                if not decode_intermediate:
+                    z = self.relu_system.step_forward(z_traj[-1])
+                    x_traj[n+2, :] = self.decoder(z)[0,
                                                      int(x_init.shape[0]/2):,
                                                      :, :]
-        return x_traj
+                    z_traj.append(z)
+                    V_traj.append(
+                        self.lyapunov.lyapunov_value(
+                            z.squeeze(), self.z_equilibrium,
+                            self.V_lambda).item())
+                else:
+                    x_decoded, x_next_pred_decoded, z_mu, z_log_var = \
+                        self.vae_forward(torch.cat((x_traj[n, :],
+                                                    x_traj[n+1, :]),
+                                                   dim=0).unsqueeze(0))
+                    if clamp:
+                        x_next_pred_decoded = torch.clamp(
+                            x_next_pred_decoded, 0, 1)
+                    x_traj[n+2, :] = x_next_pred_decoded[0, int(
+                        x_init.shape[0]/2):, :, :]
+                    # TODO: actually get the sample if VAE
+                    z_traj.append(z_mu)
+                    V_traj.append(
+                        self.lyapunov.lyapunov_value(
+                            z_mu.squeeze(), self.z_equilibrium,
+                            self.V_lambda).item())
+        z_traj = torch.cat(z_traj).detach()
+        return x_traj, V_traj, z_traj
 
-    def rollout_latent(self, x_init, N, clamp=False):
-        device = x_init.device
-        assert(len(x_init.shape) == 3)
-        x_traj = torch.zeros(N+2, int(x_init.shape[0]/2), x_init.shape[1],
-                             x_init.shape[2], dtype=self.dtype).to(device)
-        x_traj[0, :] = x_init[:int(x_init.shape[0]/2), :, :]
-        x_traj[1, :] = x_init[int(x_init.shape[0]/2):, :, :]
-        z, _ = self.encoder(x_init.unsqueeze(0))
-        print(z)
-        for n in range(N):
-            with torch.no_grad():
-                z = self.relu_system.dynamics_relu(z)
-                print(z)
-                x_traj[n+2, :] = self.decoder(z)[0, int(x_init.shape[0]/2):, :, :]
-        return x_traj
-
-    def rollout_loss(self, r_actual):
+    def rollout_loss(self, r_actual, decode_intermediate=False):
         x0 = torch.cat([r_actual[0, :], r_actual[1, :]], dim=0)
-        r_pred = self.rollout(x0, r_actual.shape[0] - 2)
+        r_pred, _, _ = self.rollout(x0, r_actual.shape[0] - 2,
+                                    decode_intermediate=decode_intermediate)
         if self.use_bce:
             loss = self.bce_loss_none(r_actual, r_pred).mean(dim=[1, 2, 3])
         else:
@@ -537,9 +535,11 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         self.z_equilibrium = self.z_equilibrium.to(device)
         self.lyapunov.lyapunov_relu.to(device)
         self.relu_system.dynamics_relu.to(device)
+        self.relu_system.x_equilibrium = self.relu_system.x_equilibrium.to(
+            device)
 
     def dynamics_loss(self, x, x_next):
-        x_next_pred = self.relu_system.dynamics_relu(x)
+        x_next_pred = self.relu_system.step_forward(x)
         loss = self.mse_loss(x_next_pred, x_next)
         return loss
 
@@ -547,16 +547,22 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         assert(len(x_init.shape) == 1)
         assert(x_init.shape[0] == self.z_dim)
         x_traj = torch.zeros(N+1, self.z_dim, dtype=self.dtype)
+        V_traj = []
         x_traj[0, :] = x_init
+        V_traj.append(self.lyapunov.lyapunov_value(
+            x_init.squeeze(), self.z_equilibrium, self.V_lambda).item())
         for n in range(N):
             with torch.no_grad():
-                x_next_pred = self.relu_system.dynamics_relu((x_traj[n:n+1,
+                x_next_pred = self.relu_system.step_forward((x_traj[n:n+1,
                                                              :]))
                 x_traj[n+1, :] = x_next_pred[0, :]
-        return x_traj
+                V_traj.append(self.lyapunov.lyapunov_value(
+                    x_next_pred.squeeze(), self.z_equilibrium,
+                    self.V_lambda).item())
+        return x_traj, V_traj
 
     def rollout_loss(self, r_actual):
         x0 = r_actual[0, :]
-        r_pred = self.rollout(x0, r_actual.shape[0] - 1)
+        r_pred, _ = self.rollout(x0, r_actual.shape[0] - 1)
         loss = (r_actual - r_pred).pow(2).mean(dim=[1])
         return loss
