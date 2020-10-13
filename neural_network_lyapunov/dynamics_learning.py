@@ -39,10 +39,12 @@ def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
+        shuffle=True
     )
     validation_dataloader = DataLoader(
         validation_dataset,
         batch_size=len(validation_dataset),
+        shuffle=True
     )
     return train_dataloader, validation_dataloader
 
@@ -159,7 +161,7 @@ class DynamicsLearning:
         return loss
 
     def total_loss(self, x, x_next, validation=False):
-        device = next(self.encoder.parameters()).device
+        device = next(self.relu_system.dynamics_relu.parameters()).device
         dyn_loss = torch.zeros(1, dtype=self.dtype).to(device)
         lyap_loss_samples = torch.zeros(1, dtype=self.dtype).to(device)
         if self.dynynamics_loss_weight > 0:
@@ -173,7 +175,7 @@ class DynamicsLearning:
 
     def validation_loss(self):
         with torch.no_grad():
-            device = next(self.encoder.parameters()).device
+            device = next(self.relu_system.dynamics_relu.parameters()).device
             val_dyn_loss = torch.zeros(1, dtype=self.dtype).to(device)
             val_lyapunov_loss_at_samples = torch.zeros(
                 1, dtype=self.dtype).to(device)
@@ -247,14 +249,7 @@ class DynamicsLearning:
                                            self.n_iter-1)
                 if save_rate > 0 and epoch_i % save_rate == 0:
                     assert(save_path is not None)
-                    torch.save(self.encoder, os.path.join(
-                        save_path, "encoder"))
-                    torch.save(self.decoder, os.path.join(
-                        save_path, "decoder"))
-                    torch.save(self.relu_system.dynamics_relu, os.path.join(
-                        save_path, "dynamics"))
-                    torch.save(self.lyapunov.lyapunov_relu, os.path.join(
-                        save_path, "lyapunov"))
+                    self.save(save_path)
         except KeyboardInterrupt:
             self.to_device('cpu')
         self.to_device('cpu')
@@ -517,6 +512,16 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             loss = (r_actual - r_pred).pow(2).mean(dim=[1, 2, 3])
         return loss
 
+    def save(self, save_path):
+        torch.save(self.encoder, os.path.join(
+            save_path, "encoder"))
+        torch.save(self.decoder, os.path.join(
+            save_path, "decoder"))
+        torch.save(self.relu_system.dynamics_relu, os.path.join(
+            save_path, "dynamics"))
+        torch.save(self.lyapunov.lyapunov_relu, os.path.join(
+            save_path, "lyapunov"))
+
 
 class StateSpaceDynamicsLearning(DynamicsLearning):
     def __init__(self, train_dataloader, validation_dataloader,
@@ -566,3 +571,9 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         r_pred, _ = self.rollout(x0, r_actual.shape[0] - 1)
         loss = (r_actual - r_pred).pow(2).mean(dim=[1])
         return loss
+
+    def save(self, save_path):
+        torch.save(self.relu_system.dynamics_relu, os.path.join(
+            save_path, "dynamics"))
+        torch.save(self.lyapunov.lyapunov_relu, os.path.join(
+            save_path, "lyapunov"))
