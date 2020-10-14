@@ -1,4 +1,5 @@
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import torch
 import unittest
 import numpy as np
@@ -450,6 +451,162 @@ class TestSetupReLU(unittest.TestCase):
         relu_params = utils.extract_relu_parameters(dut)
         np.testing.assert_allclose(
             relu_params.detach().numpy(), params.detach().numpy())
+
+
+class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
+    def saturation_tester(
+        self, lower_limit, upper_limit, input_lower_bound, input_upper_bound,
+            x_val, y_val):
+        mip = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
+        x = mip.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)[0]
+        y = mip.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)[0]
+        beta = utils.add_saturation_as_mixed_integer_constraint(
+            mip, x, y, lower_limit, upper_limit,
+            input_lower_bound, input_upper_bound)
+        # Set input value
+        mip.addLConstr(
+            [torch.tensor([1], dtype=torch.float64)], [[x]],
+            sense=gurobipy.GRB.EQUAL, rhs=x_val)
+        mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        mip.gurobi_model.optimize()
+        self.assertEqual(
+            mip.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        self.assertAlmostEqual(y.x, y_val)
+
+        return mip, beta
+
+    def test_always_saturate_upper(self):
+        # Test that the upper limit is always saturated.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_lower_bound = 3.
+        input_upper_bound = 4.
+
+        for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+            mip, beta = self.saturation_tester(
+                lower_limit, upper_limit, input_lower_bound, input_upper_bound,
+                x, y_val=upper_limit)
+            self.assertEqual(len(beta), 0)
+            self.assertEqual(len(mip.r), 2)
+            self.assertEqual(len(mip.zeta), 0)
+
+    def test_always_saturate_lower(self):
+        # Test that the lower limit is always saturated.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_lower_bound = -2.
+        input_upper_bound = 1.
+
+        for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+            mip, beta = self.saturation_tester(
+                lower_limit, upper_limit, input_lower_bound, input_upper_bound,
+                x, y_val=lower_limit)
+            self.assertEqual(len(beta), 0)
+            self.assertEqual(len(mip.r), 2)
+            self.assertEqual(len(mip.zeta), 0)
+
+    def test_no_saturation(self):
+        # Test when saturation can never happen.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_lower_bound = 1.
+        input_upper_bound = 2.
+
+        for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+            mip, beta = self.saturation_tester(
+                lower_limit, upper_limit, input_lower_bound, input_upper_bound,
+                x, y_val=x)
+            self.assertEqual(len(beta), 0)
+            self.assertEqual(len(mip.r), 2)
+            self.assertEqual(len(mip.zeta), 0)
+
+        input_lower_bound = 1.1
+        input_upper_bound = 1.9
+        for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+            mip, beta = self.saturation_tester(
+                lower_limit, upper_limit, input_lower_bound, input_upper_bound,
+                x, y_val=x)
+            self.assertEqual(len(beta), 0)
+            self.assertEqual(len(mip.r), 2)
+            self.assertEqual(len(mip.zeta), 0)
+
+    def test_maybe_saturate_lower(self):
+        # The input bounds include the lower limit, but it cannot saturate the
+        # upper limit.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_lower_bound = -1.
+        for input_upper_bound in (2., 1.9):
+            for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+                y_val = lower_limit if x <= lower_limit else x
+                mip, beta = self.saturation_tester(
+                    lower_limit, upper_limit, input_lower_bound,
+                    input_upper_bound, x, y_val=y_val)
+                self.assertEqual(len(beta), 1)
+                self.assertEqual(len(mip.r), 2)
+                self.assertEqual(len(mip.zeta), 1)
+                if x < lower_limit:
+                    self.assertAlmostEqual(beta[0].x, 1)
+                elif x > lower_limit:
+                    self.assertAlmostEqual(beta[0].x, 0)
+
+    def test_maybe_saturate_upper(self):
+        # The input bounds include the upper limit, but it cannot saturate the
+        # lower limit.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_upper_bound = 4.
+        for input_lower_bound in (1., 1.1):
+            for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+                y_val = upper_limit if x >= upper_limit else x
+                mip, beta = self.saturation_tester(
+                    lower_limit, upper_limit, input_lower_bound,
+                    input_upper_bound, x, y_val=y_val)
+                self.assertEqual(len(beta), 1)
+                self.assertEqual(len(mip.r), 2)
+                self.assertEqual(len(mip.zeta), 1)
+                if x < upper_limit:
+                    self.assertAlmostEqual(beta[0].x, 0)
+                elif x > upper_limit:
+                    self.assertAlmostEqual(beta[0].x, 1)
+
+    def test_maybe_saturate_both_limits(self):
+        # The input bounds include both the lower limit and the upper limit. It
+        # could saturate on both sides.
+        lower_limit = 1.
+        upper_limit = 2.
+        input_lower_bound = -1.
+        input_upper_bound = 3.
+
+        for x in np.linspace(input_lower_bound, input_upper_bound, 10):
+            beta_val = [None, None]
+            if x > upper_limit:
+                y_val = upper_limit
+                beta_val = [0, 1]
+            elif x < lower_limit:
+                y_val = lower_limit
+                beta_val = [1, 0]
+            else:
+                y_val = x
+                if x > lower_limit:
+                    beta_val[0] = 0
+                if x < upper_limit:
+                    beta_val[1] = 0
+            mip, beta = self.saturation_tester(
+                lower_limit, upper_limit, input_lower_bound,
+                input_upper_bound, x, y_val=y_val)
+            self.assertEqual(len(beta), 2)
+            self.assertEqual(len(mip.r), 3)
+            self.assertEqual(len(mip.zeta), 2)
+            if beta_val[0] is not None:
+                self.assertAlmostEqual(beta[0].x, beta_val[0])
+            if beta_val[1] is not None:
+                self.assertAlmostEqual(beta[1].x, beta_val[1])
+            slack_val = lower_limit if x < lower_limit else x
+            self.assertAlmostEqual(mip.r[2].x, slack_val)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import cvxpy as cp
 import gurobipy
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 def update_progress(progress):
@@ -221,6 +222,139 @@ def replace_leaky_relu_mixed_integer_constraint(
         return (A_x, A_y, A_beta, rhs)
     else:
         return (-A_x, -A_y, -A_beta, -rhs)
+
+
+def add_saturation_as_mixed_integer_constraint(
+    mip, input_var, output_var, lower_limit, upper_limit, input_lower_bound,
+        input_upper_bound):
+    """
+    For a saturation block
+    y = upper_limit if x >= upper_limit
+    y = x if lower_limit <= x <= upper_limit
+    y = lower_limit if x <= lower_limit
+    We can write this piecewise linear relationship using mixed-integer linear
+    constraints (provided that the input x is bounded
+    input_lower_boun <= x <= input_upper_bound).
+    Depending on the input bounds, we might need to introduce two binary
+    variables b_lower and b_upper, such
+    that
+    b_lower = 1 => x <= lower_limit
+    b_upper = 1 => x >= upper_limit
+    @note Depending on the input bounds, sometimes we don't need to introduce
+    the binary variables. For example, if the input bounds are all less than
+    lower_limit, then we know that the output is always lower_limit, hence the
+    output function is not piecewise linear, and we don't need binary
+    variables.
+    @return binary_variables If no binary variable is introduced, then return
+    an empty list. If the input bounds cover only the lower limit, then we
+    return [b_lower]; If the input bounds cover only the upper limit, then we
+    return [b_upper]; If the input bounds cover both saturation limits, then we
+    return [b_lower, b_upper].
+    @note that I don't always add the constraint
+    input_lower_bound <= x <= input_upper_bound in this function. Specifically
+    when the output is a linear function of the input (no saturation could
+    happen), we don't add the constraint
+    input_lower_bound <= x <= input_upper_bound.
+    """
+    assert(isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+    assert(isinstance(input_var, gurobipy.Var))
+    assert(isinstance(output_var, gurobipy.Var))
+    if input_upper_bound <= lower_limit:
+        # The input x will always be <= lower_limit, the output will always be
+        # lower_limit.
+        mip.addLConstr(
+            [torch.ones([1], dtype=torch.float64)], [[output_var]],
+            sense=gurobipy.GRB.EQUAL, rhs=lower_limit)
+        return []
+    elif input_lower_bound >= upper_limit:
+        # The input x will always be >= upper_limit, the output will always be
+        # upper_limit.
+        mip.addLConstr(
+            [torch.ones([1], dtype=torch.float64)], [[output_var]],
+            sense=gurobipy.GRB.EQUAL, rhs=upper_limit)
+        return []
+    elif input_lower_bound >= lower_limit and input_upper_bound <= upper_limit:
+        # The input is never saturated, the output equals to the input.
+        mip.addLConstr(
+            [torch.tensor([1, -1], dtype=torch.float64)],
+            [[input_var, output_var]], sense=gurobipy.GRB.EQUAL, rhs=0.)
+        return []
+    elif input_lower_bound < lower_limit and input_upper_bound <= upper_limit:
+        # The input can saturate the lower limit. We need a binary variable to
+        # determine whether the lower saturation happens.
+        # Namely y - lower_limit = relu(x - lower_limit)
+        A_x, A_y, A_beta, rhs = replace_relu_with_mixed_integer_constraint(
+            input_lower_bound - lower_limit, input_upper_bound - lower_limit)
+        # beta=1 implies that the lower limit is active, the output is
+        # lower_limit.
+        # A_x*(x - lower_limit) + A_y*(y-lower_limit) + A_beta*(1-beta) <= rhs
+        # Equivalently
+        # A_x*x + A_y*y - A_beta*beta <= rhs - A_beta + (A_x+A_y) * lower_limit
+        beta = mip.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
+            name="saturation_lower")
+        mip.addMConstrs(
+            [A_x.reshape((-1, 1)), A_y.reshape((-1, 1)),
+             -A_beta.reshape((-1, 1))], [[input_var], [output_var], beta],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs - A_beta + (A_x+A_y) * lower_limit)
+        return beta
+    elif input_lower_bound >= lower_limit and input_upper_bound > upper_limit:
+        # The input can saturate the upper limit. We need a binary variable to
+        # determine whether the upper limit saturation happens.
+        # Namely upper_limit - y = relu(upper_limit - x)
+        A_x, A_y, A_beta, rhs = replace_relu_with_mixed_integer_constraint(
+            upper_limit - input_upper_bound, upper_limit - input_lower_bound)
+        # beta=1 implies the upper limit is active, the output is upper_limit.
+        # A_x*(upper_limit-x)+A_y*(upper_limit-y)+A_beta*(1-beta)<=rhs
+        # Equilvalently
+        # -A_x*x -A_y*y - A_beta*beta <= rhs-A_beta - (A_x+A_y)*upper_limit
+        beta = mip.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
+            name="saturation_upper")
+        mip.addMConstrs(
+            [-A_x.reshape((-1, 1)), -A_y.reshape((-1, 1)),
+             -A_beta.reshape((-1, 1))], [[input_var], [output_var], beta],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs-A_beta-(A_x+A_y)*upper_limit)
+        return beta
+    else:
+        # input_lower_bound < lower_limit < upper_limit < input_upper_bound. We
+        # need two binary variables to determine which linear segment the
+        # output lives in.
+
+        # We introduce a slack continuous variable z
+        # z - lower_limit = relu(x - lower_limit)
+        # upper_limit - y = relu(upper_limit - z)
+        z = mip.addVars(
+            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
+            name="saturation_slack")
+        # beta[0] is active when the lower limit is saturated.
+        # beta[1] is active when the upper limit is saturated.
+        beta = mip.addVars(
+            2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
+            name="saturation_binary")
+        # The two binary variables cannot be both active.
+        mip.addLConstr(
+            [torch.tensor([1, 1], dtype=torch.float64)], [beta], rhs=1.,
+            sense=gurobipy.GRB.LESS_EQUAL)
+        # Now add the first constraint z - lower_limit = relu(x - lower_limit)
+        A_x1, A_z1, A_beta1, rhs1 = replace_relu_with_mixed_integer_constraint(
+            input_lower_bound - lower_limit, input_upper_bound - lower_limit)
+        mip.addMConstrs(
+            [A_x1.reshape((-1, 1)), A_z1.reshape((-1, 1)),
+             -A_beta1.reshape((-1, 1))], [[input_var], z, [beta[0]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs1 - A_beta1 + (A_x1+A_z1) * lower_limit)
+        # Now add the second constraint upper_limit - y = relu(upper_limit - y)
+        A_z2, A_y2, A_beta2, rhs2 = replace_relu_with_mixed_integer_constraint(
+            upper_limit - input_upper_bound, upper_limit - input_lower_bound)
+        mip.addMConstrs(
+            [-A_z2.reshape((-1, 1)), -A_y2.reshape((-1, 1)),
+             -A_beta2.reshape((-1, 1))], [z, [output_var], [beta[1]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs2-A_beta2-(A_z2+A_y2)*upper_limit)
+        return beta
 
 
 def compare_numpy_matrices(actual, desired, rtol, atol):
