@@ -252,7 +252,13 @@ class DynamicsLearning:
                     self.save(save_path)
         except KeyboardInterrupt:
             self.to_device('cpu')
+            if save_rate > 0:
+                assert(save_path is not None)
+                self.save(save_path)
         self.to_device('cpu')
+        if save_rate > 0:
+            assert(save_path is not None)
+            self.save(save_path)
 
     def rollout_validation(self, rollouts, device='cpu'):
         self.to_device(device)
