@@ -1,7 +1,6 @@
 import os
 import torch
 import torch.nn as nn
-import torch.distributions as distributions
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import gurobipy
