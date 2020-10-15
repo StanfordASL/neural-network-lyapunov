@@ -4,6 +4,15 @@ import torch.nn as nn
 
 class Encoder(nn.Module):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        Parent class for encoders. Encoders should be child classes of this
+        class and implement the forward method (which takes a tensor
+        and returns a tensor - see torch documentation).
+        @param z_dim int dimension of the latent space (output)
+        @param image_width/height int dimensions of the images (input)
+        @param grayscale boolean whether or not the images are in grayscale
+        (i.e. have one channel). Otherwise they are RGB (3 channels)
+        """
         super(Encoder, self).__init__()
         self.z_dim = z_dim
         self.image_width = image_width
@@ -25,6 +34,15 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        Parent class for decoders. Decoders should be child classes of this
+        class and implement the forward method (which takes a tensor
+        and returns a tensor - see torch documentation).
+        @param z_dim int dimension of the latent space (input)
+        @param image_width/height int dimensions of the images (output)
+        @param grayscale boolean whether or not the images are in grayscale
+        (i.e. have one channel). Otherwise they are RGB (3 channels)
+        """
         super(Decoder, self).__init__()
         self.z_dim = z_dim
         self.image_width = image_width
@@ -38,6 +56,9 @@ class Decoder(nn.Module):
 
 class LinearEncoder1(Encoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Encoder documentation
+        """
         super(LinearEncoder1, self).__init__(z_dim, image_width, image_height,
                                              grayscale)
         linear = [
@@ -59,6 +80,9 @@ class LinearEncoder1(Encoder):
 
 class LinearDecoder1(Decoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Decoder documentation
+        """
         super(LinearDecoder1, self).__init__(z_dim, image_width, image_height,
                                              grayscale)
         linear = [
@@ -83,6 +107,9 @@ class LinearDecoder1(Decoder):
 
 class CNNEncoder1(Encoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Encoder documentation
+        """
         super(CNNEncoder1, self).__init__(z_dim, image_width, image_height,
                                           grayscale)
         conv = [
@@ -112,6 +139,9 @@ class CNNEncoder1(Encoder):
 
 class CNNDecoder1(Decoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Decoder documentation
+        """
         super(CNNDecoder1, self).__init__(z_dim, image_width, image_height,
                                           grayscale)
         width_in = int(self.image_width / 4)
@@ -144,6 +174,9 @@ class CNNDecoder1(Decoder):
 
 class CNNEncoder2(Encoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Encoder documentation
+        """
         super(CNNEncoder2, self).__init__(z_dim, image_width, image_height,
                                           grayscale)
         conv = [
@@ -174,6 +207,9 @@ class CNNEncoder2(Encoder):
 
 class CNNDecoder2(Decoder):
     def __init__(self, z_dim, image_width, image_height, grayscale):
+        """
+        See Decoder documentation
+        """
         super(CNNDecoder2, self).__init__(z_dim, image_width, image_height,
                                           grayscale)
         width_in = self.image_width - 4
