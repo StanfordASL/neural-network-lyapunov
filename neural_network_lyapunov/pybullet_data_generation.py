@@ -64,7 +64,7 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
 def add_noise(x_data, noise_std_percent):
     """
     Adds normal noise to a dataset
-    @param noise_std tensor with standard deviation of the noise,
+    @param noise_std_percent tensor with standard deviation of the noise,
     as percent of the mean of the magnitude for that dimension
     @return x_data_, same as x_data but with noise added to it
     """
@@ -100,7 +100,7 @@ def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
     )
     validation_dataloader = DataLoader(
         validation_dataset,
-        batch_size=len(validation_dataset),
+        batch_size=batch_size,
         shuffle=True
     )
     return train_dataloader, validation_dataloader
@@ -135,7 +135,8 @@ class PybulletSampleGenerator:
         else:
             self.physics_client = pb.connect(pb.DIRECT)
         pb.setGravity(0, 0, -9.8)
-        pb.setTimeStep(1./240.)
+        self.timestep = 1./240.
+        pb.setTimeStep(self.timestep)
         pb.setPhysicsEngineParameter(enableFileCaching=0)
         self.grayscale = grayscale
         self.grayscale_weight = [.2989, .5870, .1140]
@@ -165,7 +166,7 @@ class PybulletSampleGenerator:
         else:
             self.x_dim = 12
         # runs the sim for .5 seconds to resolve self collisions
-        for i in range(120):
+        for i in range(int(.5/self.timestep)):
             pb.stepSimulation()
         self.state_id = pb.saveState()
 
@@ -189,7 +190,7 @@ class PybulletSampleGenerator:
         assert(isinstance(x0, torch.Tensor))
         assert(len(x0) == self.x_dim)
         pb.restoreState(self.state_id)
-        num_step = int(dt*240.*.5)
+        num_step = int(dt*(.5/self.timestep))
         X = np.zeros((6, self.image_width, self.image_height), dtype=np.uint8)
         X_next = np.zeros((3, self.image_width, self.image_height),
                           dtype=np.uint8)
