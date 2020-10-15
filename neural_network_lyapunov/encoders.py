@@ -24,6 +24,11 @@ class Encoder(nn.Module):
             self.num_channels_in = 6
 
     def conv_output_size(self, conv):
+        """
+        compute the output size of a list of convolutions
+        @param conv list of convolutions
+        @return num_channels, width, height
+        """
         with torch.no_grad():
             x_tmp = torch.rand((1, self.num_channels_in,
                                 self.image_width, self.image_height))
