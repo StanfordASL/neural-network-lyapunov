@@ -204,8 +204,8 @@ class DynamicsLearning:
                 lyap_pos_loss = -lyap_pos_mip.\
                     compute_objective_from_mip_data_and_solution()
             except IncorrectActiveConstraint:
-                print("WARNING: Unable to retrieve Lyapunov positivity loss.\
-                    Cannot find the right constraints to get gradient.")
+                print("WARNING: Cannot find the right " +
+                      "constraints to get gradient.")
                 lyap_pos_loss = torch.tensor(0, dtype=self.opt.dtype)
         lyap_der_mip = self.lyap.lyapunov_derivative_as_milp(
             self.lyap.system.x_equilibrium,
@@ -224,8 +224,8 @@ class DynamicsLearning:
                 lyap_der_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()
             except IncorrectActiveConstraint:
-                print("WARNING: Unable to retrieve Lyapunov derivative loss.\
-                    Cannot find the right constraints to get gradient.")
+                print("WARNING: Cannot find the right " +
+                      "constraints to get gradient.")
                 lyap_der_loss = torch.tensor(0, dtype=self.opt.dtype)
         return (self.opt.lyap_pos_loss_weight * lyap_pos_loss,
                 self.opt.lyap_der_loss_weight * lyap_der_loss)
@@ -380,6 +380,8 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         helper function to save relevant parameters
         @param save_path string for where to save (prefix)
         """
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
         with open(os.path.join(save_path, 'dyn_learner.pkl'), 'wb') as output:
             pickle.dump(self.lyap, output, pickle.HIGHEST_PROTOCOL)
 
@@ -479,6 +481,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         helper function to save relevant parameters
         @param save_path string for where to save (prefix)
         """
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
         with open(os.path.join(save_path, 'dyn_learner.pkl'), 'wb') as output:
             pickle.dump(self.lyap, output, pickle.HIGHEST_PROTOCOL)
             pickle.dump(self.encoder, output, pickle.HIGHEST_PROTOCOL)
