@@ -15,7 +15,7 @@ class TestPybulletSampleGeneratorJointSpace(unittest.TestCase):
 
     def test_generate_sample(self):
         x0 = torch.tensor([np.pi/2, 1.], dtype=self.pbsg.dtype)
-        X, X_next, x_next = self.pbsg.generate_sample(x0, .1)
+        x_next, X, X_next = self.pbsg.generate_sample(x0, .1)
         self.assertEqual(len(X.shape), 3)
         self.assertEqual(X.shape[0], 6)
         self.assertEqual(X_next.shape[0], 3)
@@ -23,7 +23,7 @@ class TestPybulletSampleGeneratorJointSpace(unittest.TestCase):
 
     def test_generate_rollout(self):
         x0 = torch.tensor([np.pi/2, 1.], dtype=self.pbsg.dtype)
-        X, x = self.pbsg.generate_rollout(x0, .1, 10)
+        x, X = self.pbsg.generate_rollout(x0, .1, 10)
         self.assertEqual(len(X.shape), 4)
         self.assertEqual(X.shape, (12, 3,
                          self.pbsg.image_width, self.pbsg.image_height))
@@ -50,7 +50,7 @@ class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
     def test_generate_sample(self):
         x0 = torch.tensor([0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                           dtype=self.pbsg.dtype)
-        X, X_next, x_next = self.pbsg.generate_sample(x0, .1)
+        x_next, X, X_next = self.pbsg.generate_sample(x0, .1)
         self.assertEqual(len(X.shape), 3)
         self.assertEqual(X.shape[0], 6)
         self.assertEqual(X_next.shape[0], 3)
@@ -59,7 +59,7 @@ class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
     def test_generate_rollout(self):
         x0 = torch.tensor([0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                           dtype=self.pbsg.dtype)
-        X, x = self.pbsg.generate_rollout(x0, .1, 10)
+        x, X = self.pbsg.generate_rollout(x0, .1, 10)
         self.assertEqual(len(X.shape), 4)
         self.assertEqual(X.shape, (12, 3,
                          self.pbsg.image_width, self.pbsg.image_height))
