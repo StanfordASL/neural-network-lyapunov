@@ -7,7 +7,10 @@ class Encoder(nn.Module):
         """
         Parent class for encoders. Encoders should be child classes of this
         class and implement the forward method (which takes a tensor
-        and returns a tensor - see torch documentation).
+        and returns tensors - see torch documentation).
+        Specifically, the forward method needs to return two tensors. The
+        first one is mean, and the second the log of the variance of the
+        samples in latent spaces (as in most VAE architectues)
         @param z_dim int dimension of the latent space (output)
         @param image_width/height int dimensions of the images (input)
         @param grayscale boolean whether or not the images are in grayscale
@@ -23,18 +26,18 @@ class Encoder(nn.Module):
         else:
             self.num_channels_in = 6
 
-    def conv_output_size(self, conv):
+    def layers_output_shape(self, layers):
         """
-        compute the output size of a list of convolutions
-        @param conv list of convolutions
-        @return num_channels, width, height
+        compute the output size of a list of layers, given an input image
+        @param conv list of torch layers (like nn.Conv2d)
+        @return tuple (num_channels, width, height)
         """
         with torch.no_grad():
             x_tmp = torch.rand((1, self.num_channels_in,
                                 self.image_width, self.image_height))
             for c_layer in self.conv:
-                x_tmp = c_layer(x_tmp)
-        return x_tmp.shape[1], x_tmp.shape[2], x_tmp.shape[3]
+                x_tmp = c_layer.forward(x_tmp)
+        return x_tmp.shape[1:]
 
 
 class Decoder(nn.Module):
@@ -76,6 +79,9 @@ class LinearEncoder1(Encoder):
         self.relu = nn.ReLU()
 
     def forward(self, x):
+        """
+        returns mean and log of variance in latent space as two tensors
+        """
         x = torch.flatten(x, start_dim=1)
         for l_layer in self.linear[:-1]:
             x = self.relu(l_layer(x))
@@ -124,7 +130,7 @@ class CNNEncoder1(Encoder):
             nn.MaxPool2d(2, 2),
         ]
         self.conv = nn.ModuleList(conv)
-        conv_out_shape = self.conv_output_size(self.conv)
+        conv_out_shape = self.layers_output_shape(self.conv)
         linear = [
             nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
                       conv_out_shape[2], self.z_dim * 2),
@@ -133,6 +139,9 @@ class CNNEncoder1(Encoder):
         self.relu = nn.ReLU()
 
     def forward(self, x):
+        """
+        returns mean and log of variance in latent space as two tensors
+        """
         for c_layer in self.conv:
             x = self.relu(c_layer(x))
         x = torch.flatten(x, start_dim=1)
@@ -191,7 +200,7 @@ class CNNEncoder2(Encoder):
             nn.Conv2d(32, 10, 5, stride=2, padding=0),
         ]
         self.conv = nn.ModuleList(conv)
-        conv_out_shape = self.conv_output_size(self.conv)
+        conv_out_shape = self.layers_output_shape(self.conv)
         linear = [
             nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
                       conv_out_shape[2], 500),
@@ -201,6 +210,9 @@ class CNNEncoder2(Encoder):
         self.relu = nn.ReLU()
 
     def forward(self, x):
+        """
+        returns mean and log of variance in latent space as two tensors
+        """
         for c_layer in self.conv:
             x = self.relu(c_layer(x))
         x = torch.flatten(x, start_dim=1)
