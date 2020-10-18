@@ -11,6 +11,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.pybullet_data_generation as\
  pybullet_data_generation
+import neural_network_lyapunov.utils as utils
 
 
 z_dim = 2
@@ -48,12 +49,10 @@ opt_default = dict(
     V_eps=0.1,
 
     # dynamics nn
-    dyn_nn_width=z_dim*3,
-    dyn_nn_depth=2,
+    dyn_nn_width=(z_dim, z_dim*3, z_dim*3, z_dim),
 
     # lyapunov nn
-    lyap_nn_width=z_dim*3,
-    lyap_nn_depth=2,
+    lyap_nn_width=(z_dim, z_dim*3, z_dim*3, 1),
 
     # encoder (image-space learning)
     encoder_class=encoders.CNNEncoder2,
@@ -114,11 +113,10 @@ class TestDynamicsLearning(unittest.TestCase):
             self.X_data, self.X_next_data, opt.batch_size)
         self.X_validation_dataloader = pybullet_data_generation.get_dataloader(
             self.X_data, self.X_next_data, opt.batch_size)
-        self.dyn_nn_model = dynamics_learning.get_ff_network(
-            opt.dtype, opt.x_dim, opt.x_dim,
-            opt.dyn_nn_width, opt.dyn_nn_depth)
-        self.lyap_nn_model = dynamics_learning.get_ff_network(
-            opt.dtype, opt.x_dim, 1, opt.lyap_nn_width, opt.lyap_nn_depth)
+        self.dyn_nn_model = utils.setup_relu(
+            opt.dyn_nn_width, negative_slope=0., dtype=opt.dtype)
+        self.lyap_nn_model = utils.setup_relu(
+            opt.lyap_nn_width, negative_slope=0., dtype=opt.dtype)
         self.relu_sys = relu_system.AutonomousReLUSystemGivenEquilibrium(
             opt.dtype, opt.dataset_x_lo, opt.dataset_x_up,
             self.dyn_nn_model, opt.x_equilibrium)

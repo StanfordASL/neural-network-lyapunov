@@ -10,26 +10,6 @@ import neural_network_lyapunov.relu_system as relu_system
 from neural_network_lyapunov.gurobi_torch_mip import IncorrectActiveConstraint
 
 
-def get_ff_network(dtype, input_dim, output_dim, width, depth,
-                   activation=nn.ReLU):
-    """
-    helper function to generate a simple feedforward neural network
-    @param dtype torch dtype
-    @param input_dim int dimension of the input
-    @param output_dim int dimension of the output
-    @param width int number of unit in each hidden layer
-    @param depth int number of hidden layers
-    @param activation torch class activation function
-    @return torch model (nn.Sequential)
-    """
-    nn_layers = [nn.Linear(input_dim, width), activation()]
-    for i in range(depth):
-        nn_layers += [nn.Linear(width, width), activation()]
-    nn_layers += [nn.Linear(width, output_dim)]
-    model = nn.Sequential(*nn_layers).type(dtype)
-    return model
-
-
 def gurobi_terminate_if(model, where, less_than_zero=True):
     """
     helper function to terminate gurobi early as soon as a counterexample
