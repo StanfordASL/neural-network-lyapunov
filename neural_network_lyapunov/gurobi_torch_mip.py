@@ -3,6 +3,10 @@ import torch
 import numpy as np
 
 
+class IncorrectActiveConstraint(Exception):
+    pass
+
+
 class MixedIntegerConstraintsReturn:
     """
     We often convert a piecewise linear(affine) function y=f(x) to mixed
@@ -558,7 +562,8 @@ class GurobiTorchMIP:
         """
         assert(solution_number >= 0 and
                solution_number < self.gurobi_model.solCount)
-        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        assert(self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL or
+               self.gurobi_model.status == gurobipy.GRB.Status.INTERRUPTED)
         self.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber,
                                    solution_number)
         r_sol = torch.tensor([var.xn for var in self.r], dtype=self.dtype)
@@ -576,8 +581,6 @@ class GurobiTorchMIP:
         num_trials = 0
         max_num_trials = 10
 
-        class IncorrectActiveConstraint(Exception):
-            pass
         while not objective_match:
             active_ineq_row_indices = np.arange(len(self.rhs_in))
             active_ineq_row_indices = set(active_ineq_row_indices[

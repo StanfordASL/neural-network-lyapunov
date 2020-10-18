@@ -76,34 +76,23 @@ def add_noise(x_data, noise_std_percent):
     return x_data_
 
 
-def get_dataloaders(x_data, x_next_data, batch_size, validation_ratio):
+def get_dataloader(x_data, x_next_data, batch_size):
     """
-    generates dataloaders given datasets as tensors
+    generates a dataloader given a dataset as tensors
     @param x_data, tensor of input data to the model
     [num_sample,2*num_channels,state size or width, nothing or height]
     @param x_next_data, tensor of output data to the model
     [num_sample,num_channels,state size or width, nothing or height]
     @param batch_size, int
-    @param validation_ratio, float proportion of the data to include in the
-    validation dataloader instead of the training dataloader
     @return torch DataLoaders, training dataloader and validation one
     """
     x_dataset = TensorDataset(x_data, x_next_data)
-    train_size = int((1. - validation_ratio) * len(x_dataset))
-    val_size = len(x_dataset) - train_size
-    train_dataset, validation_dataset = torch.utils.data.random_split(
-        x_dataset, [train_size, val_size])
-    train_dataloader = DataLoader(
-        train_dataset,
+    dataloader = DataLoader(
+        x_dataset,
         batch_size=batch_size,
         shuffle=True
     )
-    validation_dataloader = DataLoader(
-        validation_dataset,
-        batch_size=batch_size,
-        shuffle=True
-    )
-    return train_dataloader, validation_dataloader
+    return dataloader
 
 
 class PybulletSampleGenerator:
@@ -269,7 +258,7 @@ class PybulletSampleGenerator:
         X_next = torch.clamp(X_next, 0., 1.)
         X = X.type(self.dtype)
         X_next = X_next.type(self.dtype)
-        return X, X_next, x1
+        return x1, X, X_next
 
     def generate_rollout(self, x0, dt, N):
         """
@@ -281,15 +270,15 @@ class PybulletSampleGenerator:
                              self.image_width, self.image_height),
                              dtype=self.dtype)
         x_data = torch.empty((N+1, self.x_dim), dtype=self.dtype)
-        X, _, _ = self.generate_sample(x0, dt)
+        _, X, _ = self.generate_sample(x0, dt)
         X_data[0, :] = X[:self.num_channels, :]
         X_data[1, :] = X[self.num_channels:, :]
         x_data[0, :] = x0
         for n in range(N):
-            _, X_next, x_next = self.generate_sample(x_data[n], dt)
+            x_next, _, X_next = self.generate_sample(x_data[n], dt)
             X_data[n+2] = X_next
             x_data[n+1] = x_next
-        return X_data, x_data
+        return x_data, X_data
 
     def generate_dataset(self, x_lo, x_up, dt, N, num_rollouts):
         """
@@ -311,7 +300,7 @@ class PybulletSampleGenerator:
                                   dtype=self.dtype)
         for i in range(num_rollouts):
             x0 = torch.rand(self.x_dim) * (x_up - x_lo) + x_lo
-            X_data_rollout, x_data_rollout = self.generate_rollout(x0, dt, N)
+            x_data_rollout, X_data_rollout = self.generate_rollout(x0, dt, N)
             for n in range(N):
                 X_data[i * N + n, :self.num_channels, :] = X_data_rollout[n, :]
                 X_data[i * N + n, self.num_channels:, :] = X_data_rollout[
@@ -332,7 +321,7 @@ class PybulletSampleGenerator:
         X_rollouts = []
         x_rollouts = []
         for k in range(x_data.shape[0]):
-            rX, rx = self.generate_rollout(x_data[k, :], dt, N)
-            X_rollouts.append(rX)
+            rx, rX = self.generate_rollout(x_data[k, :], dt, N)
             x_rollouts.append(rx)
-        return X_rollouts, x_rollouts
+            X_rollouts.append(rX)
+        return x_rollouts, X_rollouts

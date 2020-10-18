@@ -137,7 +137,7 @@ gurobi.log
 !*/test/data/*.pt
 
 # pytorch logs
-neural_network_lyapunov/notebooks/runs
-neural_network_lyapunov/notebooks/*.p
+notebooks/runs
+notebooks/*.p
 
 *.DS_Store
