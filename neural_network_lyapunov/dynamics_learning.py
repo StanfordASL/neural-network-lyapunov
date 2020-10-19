@@ -519,7 +519,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         x_decoded = self.decoder(z)
         z_next = self.lyap.system.step_forward(z)
         x_next_pred_decoded = self.decoder(z_next)
-        return x_decoded, x_next_pred_decoded, z_mu, z_log_var
+        return x_decoded, x_next_pred_decoded, z_mu, z_log_var, z_next
 
     def lyapunov_loss_at_samples(self, x):
         """
@@ -569,7 +569,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             x_next_ = torch.cat((x[:, x_next.shape[1]:, :, :], x_next), dim=1)
         else:
             x_next_ = x_next
-        x_decoded, x_next_pred_decoded, z_mu, z_log_var = self.vae_forward(x)
+        x_decoded, x_next_pred_decoded, z_mu, z_log_var, z_next =\
+            self.vae_forward(x)
         loss = self.reconstruction_loss(x, x_decoded)
         loss += self.reconstruction_loss(x_next_, x_next_pred_decoded)
         if self.opt.use_variational:
@@ -611,18 +612,17 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                             z.squeeze(), self.lyap.system.x_equilibrium,
                             self.opt.V_lambda).item())
                 else:
-                    _, x_next_pred_decoded, z_mu, z_log_var = \
+                    _, x_next_pred_decoded, _, _, z_next =\
                         self.vae_forward(
                             torch.cat(
                                 (x_traj[n, :], x_traj[n+1, :]),
                                 dim=0).unsqueeze(0))
                     x_traj[n+2, :] =\
                         x_next_pred_decoded[0, num_channels:, :, :]
-                    # TODO: actually get the sample if VAE (not the mean)
-                    z_traj.append(z_mu)
+                    z_traj.append(z_next)
                     V_traj.append(
                         self.lyap.lyapunov_value(
-                            z_mu.squeeze(), self.lyap.system.x_equilibrium,
+                            z_next.squeeze(), self.lyap.system.x_equilibrium,
                             self.opt.V_lambda).item())
         V_traj = torch.tensor(V_traj, dtype=self.opt.dtype)
         z_traj = torch.cat(z_traj).detach()
