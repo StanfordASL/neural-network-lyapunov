@@ -216,8 +216,8 @@ class TestDynamicsLearning(unittest.TestCase):
         dl = dynamics_learning.LatentSpaceDynamicsLearning.load(
             ".", self.x_train_dataloader, self.x_validation_dataloader,
             self.opt)
-        x1, _, _, _ = self.latent_dyn_learner.vae_forward(self.X_data)
-        x2, _, _, _ = dl.vae_forward(self.X_data)
+        x1, _, _, _, _ = self.latent_dyn_learner.vae_forward(self.X_data)
+        x2, _, _, _, _ = dl.vae_forward(self.X_data)
         self.assertTrue(torch.all(x1 == x2))
         os.remove("./dyn_learner.pkl")
 
