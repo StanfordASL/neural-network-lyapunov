@@ -215,6 +215,16 @@ def train_cost_approximator(state_samples, cost_samples, cost_relu, V_lambda):
         lr=0.001)
 
 
+def pendulum_closed_loop_dynamics(
+    plant: pendulum.Pendulum, x: np.ndarray, controller_relu,
+        x_equilibrium, u_equilibrium, u_lo, u_up):
+    assert(isinstance(plant, pendulum.Pendulum))
+    u_pre_saturation = controller_relu(torch.from_numpy(x)) -\
+        controller_relu(x_equilibrium) + u_equilibrium
+    u = torch.max(torch.min(u_pre_saturation, u_up), u_lo).detach().numpy()
+    return plant.dynamics(x, u)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="pendulum training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -239,14 +249,15 @@ if __name__ == "__main__":
         dataset = torch.load(dir_path + "/data/pendulum_dynamics_dataset.pt")
         model_dataset = torch.utils.data.TensorDataset(
             dataset["input"], dataset["output"])
+    # Setup forward dynamics model
+    dynamics_model = utils.setup_relu(
+        (3, 5, 5, 2), params=None, negative_slope=0.01, bias=True,
+        dtype=torch.float64)
     if args.train_forward_model:
-        dynamics_model = utils.setup_relu(
-            (3, 5, 5, 2), params=None, negative_slope=0.01, bias=True,
-            dtype=torch.float64)
         train_forward_model(dynamics_model, model_dataset)
     else:
-        dynamics_model = torch.load(
-            dir_path + "/data/pendulum_forward_relu.pt")
+        dynamics_model.load_state_dict(torch.load(
+            dir_path + "/data/pendulum_forward_relu.pt"))
     if args.generate_controller_cost_data:
         state_samples, control_samples, cost_samples =\
             generate_controller_dataset()
@@ -257,7 +268,7 @@ if __name__ == "__main__":
         control_samples = controller_cost_data["control_samples"]
         cost_samples = controller_cost_data["cost_samples"]
 
-    V_lambda = 0.2
+    V_lambda = 0.11
     controller_relu = utils.setup_relu(
         (2, 4, 4, 1), params=None, negative_slope=0.01, bias=True,
         dtype=torch.float64)
@@ -268,7 +279,7 @@ if __name__ == "__main__":
         controller_relu.load_state_dict(torch.load(args.load_controller_relu))
 
     lyapunov_relu = utils.setup_relu(
-        (2, 6, 6, 1), params=None, negative_slope=0.01, bias=True,
+        (2, 6, 6, 6, 1), params=None, negative_slope=0.01, bias=True,
         dtype=torch.float64)
     if args.train_cost_approximator:
         train_cost_approximator(
@@ -278,25 +289,26 @@ if __name__ == "__main__":
     # Now train the controller and Lyapunov function together
     x_equilibrium = torch.tensor([np.pi, 0], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([0, -3], dtype=torch.float64)
-    x_up = torch.tensor([np.pi * 2, 3], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - 0.5, -5], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + 0.5, 5], dtype=torch.float64)
     u_lo = torch.tensor([-10], dtype=torch.float64)
     u_up = torch.tensor([10], dtype=torch.float64)
     forward_system = relu_system.ReLUSystemGivenEquilibrium(
         torch.float64, x_lo, x_up, u_lo, u_up, dynamics_model, x_equilibrium,
         u_equilibrium)
     closed_loop_system = feedback_system.FeedbackSystem(
-        forward_system, controller_relu, x_equilibrium, u_equilibrium)
+        forward_system, controller_relu, x_equilibrium, u_equilibrium,
+        u_lo.detach().numpy(), u_up.detach().numpy())
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
-    dut.lyapunov_derivative_convergence_tol = 5E-4
+    dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = 3000
-    dut.lyapunov_positivity_epsilon = 0.05
-    dut.lyapunov_derivative_epsilon = 0.05
+    dut.lyapunov_positivity_epsilon = 0.1
+    dut.lyapunov_derivative_epsilon = 0.0
     state_samples_all = torch.tensor([
         [np.pi + 0.1, 0.2], [np.pi - 0.1, 0.2]], dtype=torch.float64)
     dut.output_flag = True

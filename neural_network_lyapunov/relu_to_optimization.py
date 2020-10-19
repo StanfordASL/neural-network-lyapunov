@@ -222,6 +222,62 @@ class ReLUFreePattern:
             self.num_relu_units -= len(self.relu_unit_index[-1])
             self.relu_unit_index = self.relu_unit_index[:-1]
 
+    def output_bounds_IA(self, z_post_relu_lo, z_post_relu_up) -> tuple:
+        """
+        Get the bounds on the output using interval arithmetic (IA).
+        Note that the bounds are tensors which carries the gradient w.r.t the
+        network output layer weights and biases.
+        @param z_post_relu_lo The lower bound on all the hidden units after
+        ReLU activation.
+        @param z_post_relu_up The upper bound on all the hidden units after
+        ReLU activation.
+        @return (lower_bound, upper_bound) The lower and upper bounds of the
+        output as lists of tensors.
+        """
+        if self.last_layer_is_relu:
+            lower_bounds = [None] * self.model[-2].out_features
+            upper_bounds = [None] * self.model[-2].out_features
+            for j in range(len(self.relu_unit_index[-1])):
+                z_bound_index = self.relu_unit_index[-1][j]
+                lower_bounds[j] = z_post_relu_lo[z_bound_index]
+                upper_bounds[j] = z_post_relu_up[z_bound_index]
+        else:
+            # TODO(hongkai.dai): factor out this code to compute the bound
+            # using interval arithmetics.
+            layer = self.model[-1]
+            lower_bounds = [None] * layer.out_features
+            upper_bounds = [None] * layer.out_features
+            for j in range(layer.out_features):
+                # First compute zᵤₚ, zₗₒ as the bounds for
+                # (Wᵢzᵢ)(j) + bᵢ(j)
+                zi_size = layer.in_features
+                # Note that z_post_relu_lo and z_post_relu_up are
+                # lists, not torch tensors (because Tensor[]
+                # operator is an inplace operator, which causes
+                # the pytorch autograd to fail. So we have to use
+                # a for loop below to copy z_post_relu_lo to zi_lo,
+                # and z_post_relu_up to zi_up.
+                zi_lo = torch.empty(zi_size, dtype=self.dtype)
+                zi_up = torch.empty(zi_size, dtype=self.dtype)
+                for k in range(zi_size):
+                    zi_lo[k] = z_post_relu_lo[
+                        self.relu_unit_index[-1][k]].clone()
+                    zi_up[k] = z_post_relu_up[
+                        self.relu_unit_index[-1][k]].clone()
+                mask1 = torch.where(layer.weight[j] > 0)[0]
+                mask2 = torch.where(layer.weight[j] <= 0)[0]
+                lower_bounds[j] = layer.weight[j][mask1] \
+                    @ zi_lo[mask1].reshape((-1)) + layer.weight[j][mask2] @ \
+                    zi_up[mask2].reshape((-1)) + \
+                    (layer.bias[j] if layer.bias is not None else
+                     torch.tensor(0., dtype=self.dtype))
+                upper_bounds[j] = layer.weight[j][mask1] \
+                    @ zi_up[mask1].reshape((-1)) + layer.weight[j][mask2] @ \
+                    zi_lo[mask2].reshape((-1)) + \
+                    (layer.bias[j] if layer.bias is not None else
+                     torch.tensor(0., dtype=self.dtype))
+        return lower_bounds, upper_bounds
+
     def output_constraint(self, x_lo, x_up):
         """
         The output of (leaky) ReLU network is a piecewise linear function of

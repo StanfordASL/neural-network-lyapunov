@@ -177,8 +177,11 @@ def setup_hybrid_feedback_system(dtype):
         linear1, torch.nn.LeakyReLU(0.01), linear2)
     x_equilibrium = torch.tensor([1, 1], dtype=dtype)
     u_equilibrium = torch.tensor([0.1, 0.1], dtype=dtype)
+    u_lower_limit = np.array([-np.inf, -np.inf])
+    u_upper_limit = np.array([np.inf, np.inf])
     system = feedback_system.FeedbackSystem(
-        forward_system, controller_network, x_equilibrium, u_equilibrium)
+        forward_system, controller_network, x_equilibrium, u_equilibrium,
+        u_lower_limit, u_upper_limit)
     return system
 
 
@@ -1096,7 +1099,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
 
     def test_lyapunov_derivative_as_milp_gradient4(self):
         self.lyapunov_derivative_as_milp_gradient_tester(
-            self.system4, atol=1e-4, rtol=4e-5)
+            self.system4, atol=1e-4, rtol=1.1e-4)
 
     def test_lyapunov_derivative_loss_at_samples(self):
         # Construct a simple ReLU model with 2 hidden layers

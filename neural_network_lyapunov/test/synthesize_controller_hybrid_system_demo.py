@@ -5,6 +5,7 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 
 import torch
+import numpy as np
 
 
 def create_system(dtype):
@@ -38,9 +39,12 @@ if __name__ == "__main__":
 
     x_equilibrium = torch.tensor([0, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0, 0], dtype=dtype)
+    u_lower_limit = np.array([-20., -20.])
+    u_upper_limit = np.array([20., 20.])
 
     closed_loop_system = feedback_system.FeedbackSystem(
-        forward_system, controller_network, x_equilibrium, u_equilibrium)
+        forward_system, controller_network, x_equilibrium, u_equilibrium,
+        u_lower_limit, u_upper_limit)
 
     lyapunov_relu = utils.setup_relu(
         (2, 4, 4, 1), None, negative_slope=0.01, bias=False, dtype=dtype)

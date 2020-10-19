@@ -214,6 +214,8 @@ class TrainLyapunovReLU:
                 gurobipy.GRB.Param.PoolSolutions,
                 self.lyapunov_derivative_mip_pool_solutions)
         lyapunov_derivative_mip.gurobi_model.optimize()
+        for v in lyapunov_derivative_as_milp_return[2]:
+            v.x
 
         relu_zeta_val = np.array([
             np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])

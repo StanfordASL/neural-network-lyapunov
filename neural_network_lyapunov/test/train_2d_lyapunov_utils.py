@@ -24,8 +24,10 @@ def setup_state_samples_all(x_equilibrium, lower, upper, mesh_size, theta):
     assert(len(mesh_size) == 2)
     dtype = torch.float64
     (samples_x, samples_y) = torch.meshgrid(
-        torch.linspace(lower[0], upper[0], mesh_size[0], dtype=dtype),
-        torch.linspace(lower[1], upper[1], mesh_size[1], dtype=dtype))
+        torch.linspace(lower[0] - x_equilibrium[0],
+                       upper[0] - x_equilibrium[0], mesh_size[0], dtype=dtype),
+        torch.linspace(lower[1] - x_equilibrium[1],
+                       upper[1] - x_equilibrium[1], mesh_size[1], dtype=dtype))
     state_samples = [None] * (mesh_size[0] * mesh_size[1])
     if isinstance(theta, float):
         theta = torch.tensor(theta, dtype=dtype)
@@ -120,7 +122,9 @@ def plot_lyapunov(
     with torch.no_grad():
         state_samples_all = setup_state_samples_all(
             x_equilibrium, x_lower, x_upper, mesh_size, 0.)
-        V = relu(state_samples_all)
+        V = relu(state_samples_all) - relu(x_equilibrium)\
+            + V_lambda * torch.norm(
+                state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
         V_np = np.empty(mesh_size)
         samples_x = torch.empty(mesh_size)
         samples_y = torch.empty(mesh_size)
@@ -147,21 +151,23 @@ def plot_lyapunov_colormap(
     with torch.no_grad():
         state_samples_all = setup_state_samples_all(
             x_equilibrium, x_lower, x_upper, mesh_size, 0.)
-        V = relu(state_samples_all)
-        relu_at_equilibrium = relu.forward(x_equilibrium)
-        V_np = np.empty(mesh_size)
+        V = relu(state_samples_all) - relu(x_equilibrium) +\
+            V_lambda * torch.norm(
+                state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
+        V_minus_l1 = V - lyapunov_positivity_epsilon * torch.norm(
+            state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
+        V_minus_l1_np = np.empty(mesh_size)
         samples_x = torch.empty(mesh_size)
         samples_y = torch.empty(mesh_size)
         for i in range(mesh_size[0]):
             for j in range(mesh_size[1]):
                 samples_x[i, j] = state_samples_all[i * mesh_size[1] + j][0]
                 samples_y[i, j] = state_samples_all[i * mesh_size[1] + j][1]
-                V_np[i, j] = V[i * mesh_size[1] + j].item()
+                V_minus_l1_np[i, j] = V_minus_l1[i * mesh_size[1] + j].item()
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
         plot = ax.pcolor(
-            samples_x_np, samples_y_np, V_np - relu_at_equilibrium.item(),
-            **kwargs)
+            samples_x_np, samples_y_np, V_minus_l1_np, **kwargs)
         rc('text', usetex=True)
         if lyapunov_positivity_epsilon == 0:
             ax.set_title(r"$V$", fontsize=title_fontsize)
