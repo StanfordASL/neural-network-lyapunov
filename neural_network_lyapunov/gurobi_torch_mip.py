@@ -322,9 +322,9 @@ class GurobiTorchMIP:
         constraints to the program. We assume that the input variable and
         output variables are already created, and we will create the slack
         variable and binary variables within this function.
-        @p add_output_constraint If true, add the constraint
-        output = Aout_in * input + Aout_slack * slack + Aout_binary * binary +
-        Cout
+        @param output_vars If output_vars is None, thn we do not add the output
+        constraint output_vars = Aout_input * input + Aout_slack * slack +
+        Aout_binary * binary + Cout, otherwise we add the constraint.
         """
         # Do some check
         assert(isinstance(

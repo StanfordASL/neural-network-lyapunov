@@ -1,0 +1,6 @@
+pytorch >= 1.6
+numpy >= 1.18
+scipy >= 1.4
+tensorboard >= 2.3
+pybullet
+cvxpy >= 1.1
