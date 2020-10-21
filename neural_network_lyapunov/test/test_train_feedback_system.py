@@ -8,6 +8,7 @@ import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
 import unittest
 import torch
+import numpy as np
 
 
 def create_hybrid_system1(dtype):
@@ -44,10 +45,14 @@ class TestLyapunov(unittest.TestCase):
                 0.1, 0.2, 0.3, 0.4, -0.5, 0.6, 0.7, 0.2, 0.5, 0.4, 1.5, 1.3,
                 1.2, -0.8, 2.1, 0.4], dtype=self.dtype), negative_slope=0.01,
             bias=False, dtype=self.dtype)
+        u_lower_limit = np.array([-10., -10.])
+        u_upper_limit = np.array([10., 10.])
         self.closed_loop_system1 = feedback_system.FeedbackSystem(
             self.forward_system1, self.controller_network1,
             x_equilibrium=torch.tensor([0, 0], dtype=self.dtype),
-            u_equilibrium=torch.tensor([0, 0], dtype=self.dtype))
+            u_equilibrium=torch.tensor([0, 0], dtype=self.dtype),
+            u_lower_limit=u_lower_limit,
+            u_upper_limit=u_upper_limit)
         self.lyapunov_relu1 = utils.setup_relu(
             (2, 4, 4, 1), torch.tensor([
                 0.1, 0.2, 0.3, -0.1, 0.3, 0.9, 1.2, 0.4, -0.2, -0.5, 0.5, 0.9,

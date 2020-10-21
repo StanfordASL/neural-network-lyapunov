@@ -11,6 +11,7 @@ between x[n], x[n+1] and u[n] with mixed-integer linear constraints.
 """
 
 import torch
+import numpy as np
 
 import gurobipy
 
@@ -18,6 +19,7 @@ import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.utils as utils
 
 
 class FeedbackSystem:
@@ -29,7 +31,8 @@ class FeedbackSystem:
     """
     def __init__(
         self, forward_system, controller_network, x_equilibrium: torch.Tensor,
-            u_equilibrium: torch.Tensor):
+        u_equilibrium: torch.Tensor, u_lower_limit: np.ndarray,
+            u_upper_limit: np.ndarray):
         """
         @param forward_system. The forward dynamical system representing
         x[n+1] = f(x[n], u[n])
@@ -37,6 +40,16 @@ class FeedbackSystem:
         u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         @param x_equilibrium The equilibrium state.
         @param u_equilibrium The control action at equilibrium.
+        @param u_lower_limit The lower limit for the control u[n]. We will
+        saturate the control if it is below u_lower_limit. Set to
+        u_lower_limit[i] to -infinity if you don't want saturation for the i'th
+        control.
+        @param u_upper_limit The upper limit for the control u[n]. We will
+        saturate the control if it is above u_upper_limit. Set to
+        u_upper_limit[i] to infinity if you don't want saturation for the i'th
+        control.
+        @note If a control has a lower limit, it has to also have an upper
+        limit, and vice versa.
         """
         assert(isinstance(
             forward_system, hybrid_linear_system.HybridLinearSystem) or
@@ -60,6 +73,12 @@ class FeedbackSystem:
         self.controller_relu_free_pattern = \
             relu_to_optimization.ReLUFreePattern(
                 self.controller_network, self.dtype)
+        assert(isinstance(u_lower_limit, np.ndarray))
+        assert(u_lower_limit.shape == (self.forward_system.u_dim,))
+        assert(isinstance(u_upper_limit, np.ndarray))
+        assert(u_upper_limit.shape == (self.forward_system.u_dim,))
+        self.u_lower_limit = u_lower_limit
+        self.u_upper_limit = u_upper_limit
 
     def add_dynamics_mip_constraint(
         self, mip, x_var, x_next_var, u_var_name, forward_slack_var_name,
@@ -79,7 +98,8 @@ class FeedbackSystem:
                 "forward_dynamics_output")
 
         # Now add the controller mip constraint.
-        controller_mip_cnstr, _, _, _, _ = \
+        controller_mip_cnstr, _, _, controller_z_post_relu_lo,\
+            controller_z_post_relu_up = \
             self.controller_relu_free_pattern.output_constraint(
                 torch.from_numpy(self.forward_system.x_lo_all),
                 torch.from_numpy(self.forward_system.x_up_all))
@@ -90,17 +110,45 @@ class FeedbackSystem:
                 controller_mip_cnstr, x_var, None, controller_slack_var_name,
                 controller_binary_var_name, "controller_ineq", "controller_eq",
                 "")
-        # Add the constraint
-        # u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
-        # Namely Aout_slack * controller_slack -u[n] = ϕᵤ(x*) - u* -Cout
+
+        # Add the input saturation constraint
+        # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
+        # and u[n] = saturation(u_pre_sat)
+        # Namely Aout_slack * controller_slack -u_pre_sat = ϕᵤ(x*) - u* -Cout
+        u_pre_sat = mip.addVars(
+            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="u_pre_sat")
+        controller_relu_at_x_equilibrium = self.controller_network(
+            self.x_equilibrium)
         mip.addMConstrs([
             controller_mip_cnstr.Aout_slack.reshape(
                 (self.forward_system.u_dim, len(controller_slack))),
             -torch.eye(
                 self.forward_system.u_dim, dtype=self.forward_system.dtype)],
-            [controller_slack, u], sense=gurobipy.GRB.EQUAL,
-            b=self.controller_network(self.x_equilibrium) - self.u_equilibrium
+            [controller_slack, u_pre_sat], sense=gurobipy.GRB.EQUAL,
+            b=controller_relu_at_x_equilibrium - self.u_equilibrium
             - controller_mip_cnstr.Cout, name="controller_output")
+
+        # Now add the saturation limit constraint
+        controller_relu_output_lo, controller_relu_output_up = \
+            self.controller_relu_free_pattern.output_bounds_IA(
+                controller_z_post_relu_lo, controller_z_post_relu_up)
+        for i in range(self.forward_system.u_dim):
+            if np.isinf(self.u_lower_limit[i]) and\
+                    np.isinf(self.u_upper_limit[i]):
+                mip.addLConstr(
+                    [torch.tensor([1, -1], dtype=self.dtype)],
+                    [[u[i], u_pre_sat[i]]], rhs=0., sense=gurobipy.GRB.EQUAL)
+            else:
+                assert(not np.isinf(self.u_lower_limit[i]) and
+                       not np.isinf(self.u_upper_limit[i]))
+                u_lower_bound = controller_relu_output_lo[i] -\
+                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
+                u_upper_bound = controller_relu_output_up[i] -\
+                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
+                utils.add_saturation_as_mixed_integer_constraint(
+                    mip, u_pre_sat[i], u[i], self.u_lower_limit[i],
+                    self.u_upper_limit[i], u_lower_bound, u_upper_bound)
         return u, forward_slack, controller_slack, forward_binary,\
             controller_binary
 
@@ -109,8 +157,12 @@ class FeedbackSystem:
         The controller is defined as
         u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         """
-        return self.controller_network(x) - \
+        u_pre_sat = self.controller_network(x) - \
             self.controller_network(self.x_equilibrium) + self.u_equilibrium
+        u = torch.max(torch.min(
+            u_pre_sat, torch.from_numpy(self.u_upper_limit)),
+            torch.from_numpy(self.u_lower_limit))
+        return u
 
     def possible_dx(self, x):
         u = self.compute_u(x)

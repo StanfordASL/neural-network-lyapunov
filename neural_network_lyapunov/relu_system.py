@@ -287,6 +287,8 @@ class ReLUSystemGivenEquilibrium:
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
             xu_lo, xu_up)
+        result.Aout_slack = result.Aout_slack.reshape((self.x_dim, -1))
+        result.Cout = result.Cout.reshape((-1))
         result.Cout += -self.dynamics_relu(
             torch.cat((self.x_equilibrium, self.u_equilibrium))) +\
             self.x_equilibrium
