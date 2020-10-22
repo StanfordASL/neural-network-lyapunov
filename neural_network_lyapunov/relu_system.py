@@ -38,7 +38,7 @@ class AutonomousReLUSystem:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
@@ -100,7 +100,7 @@ class AutonomousReLUSystemGivenEquilibrium:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
@@ -167,7 +167,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
@@ -254,7 +254,7 @@ class ReLUSystem:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_u, Aeq_s, Aeq_gamma, rhs_eq
                 such that

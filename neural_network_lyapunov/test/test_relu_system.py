@@ -94,13 +94,8 @@ class TestAutonomousReluSystem(unittest.TestCase):
             check_transition(x0)
 
 
-def check_mixed_integer_constraints(tester, dut, autonomous=True,
-                                    residual=False):
+def check_mixed_integer_constraints(tester, dut, autonomous=True):
     mip_cnstr_return = dut.mixed_integer_constraints()
-    if not residual:
-        tester.assertIsNone(mip_cnstr_return.Aout_input)
-    else:
-        tester.assertIsNotNone(mip_cnstr_return.Aout_input)
     tester.assertIsNone(mip_cnstr_return.Aout_binary)
 
     def check_transition(x_val, u_val=None):
@@ -135,8 +130,9 @@ def check_mixed_integer_constraints(tester, dut, autonomous=True,
         s_val = torch.tensor([si.X for si in s], dtype=dut.dtype)
         x_next_val = mip_cnstr_return.Aout_slack @ s_val +\
             mip_cnstr_return.Cout
-        if residual:
-            x_next_val += mip_cnstr_return.Aout_input @ x_val
+        nn_input = x_val if autonomous else torch.cat((x_val, u_val))
+        if mip_cnstr_return.Aout_input is not None:
+            x_next_val += mip_cnstr_return.Aout_input @ nn_input
         if autonomous:
             x_next_val_expected = dut.step_forward(x_val)
         else:
@@ -318,8 +314,7 @@ class TestAutonomousResidualReLUSystemGivenEquilibrium(unittest.TestCase):
         dut, _ = self.construct_relu_system_example()
 
         self.assertEqual(dut.x_dim, 3)
-        check_mixed_integer_constraints(self, dut, autonomous=True,
-                                        residual=True)
+        check_mixed_integer_constraints(self, dut, autonomous=True)
 
     def test_equilibrium(self):
         dut, x_equ = self.construct_relu_system_example()
