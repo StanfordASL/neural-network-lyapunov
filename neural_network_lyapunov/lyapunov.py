@@ -183,7 +183,7 @@ class LyapunovHybridLinearSystem:
                 V_lambda * torch.norm(x - x_equilibrium, p=1, dim=1)
 
     def lyapunov_positivity_as_milp(
-            self, x_equilibrium, V_lambda, V_epsilon):
+            self, x_equilibrium, V_lambda, V_epsilon, x_warmstart=None):
         """
         For a ReLU network, in order to determine if the function
         V(x) = ReLU(x) - ReLU(x*) + λ * |x - x*|₁
@@ -218,6 +218,20 @@ class LyapunovHybridLinearSystem:
         # z is the slack variable to write the output of ReLU network as mixed
         # integer constraints.
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+
+        if x_warmstart is not None:
+            activation = relu_to_optimization.ComputeReLUActivationPattern(
+                self.lyapunov_relu, x_warmstart)
+            unit_counter = 0
+            for layer in activation:
+                for unit in layer:
+                    if unit:
+                        beta[unit_counter].start = 1.
+                    else:
+                        beta[unit_counter].start = 0.
+                    unit_counter += 1
+            for i in range(len(x_warmstart)):
+                x[i].start = x_warmstart[i]
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
