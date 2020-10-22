@@ -38,7 +38,7 @@ class AutonomousReLUSystem:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
@@ -100,7 +100,7 @@ class AutonomousReLUSystemGivenEquilibrium:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
@@ -126,6 +126,77 @@ class AutonomousReLUSystemGivenEquilibrium:
         assert(isinstance(x_start, torch.Tensor))
         return self.dynamics_relu(x_start) - \
             self.dynamics_relu(self.x_equilibrium) + self.x_equilibrium
+
+
+class AutonomousResidualReLUSystemGivenEquilibrium:
+    """
+    This system models an autonomous system with known equilibirum x* using
+    a feedforward neural network with ReLU activations. The neural network
+    learn the residual dynamics
+    x[n+1] = ϕ(x[n]) − ϕ(x*) + x[n]
+    where ϕ is a feedforward (leaky) ReLU network.
+    """
+
+    def __init__(self, dtype, x_lo, x_up, dynamics_relu, x_equilibrium):
+        """
+        @param dtype The torch datatype
+        @param x_lo, x_up torch tensor that lower and upper bound the state
+        @param dynamics_relu torch model that represents the dynamics
+        @param x_equilibrium The equilibrium state.
+        """
+        assert(len(x_lo) == len(x_up))
+        assert(torch.all(x_up >= x_lo))
+        assert(dynamics_relu[0].in_features == dynamics_relu[-1].out_features)
+        self.dtype = dtype
+        self.x_lo = x_lo
+        self.x_up = x_up
+        self.x_dim = len(self.x_lo)
+        self.dynamics_relu = dynamics_relu
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        assert(x_equilibrium.shape == (self.x_dim,))
+        self.x_equilibrium = x_equilibrium
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def mixed_integer_constraints(self):
+        """
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
+                Ain_x, Ain_s, Ain_gamma, rhs_in,
+                Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
+                such that
+                x[n+1] = Aout_input @ x + Aout_s @ s + Cout
+                 or x_dot = Aout_input @ x + Aout_s @ s + Cout
+                s.t.
+                Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
+                Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
+        """
+        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
+         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
+            self.x_lo, self.x_up)
+        result.Cout += -self.dynamics_relu(self.x_equilibrium)
+        if result.Aout_input is None:
+            result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
+        else:
+            result.Aout_input += torch.eye(self.x_dim, dtype=self.dtype)
+
+        return result
+
+    def possible_dx(self, x):
+        assert(isinstance(x, torch.Tensor))
+        assert(len(x) == self.x_dim)
+        return [self.step_forward(x)]
+
+    def step_forward(self, x_start):
+        assert(isinstance(x_start, torch.Tensor))
+        return self.dynamics_relu(x_start) - \
+            self.dynamics_relu(self.x_equilibrium) + x_start
 
 
 class ReLUSystem:
@@ -183,7 +254,7 @@ class ReLUSystem:
 
     def mixed_integer_constraints(self):
         """
-        @return Aout_s, Cout,
+        @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_u, Aeq_s, Aeq_gamma, rhs_eq
                 such that
