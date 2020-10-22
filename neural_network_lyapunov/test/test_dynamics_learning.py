@@ -60,6 +60,7 @@ opt_default = dict(
     use_bce=True,
     use_variational=False,
     kl_loss_weight=1.,
+    decoded_equilibrium_loss_weight=1e-3,
     z_dim=z_dim,
     z_lo=-1.*torch.ones(z_dim, dtype=dtype),
     z_up=torch.ones(z_dim, dtype=dtype),
@@ -113,6 +114,9 @@ class TestDynamicsLearning(unittest.TestCase):
             self.X_data, self.X_next_data, opt.batch_size)
         self.X_validation_dataloader = pybullet_data_generation.get_dataloader(
             self.X_data, self.X_next_data, opt.batch_size)
+        self.X_equilibrium = torch.rand(
+            (2*num_channels, opt.image_width, opt.image_height),
+            dtype=opt.dtype)
         self.dyn_nn_model = utils.setup_relu(
             opt.dyn_nn_width, negative_slope=0., dtype=opt.dtype)
         self.lyap_nn_model = utils.setup_relu(
@@ -133,7 +137,8 @@ class TestDynamicsLearning(unittest.TestCase):
             LatentSpaceDynamicsLearning(
                 self.X_train_dataloader, self.X_validation_dataloader,
                 self.lyap, opt,
-                self.encoder, self.decoder)
+                self.encoder, self.decoder,
+                decoded_equilibrium=self.X_equilibrium)
 
     def test_lyapunov_loss(self):
         for dyn_learner, data in [(self.ss_dyn_learner, self.x_data),

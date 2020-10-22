@@ -24,7 +24,7 @@ def get_load_falling_cubes_callback():
         cube1_id = pb.loadURDF(urdf_path("cube_blue.urdf"), pos, orn)
         pos = [0.03, 0, 0.025]
         pb.loadURDF(urdf_path("cube_red.urdf"), pos, orn)
-        pos = [-.075, 0, 0.025]
+        pos = [-.065, 0, 0.025]
         pb.loadURDF(urdf_path("cube_red.urdf"), pos, orn)
         return cube1_id
     return cb

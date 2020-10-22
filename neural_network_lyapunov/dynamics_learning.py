@@ -430,11 +430,19 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
 
 class LatentSpaceDynamicsLearning(DynamicsLearning):
     def __init__(self, train_dataloader, validation_dataloader,
-                 lyap, learning_opt, encoder, decoder):
+                 lyap, learning_opt, encoder, decoder,
+                 decoded_equilibrium=None):
         super(LatentSpaceDynamicsLearning, self).__init__(
             train_dataloader, validation_dataloader, lyap, learning_opt)
         self.encoder = encoder.type(self.opt.dtype)
         self.decoder = decoder.type(self.opt.dtype)
+        if decoded_equilibrium is not None:
+            assert(len(decoded_equilibrium.shape) == 3)
+            assert(decoded_equilibrium.shape[1:] ==
+                   (self.opt.image_width, self.opt.image_height))
+            assert(decoded_equilibrium.shape[0] == 2 or
+                   decoded_equilibrium.shape[0] == 6)
+        self.decoded_equilibrium = decoded_equilibrium
         self.bce_loss = nn.BCELoss(reduction='mean')
         self.bce_loss_none = nn.BCELoss(reduction='none')
 
@@ -455,6 +463,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         self.lyapunov_to_device(device)
         self.encoder.to(device)
         self.decoder.to(device)
+        if self.decoded_equilibrium is not None:
+            self.decoded_equilibrium = self.decoded_equilibrium.to(device)
 
     def save(self, save_path):
         """
@@ -467,6 +477,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             pickle.dump(self.lyap, output, pickle.HIGHEST_PROTOCOL)
             pickle.dump(self.encoder, output, pickle.HIGHEST_PROTOCOL)
             pickle.dump(self.decoder, output, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(
+                self.decoded_equilibrium, output, pickle.HIGHEST_PROTOCOL)
 
     @classmethod
     def load(cls, load_path,
@@ -482,9 +494,10 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             lyap = pickle.load(input)
             encoder = pickle.load(input)
             decoder = pickle.load(input)
+            decoded_equilibrium = pickle.load(input)
         return cls(
             train_dataloader, validation_dataloader, lyap, learning_opt,
-            encoder, decoder)
+            encoder, decoder, decoded_equilibrium=decoded_equilibrium)
 
     def reparam(self, z_mu, z_log_var):
         """
@@ -575,6 +588,13 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         loss += self.reconstruction_loss(x_next_, x_next_pred_decoded)
         if self.opt.use_variational:
             loss += self.kl_loss(z_mu, z_log_var)
+        if self.decoded_equilibrium is not None:
+            decoded_equilibrium_pred = self.decoder.forward(
+                self.lyap.system.x_equilibrium.unsqueeze(0))
+            loss += self.opt.decoded_equilibrium_loss_weight *\
+                self.reconstruction_loss(
+                    self.decoded_equilibrium.unsqueeze(0),
+                    decoded_equilibrium_pred)
         return loss
 
     def rollout(self, x_init, N, decode_intermediate=False):

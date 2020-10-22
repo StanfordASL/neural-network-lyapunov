@@ -78,6 +78,22 @@ class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
                          self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x_data.shape, (10 * 5, 12))
 
+    def test_generate_dataset_normal(self):
+        x_lo = -torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
+        x_up = torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
+        x_mean = .2*torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
+        x_std = torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
+        x_data, x_next_data, X_data, X_next_data = self.pbsg.generate_dataset(
+            x_lo, x_up, .1, 10, 5, x_mean=x_mean, x_std=x_std)
+        self.assertEqual(len(X_data.shape), 4)
+        self.assertEqual(len(X_next_data.shape), 4)
+        self.assertEqual(X_data.shape, (10 * 5, 6,
+                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(x_data.shape, (10 * 5, 12))
+        for i in range(5):
+            self.assertTrue(torch.all(x_data[10*i, :] <= x_up))
+            self.assertTrue(torch.all(x_data[10*i, :] >= x_lo))
+
 
 if __name__ == "__main__":
     unittest.main()
