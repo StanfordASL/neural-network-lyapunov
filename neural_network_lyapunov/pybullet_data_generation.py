@@ -280,13 +280,18 @@ class PybulletSampleGenerator:
             x_data[n+1] = x_next
         return x_data, X_data
 
-    def generate_dataset(self, x_lo, x_up, dt, N, num_rollouts):
+    def generate_dataset(self, x_lo, x_up, dt, N, num_rollouts,
+                         x_mean=None, x_std=None):
         """
         generates a dataset using pybullet
         @param x_lo, x_up, bounding box on the initial states of the system
         @param dt float time step size
         @param N int length each rollout
         @param num_rollouts int number of rollouts
+        @param x_mean, x_std tensors of the same shape as x_lo/x_up. If set,
+        sampling uses a normal distribution centered at x_mean with standard
+        variation equal to x_std. The samples are still limited between
+        x_lo and x_up
         """
         assert(N >= 1)
         X_data = torch.empty((num_rollouts * N, 2 * self.num_channels,
@@ -299,7 +304,13 @@ class PybulletSampleGenerator:
         x_next_data = torch.empty((num_rollouts * N, self.x_dim),
                                   dtype=self.dtype)
         for i in range(num_rollouts):
-            x0 = torch.rand(self.x_dim) * (x_up - x_lo) + x_lo
+            if x_mean is not None:
+                assert(x_std is not None)
+                x0 = torch.randn(self.x_dim) * x_std + x_mean
+                x0 = torch.min(x0, x_up)
+                x0 = torch.max(x0, x_lo)
+            else:
+                x0 = torch.rand(self.x_dim) * (x_up - x_lo) + x_lo
             x_data_rollout, X_data_rollout = self.generate_rollout(x0, dt, N)
             for n in range(N):
                 X_data[i * N + n, :self.num_channels, :] = X_data_rollout[n, :]
