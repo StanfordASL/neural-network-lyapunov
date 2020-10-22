@@ -171,7 +171,8 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
                 Aeq_x, Aeq_s, Aeq_gamma, rhs_eq
                 such that
-                x[n+1] = Aout_s @ s + Cout or x_dot = Aout_s @ s + Cout
+                x[n+1] = Aout_input @ x + Aout_s @ s + Cout
+                 or x_dot = Aout_input @ x + Aout_s @ s + Cout
                 s.t.
                 Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
