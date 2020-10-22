@@ -204,11 +204,20 @@ class LyapunovHybridLinearSystem:
         @param V_epsilon A scalar. ε in the documentation above.
         @return (milp, x) milp is a GurobiTorchMILP instance, x is the decision
         variable for state.
+        @param x_warmstart tensor of size self.system.x_dim. If provided, will
+        use x_warmstart as initial guess for the *binary* variables of the
+        milp. Instead of warm start beta with the binary variable solution from
+        the previous iteration, we choose to recompute beta using the previous
+        adversarial state `x` in the current neural network, so as to make
+        sure that this initial guess of beta is always a feasible solution.
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
         assert(isinstance(V_lambda, float))
         assert(isinstance(V_epsilon, float))
+        if x_warmstart is not None:
+            assert(isinstance(x_warmstart, torch.Tensor))
+            assert(x_warmstart.shape == (self.system.x_dim,))
 
         dtype = self.system.dtype
         milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
@@ -219,19 +228,9 @@ class LyapunovHybridLinearSystem:
         # integer constraints.
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
 
+        # warmstart the binary variables
         if x_warmstart is not None:
-            activation = relu_to_optimization.ComputeReLUActivationPattern(
-                self.lyapunov_relu, x_warmstart)
-            unit_counter = 0
-            for layer in activation:
-                for unit in layer:
-                    if unit:
-                        beta[unit_counter].start = 1.
-                    else:
-                        beta[unit_counter].start = 0.
-                    unit_counter += 1
-            for i in range(len(x_warmstart)):
-                x[i].start = x_warmstart[i]
+            self.set_activation_warmstart(beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
@@ -247,6 +246,27 @@ class LyapunovHybridLinearSystem:
             [z, s], constant=b_out - relu_x_equilibrium.squeeze(),
             sense=gurobipy.GRB.MINIMIZE)
         return (milp, x)
+
+    def set_activation_warmstart(self, beta, x_warmstart):
+        """
+        @param beta list of binary variables corresponding to the activations
+        of the lyapunov neural network (as returned by
+        add_relu_output_constraint)
+        @param x_warmstart tensor of size self.system.x_dim. beta is then
+        warmstarted using the activation pattern produced by using
+        x_warmstart as the input of the lyapunov neural network
+        """
+        if x_warmstart is not None:
+            activation = relu_to_optimization.ComputeReLUActivationPattern(
+                self.lyapunov_relu, x_warmstart)
+            unit_counter = 0
+            for layer in activation:
+                for unit in layer:
+                    if unit:
+                        beta[unit_counter].start = 1.
+                    else:
+                        beta[unit_counter].start = 0.
+                    unit_counter += 1
 
     def lyapunov_positivity_loss_at_samples(
             self, relu_at_equilibrium, x_equilibrium,
@@ -366,7 +386,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
     def lyapunov_derivative_as_milp(
             self, x_equilibrium, V_lambda, epsilon,
-            lyapunov_lower=None, lyapunov_upper=None):
+            lyapunov_lower=None, lyapunov_upper=None, x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -387,6 +407,12 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
+        @param x_warmstart tensor of size self.system.x_dim. If provided, will
+        use x_warmstart as initial guess for the *binary* variables of the
+        milp. Instead of warm start beta with the binary variable solution from
+        the previous iteration, we choose to recompute beta using the previous
+        adversarial state `x` in the current neural network, so as to make
+        sure that this initial guess of beta is always a feasible solution.
         @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
@@ -420,6 +446,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            self.set_activation_warmstart(beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
