@@ -40,7 +40,7 @@
     <origin xyz="0.0 0.0 0"/>
     <parent link="base"/>
     <child link="pole"/>
-    <dynamics damping=".5"/>
+    <dynamics damping=".1"/>
   </joint>
 
 </robot>
