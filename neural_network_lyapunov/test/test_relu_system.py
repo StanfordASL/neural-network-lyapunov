@@ -94,9 +94,13 @@ class TestAutonomousReluSystem(unittest.TestCase):
             check_transition(x0)
 
 
-def check_mixed_integer_constraints(tester, dut, autonomous=True):
+def check_mixed_integer_constraints(tester, dut, autonomous=True,
+                                    residual=False):
     mip_cnstr_return = dut.mixed_integer_constraints()
-    tester.assertIsNone(mip_cnstr_return.Aout_input)
+    if not residual:
+        tester.assertIsNone(mip_cnstr_return.Aout_input)
+    else:
+        tester.assertIsNotNone(mip_cnstr_return.Aout_input)
     tester.assertIsNone(mip_cnstr_return.Aout_binary)
 
     def check_transition(x_val, u_val=None):
@@ -131,6 +135,8 @@ def check_mixed_integer_constraints(tester, dut, autonomous=True):
         s_val = torch.tensor([si.X for si in s], dtype=dut.dtype)
         x_next_val = mip_cnstr_return.Aout_slack @ s_val +\
             mip_cnstr_return.Cout
+        if residual:
+            x_next_val += mip_cnstr_return.Aout_input @ x_val
         if autonomous:
             x_next_val_expected = dut.step_forward(x_val)
         else:
@@ -271,6 +277,49 @@ class TestAutonomousReLUSystemGivenEquilibrium(unittest.TestCase):
 
         self.assertEqual(dut.x_dim, 3)
         check_mixed_integer_constraints(self, dut, autonomous=True)
+
+    def test_equilibrium(self):
+        dut, x_equ = self.construct_relu_system_example()
+        x_next = dut.step_forward(x_equ)
+
+        np.testing.assert_array_almost_equal(
+            x_next.detach().numpy(),
+            x_equ.detach().numpy(), decimal=5)
+
+
+class TestAutonomousResidualReLUSystemGivenEquilibrium(unittest.TestCase):
+    def construct_relu_system_example(self):
+        # Construct a ReLU system with nx = 3
+        self.dtype = torch.float64
+        linear1 = torch.nn.Linear(3, 5, bias=True)
+        linear1.weight.data = torch.tensor(
+            [[0.1, 0.62, 0.3], [0.2, -0.2, 0.3], [0.1, 0.3, -1.2],
+             [4.5, 0.7, 0.3], [0.1, 1.5, 0.1]], dtype=self.dtype)
+        linear1.bias.data = torch.tensor(
+            [0.1, -4.2, 0.3, 0.2, -0.5], dtype=self.dtype)
+        linear2 = torch.nn.Linear(5, 3, bias=True)
+        linear2.weight.data = torch.tensor(
+            [[0.1, -4.3, 1.5, 0.4, 0.2],
+             [0.1, -1.2, -0.3, 0.3, 0.8],
+             [0.3, -1.4, -0.1, 0.1, 1.1]],
+            dtype=self.dtype)
+        linear2.bias.data = torch.tensor([0.2, -1.4, -.5], dtype=self.dtype)
+        dynamics_relu = torch.nn.Sequential(
+            linear1, torch.nn.LeakyReLU(0.1), linear2)
+
+        x_lo = torch.tensor([-2, -2, -2], dtype=self.dtype)
+        x_up = torch.tensor([2, 2, 2], dtype=self.dtype)
+        x_equilibrium = torch.tensor([-.1, 0.3, 0.5], dtype=self.dtype)
+        dut = relu_system.AutonomousResidualReLUSystemGivenEquilibrium(
+            self.dtype, x_lo, x_up, dynamics_relu, x_equilibrium)
+        return dut, x_equilibrium
+
+    def test_mixed_integer_constraints(self):
+        dut, _ = self.construct_relu_system_example()
+
+        self.assertEqual(dut.x_dim, 3)
+        check_mixed_integer_constraints(self, dut, autonomous=True,
+                                        residual=True)
 
     def test_equilibrium(self):
         dut, x_equ = self.construct_relu_system_example()
