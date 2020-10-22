@@ -1,5 +1,6 @@
 import torch
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 class AutonomousReLUSystem:
@@ -36,7 +37,8 @@ class AutonomousReLUSystem:
     def x_up_all(self):
         return self.x_up.detach().numpy()
 
-    def mixed_integer_constraints(self):
+    def mixed_integer_constraints(self) ->\
+            gurobi_torch_mip.MixedIntegerConstraintsReturn:
         """
         @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_s, Ain_gamma, rhs_in,
@@ -372,6 +374,138 @@ class ReLUSystemGivenEquilibrium:
         x_next = self.dynamics_relu(torch.cat((x_start, u_start))) - \
             self.dynamics_relu(torch.cat(
                 (self.x_equilibrium, self.u_equilibrium))) + self.x_equilibrium
+        return x_next
+
+    def possible_dx(self, x, u):
+        assert(isinstance(x, torch.Tensor))
+        assert(len(x) == self.x_dim)
+        assert(isinstance(u, torch.Tensor))
+        assert(u.shape == (self.u_dim,))
+        return [self.step_forward(x, u)]
+
+
+class ReLUSecondOrderSystemGivenEquilibrium:
+    """
+    For a second order system
+    q̇ = v
+    v̇ = f(q, v, u)
+    We use a fully connected network with (leaky) ReLU activation unit ϕ to
+    approximate its second order dynamics (in discrete time), as
+    v[n+1] = ϕ(q[n], v[n], u[n]) − ϕ(q*, v*, u*)
+    For the update on q, we use mid-point interpolation
+    q[n+1] = q[n] + (v[n] + v[n+1]) / 2 * dt
+    @note at the equilibrium, v should be 0.
+    """
+    def __init__(
+        self, dtype, x_lo: torch.Tensor, x_up: torch.Tensor,
+        u_lo: torch.Tensor, u_up: torch.Tensor, dynamics_relu,
+        q_equilibrium: torch.Tensor, u_equilibrium: torch.Tensor,
+            dt: float):
+        """
+        @param x_lo The lower bound of state x = [q; v].
+        @param x_up The upper bound of state x = [q; v].
+        @param u_lo The lower bound of the input u.
+        @param u_up The upper bound of the input u.
+        @param dynamics_relu A fully connected network with (leaky) ReLU
+        activation units. The input to the network is (q, v, u), the output of
+        the network is of same dimension as v.
+        @param q_equilibrium The equilibrium position.
+        @param u_equilibrium The control at the equilibrium.
+        @param dt The integration time step.
+        """
+        self.dtype = dtype
+        self.x_dim = x_lo.numel()
+        assert(isinstance(x_lo, torch.Tensor))
+        self.x_lo = x_lo
+        assert(isinstance(x_up, torch.Tensor))
+        assert(x_up.shape == (self.x_dim,))
+        self.x_up = x_up
+        self.u_dim = u_lo.numel()
+        assert(isinstance(u_lo, torch.Tensor))
+        self.u_lo = u_lo
+        assert(isinstance(u_up, torch.Tensor))
+        assert(u_up.shape == (self.u_dim,))
+        self.u_up = u_up
+        assert(dynamics_relu[0].in_features == self.x_dim + self.u_dim)
+        self.nv = dynamics_relu[-1].out_features
+        self.nq = self.x_dim - self.nv
+        self.dynamics_relu = dynamics_relu
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        assert(isinstance(q_equilibrium, torch.Tensor))
+        assert(q_equilibrium.shape == (self.nq,))
+        self.q_equilibrium = q_equilibrium
+        self.x_equilibrium = torch.cat((
+            self.q_equilibrium, torch.zeros((self.nv,), dtype=self.dtype)))
+        assert(torch.all(self.x_equilibrium >= self.x_lo))
+        assert(torch.all(self.x_equilibrium <= self.x_up))
+        assert(isinstance(u_equilibrium, torch.Tensor))
+        assert(u_equilibrium.shape == (self.u_dim,))
+        self.u_equilibrium = u_equilibrium
+        assert(torch.all(self.u_equilibrium >= self.u_lo))
+        assert(torch.all(self.u_equilibrium <= self.u_up))
+        assert(isinstance(dt, float))
+        assert(dt > 0)
+        self.dt = dt
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def mixed_integer_constraints(self) ->\
+            gurobi_torch_mip.MixedIntegerConstraintsReturn:
+        """
+        The relationship between x[n], u[n] and x[n+1] can be captured by mixed
+        -integer linear constraints.
+        Please refer to gurobi_torch_mip.MixedIntegerConstraintsReturn for the
+        meaning of each term in the output.
+        """
+        # `result` contains the mixed integer linear constraint to write
+        # ϕ(q[n], v[n], u[n]) as a function
+        # ϕ(q[n], v[n], u[n]) = result.Aout_slack * s + result.Cout
+        # whee s is the slack variable.
+        # For the constraint v[n+1] = ϕ(q[n], v[n], u[n]) − ϕ(q*, v*, u*)
+        # This is equivalent to
+        # v[n+1] = result.Aout_slack * s  + result.Cout - ϕ(q*, v*, u*)
+        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
+         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
+            torch.cat((self.x_lo, self.u_lo)),
+            torch.cat((self.x_up, self.u_up)))
+        assert(result.Aout_input is None)
+        assert(result.Aout_binary is None)
+        result.Cout -= self.dynamics_relu(torch.cat((
+            self.x_equilibrium, self.u_equilibrium)))
+        # We also need to add the output constraint
+        # q[n+1] = q[n] + (v[n] + v[n+1]) * dt / 2
+        #        = [I dt/2*I 0] * [q[n]; v[n]; u[n]] +
+        #          + (result.Aout_slack*dt/2) * s + result.Cout*dt/2
+        result.Aout_input = torch.cat((torch.cat((
+            torch.eye(self.nq, dtype=self.dtype),
+            self.dt/2 * torch.eye(self.nv, dtype=self.dtype),
+            torch.zeros((self.nq, self.u_dim), dtype=self.dtype)), dim=1),
+            torch.zeros((self.nv, self.x_dim + self.u_dim), dtype=self.dtype)),
+            dim=0)
+        result.Aout_slack = torch.cat((
+            result.Aout_slack * self.dt / 2, result.Aout_slack), dim=0)
+        result.Cout = torch.cat((result.Cout * self.dt / 2, result.Cout),
+                                dim=0)
+        return result
+
+    def step_forward(self, x_start, u_start):
+        # Compute x[n+1] according to
+        # v[n+1] = ϕ(q[n], v[n], u[n]) − ϕ(q*, v*, u*)
+        # q[n+1] = q[n] + (v[n] + v[n+1]) * dt / 2
+        assert(isinstance(x_start, torch.Tensor))
+        assert(isinstance(u_start, torch.Tensor))
+        v_next = self.dynamics_relu(torch.cat((x_start, u_start))) - \
+            self.dynamics_relu(torch.cat(
+                (self.x_equilibrium, self.u_equilibrium)))
+        q_next = x_start[:self.nq] + (x_start[self.nq:] + v_next) * self.dt / 2
+        x_next = torch.cat((q_next, v_next))
         return x_next
 
     def possible_dx(self, x, u):
