@@ -1172,7 +1172,6 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         relu = utils.setup_relu((2, 100, 100, 1))
         system = self.system1
         x_equilibrium = self.x_equilibrium1
-        relu_x_equilibrium = relu.forward(x_equilibrium)
         V_epsilon = 0.01
         V_lambda = 0.1
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
@@ -1185,7 +1184,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             x, y, less_than_zero=True))
         end = time.time()
         first_time = end - start
-        print(end - start)
+        print(first_time)
         self.assertTrue(
             milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL or
             milp.gurobi_model.status == gurobipy.GRB.Status.INTERRUPTED)
