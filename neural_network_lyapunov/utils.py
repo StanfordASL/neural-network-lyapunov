@@ -763,3 +763,29 @@ def extract_relu_parameters(relu):
             if layer.bias is not None:
                 weights_biases.append(layer.bias.data.reshape((-1)))
     return torch.cat(weights_biases)
+
+
+def get_gurobi_terminate_if_callback(less_than_zero):
+    """
+    helper function to return a callback that terminates gurobi early as soon
+    as a counterexample is found
+    @param less_than_zero boolean terminate if the objective becomes less
+    than zero, otherwise terminates when the objective becomes greater than
+    zero
+    """
+    def gurobi_terminate_if(model, where):
+        """
+        callback
+        @param model, where see Gurobi callback documentation
+        """
+        if where == gurobipy.GRB.Callback.MIPNODE:
+            solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
+            if solcnt > 0:
+                status = model.cbGet(gurobipy.GRB.Callback.MIPNODE_STATUS)
+                if status == gurobipy.GRB.Status.OPTIMAL:
+                    objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
+                    if not less_than_zero:
+                        objbst *= -1
+                    if objbst < 0:
+                        model.terminate()
+    return gurobi_terminate_if

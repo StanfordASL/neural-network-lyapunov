@@ -9,6 +9,7 @@ import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.line_search_gd as line_search_gd
 import neural_network_lyapunov.line_search_adam as line_search_adam
+import neural_network_lyapunov.utils as utils
 
 from enum import Enum
 
@@ -139,6 +140,15 @@ class TrainLyapunovReLU:
         # samples.
         self.max_sample_pool_size = 500
 
+        # keeping track of the last adversarial examples for warmstarting
+        self.lyapunov_positivity_x_adv = x_equilibrium
+        self.lyapunov_derivative_x_adv = x_equilibrium
+
+        # use early termination in the training
+        self.early_termination = False
+        # use both warmstarting in the training
+        self.warmstarting = False
+
     def total_loss(
             self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
@@ -185,10 +195,17 @@ class TrainLyapunovReLU:
             (derivative_state_samples.shape[0],
              self.lyapunov_hybrid_system.system.x_dim))
         dtype = self.lyapunov_hybrid_system.system.dtype
-        lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
-            lyapunov_positivity_as_milp(
-                self.x_equilibrium, self.V_lambda,
-                self.lyapunov_positivity_epsilon)
+        if self.warmstarting:
+            lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
+                lyapunov_positivity_as_milp(
+                    self.x_equilibrium, self.V_lambda,
+                    self.lyapunov_positivity_epsilon,
+                    x_warmstart=self.lyapunov_positivity_x_adv)
+        else:
+            lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
+                lyapunov_positivity_as_milp(
+                    self.x_equilibrium, self.V_lambda,
+                    self.lyapunov_positivity_epsilon)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -198,12 +215,27 @@ class TrainLyapunovReLU:
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.PoolSolutions,
                 self.lyapunov_positivity_mip_pool_solutions)
-        lyapunov_positivity_mip.gurobi_model.optimize()
+        if self.early_termination:
+            lyapunov_positivity_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback(True))
+        else:
+            lyapunov_positivity_mip.gurobi_model.optimize()
+        if self.warmstarting:
+            self.lyapunov_positivity_x_adv = torch.tensor(
+                [var.X for var in lyapunov_positivity_as_milp_return[1]],
+                dtype=dtype)
 
-        lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
-            lyapunov_derivative_as_milp(
-                self.x_equilibrium, self.V_lambda,
-                self.lyapunov_derivative_epsilon)
+        if self.warmstarting:
+            lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
+                lyapunov_derivative_as_milp(
+                    self.x_equilibrium, self.V_lambda,
+                    self.lyapunov_derivative_epsilon,
+                    x_warmstart=self.lyapunov_derivative_x_adv)
+        else:
+            lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
+                lyapunov_derivative_as_milp(
+                    self.x_equilibrium, self.V_lambda,
+                    self.lyapunov_derivative_epsilon)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -213,7 +245,16 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.PoolSolutions,
                 self.lyapunov_derivative_mip_pool_solutions)
-        lyapunov_derivative_mip.gurobi_model.optimize()
+        if self.early_termination:
+            lyapunov_derivative_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback(False))
+        else:
+            lyapunov_derivative_mip.gurobi_model.optimize()
+        if self.warmstarting:
+            self.lyapunov_derivative_x_adv = torch.tensor(
+                [var.X for var in lyapunov_derivative_as_milp_return[1]],
+                dtype=dtype)
+
         for v in lyapunov_derivative_as_milp_return[2]:
             v.x
 
