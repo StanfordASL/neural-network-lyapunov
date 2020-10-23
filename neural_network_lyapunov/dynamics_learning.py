@@ -7,23 +7,8 @@ import pickle
 
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.utils as utils
 from neural_network_lyapunov.gurobi_torch_mip import IncorrectActiveConstraint
-
-
-def gurobi_terminate_if(model, where):
-    """
-    helper function to terminate gurobi early as soon as a counterexample
-    is found
-    @param model, where see Gurobi callback documentation
-    """
-    if where == gurobipy.GRB.Callback.MIPNODE:
-        solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
-        if solcnt > 0:
-            status = model.cbGet(gurobipy.GRB.Callback.MIPNODE_STATUS)
-            if status == gurobipy.GRB.Status.OPTIMAL:
-                objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
-                if objbst > 0:
-                    model.terminate()
 
 
 class DynamicsLearningOptions():
@@ -58,14 +43,20 @@ class DynamicsLearning:
         @param learning_opt instance of DynamicsLearningOptions class
         """
         assert(isinstance(lyap, lyapunov.LyapunovHybridLinearSystem))
-        assert(isinstance(lyap.system,
-                          relu_system.AutonomousReLUSystemGivenEquilibrium))
+        assert(
+            isinstance(
+                lyap.system, relu_system.AutonomousReLUSystemGivenEquilibrium)
+            or isinstance(
+                lyap.system,
+                relu_system.AutonomousResidualReLUSystemGivenEquilibrium))
         assert(isinstance(learning_opt, DynamicsLearningOptions))
         self.train_dataloader = train_dataloader
         self.validation_dataloader = validation_dataloader
         self.lyap = lyap
         self.opt = learning_opt
         self.optimizer = None
+        self.lyap_pos_x_adv = lyap.system.x_equilibrium
+        self.lyap_der_x_adv = lyap.system.x_equilibrium
 
     def reset_optimizer(self, lyapunov_only=False):
         """
@@ -117,7 +108,8 @@ class DynamicsLearning:
         if self.opt.lyap_loss_optimal:
             lyap_pos_mip.gurobi_model.optimize()
         else:
-            lyap_pos_mip.gurobi_model.optimize(gurobi_terminate_if)
+            lyap_pos_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback())
         num_sol = lyap_pos_mip.gurobi_model.solCount
         z_adv_pos = []
         for i in range(num_sol):
@@ -138,7 +130,8 @@ class DynamicsLearning:
         if self.opt.lyap_loss_optimal:
             lyap_der_mip.gurobi_model.optimize()
         else:
-            lyap_der_mip.gurobi_model.optimize(gurobi_terminate_if)
+            lyap_der_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback())
         num_sol = lyap_der_mip.gurobi_model.solCount
         z_adv_der = []
         for i in range(num_sol):
@@ -160,10 +153,14 @@ class DynamicsLearning:
         @return lyap_der_loss tensor of the lypunov loss for the derivative
         constraint
         """
-        lyap_pos_mip = self.lyap.lyapunov_positivity_as_milp(
-            self.lyap.system.x_equilibrium,
-            self.opt.V_lambda,
-            self.opt.V_eps)[0]
+        if self.opt.lyap_loss_warmstart:
+            lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
+                self.lyap.system.x_equilibrium, self.opt.V_lambda,
+                self.opt.V_eps, x_warmstart=self.lyap_pos_x_adv)
+        else:
+            lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
+                self.lyap.system.x_equilibrium, self.opt.V_lambda,
+                self.opt.V_eps)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -171,7 +168,8 @@ class DynamicsLearning:
             lyap_pos_loss = lyap_pos_mip.\
                 compute_objective_from_mip_data_and_solution()
         else:
-            lyap_pos_mip.gurobi_model.optimize(gurobi_terminate_if)
+            lyap_pos_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback())
             try:
                 lyap_pos_loss = lyap_pos_mip.\
                     compute_objective_from_mip_data_and_solution()
@@ -179,10 +177,22 @@ class DynamicsLearning:
                 print("WARNING: Cannot find the right " +
                       "constraints to get gradient.")
                 lyap_pos_loss = torch.tensor(0, dtype=self.opt.dtype)
-        lyap_der_mip = self.lyap.lyapunov_derivative_as_milp(
-            self.lyap.system.x_equilibrium,
-            self.opt.V_lambda,
-            self.opt.V_eps)[0]
+        if self.opt.lyap_loss_warmstart:
+            self.lyap_pos_x_adv = torch.tensor(
+                [var.X for var in x_var], dtype=self.opt.dtype)
+        if self.opt.lyap_loss_warmstart:
+            lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps,
+                x_warmstart=self.lyap_der_x_adv)
+        else:
+            lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps)
+        lyap_der_mip = lyap_der_mip_return[0]
+        x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -190,7 +200,8 @@ class DynamicsLearning:
             lyap_der_loss = lyap_der_mip.\
                 compute_objective_from_mip_data_and_solution()
         else:
-            lyap_der_mip.gurobi_model.optimize(gurobi_terminate_if)
+            lyap_der_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback())
             try:
                 lyap_der_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()
@@ -198,6 +209,9 @@ class DynamicsLearning:
                 print("WARNING: Cannot find the right " +
                       "constraints to get gradient.")
                 lyap_der_loss = torch.tensor(0, dtype=self.opt.dtype)
+        if self.opt.lyap_loss_warmstart:
+            self.lyap_der_x_adv = torch.tensor(
+                [var.X for var in x_var], dtype=self.opt.dtype)
         return (self.opt.lyap_pos_loss_weight * lyap_pos_loss,
                 self.opt.lyap_der_loss_weight * lyap_der_loss)
 

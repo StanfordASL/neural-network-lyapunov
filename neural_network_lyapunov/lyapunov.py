@@ -237,7 +237,8 @@ class LyapunovHybridLinearSystem:
 
         # warmstart the binary variables
         if x_warmstart is not None:
-            self.set_activation_warmstart(beta, x_warmstart)
+            self.set_activation_warmstart(
+                self.lyapunov_relu, beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
@@ -254,7 +255,7 @@ class LyapunovHybridLinearSystem:
             sense=gurobipy.GRB.MAXIMIZE)
         return (milp, x)
 
-    def set_activation_warmstart(self, beta, x_warmstart):
+    def set_activation_warmstart(self, relu, beta, x_warmstart):
         """
         @param beta list of binary variables corresponding to the activations
         of the lyapunov neural network (as returned by
@@ -265,7 +266,7 @@ class LyapunovHybridLinearSystem:
         """
         if x_warmstart is not None:
             activation = relu_to_optimization.ComputeReLUActivationPattern(
-                self.lyapunov_relu, x_warmstart)
+                relu, x_warmstart)
             unit_counter = 0
             for layer in activation:
                 for unit in layer:
@@ -447,6 +448,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # x is the variable x[n]
         s, gamma = self.add_system_constraint(milp, x, x_next)
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            self.set_activation_warmstart(
+                self.system.dynamics_relu, gamma, x_warmstart)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
@@ -456,7 +461,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # warmstart the binary variables
         if x_warmstart is not None:
-            self.set_activation_warmstart(beta, x_warmstart)
+            self.set_activation_warmstart(
+                self.lyapunov_relu, beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
@@ -489,7 +495,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # warmstart the binary variables
         if x_warmstart is not None:
-            self.set_activation_warmstart(beta_next, x_warmstart)
+            self.set_activation_warmstart(
+                self.lyapunov_relu, beta_next,
+                self.system.step_forward(x_warmstart))
 
         # The cost function is
         # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
