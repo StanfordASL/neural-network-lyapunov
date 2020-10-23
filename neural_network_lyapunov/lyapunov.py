@@ -480,6 +480,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         (z_next, beta_next, _, _) = self.add_relu_output_constraint(
             milp, x_next)
 
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            self.set_activation_warmstart(beta_next, x_warmstart)
+
         # The cost function is
         # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
         #     epsilon * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
