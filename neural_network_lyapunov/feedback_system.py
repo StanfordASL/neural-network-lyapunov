@@ -54,7 +54,9 @@ class FeedbackSystem:
         assert(isinstance(
             forward_system, hybrid_linear_system.HybridLinearSystem) or
             isinstance(forward_system, relu_system.ReLUSystem) or
-            isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium))
+            isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium)
+            or isinstance(forward_system,
+                          relu_system.ReLUSecondOrderSystemGivenEquilibrium))
         self.forward_system = forward_system
         self.x_dim = self.forward_system.x_dim
         self.x_lo_all = self.forward_system.x_lo_all

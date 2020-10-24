@@ -240,7 +240,8 @@ if __name__ == "__main__":
         if args.train_on_sample:
             # Train the Lyapunov loss on many sampled states
             dut.train_lyapunov_on_samples(
-                state_samples_all, args.train_on_samples_iterations, 10)
+                state_samples_all, args.train_on_samples_iterations,
+                batch_size=10)
         else:
             # First train a ReLU to approximate the value function.
             approximator = train_lyapunov.TrainValueApproximator()

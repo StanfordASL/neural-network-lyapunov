@@ -477,6 +477,10 @@ class ReLUSecondOrderSystemGivenEquilibrium:
             torch.cat((self.x_up, self.u_up)))
         assert(result.Aout_input is None)
         assert(result.Aout_binary is None)
+        if (len(result.Aout_slack.shape) == 1):
+            result.Aout_slack = result.Aout_slack.reshape((1, -1))
+        if (len(result.Cout.shape) == 0):
+            result.Cout = result.Cout.reshape((-1))
         result.Cout -= self.dynamics_relu(torch.cat((
             self.x_equilibrium, self.u_equilibrium)))
         # We also need to add the output constraint
