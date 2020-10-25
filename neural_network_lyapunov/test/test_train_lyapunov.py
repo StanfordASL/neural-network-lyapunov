@@ -143,7 +143,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                     torch.pow(torch.tensor(
                         dut.lyapunov_positivity_mip_cost_decay_rate,
                         dtype=system.dtype), mip_sol_number) * \
-                    -lyapunov_positivity_mip.gurobi_model.getAttr(
+                    lyapunov_positivity_mip.gurobi_model.getAttr(
                         gurobipy.GRB.Attr.PoolObjVal)
         for mip_sol_number in\
                 range(dut.lyapunov_derivative_mip_pool_solutions):

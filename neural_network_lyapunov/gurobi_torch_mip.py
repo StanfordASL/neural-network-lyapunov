@@ -46,7 +46,7 @@ class GurobiTorchMIP:
     can run automatic differentiation.
 
     Internally it stores an MIP
-    min cost
+    min/max cost
     s.t Ain_r * r + Ain_zeta * ζ <= rhs_in
         Aeq_r * r + Aeq_zeta * ζ = rhs_eq
     where r includes all continuous variables, and ζ includes all binary

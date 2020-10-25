@@ -598,7 +598,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
 
         def test_fun(system, relu, x_equilibrium, relu_x_equilibrium, x_val):
             # Fix x to different values. Now check if the optimal cost is
-            # ReLU(x) - ReLU(x*) + (ρ - epsilon) * |x - x*|₁
+            # (ε-λ) * |x - x*|₁ - ReLU(x) + ReLU(x*)
             dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
             (milp, x) = dut.lyapunov_positivity_as_milp(
                 x_equilibrium, V_lambda, V_epsilon)
@@ -611,9 +611,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
             self.assertAlmostEqual(
-                milp.gurobi_model.ObjVal, relu.forward(x_val).item() -
+                milp.gurobi_model.ObjVal, -relu.forward(x_val).item() +
                 relu_x_equilibrium.item() +
-                (V_lambda - V_epsilon) *
+                (V_epsilon - V_lambda) *
                 torch.norm(x_val - x_equilibrium, p=1).item())
 
         relu_x_equilibrium1 = lyapunov_relu1.forward(self.x_equilibrium1)
