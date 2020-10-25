@@ -10,14 +10,11 @@ import neural_network_lyapunov.relu_system as relu_system
 from neural_network_lyapunov.gurobi_torch_mip import IncorrectActiveConstraint
 
 
-def gurobi_terminate_if(model, where, less_than_zero=True):
+def gurobi_terminate_if(model, where):
     """
     helper function to terminate gurobi early as soon as a counterexample
     is found
     @param model, where see Gurobi callback documentation
-    @param less_than_zero boolean terminate if the objective becomes less
-    than zero, otherwise terminates when the objective becomes greater than
-    zero
     """
     if where == gurobipy.GRB.Callback.MIPNODE:
         solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
@@ -25,9 +22,7 @@ def gurobi_terminate_if(model, where, less_than_zero=True):
             status = model.cbGet(gurobipy.GRB.Callback.MIPNODE_STATUS)
             if status == gurobipy.GRB.Status.OPTIMAL:
                 objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
-                if not less_than_zero:
-                    objbst *= -1
-                if objbst < 0:
+                if objbst > 0:
                     model.terminate()
 
 
@@ -122,15 +117,14 @@ class DynamicsLearning:
         if self.opt.lyap_loss_optimal:
             lyap_pos_mip.gurobi_model.optimize()
         else:
-            lyap_pos_mip.gurobi_model.optimize(
-                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
+            lyap_pos_mip.gurobi_model.optimize(gurobi_terminate_if)
         num_sol = lyap_pos_mip.gurobi_model.solCount
         z_adv_pos = []
         for i in range(num_sol):
             lyap_pos_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.SolutionNumber, i)
             obj = lyap_pos_mip.gurobi_model.PoolObjVal
-            if obj < 0:
+            if obj > 0:
                 z_adv_pos.append(torch.tensor(
                     [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
         if num_sol > 0:
@@ -144,8 +138,7 @@ class DynamicsLearning:
         if self.opt.lyap_loss_optimal:
             lyap_der_mip.gurobi_model.optimize()
         else:
-            lyap_der_mip.gurobi_model.optimize(
-                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
+            lyap_der_mip.gurobi_model.optimize(gurobi_terminate_if)
         num_sol = lyap_der_mip.gurobi_model.solCount
         z_adv_der = []
         for i in range(num_sol):
@@ -175,13 +168,12 @@ class DynamicsLearning:
                                            False)
         if self.opt.lyap_loss_optimal:
             lyap_pos_mip.gurobi_model.optimize()
-            lyap_pos_loss = -lyap_pos_mip.\
+            lyap_pos_loss = lyap_pos_mip.\
                 compute_objective_from_mip_data_and_solution()
         else:
-            lyap_pos_mip.gurobi_model.optimize(
-                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=True))
+            lyap_pos_mip.gurobi_model.optimize(gurobi_terminate_if)
             try:
-                lyap_pos_loss = -lyap_pos_mip.\
+                lyap_pos_loss = lyap_pos_mip.\
                     compute_objective_from_mip_data_and_solution()
             except IncorrectActiveConstraint:
                 print("WARNING: Cannot find the right " +
@@ -198,8 +190,7 @@ class DynamicsLearning:
             lyap_der_loss = lyap_der_mip.\
                 compute_objective_from_mip_data_and_solution()
         else:
-            lyap_der_mip.gurobi_model.optimize(
-                lambda x, y: gurobi_terminate_if(x, y, less_than_zero=False))
+            lyap_der_mip.gurobi_model.optimize(gurobi_terminate_if)
             try:
                 lyap_der_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()

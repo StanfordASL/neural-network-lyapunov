@@ -299,7 +299,7 @@ class TrainLyapunovReLU:
                         torch.pow(torch.tensor(
                             self.lyapunov_positivity_mip_cost_decay_rate,
                             dtype=dtype), mip_sol_number) *\
-                        -lyapunov_positivity_mip.\
+                        lyapunov_positivity_mip.\
                         compute_objective_from_mip_data_and_solution(
                             solution_number=mip_sol_number, penalty=1e-13)
         derivative_mip_loss = 0

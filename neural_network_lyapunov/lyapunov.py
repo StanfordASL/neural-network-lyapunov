@@ -201,10 +201,10 @@ class LyapunovHybridLinearSystem:
         V(x) ≥ ε |x - x*|₁ ∀ x
         where ε is a small positive number.To check if the stronger condition
         is satisfied, we can solve the following optimization problem
-        min x ReLU(x) - ReLU(x*) + (λ-ε) * |x - x*|₁
+        max x  (ε-λ) * |x - x*|₁ - ReLU(x) + ReLU(x*)
         We can formulate this optimization problem as a mixed integer linear
         program, solve the for optimal solution of this program. If the optimal
-        cost is no smaller than 0, then we proved the positivity constraint
+        cost is no larger than 0, then we proved the positivity constraint
         V(x) > 0 ∀ x ≠ x*
         @param x_equilibrium The equilibrium state x*.
         @param V_lambda ρ in the documentation above.
@@ -234,11 +234,11 @@ class LyapunovHybridLinearSystem:
             milp, x_equilibrium, x, slack_name="s", binary_var_name="gamma")
 
         milp.setObjective(
-            [a_out,
-             (V_lambda-V_epsilon) *
+            [-a_out,
+             (V_epsilon-V_lambda) *
              torch.ones((self.system.x_dim,), dtype=dtype)],
-            [z, s], constant=b_out - relu_x_equilibrium.squeeze(),
-            sense=gurobipy.GRB.MINIMIZE)
+            [z, s], constant=-b_out + relu_x_equilibrium.squeeze(),
+            sense=gurobipy.GRB.MAXIMIZE)
         return (milp, x)
 
     def lyapunov_positivity_loss_at_samples(
