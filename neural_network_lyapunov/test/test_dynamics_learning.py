@@ -358,7 +358,8 @@ class TestDynamicsLearning(unittest.TestCase):
             lyap_pos_loss1, lyap_der_loss1 = dyn_learner.lyapunov_loss()
             self.opt.set_option("lyap_loss_optimal", False)
             lyap_pos_loss2, lyap_der_loss2 = dyn_learner.lyapunov_loss(
-                pos_threshold=lyap_pos_loss1, der_threshold=lyap_der_loss1)
+                lyap_pos_threshold=lyap_pos_loss1,
+                lyap_der_threshold=lyap_der_loss1)
             lyap_pos_loss3, lyap_der_loss3 = dyn_learner.lyapunov_loss()
             self.assertEqual(lyap_pos_loss1, lyap_pos_loss2)
             self.assertEqual(lyap_der_loss1, lyap_der_loss2)
