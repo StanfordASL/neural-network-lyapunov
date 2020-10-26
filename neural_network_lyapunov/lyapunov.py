@@ -164,6 +164,29 @@ class LyapunovHybridLinearSystem:
 
         return (s, alpha)
 
+    def set_activation_warmstart(self, relu, beta, x_warmstart):
+        """
+        @param relu (leaky) relu neural network correspoding to the binary
+        variables to warmstart
+        @param beta list of binary variables corresponding to the activations
+        of the lyapunov neural network (as returned by
+        add_relu_output_constraint)
+        @param x_warmstart tensor of size self.system.x_dim. beta is then
+        warmstarted using the activation pattern produced by using
+        x_warmstart as the input of the lyapunov neural network
+        """
+        if x_warmstart is not None:
+            activation = relu_to_optimization.ComputeReLUActivationPattern(
+                relu, x_warmstart)
+            unit_counter = 0
+            for layer in activation:
+                for unit in layer:
+                    if unit:
+                        beta[unit_counter].start = 1.
+                    else:
+                        beta[unit_counter].start = 0.
+                    unit_counter += 1
+
     def lyapunov_value(
             self, x, x_equilibrium, V_lambda,
             relu_at_equilibrium=None):
@@ -254,27 +277,6 @@ class LyapunovHybridLinearSystem:
             [z, s], constant=-b_out + relu_x_equilibrium.squeeze(),
             sense=gurobipy.GRB.MAXIMIZE)
         return (milp, x)
-
-    def set_activation_warmstart(self, relu, beta, x_warmstart):
-        """
-        @param beta list of binary variables corresponding to the activations
-        of the lyapunov neural network (as returned by
-        add_relu_output_constraint)
-        @param x_warmstart tensor of size self.system.x_dim. beta is then
-        warmstarted using the activation pattern produced by using
-        x_warmstart as the input of the lyapunov neural network
-        """
-        if x_warmstart is not None:
-            activation = relu_to_optimization.ComputeReLUActivationPattern(
-                relu, x_warmstart)
-            unit_counter = 0
-            for layer in activation:
-                for unit in layer:
-                    if unit:
-                        beta[unit_counter].start = 1.
-                    else:
-                        beta[unit_counter].start = 0.
-                    unit_counter += 1
 
     def lyapunov_positivity_loss_at_samples(
             self, relu_at_equilibrium, x_equilibrium,
@@ -449,7 +451,14 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # x is the variable x[n]
         s, gamma = self.add_system_constraint(milp, x, x_next)
         # warmstart the binary variables
-        if x_warmstart is not None:
+        if x_warmstart is not None and (isinstance(
+                    self.system, relu_system.AutonomousReLUSystem)
+                or isinstance(
+                    self.system,
+                    relu_system.AutonomousReLUSystemGivenEquilibrium)
+                or isinstance(
+                    self.system,
+                    relu_system.AutonomousResidualReLUSystemGivenEquilibrium)):
             self.set_activation_warmstart(
                 self.system.dynamics_relu, gamma, x_warmstart)
 

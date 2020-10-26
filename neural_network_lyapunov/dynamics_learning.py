@@ -145,7 +145,7 @@ class DynamicsLearning:
             z_adv_der = torch.cat(z_adv_der, dim=0)
         return z_adv_pos, z_adv_der
 
-    def lyapunov_loss(self):
+    def lyapunov_loss(self, pos_threshold=0., der_threshold=0.):
         """
         compute the Lyapunov losses
         @return lyap_pos_loss tensor of the lyapunov loss for the positivity
@@ -169,7 +169,8 @@ class DynamicsLearning:
                 compute_objective_from_mip_data_and_solution()
         else:
             lyap_pos_mip.gurobi_model.optimize(
-                utils.get_gurobi_terminate_if_callback())
+                utils.get_gurobi_terminate_if_callback(
+                    threshold=pos_threshold))
             try:
                 lyap_pos_loss = lyap_pos_mip.\
                     compute_objective_from_mip_data_and_solution()
@@ -201,7 +202,8 @@ class DynamicsLearning:
                 compute_objective_from_mip_data_and_solution()
         else:
             lyap_der_mip.gurobi_model.optimize(
-                utils.get_gurobi_terminate_if_callback())
+                utils.get_gurobi_terminate_if_callback(
+                    threshold=der_threshold))
             try:
                 lyap_der_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()
