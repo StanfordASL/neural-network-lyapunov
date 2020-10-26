@@ -139,6 +139,10 @@ class TrainLyapunovReLU:
         # samples.
         self.max_sample_pool_size = 500
 
+        # Whether we search for the controller when the dynamical is a feedback
+        # system which contains a neural network representing its controller.
+        self.search_controller = True
+
     def total_loss(
             self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
@@ -459,8 +463,9 @@ class TrainLyapunovReLU:
                 derivative_state_samples[i]) for i in
             range(derivative_state_samples.shape[0])], dim=0)
         iter_count = 0
-        if isinstance(self.lyapunov_hybrid_system.system,
-                      feedback_system.FeedbackSystem):
+        if isinstance(
+            self.lyapunov_hybrid_system.system,
+                feedback_system.FeedbackSystem) and self.search_controller:
             # For a feedback system, we train both the Lyapunov network
             # parameters and the controller network parameters.
             training_params = [
@@ -594,8 +599,9 @@ class TrainLyapunovReLU:
         assert(state_samples_all.shape[1] ==
                self.lyapunov_hybrid_system.system.x_dim)
         best_loss = np.inf
-        if isinstance(self.lyapunov_hybrid_system.system,
-                      feedback_system.FeedbackSystem):
+        if isinstance(
+            self.lyapunov_hybrid_system.system,
+                feedback_system.FeedbackSystem) and self.search_controller:
             training_params = [
                 {'params': p} for p in
                 (self.lyapunov_hybrid_system.lyapunov_relu.parameters(),

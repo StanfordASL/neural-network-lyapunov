@@ -239,24 +239,6 @@ def step_system(system, x_start, steps):
     return path
 
 
-def save_lyapunov_model(
-    lyapunov_relu, linear_layer_width, negative_slope, V_lambda,
-        file_path):
-    torch.save({"linear_layer_width": linear_layer_width,
-                "state_dict": lyapunov_relu.state_dict(),
-                "negative_slope": negative_slope, "V_lambda": V_lambda},
-               file_path)
-
-
-def save_controller_model(
-    controller_relu, linear_layer_width, negative_slope, x_lo, x_up, u_lo,
-        u_up, file_path):
-    torch.save({"linear_layer_width": linear_layer_width,
-                "state_dict": controller_relu.state_dict(),
-                "negative_slope": negative_slope, "x_lo": x_lo, "x_up": x_up,
-                "u_lo": u_lo, "u_up": u_up}, file_path)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="pendulum training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -289,8 +271,13 @@ if __name__ == "__main__":
     if args.train_forward_model:
         train_forward_model(dynamics_model, model_dataset)
     else:
-        dynamics_model.load_state_dict(torch.load(
-            dir_path + "/data/pendulum_second_order_forward_relu.pt"))
+        dynamics_model_data = torch.load(
+            dir_path + "/data/pendulum_second_order_forward_relu.pt")
+        dynamics_model = utils.setup_relu(
+            dynamics_model_data["linear_layer_width"], params=None,
+            negative_slope=dynamics_model_data["negative_slope"], bias=True,
+            dtype=torch.float64)
+        dynamics_model.load_state_dict(dynamics_model_data["state_dict"])
     if args.generate_controller_cost_data:
         state_samples, control_samples, cost_samples =\
             generate_controller_dataset()
@@ -301,9 +288,9 @@ if __name__ == "__main__":
         control_samples = controller_cost_data["control_samples"]
         cost_samples = controller_cost_data["cost_samples"]
 
-    V_lambda = 0.05
+    V_lambda = 0.1
     controller_relu = utils.setup_relu(
-        (2, 4, 1), params=None, negative_slope=0.01, bias=True,
+        (2, 2, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
     if args.train_controller_approximator:
         train_controller_approximator(
@@ -316,8 +303,11 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
+    plant = pendulum.Pendulum(torch.float64)
+    lqr_gain = plant.lqr_control(np.diag([1., 10.]), np.array([[1.]]))
+
     lyapunov_relu = utils.setup_relu(
-        (2, 8, 8, 6, 4, 1), params=None, negative_slope=0.01, bias=True,
+        (2, 8, 8, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
     if args.train_cost_approximator:
         train_cost_approximator(
@@ -334,8 +324,8 @@ if __name__ == "__main__":
     # Now train the controller and Lyapunov function together
     q_equilibrium = torch.tensor([np.pi], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([np.pi - 0.5, -1], dtype=torch.float64)
-    x_up = torch.tensor([np.pi + 0.5, 1], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - 0.1, -0.2], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + 0.1, 0.2], dtype=torch.float64)
     u_lo = torch.tensor([-20], dtype=torch.float64)
     u_up = torch.tensor([20], dtype=torch.float64)
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
@@ -353,18 +343,11 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = 200
-    dut.lyapunov_positivity_epsilon = 0.01
-    dut.lyapunov_derivative_epsilon = 0.01
-    theta_all = torch.linspace(x_lo[0], x_up[0], 50).type(torch.float64)
-    thetadot_all = torch.linspace(x_lo[1], x_up[1], 50).type(torch.float64)
-    state_samples_all = []
-    for i in range(theta_all.numel()):
-        for j in range(thetadot_all.numel()):
-            state_samples_all.append(torch.tensor([[
-                theta_all[i], thetadot_all[j]]], dtype=torch.float64))
-    state_samples_all = torch.cat(state_samples_all, dim=0)
+    dut.lyapunov_positivity_epsilon = 0.05
+    dut.lyapunov_derivative_epsilon = 0.05
+    state_samples_all = utils.get_meshgrid_samples(
+        x_lo, x_up, (51, 51), dtype=torch.float64)
     dut.output_flag = True
-    dut.lyapunov_derivative_sample_margin = 0.001
     dut.train_lyapunov_on_samples(
         state_samples_all, num_epochs=100, batch_size=50)
 

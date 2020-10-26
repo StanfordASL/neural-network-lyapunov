@@ -751,6 +751,24 @@ def setup_relu(
     return relu
 
 
+def update_relu_params(relu, params: torch.Tensor):
+    """
+    Sets the weights and bias of the ReLU network to @p params.
+    """
+    params_count = 0
+    for layer in relu:
+        if isinstance(layer, torch.nn.Linear):
+            layer.weight.data = params[
+                params_count:
+                params_count + layer.in_features * layer.out_features].reshape(
+                    (layer.out_features, layer.in_features))
+            params_count += layer.in_features * layer.out_features
+            if layer.bias is not None:
+                layer.bias.data = params[
+                    params_count: params_count + layer.out_features]
+                params_count += layer.out_features
+
+
 def extract_relu_parameters(relu):
     """
     For a feedforward network with (leaky) relu activation units, extract the
@@ -763,3 +781,102 @@ def extract_relu_parameters(relu):
             if layer.bias is not None:
                 weights_biases.append(layer.bias.data.reshape((-1)))
     return torch.cat(weights_biases)
+
+
+def extract_relu_parameters_grad(relu):
+    """
+    For a feedforward network with (leaky) relu activation units, extract the
+    weights and bias gradient into one tensor.
+    """
+    weights_biases_grad = []
+    for layer in relu:
+        if isinstance(layer, torch.nn.Linear):
+            weights_biases_grad.append(layer.weight.grad.reshape((-1)))
+            if layer.bias is not None:
+                weights_biases_grad.append(layer.bias.grad.reshape((-1)))
+    return torch.cat(weights_biases_grad)
+
+
+def extract_relu_structure(relu_network):
+    """
+    Get the linear_layer_width, negative_slope and bias flag.
+    """
+    linear_layer_width = []
+    negative_slope = None
+    bias = None
+    for layer in relu_network:
+        if isinstance(layer, torch.nn.Linear):
+            if len(linear_layer_width) == 0:
+                # first layer
+                linear_layer_width.extend(
+                    [layer.in_features, layer.out_features])
+            else:
+                linear_layer_width.append(layer.out_features)
+            if layer.bias is not None:
+                assert(bias is None or bias)
+                bias = True
+            else:
+                assert(bias is None or not bias)
+                bias = False
+        elif isinstance(layer, torch.nn.ReLU):
+            if negative_slope is None:
+                negative_slope = 0.
+            else:
+                assert(negative_slope == 0.)
+        elif isinstance(layer, torch.nn.LeakyReLU):
+            if negative_slope is None:
+                negative_slope = layer.negative_slope
+            else:
+                assert(negative_slope == layer.negative_slope)
+        else:
+            raise Exception("extract_relu_structure(): unknown layer.")
+    return tuple(linear_layer_width), negative_slope, bias
+
+
+def get_meshgrid_samples(lower, upper, mesh_size: tuple, dtype) ->\
+        torch.Tensor:
+    """
+    Often we want to get the mesh samples in a box lower <= x <= upper.
+    This returns a torch tensor of size (prod(mesh_size), sample_dim), where
+    each row is a sample in the meshgrid.
+    """
+    sample_dim = len(mesh_size)
+    assert(len(upper) == sample_dim)
+    assert(len(lower) == sample_dim)
+    assert(len(mesh_size) == sample_dim)
+    meshes = []
+    for i in range(sample_dim):
+        meshes.append(torch.linspace(
+            lower[i], upper[i], mesh_size[i], dtype=dtype))
+    mesh_tensors = torch.meshgrid(*meshes)
+    return torch.cat([
+        mesh_tensors[i].reshape((-1, 1)) for i in range(sample_dim)], dim=1)
+
+
+def save_second_order_forward_model(
+        forward_relu, q_equilibrium, u_equilibrium, dt, file_path):
+    linear_layer_width, negative_slope, bias = extract_relu_structure(
+        forward_relu)
+    torch.save({"linear_layer_width": linear_layer_width,
+                "state_dict": forward_relu.state_dict(),
+                "negative_slope": negative_slope,
+                "bias": bias, "q_equilibrium": q_equilibrium,
+                "u_equilibrium": u_equilibrium, "dt": dt}, file_path)
+
+
+def save_lyapunov_model(lyapunov_relu, V_lambda, file_path):
+    linear_layer_width, negative_slope, bias = extract_relu_structure(
+        lyapunov_relu)
+    torch.save({"linear_layer_width": linear_layer_width,
+                "state_dict": lyapunov_relu.state_dict(),
+                "negative_slope": negative_slope, "V_lambda": V_lambda,
+                "bias": bias}, file_path)
+
+
+def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
+    linear_layer_width, negative_slope, bias = extract_relu_structure(
+        controller_relu)
+    torch.save({"linear_layer_width": linear_layer_width,
+                "state_dict": controller_relu.state_dict(),
+                "negative_slope": negative_slope, "x_lo": x_lo, "x_up": x_up,
+                "u_lo": u_lo, "u_up": u_up, "bias": bias}, file_path)

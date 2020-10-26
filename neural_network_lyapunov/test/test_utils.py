@@ -609,5 +609,78 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
             self.assertAlmostEqual(mip.r[2].x, slack_val)
 
 
+class TestExtractReLUStructure(unittest.TestCase):
+    def test(self):
+        relu = utils.setup_relu(
+            (2, 4, 5), params=None, negative_slope=0.1, bias=True)
+        linear_layer_width, negative_slope, bias = \
+            utils.extract_relu_structure(relu)
+        self.assertEqual(linear_layer_width, (2, 4, 5))
+        self.assertEqual(negative_slope, 0.1)
+        self.assertTrue(bias)
+
+        # negative_slope = 0
+        relu = utils.setup_relu(
+            (2, 4, 5), params=None, negative_slope=0., bias=True)
+        linear_layer_width, negative_slope, bias =\
+            utils.extract_relu_structure(relu)
+        self.assertEqual(linear_layer_width, (2, 4, 5))
+        self.assertEqual(negative_slope, 0.)
+        self.assertTrue(bias)
+
+        # bias = False
+        relu = utils.setup_relu(
+            (2, 4, 5), params=None, negative_slope=0., bias=False)
+        linear_layer_width, negative_slope, bias = \
+            utils.extract_relu_structure(relu)
+        self.assertEqual(linear_layer_width, (2, 4, 5))
+        self.assertEqual(negative_slope, 0.)
+        self.assertFalse(bias)
+
+
+class TestUpdateReLUParams(unittest.TestCase):
+    def test(self):
+        # no bias.
+        network = utils.setup_relu(
+            (2, 4, 3, 2), params=None, negative_slope=0.01, bias=False,
+            dtype=torch.float64)
+        params = torch.linspace(1, 26, 26, dtype=torch.float64)
+        utils.update_relu_params(network, params)
+        params_extracted = utils.extract_relu_parameters(network)
+        np.testing.assert_allclose(
+            params_extracted.detach().numpy(), np.linspace(1, 26, 26))
+
+        # with bias.
+        network = utils.setup_relu(
+            (2, 4, 3, 2), params=None, negative_slope=0.01, bias=True,
+            dtype=torch.float64)
+        params = torch.linspace(1, 34, 34, dtype=torch.float64)
+        utils.update_relu_params(network, params)
+        params_extracted = utils.extract_relu_parameters(network)
+        np.testing.assert_allclose(
+            params_extracted.detach().numpy(), np.linspace(1, 34, 34))
+
+
+class TestGetMeshgridSamples(unittest.TestCase):
+    def test(self):
+        lower = np.array([-1, -2])
+        upper = np.array([1, 2])
+        mesh_size = (11, 21)
+        samples = utils.get_meshgrid_samples(
+            lower, upper, mesh_size, torch.float64)
+        self.assertIsInstance(samples, torch.Tensor)
+        self.assertEqual(samples.shape, (11 * 21, 2))
+
+        x_samples = torch.linspace(
+            lower[0], upper[0], mesh_size[0], dtype=torch.float64)
+        y_samples = torch.linspace(
+            lower[1], upper[1], mesh_size[1], dtype=torch.float64)
+        for i in range(mesh_size[0]):
+            for j in range(mesh_size[1]):
+                np.testing.assert_allclose(
+                    samples[i * mesh_size[1] + j, :].detach().numpy(),
+                    np.array([x_samples[i], y_samples[j]]))
+
+
 if __name__ == "__main__":
     unittest.main()
