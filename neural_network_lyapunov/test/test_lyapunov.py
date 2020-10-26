@@ -1155,6 +1155,55 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     grad[i].detach().numpy(),
                     grad_expected[i].detach().numpy(), atol=1e-15)
 
+    def test_lyapunov_as_milp_warmstart(self):
+        def cb(model, where):
+            if where == gurobipy.GRB.Callback.MIP:
+                model.terminate()
+        relu = setup_leaky_relu(self.dtype)
+        x_equilibrium = self.x_equilibrium1
+        V_epsilon = 0.01
+        V_lambda = 0.1
+        for system in [self.system1, self.system3]:
+            dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
+            (milp, x) = dut.lyapunov_positivity_as_milp(
+                x_equilibrium, V_lambda, V_epsilon)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.Presolve, 0)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.Threads, 1)
+            milp.gurobi_model.optimize()
+            self.assertTrue(
+                milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            x_sol1 = torch.tensor([var.X for var in x], dtype=self.dtype)
+            (milp, x) = dut.lyapunov_positivity_as_milp(
+                x_equilibrium, V_lambda, V_epsilon, x_warmstart=x_sol1)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.Presolve, 0)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.Threads, 1)
+            milp.gurobi_model.optimize(cb)
+            self.assertTrue(
+                milp.gurobi_model.status == gurobipy.GRB.Status.INTERRUPTED)
+            self.assertEqual(milp.gurobi_model.solCount, 1)
+            x_sol2 = torch.tensor([var.X for var in x], dtype=self.dtype)
+            np.testing.assert_allclose(
+                x_sol1.detach().numpy(), x_sol2.detach().numpy())
+            (milp, x, _, _, _, _, _, _, _) = dut.lyapunov_derivative_as_milp(
+                x_equilibrium, V_lambda, V_epsilon)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            self.assertTrue(
+                milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            x_sol3 = torch.tensor([var.X for var in x], dtype=self.dtype)
+            (milp, x, _, _, _, _, _, _, _) = dut.lyapunov_derivative_as_milp(
+                x_equilibrium, V_lambda, V_epsilon, x_warmstart=x_sol3)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize(cb)
+            self.assertTrue(
+                milp.gurobi_model.status == gurobipy.GRB.Status.INTERRUPTED)
+            self.assertEqual(milp.gurobi_model.solCount, 1)
+            x_sol4 = torch.tensor([var.X for var in x], dtype=self.dtype)
+            np.testing.assert_allclose(
+                x_sol3.detach().numpy(), x_sol4.detach().numpy())
+
 
 class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
     def setUp(self):

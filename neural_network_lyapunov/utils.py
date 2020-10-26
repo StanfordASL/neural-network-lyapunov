@@ -880,3 +880,27 @@ def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
                 "state_dict": controller_relu.state_dict(),
                 "negative_slope": negative_slope, "x_lo": x_lo, "x_up": x_up,
                 "u_lo": u_lo, "u_up": u_up, "bias": bias}, file_path)
+
+
+def get_gurobi_terminate_if_callback(threshold=0.):
+    """
+    helper function that returns a callback that terminates gurobi as
+    soon as a counterexample is found. A counterexamples happens when
+    the objective > threshold
+    @param threshold float terminate if the objective becomes more than
+    threshold
+    """
+    def gurobi_terminate_if(model, where):
+        """
+        callback
+        @param model, where see Gurobi callback documentation
+        """
+        if where == gurobipy.GRB.Callback.MIPNODE:
+            solcnt = model.cbGet(gurobipy.GRB.Callback.MIPNODE_SOLCNT)
+            if solcnt > 0:
+                status = model.cbGet(gurobipy.GRB.Callback.MIPNODE_STATUS)
+                if status == gurobipy.GRB.Status.OPTIMAL:
+                    objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
+                    if objbst > threshold:
+                        model.terminate()
+    return gurobi_terminate_if

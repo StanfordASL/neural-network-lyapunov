@@ -49,10 +49,10 @@ opt_default = dict(
     V_eps=0.1,
 
     # dynamics nn
-    dyn_nn_width=(z_dim, z_dim*3, z_dim*3, z_dim),
+    dyn_nn_width=(z_dim, z_dim*5, z_dim*3, z_dim),
 
     # lyapunov nn
-    lyap_nn_width=(z_dim, z_dim*3, z_dim*3, 1),
+    lyap_nn_width=(z_dim, z_dim*5, z_dim*3, 1),
 
     # encoder (image-space learning)
     encoder_class=encoders.CNNEncoder2,
@@ -69,6 +69,7 @@ opt_default = dict(
 opt_variants = dict(
     unstable=dict(
         lyap_loss_optimal=True,
+        lyap_loss_warmstart=False,
         lyap_loss_freq=0,
         lyap_pos_loss_at_samples_weight=0.,
         lyap_der_loss_at_samples_weight=0.,
@@ -77,6 +78,7 @@ opt_variants = dict(
     ),
     stable=dict(
         lyap_loss_optimal=True,
+        lyap_loss_warmstart=False,
         lyap_loss_freq=2,
         lyap_pos_loss_at_samples_weight=1.,
         lyap_der_loss_at_samples_weight=1.,
@@ -89,6 +91,7 @@ opt_variants = dict(
 class TestDynamicsLearning(unittest.TestCase):
 
     def setUp(self):
+        torch.manual_seed(123)
         opt = dynamics_learning.DynamicsLearningOptions(opt_default)
         opt.set_options(opt_variants["stable"])
         self.opt = opt
@@ -347,6 +350,21 @@ class TestDynamicsLearning(unittest.TestCase):
                 elif var_name == "stable":
                     self.assertFalse(torch.all(v_post == v_post2))
         shutil.rmtree("runs")
+
+    def test_early_term(self):
+        for dyn_learner, data in [(self.ss_dyn_learner, self.x_data),
+                                  (self.latent_dyn_learner, self.X_data)]:
+            self.opt.set_option("lyap_loss_optimal", True)
+            lyap_pos_loss1, lyap_der_loss1 = dyn_learner.lyapunov_loss()
+            self.opt.set_option("lyap_loss_optimal", False)
+            lyap_pos_loss2, lyap_der_loss2 = dyn_learner.lyapunov_loss(
+                lyap_pos_threshold=lyap_pos_loss1,
+                lyap_der_threshold=lyap_der_loss1)
+            lyap_pos_loss3, lyap_der_loss3 = dyn_learner.lyapunov_loss()
+            self.assertEqual(lyap_pos_loss1, lyap_pos_loss2)
+            self.assertEqual(lyap_der_loss1, lyap_der_loss2)
+            self.assertLess(lyap_pos_loss3, lyap_pos_loss1)
+            self.assertLess(lyap_der_loss3, lyap_der_loss1)
 
 
 if __name__ == "__main__":

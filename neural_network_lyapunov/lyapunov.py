@@ -190,7 +190,7 @@ class LyapunovHybridLinearSystem:
                 V_lambda * torch.norm(x - x_equilibrium, p=1, dim=1)
 
     def lyapunov_positivity_as_milp(
-            self, x_equilibrium, V_lambda, V_epsilon):
+            self, x_equilibrium, V_lambda, V_epsilon, x_warmstart=None):
         """
         For a ReLU network, in order to determine if the function
         V(x) = ReLU(x) - ReLU(x*) + λ * |x - x*|₁
@@ -211,11 +211,20 @@ class LyapunovHybridLinearSystem:
         @param V_epsilon A scalar. ε in the documentation above.
         @return (milp, x) milp is a GurobiTorchMILP instance, x is the decision
         variable for state.
+        @param x_warmstart tensor of size self.system.x_dim. If provided, will
+        use x_warmstart as initial guess for the *binary* variables of the
+        milp. Instead of warm start beta with the binary variable solution from
+        the previous iteration, we choose to recompute beta using the previous
+        adversarial state `x` in the current neural network, so as to make
+        sure that this initial guess of beta is always a feasible solution.
         """
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (self.system.x_dim,))
         assert(isinstance(V_lambda, float))
         assert(isinstance(V_epsilon, float))
+        if x_warmstart is not None:
+            assert(isinstance(x_warmstart, torch.Tensor))
+            assert(x_warmstart.shape == (self.system.x_dim,))
 
         dtype = self.system.dtype
         milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
@@ -225,6 +234,11 @@ class LyapunovHybridLinearSystem:
         # z is the slack variable to write the output of ReLU network as mixed
         # integer constraints.
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            relu_to_optimization.set_activation_warmstart(
+                self.lyapunov_relu, beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
@@ -359,7 +373,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
     def lyapunov_derivative_as_milp(
             self, x_equilibrium, V_lambda, epsilon,
-            lyapunov_lower=None, lyapunov_upper=None):
+            lyapunov_lower=None, lyapunov_upper=None, x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -380,6 +394,12 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
+        @param x_warmstart tensor of size self.system.x_dim. If provided, will
+        use x_warmstart as initial guess for the *binary* variables of the
+        milp. Instead of warm start beta with the binary variable solution from
+        the previous iteration, we choose to recompute beta using the previous
+        adversarial state `x` in the current neural network, so as to make
+        sure that this initial guess of beta is always a feasible solution.
         @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
@@ -407,12 +427,28 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # x is the variable x[n]
         s, gamma = self.add_system_constraint(milp, x, x_next)
+        # warmstart the binary variables
+        if x_warmstart is not None and (isinstance(
+                    self.system, relu_system.AutonomousReLUSystem)
+                or isinstance(
+                    self.system,
+                    relu_system.AutonomousReLUSystemGivenEquilibrium)
+                or isinstance(
+                    self.system,
+                    relu_system.AutonomousResidualReLUSystemGivenEquilibrium)):
+            relu_to_optimization.set_activation_warmstart(
+                self.system.dynamics_relu, gamma, x_warmstart)
 
         # Add the mixed-integer constraint that formulates the output of
         # ReLU(x[n]).
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
         (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            relu_to_optimization.set_activation_warmstart(
+                self.lyapunov_relu, beta, x_warmstart)
 
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
@@ -442,6 +478,12 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # constraints
         (z_next, beta_next, _, _) = self.add_relu_output_constraint(
             milp, x_next)
+
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            relu_to_optimization.set_activation_warmstart(
+                self.lyapunov_relu, beta_next,
+                self.system.step_forward(x_warmstart))
 
         # The cost function is
         # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
