@@ -1,9 +1,11 @@
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import unittest
 import numpy as np
 import torch
 import torch.nn as nn
 import cvxpy as cp
+import gurobipy
 
 
 class TestReLU(unittest.TestCase):
@@ -755,6 +757,24 @@ class TestReLU(unittest.TestCase):
             x = torch.from_numpy(np.random.normal(0, 1, (2,))).type(self.dtype)
             test_model(self.model1, x, y, y_lo, y_up)
             test_model(self.model2, x, y, y_lo, y_up)
+
+    def test_set_activation_warmstart(self):
+        x = torch.tensor([1, 2], dtype=self.dtype)
+        for model in [self.model1, self.model2, self.model3]:
+            pattern = relu_to_optimization.ComputeReLUActivationPattern(
+                model, x)
+            pattern_flat = []
+            for a in pattern:
+                for b in a:
+                    pattern_flat.append(b.item())
+            milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            z = milp.addVars(
+                    len(pattern_flat), lb=-gurobipy.GRB.INFINITY,
+                    vtype=gurobipy.GRB.BINARY, name="z")
+            relu_to_optimization.set_activation_warmstart(model, z, x)
+            milp.gurobi_model.update()
+            for i in range(len(z)):
+                self.assertEqual(bool(z[i].start), pattern_flat[i])
 
 
 if __name__ == "__main__":

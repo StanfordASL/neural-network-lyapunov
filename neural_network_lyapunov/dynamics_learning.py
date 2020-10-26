@@ -145,9 +145,17 @@ class DynamicsLearning:
             z_adv_der = torch.cat(z_adv_der, dim=0)
         return z_adv_pos, z_adv_der
 
-    def lyapunov_loss(self, pos_threshold=0., der_threshold=0.):
+    def lyapunov_loss(self, lyap_pos_threshold=0., lyap_der_threshold=0.):
         """
         compute the Lyapunov losses
+        @param lyap_pos_threshold float the thresold used when computing an
+        adversarial example for violation of the positivity of the lyapunov
+        function. The MILP is terminated when its objective reaches
+        lyap_pos_threshold.
+        @param lyap_der_threshold float the thresold used when computing an
+        adversarial example for violation of the derivative constraint of the
+        lyapunov function. The MILP is terminated when its objective reaches
+        lyap_der_threshold.
         @return lyap_pos_loss tensor of the lyapunov loss for the positivity
         constraint
         @return lyap_der_loss tensor of the lypunov loss for the derivative
@@ -170,7 +178,7 @@ class DynamicsLearning:
         else:
             lyap_pos_mip.gurobi_model.optimize(
                 utils.get_gurobi_terminate_if_callback(
-                    threshold=pos_threshold))
+                    threshold=lyap_pos_threshold))
             try:
                 lyap_pos_loss = lyap_pos_mip.\
                     compute_objective_from_mip_data_and_solution()
@@ -203,7 +211,7 @@ class DynamicsLearning:
         else:
             lyap_der_mip.gurobi_model.optimize(
                 utils.get_gurobi_terminate_if_callback(
-                    threshold=der_threshold))
+                    threshold=lyap_der_threshold))
             try:
                 lyap_der_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()

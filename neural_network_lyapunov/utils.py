@@ -783,7 +783,6 @@ def extract_relu_parameters(relu):
     return torch.cat(weights_biases)
 
 
-<<<<<<< HEAD
 def extract_relu_parameters_grad(relu):
     """
     For a feedforward network with (leaky) relu activation units, extract the
