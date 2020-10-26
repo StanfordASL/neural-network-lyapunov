@@ -1,5 +1,6 @@
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.utils as utils
 import unittest
 import numpy as np
 import torch
@@ -775,6 +776,105 @@ class TestReLU(unittest.TestCase):
             milp.gurobi_model.update()
             for i in range(len(z)):
                 self.assertEqual(bool(z[i].start), pattern_flat[i])
+
+
+class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
+    """
+    This class tests that the gradient of each entry in
+    ReLUFreePattern.output_constraint() function is correct, by comparing the
+    automatic differentiation result versus numerical gradient.
+    """
+
+    def entry_gradient_tester(
+        self, network, network_param, x_lo, x_up, mip_entry_name,
+            mip_entry_size, atol, rtol):
+
+        def get_entry(params, entry_index):
+            if isinstance(params, np.ndarray):
+                params_torch = torch.from_numpy(params)
+            elif isinstance(params, torch.Tensor):
+                params_torch = params
+            utils.update_relu_params(network, params_torch)
+            utils.network_zero_grad(network)
+            dut = relu_to_optimization.ReLUFreePattern(
+                network, params_torch.dtype)
+            mip_return, _, _, _, _ = dut.output_constraint(x_lo, x_up)
+            entry = getattr(mip_return, mip_entry_name)
+
+            if entry is None:
+                return None
+            else:
+                entry_flat = entry.reshape((-1))
+                return entry_flat[entry_index]
+        for entry_index in range(mip_entry_size):
+            # First compute the gradient of that entry w.r.t network
+            # weights/biases using autodiff.
+            entry_i = get_entry(network_param, entry_index)
+            if entry_i is None:
+                continue
+            if not entry_i.requires_grad:
+                grad = torch.zeros_like(network_param)
+            else:
+                entry_i.backward()
+                grad = utils.extract_relu_parameters_grad(network)
+
+            grad_numerical = utils.compute_numerical_gradient(
+                lambda param: get_entry(param, entry_index).item(),
+                network_param.detach().numpy())
+            np.testing.assert_allclose(
+                grad.detach().numpy(), grad_numerical, atol=atol, rtol=rtol)
+
+    def mip_return_gradient_tester(
+            self, network, network_param, x_lo, x_up, atol, rtol):
+        utils.update_relu_params(network, network_param)
+        dut = relu_to_optimization.ReLUFreePattern(
+            network, network_param.dtype)
+        mip_return, _, _, _, _ = dut.output_constraint(x_lo, x_up)
+
+        def test_entry(entry_name):
+            entry = getattr(mip_return, entry_name)
+            if entry is None:
+                return
+            self.entry_gradient_tester(
+                network, network_param, x_lo, x_up, entry_name, entry.numel(),
+                atol, rtol)
+
+        test_entry("Aout_input")
+        test_entry("Aout_slack")
+        test_entry("Aout_binary")
+        test_entry("Cout")
+        test_entry("Ain_input")
+        test_entry("Ain_slack")
+        test_entry("Ain_binary")
+        test_entry("rhs_in")
+        test_entry("Aeq_input")
+        test_entry("Aeq_slack")
+        test_entry("Aeq_binary")
+        test_entry("rhs_eq")
+
+    def test_network1(self):
+        """
+        This is a network I found in the while when synthesizing controller for
+        the pendulum.
+        """
+        network = utils.setup_relu(
+            (2, 2, 1), params=None, negative_slope=0.1, bias=True,
+            dtype=torch.float64)
+        network[0].weight.data = torch.tensor(
+            [[1.6396, 2.7298], [-6.5492, -5.0761]], dtype=torch.float64)
+        network[0].bias.data = torch.tensor(
+            [0.1370, -0.3323], dtype=torch.float64)
+        network[2].weight.data = torch.tensor(
+            [-2.9836, 5.6627], dtype=torch.float64)
+        network[2].bias.data = torch.tensor([-0.0927], dtype=torch.float64)
+
+        network_param = utils.extract_relu_parameters(network)
+
+        x_lo = torch.tensor([np.pi - 0.1, -0.2], dtype=torch.float64)
+        x_up = torch.tensor([np.pi + 0.1, 0.2], dtype=torch.float64)
+
+        self.mip_return_gradient_tester(
+            network, network_param, x_lo, x_up, atol=1E-5, rtol=1E-5)
 
 
 if __name__ == "__main__":

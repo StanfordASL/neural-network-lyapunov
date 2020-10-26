@@ -682,5 +682,45 @@ class TestGetMeshgridSamples(unittest.TestCase):
                     np.array([x_samples[i], y_samples[j]]))
 
 
+class TestNetworkZeroGrad(unittest.TestCase):
+    def test(self):
+        # Test without bias
+        network = utils.setup_relu(
+            (2, 4, 1), params=None, negative_slope=0.1, bias=False,
+            dtype=torch.float64)
+        data = (torch.tensor(
+            [[1., 2.], [0., 2.], [3., 1.]], dtype=torch.float64),
+            torch.tensor([[1.], [2.], [3.]], dtype=torch.float64))
+        output = network(data[0])
+
+        loss = torch.nn.MSELoss()(output, data[1])
+        loss.backward()
+
+        utils.network_zero_grad(network)
+        for layer in (0, 2):
+            np.testing.assert_allclose(
+                network[layer].weight.grad.detach().numpy(),
+                np.zeros_like(network[layer].weight.grad.detach().numpy()))
+            self.assertIsNone(network[layer].bias)
+
+        # Test with bias
+        network = utils.setup_relu(
+            (2, 4, 1), params=None, negative_slope=0.1, bias=True,
+            dtype=torch.float64)
+        output = network(data[0])
+
+        loss = torch.nn.MSELoss()(output, data[1])
+        loss.backward()
+
+        utils.network_zero_grad(network)
+        for layer in (0, 2):
+            np.testing.assert_allclose(
+                network[layer].weight.grad.detach().numpy(),
+                np.zeros_like(network[layer].weight.grad.detach().numpy()))
+            np.testing.assert_allclose(
+                network[layer].bias.grad.detach().numpy(),
+                np.zeros_like(network[layer].bias.grad.detach().numpy()))
+
+
 if __name__ == "__main__":
     unittest.main()

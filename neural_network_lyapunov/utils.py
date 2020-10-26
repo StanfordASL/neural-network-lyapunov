@@ -791,9 +791,17 @@ def extract_relu_parameters_grad(relu):
     weights_biases_grad = []
     for layer in relu:
         if isinstance(layer, torch.nn.Linear):
-            weights_biases_grad.append(layer.weight.grad.reshape((-1)))
+            if layer.weight.grad is None:
+                weights_biases_grad.append(
+                    torch.zeros_like(layer.weight).reshape((-1)))
+            else:
+                weights_biases_grad.append(layer.weight.grad.reshape((-1)))
             if layer.bias is not None:
-                weights_biases_grad.append(layer.bias.grad.reshape((-1)))
+                if layer.bias.grad is None:
+                    weights_biases_grad.append(
+                        torch.zeros_like(layer.bias).reshape((-1)))
+                else:
+                    weights_biases_grad.append(layer.bias.grad.reshape((-1)))
     return torch.cat(weights_biases_grad)
 
 
@@ -864,12 +872,16 @@ def save_second_order_forward_model(
                 "u_equilibrium": u_equilibrium, "dt": dt}, file_path)
 
 
-def save_lyapunov_model(lyapunov_relu, V_lambda, file_path):
+def save_lyapunov_model(
+    lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
+        lyapunov_derivative_epsilon, file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         lyapunov_relu)
     torch.save({"linear_layer_width": linear_layer_width,
                 "state_dict": lyapunov_relu.state_dict(),
                 "negative_slope": negative_slope, "V_lambda": V_lambda,
+                "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
+                "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
                 "bias": bias}, file_path)
 
 
@@ -904,3 +916,20 @@ def get_gurobi_terminate_if_callback(threshold=0.):
                     if objbst > threshold:
                         model.terminate()
     return gurobi_terminate_if
+
+
+def network_zero_grad(network):
+    """
+    Set the gradient of all parameters in the network to zero.
+    """
+    for layer in network:
+        if isinstance(layer, torch.nn.Linear):
+            if layer.weight.grad is not None:
+                layer.weight.grad.data.zero_()
+            if layer.bias is not None and layer.bias.grad is not None:
+                layer.bias.grad.data.zero_()
+        elif isinstance(layer, torch.nn.ReLU) or isinstance(
+                layer, torch.nn.LeakyReLU):
+            pass
+        else:
+            raise Exception("network_zero_grad: unsupported layer.")
