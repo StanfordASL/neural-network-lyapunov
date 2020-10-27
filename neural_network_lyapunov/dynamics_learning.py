@@ -308,9 +308,17 @@ class DynamicsLearning:
                         self.n_iter)
                     if ((self.opt.lyap_loss_freq > 0) and
                        ((self.n_iter % self.opt.lyap_loss_freq) == 0)):
+                        with torch.no_grad():
+                            (lyap_pos_loss_at_samples,
+                             lyap_der_loss_at_samples) =\
+                                self.lyapunov_loss_at_samples(x)
+                        lyap_pos_threshold = lyap_pos_loss_at_samples.item()
+                        lyap_der_threshold = lyap_der_loss_at_samples.item()
                         self.optimizer.zero_grad()
                         self.lyapunov_to_device('cpu')
-                        lyap_pos_loss, lyap_der_loss = self.lyapunov_loss()
+                        lyap_pos_loss, lyap_der_loss = self.lyapunov_loss(
+                            lyap_pos_threshold=lyap_pos_threshold,
+                            lyap_der_threshold=lyap_der_threshold)
                         loss = (lyap_pos_loss + lyap_der_loss)
                         loss.backward()
                         self.lyapunov_to_device(device)
