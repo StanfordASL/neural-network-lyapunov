@@ -140,4 +140,9 @@ gurobi.log
 notebooks/runs
 notebooks/*.p
 
+# data
+notebooks/experiments/*/x_*
+notebooks/experiments/*/X_*
+notebooks/experiments/*/*/*.pkl
+
 *.DS_Store
