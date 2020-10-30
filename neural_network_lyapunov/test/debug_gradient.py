@@ -57,7 +57,8 @@ def compute_milp_cost_given_relu(
     else:
         milp = dut.lyapunov_derivative_as_milp(
             x_equilibrium, V_lambda, lyapunov_derivative_epsilon,
-            None, None)[0]
+            lyapunov.ConvergenceEps.ExpLower,
+            lyapunov_lower=None, lyapunov_upper=None)[0]
     milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     milp.gurobi_model.optimize()
     objective = milp.compute_objective_from_mip_data_and_solution(

@@ -122,7 +122,8 @@ class DynamicsLearning:
         if num_sol > 0:
             z_adv_pos = torch.cat(z_adv_pos, dim=0)
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda, self.opt.V_eps)
+            self.lyap.system.x_equilibrium, self.opt.V_lambda, self.opt.V_eps,
+            lyapunov.ConvergenceEps.ExpLower)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -193,13 +194,13 @@ class DynamicsLearning:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps,
+                self.opt.V_eps, lyapunov.ConvergenceEps.ExpLower,
                 x_warmstart=self.lyap_der_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps)
+                self.opt.V_eps, lyapunov.ConvergenceEps.ExpLower)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,

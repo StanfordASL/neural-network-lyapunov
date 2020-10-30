@@ -123,7 +123,8 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         lyapunov_derivative_mip_return = lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
                 x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
-                None, None)
+                lyapunov.ConvergenceEps.ExpLower, lyapunov_lower=None,
+                lyapunov_upper=None)
         lyapunov_derivative_mip = lyapunov_derivative_mip_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
