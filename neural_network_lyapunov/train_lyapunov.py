@@ -108,8 +108,13 @@ class TrainLyapunovReLU:
         self.lyapunov_derivative_mip_cost_decay_rate = 0.9
         # This is ε₂ in  V(x) >=  ε₂ |x - x*|₁
         self.lyapunov_positivity_epsilon = 0.01
-        # This is ε in dV(x) ≤ -ε V(x)
+        # This is ε in dV(x) ≤ -ε V(x) or dV(x) ≤ -ε |x-x*|₁
         self.lyapunov_derivative_epsilon = 0.01
+        # Depending on this type, the interpretation for
+        # self.lyapunov_derivative_epsilon is different. To prove exponential
+        # convergence, use ExpLower (or ExpUpper) to prove the exponential
+        # convergence rate. To prove asymptotic convergence, use Asymp
+        self.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
 
         # The convergence tolerance for the training.
         # When the lyapunov function
@@ -215,7 +220,7 @@ class TrainLyapunovReLU:
                 lyapunov_derivative_as_milp(
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_derivative_epsilon,
-                    lyapunov.ConvergenceEps.ExpLower)
+                    self.lyapunov_derivative_eps_type)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -289,6 +294,7 @@ class TrainLyapunovReLU:
                     self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
+                    self.lyapunov_derivative_eps_type,
                     margin=self.lyapunov_derivative_sample_margin)
         else:
             derivative_sample_loss = 0.

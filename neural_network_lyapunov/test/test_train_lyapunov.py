@@ -106,6 +106,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                 V_lambda, dut.lyapunov_derivative_epsilon,
                 state_samples_all[-dut.max_sample_pool_size:],
                 state_samples_next[-dut.max_sample_pool_size:], x_equilibrium,
+                dut.lyapunov_derivative_eps_type,
                 dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(

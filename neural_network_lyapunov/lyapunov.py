@@ -388,7 +388,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return [V_next - V + epsilon * V for V_next in V_next_possible]
 
     def lyapunov_derivative_as_milp(
-        self, x_equilibrium, V_lambda, epsilon, exp_type: ConvergenceEps, *,
+        self, x_equilibrium, V_lambda, epsilon, eps_type: ConvergenceEps, *,
             lyapunov_lower=None, lyapunov_upper=None, x_warmstart=None):
         """
         We assume that the Lyapunov function
@@ -405,18 +405,26 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         MILP2
         max -V(x[n+1]) + (1-ε_max)*V(x[n])
         s.t lower <= V(x[n]) <= upper
-        Formulate the Lyapunov condition
+
+        In order to prove that the system converges asymptotically (but not
+        necessarily exponentially), we only need to prove that dV is strictly
+        negative. We choose to prove that
+        V(x[n+1]) - V(x[n]) ≤ −ε |x[n] − x*|₁, we could check the optimality
+        of an MILP to determine the asympotic convergence.
+        MILP3
+        max  V(x[n+1]) - V(x[n]) + ε |x[n] − x*|₁
+        s.t lower <= V(x[n]) <= upper
         @param V_lambda λ in the documentation above.
-        @param exp_type The interpretation of epsilon. If exp_type=ExpLower,
-        then we formulate MILP1. If exp_type=ExpUpper, then we formulate
-        MILP2.
+        @param eps_type The interpretation of epsilon. If eps_type=ExpLower,
+        then we formulate MILP1. If eps_type=ExpUpper, then we formulate
+        MILP2. If eps_type=Asymp, then we formulate MILP3.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
         @param lyapunov_upper the "upper" bound in the documentation above. If
         lyapunov_upper = None, then we ignore the upper bound on V(x[n]).
-        @param epsilon The rate of exponential convergence. If the goal is to
-        verify convergence but not exponential convergence, then set epsilon
-        to 0.
+        @param epsilon Depending on eps_type, epsilon has different
+        interpretations. It could be used to verify either exponential or
+        asymptotic convergence.
         @param x_warmstart tensor of size self.system.x_dim. If provided, will
         use x_warmstart as initial guess for the *binary* variables of the
         milp. Instead of warm start beta with the binary variable solution from
@@ -436,7 +444,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_upper, float))
         assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
-        assert(isinstance(exp_type, ConvergenceEps))
+        assert(isinstance(eps_type, ConvergenceEps))
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
@@ -511,40 +519,59 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # For MILP1, the cost function is (ε-1)*V(x[n]) + V(x[n+1]), equals to
         # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
-        #     epsilon * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
+        #     ε * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
         # For MILP2, the cost function is the negation of MILP1.
-        if exp_type == ConvergenceEps.ExpLower or \
-                exp_type == ConvergenceEps.ExpUpper:
+        if eps_type == ConvergenceEps.ExpLower or \
+                eps_type == ConvergenceEps.ExpUpper:
             obj_coeff = [a_out, (epsilon - 1) * a_out, V_lambda * torch.ones(
                 (self.system.x_dim,), dtype=self.system.dtype),
                 (epsilon - 1) * V_lambda * torch.ones(
                     (self.system.x_dim,), dtype=self.system.dtype)]
             obj_constant = epsilon * (b_out - relu_x_equilibrium.squeeze())
             obj_vars = [z_next, z, s_x_next_norm, s_x_norm]
-            if exp_type == ConvergenceEps.ExpLower:
+            if eps_type == ConvergenceEps.ExpLower:
                 milp.setObjective(
                     obj_coeff, obj_vars, obj_constant, gurobipy.GRB.MAXIMIZE)
-            elif exp_type == ConvergenceEps.ExpUpper:
+            elif eps_type == ConvergenceEps.ExpUpper:
                 milp.setObjective(
                     [-c for c in obj_coeff], obj_vars, -obj_constant,
                     gurobipy.GRB.MAXIMIZE)
+        elif eps_type == ConvergenceEps.Asymp:
+            # For asymptotic convergence, the cost is
+            # V(x[n+1]) - V(x[n]) + ε |x[n] − x*|₁
+            # = ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) + (ε-λ)|x[n]-x*|₁
+            milp.setObjective([a_out, -a_out, V_lambda * torch.ones(
+                (self.system.x_dim,), dtype=self.system.dtype),
+                (epsilon - V_lambda) * torch.ones(
+                    (self.system.x_dim,), dtype=self.system.dtype)],
+                [z_next, z, s_x_next_norm, s_x_norm], 0.,
+                gurobipy.GRB.MAXIMIZE)
         else:
-            raise NotImplementedError
-
+            raise Exception("unknown eps_type")
         return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
 
     def lyapunov_derivative_loss_at_samples(
-            self, V_lambda, epsilon, state_samples, x_equilibrium, margin=0.):
+        self, V_lambda, epsilon, state_samples, x_equilibrium, eps_type,
+            margin=0.):
         """
-        We will sample N states x̅ⁱ[n], i=1,...,N, compute the next state
-        x̅ⁱ[n+1], and we would like the Lyapunov function to decrease on these
-        sampled state x̅ⁱ[n]. To do so, we define a loss as
-        mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n])+ margin, 0))
+        We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
+        function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
+        function we want to penalize, and define a loss as
+        mean(max(l(x̅ⁱ) + margin, 0))
+        Depending on eps_type, l is defined as
+        1. If we want to prove the exponential convergence rate is larger than
+           epsilon, then l(x) = V(x_next) - V(x) + ε*V(x)
+        2. If we want to prove the exponential convergence rate is smaller
+           than epsilon, then l(x) = -(V(x_next) - V(x) + ε*V(x))
+        3. If we want to prove the asymptotic convergence, then
+           l(x) = V(x_next) - V(x) + ε*|x−x*|₁
         @param V_lambda λ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
         @param state_samples The sampled state x̅[n], state_samples[i] is the
         i'th sample x̅ⁱ[n]
         @param x_equilibrium x*.
+        @param eps_type The interpretation of epsilon. Whether we prove
+        exponential or asymptotic convergence.
         @param margin We might want to shift the margin for the Lyapunov
         loss.
         @return loss The loss
@@ -554,6 +581,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
+        assert(isinstance(eps_type, ConvergenceEps))
         # TODO(hongkai.dai): write this as a batched operation for relu
         # systems.
         state_next = torch.stack([
@@ -562,16 +590,23 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
             V_lambda, epsilon, state_samples, state_next,
-            x_equilibrium, margin)
+            x_equilibrium, eps_type, margin)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self, V_lambda, epsilon, state_samples, state_next,
-            x_equilibrium, margin=0.):
+            x_equilibrium, eps_type, margin=0.):
         """
-        We will sample N states x̅ⁱ[n], i=1,...,N, compute the next state
-        x̅ⁱ[n+1], and we would like the Lyapunov function to decrease on these
-        sampled state x̅ⁱ[n]. To do so, we define a loss as
-        mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n])+ margin, 0))
+        We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
+        function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
+        function we want to penalize, and define a loss as
+        mean(max(l(x̅ⁱ) + margin, 0))
+        Depending on eps_type, l is defined as
+        1. If we want to prove the exponential convergence rate is larger than
+           epsilon, then l(x) = V(x_next) - V(x) + ε*V(x)
+        2. If we want to prove the exponential convergence rate is smaller
+           than epsilon, then l(x) = -(V(x_next) - V(x) + ε*V(x))
+        3. If we want to prove the asymptotic convergence, then
+           l(x) = V(x_next) - V(x) + ε*|x−x*|₁
         The lyapunov function is
         ReLU(x) - ReLU(x*) + λ|x-x*|₁
         @param V_lambda λ in the Lyapunov function.
@@ -593,14 +628,27 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(state_next, torch.Tensor))
         assert(state_next.shape[1] == self.system.x_dim)
         assert(state_samples.shape[0] == state_next.shape[0])
+        assert(isinstance(eps_type, ConvergenceEps))
         relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
         v1 = self.lyapunov_value(
             state_samples, x_equilibrium, V_lambda, relu_at_equilibrium)
         v2 = self.lyapunov_value(
             state_next, x_equilibrium, V_lambda, relu_at_equilibrium)
-        return torch.nn.HingeEmbeddingLoss(margin=margin)(
-            -(v2 - v1 + epsilon * v1),
-            torch.tensor(-1.).to(state_samples.device))
+        if eps_type == ConvergenceEps.ExpLower:
+            return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                -(v2 - v1 + epsilon * v1),
+                torch.tensor(-1.).to(state_samples.device))
+        elif eps_type == ConvergenceEps.ExpUpper:
+            return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                (v2 - v1 + epsilon * v1),
+                torch.tensor(-1.).to(state_samples.device))
+        elif eps_type == ConvergenceEps.Asymp:
+            return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                -(v2 - v1 + epsilon * torch.norm(
+                    state_samples - x_equilibrium, p=1, dim=1)),
+                torch.tensor(-1.).to(state_samples.device))
+        else:
+            raise Exception("Unknown eps_type")
 
 
 class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
@@ -1294,11 +1342,20 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, relu_beta, gamma)
 
     def lyapunov_derivative_loss_at_samples(
-            self, V_lambda, epsilon, state_samples, x_equilibrium, margin=0.):
+        self, V_lambda, epsilon, state_samples, x_equilibrium, eps_type,
+            margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
-        function to decrease on these sampled states x̅ⁱ. To do so, we define
-        a loss as mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
+        function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
+        function we want to penalize, and define a loss as
+        mean(max(l(x̅ⁱ) + margin, 0))
+        Depending on eps_type, l is defined as
+        1. If we want to prove the exponential convergence rate is larger than
+           epsilon, then l(x) = V̇(x) + ε*V(x)
+        2. If we want to prove the exponential convergence rate is smaller
+           than epsilon, then l(x) = -(V̇(x) + ε*V(x))
+        3. If we want to prove the asymptotic convergence, then
+           l(x) = V̇(x) + ε*|x−x*|₁
         The lyapunov function is
         ReLU(x) - ReLU(x*) + λ|x-x*|₁
         @param V_lambda ρ in the Lyapunov function.
@@ -1313,6 +1370,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(epsilon, float))
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
+        assert(isinstance(eps_type, ConvergenceEps))
         xdot = torch.empty(
             (state_samples.shape[0], self.system.x_dim),
             dtype=self.system.dtype)
@@ -1328,15 +1386,23 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
             V_lambda, epsilon, state_samples, xdot, x_equilibrium,
-            margin)
+            eps_type, margin)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self, V_lambda, epsilon, state_samples, xdot_samples,
-            x_equilibrium, margin=0.):
+            x_equilibrium, eps_type, margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
-        function to decrease on these sampled states x̅ⁱ. To do so, we define
-        a loss as mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
+        function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
+        function we want to penalize, and define a loss as
+        mean(max(l(x̅ⁱ) + margin, 0))
+        Depending on eps_type, l is defined as
+        1. If we want to prove the exponential convergence rate is larger than
+           epsilon, then l(x) = V̇(x) + ε*V(x)
+        2. If we want to prove the exponential convergence rate is smaller
+           than epsilon, then l(x) = -(V̇(x) + ε*V(x))
+        3. If we want to prove the asymptotic convergence, then
+           l(x) = V̇(x) + ε*|x−x*|₁
         The lyapunov function is
         ReLU(x) - ReLU(x*) + λ|x-x*|₁
         @param V_lambda λ in the Lyapunov function.
@@ -1355,6 +1421,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(xdot_samples, torch.Tensor))
         assert(xdot_samples.shape[1] == self.system.x_dim)
         assert(state_samples.shape[0] == xdot_samples.shape[0])
+        assert(isinstance(eps_type, ConvergenceEps))
 
         num_samples = state_samples.shape[0]
         # First compute ∂V/∂x using pytorch autodiff.
@@ -1372,6 +1439,14 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         Vdot = torch.sum(dV_dx * xdot_samples, dim=1)
         V = self.lyapunov_value(
             state_samples, x_equilibrium, V_lambda).squeeze()
-        loss = torch.nn.HingeEmbeddingLoss(margin=margin)(
-            -(Vdot + epsilon * V), torch.tensor(-1))
-        return loss
+        if eps_type == ConvergenceEps.ExpLower:
+            val = Vdot + epsilon * V
+        elif eps_type == ConvergenceEps.ExpUpper:
+            val = -(Vdot + epsilon * V)
+        elif eps_type == ConvergenceEps.Asymp:
+            val = (Vdot + epsilon * torch.norm(
+                state_samples - x_equilibrium, p=1, dim=1))
+        else:
+            raise Exception("Unknown eps_type")
+        return torch.nn.HingeEmbeddingLoss(margin=margin)(
+            -val, torch.tensor(-1))

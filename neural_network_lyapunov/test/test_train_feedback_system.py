@@ -162,7 +162,7 @@ class TestLyapunov(unittest.TestCase):
             optimizer.step()
 
     def compute_lyapunov_derivative_loss_at_samples(
-            self, dut, state_samples, V_lambda, epsilon, margin):
+            self, dut, state_samples, V_lambda, epsilon, eps_type, margin):
         assert(isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         state_samples_next = torch.stack([dut.system.step_forward(
             state_samples[i]) for i in range(state_samples.shape[0])], dim=0)
@@ -175,22 +175,36 @@ class TestLyapunov(unittest.TestCase):
             # Note, by using torch.tensor([]), we cannot do auto grad on
             # `losses[i]`. In order to do automatic differentiation, change
             # torch.max to torch.nn.HingeEmbeddingLoss
-            losses[i] = torch.max(torch.tensor([dut.lyapunov_value(
+            V_next = dut.lyapunov_value(
                 state_samples_next[i], dut.system.x_equilibrium, V_lambda,
-                relu_at_equilibrium) - V + epsilon * V + margin, 0]))
+                relu_at_equilibrium)
+            if eps_type == lyapunov.ConvergenceEps.ExpLower:
+                losses[i] = torch.max(torch.tensor([
+                    V_next - V + epsilon * V + margin, 0]))
+            elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
+                losses[i] = torch.max(torch.tensor([
+                    -(V_next - V + epsilon * V) + margin, 0]))
+            elif eps_type == lyapunov.ConvergenceEps.Asymp:
+                losses[i] = torch.max(torch.tensor([
+                    (V_next - V + epsilon * torch.norm(
+                        state_samples[i] - dut.system.x_equilibrium, p=1)) +
+                    margin, 0]))
+
         return torch.mean(losses)
 
     def lyapunov_derivative_loss_at_sample_tester(
-            self, dut, training_params, state_samples):
+            self, dut, training_params, state_samples, eps_type):
         assert(isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         V_lambda = 0.1
         epsilon = 0.2
         margin = 0.3
         loss = dut.lyapunov_derivative_loss_at_samples(
-            V_lambda, epsilon, state_samples, dut.system.x_equilibrium, margin)
+            V_lambda, epsilon, state_samples, dut.system.x_equilibrium,
+            eps_type, margin)
         self.assertAlmostEqual(
             loss.item(), self.compute_lyapunov_derivative_loss_at_samples(
-                dut, state_samples, V_lambda, epsilon, margin).item())
+                dut, state_samples, V_lambda, epsilon, eps_type, margin
+                ).item())
 
         optimizer = torch.optim.Adam(list(
             self.controller_network1.parameters()) +
@@ -199,7 +213,7 @@ class TestLyapunov(unittest.TestCase):
             optimizer.zero_grad()
             loss = dut.lyapunov_derivative_loss_at_samples(
                 V_lambda, epsilon, state_samples, dut.system.x_equilibrium,
-                margin)
+                eps_type, margin)
             loss.backward()
             optimizer.step()
 
@@ -209,8 +223,10 @@ class TestLyapunov(unittest.TestCase):
             dtype=self.dtype)
         training_params = list(self.controller_network1.parameters()) +\
             list(self.lyapunov_relu1.parameters())
-        self.lyapunov_derivative_loss_at_sample_tester(
-            self.lyapunov_hybrid_system1, training_params, state_samples)
+        for eps_type in list(lyapunov.ConvergenceEps):
+            self.lyapunov_derivative_loss_at_sample_tester(
+                self.lyapunov_hybrid_system1, training_params, state_samples,
+                eps_type)
 
     def test_lyapunov_derivative_loss_at_samples2(self):
         state_samples = torch.tensor(
@@ -219,8 +235,10 @@ class TestLyapunov(unittest.TestCase):
             dtype=self.dtype)
         training_params = list(self.controller_network2.parameters()) +\
             list(self.lyapunov_relu2.parameters())
-        self.lyapunov_derivative_loss_at_sample_tester(
-            self.lyapunov_hybrid_system2, training_params, state_samples)
+        for eps_type in list(lyapunov.ConvergenceEps):
+            self.lyapunov_derivative_loss_at_sample_tester(
+                self.lyapunov_hybrid_system2, training_params, state_samples,
+                eps_type)
 
     def test_total_loss1(self):
         state_samples = torch.tensor(
