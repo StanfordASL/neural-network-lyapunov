@@ -48,6 +48,11 @@ if __name__ == "__main__":
         dtype=torch.float64)
     lyapunov_relu.load_state_dict(lyapunov_network["state_dict"])
     V_lambda = lyapunov_network["V_lambda"]
+    lyapunov_derivative_epsilon = lyapunov_network[
+        "lyapunov_derivative_epsilon"]
+    lyapunov_positivity_epsilon = lyapunov_network[
+        "lyapunov_positivity_epsilon"]
+    eps_type = lyapunov_network["eps_type"]
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
         torch.float64, x_lo, x_up, u_lo, u_up, forward_relu, q_equilibrium,
         u_equilibrium, dt)
@@ -66,9 +71,18 @@ if __name__ == "__main__":
         x_samples, atol=1E-5, rtol=1E-5)
     # Check gradient of positivity MIP cost.
     feedback_gradient_check.check_lyapunov_mip_loss_grad(
-        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda, 0.1,
-        True, atol=1E-5, rtol=1E-5)
+        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
+        lyapunov_positivity_epsilon, True, atol=1E-5, rtol=1E-5)
     # Check gradient of derivative MIP cost.
     feedback_gradient_check.check_lyapunov_mip_loss_grad(
-        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda, 0.01,
-        False, atol=1E-5, rtol=1E-5)
+        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
+        lyapunov_derivative_epsilon, False, atol=1E-5, rtol=1E-5)
+    feedback_gradient_check.check_lyapunov_mip_grad(
+        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
+        lyapunov_derivative_epsilon, False, eps_type, atol=1E-6, rtol=1E-6)
+    feedback_gradient_check.check_lyapunov_grad(
+        lyapunov_hybrid_system,
+        lambda p1, p2: feedback_gradient_check.compute_mip_loss(
+            lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
+            lyapunov_derivative_epsilon, False, eps_type, p1, p2), atol=1E-6,
+        rtol=1E-6, dx=1e-7)
