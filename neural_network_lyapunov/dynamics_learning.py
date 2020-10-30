@@ -236,8 +236,8 @@ class DynamicsLearning:
         """
         computes lyapunov loss at the provided samples
         @param x_all tensor (num_samples, x/z dim)
-        @param tensor upper bound outside which the loss is 0
-        @param tensor lower bound outside which the loss is 0
+        @param x_lo tensor upper bound outside which the loss is 0
+        @param x_up tensor lower bound outside which the loss is 0
         @return sample_pos_loss tensor lyapunov positivity loss at x
         @return sample_der_loss tensor lyapunov derivative loss at x
         """
