@@ -722,5 +722,16 @@ class TestNetworkZeroGrad(unittest.TestCase):
                 np.zeros_like(network[layer].bias.grad.detach().numpy()))
 
 
+class TestSigmoidAnneal(unittest.TestCase):
+    def test(self):
+        dtype = torch.float64
+        sa = utils.SigmoidAnneal(dtype, 0, 1, 10, 1)
+        sig = torch.nn.Sigmoid()
+        self.assertEqual(sa(10+2), sig(torch.tensor(2, dtype=dtype)))
+        sa = utils.SigmoidAnneal(dtype, 1e-3, 100, 30, 7)
+        self.assertEqual(sa(30), .5*(100 - 1e-3) + 1e-3)
+        self.assertAlmostEqual(sa(-100).item(), 1e-3, places=5)
+
+
 if __name__ == "__main__":
     unittest.main()

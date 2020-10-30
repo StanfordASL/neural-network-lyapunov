@@ -55,8 +55,14 @@ class DynamicsLearning:
         self.lyap = lyap
         self.opt = learning_opt
         self.optimizer = None
+        self.writer = None
+        self.log_suffix = ""
+        self.n_iter = 0.
         self.lyap_pos_x_adv = lyap.system.x_equilibrium
         self.lyap_der_x_adv = lyap.system.x_equilibrium
+        self.kl_loss_weight = utils.SigmoidAnneal(
+            self.opt.dtype, self.opt.kl_weight_lo, self.opt.kl_weight_up,
+            self.opt.kl_weight_center_step, self.opt.kl_weight_steps_lo_to_up)
 
     def reset_optimizer(self, lyapunov_only=False):
         """
@@ -72,6 +78,7 @@ class DynamicsLearning:
         params = [{'params': p} for p in params_list]
         self.optimizer = torch.optim.Adam(params)
         self.writer = SummaryWriter()
+        self.log_suffix = ""
         self.n_iter = 0
 
     def get_lyapunov_parameters(self):
@@ -225,13 +232,23 @@ class DynamicsLearning:
         return (self.opt.lyap_pos_loss_weight * lyap_pos_loss,
                 self.opt.lyap_der_loss_weight * lyap_der_loss)
 
-    def lyapunov_loss_at_samples(self, x):
+    def lyapunov_loss_at_samples(self, x_all, x_lo, x_up):
         """
         computes lyapunov loss at the provided samples
-        @param x tensor (num_samples, x/z dim)
+        @param x_all tensor (num_samples, x/z dim)
+        @param tensor upper bound outside which the loss is 0
+        @param tensor lower bound outside which the loss is 0
         @return sample_pos_loss tensor lyapunov positivity loss at x
         @return sample_der_loss tensor lyapunov derivative loss at x
         """
+        x = x_all[torch.all(x_all <= x_up.to(x_all.device), dim=1), :]
+        x = x[torch.all(x >= x_lo.to(x_all.device), dim=1), :]
+        if x.shape[0] == 0:
+            sample_der_loss = torch.zeros(1, dtype=self.opt.dtype).to(
+                x_all.device)
+            sample_pos_loss = torch.zeros(1, dtype=self.opt.dtype).to(
+                x_all.device)
+            return sample_pos_loss, sample_der_loss
         x_next = self.lyap.system.step_forward(x)
         relu_at_equilibrium = self.lyap.lyapunov_relu.forward(
             self.lyap.system.x_equilibrium)
@@ -265,6 +282,14 @@ class DynamicsLearning:
         validation_loss = validation_loss.to('cpu')
         return validation_loss
 
+    def log(self, name, value):
+        if self.writer is not None:
+            if self.log_suffix != "":
+                self.writer.add_scalar(
+                    name + '/' + self.log_suffix, value, self.n_iter)
+            else:
+                self.writer.add_scalar(name, value, self.n_iter)
+
     def train(self, num_epoch, validate=False, device='cpu',
               save_rate=0, save_path=None):
         """
@@ -285,6 +310,7 @@ class DynamicsLearning:
             self.reset_optimizer()
         try:
             for epoch_i in range(num_epoch):
+                self.log_suffix = "train"
                 for x, x_next in self.train_dataloader:
                     x = x.to(device)
                     x_next = x_next.to(device)
@@ -296,16 +322,9 @@ class DynamicsLearning:
                         lyap_der_loss_at_samples
                     loss.backward()
                     self.optimizer.step()
-                    self.writer.add_scalar(
-                        'Dynamics/train', dyn_loss, self.n_iter)
-                    self.writer.add_scalar(
-                        'LyapunovPosSamples/train',
-                        lyap_pos_loss_at_samples,
-                        self.n_iter)
-                    self.writer.add_scalar(
-                        'LyapunovDerSamples/train',
-                        lyap_der_loss_at_samples,
-                        self.n_iter)
+                    self.log('Dynamics', dyn_loss)
+                    self.log('LyapunovPosSamples', lyap_pos_loss_at_samples)
+                    self.log('LyapunovDerSamples', lyap_der_loss_at_samples)
                     if ((self.opt.lyap_loss_freq > 0) and
                        ((self.n_iter % self.opt.lyap_loss_freq) == 0)):
                         with torch.no_grad():
@@ -324,29 +343,37 @@ class DynamicsLearning:
                         self.lyapunov_to_device(device)
                         loss = loss.to(device)
                         self.optimizer.step()
-                        self.writer.add_scalar(
-                            'LyapunovPos', lyap_pos_loss, self.n_iter)
-                        self.writer.add_scalar(
-                            'LyapunovDer', lyap_der_loss, self.n_iter)
+                        self.log('LyapunovPos', lyap_pos_loss)
+                        self.log('LyapunovDer', lyap_der_loss)
                     self.n_iter += 1
                 if validate:
+                    self.log_suffix = "validate"
                     with torch.no_grad():
+                        dyn_loss = 0.
+                        lyap_pos_loss_at_samples = 0.
+                        lyap_der_loss_at_samples = 0.
+                        n_samples = 0.
                         for x, x_next in self.validation_dataloader:
                             x = x.to(device)
                             x_next = x_next.to(device)
-                            dyn_loss = self.dynamics_loss(x, x_next)
-                            (lyap_pos_loss_at_samples,
-                             lyap_der_loss_at_samples) =\
+                            dyn_loss_ = self.dynamics_loss(x, x_next)
+                            (lyap_pos_loss_at_samples_,
+                             lyap_der_loss_at_samples_) =\
                                 self.lyapunov_loss_at_samples(x)
-                            self.writer.add_scalar(
-                                'Dynamics/validate',
-                                dyn_loss, self.n_iter-1)
-                            self.writer.add_scalar(
-                                'LyapunovPosSamples/validate',
-                                lyap_pos_loss_at_samples, self.n_iter-1)
-                            self.writer.add_scalar(
-                                'LyapunovDerSamples/validate',
-                                lyap_der_loss_at_samples, self.n_iter-1)
+                            dyn_loss += dyn_loss_ * x.shape[0]
+                            lyap_pos_loss_at_samples +=\
+                                lyap_pos_loss_at_samples_ * x.shape[0]
+                            lyap_der_loss_at_samples +=\
+                                lyap_der_loss_at_samples_ * x.shape[0]
+                            n_samples += x.shape[0]
+                        dyn_loss /= n_samples
+                        lyap_pos_loss_at_samples /= n_samples
+                        lyap_der_loss_at_samples /= n_samples
+                        self.log('Dynamics', dyn_loss)
+                        self.log('LyapunovPosSamples',
+                                 lyap_pos_loss_at_samples)
+                        self.log('LyapunovDerSamples',
+                                 lyap_der_loss_at_samples)
                 if save_rate > 0 and epoch_i % save_rate == 0:
                     assert(save_path is not None)
                     self.save(save_path)
@@ -402,6 +429,14 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
             lyap = pickle.load(input)
         return cls(
             train_dataloader, validation_dataloader, lyap, learning_opt)
+
+    def lyapunov_loss_at_samples(self, x):
+        """
+        computes the lyapunov loss at the samples.
+        """
+        return super(StateSpaceDynamicsLearning, self).\
+            lyapunov_loss_at_samples(
+                x, self.opt.x_lo_stable, self.opt.x_up_stable)
 
     def dynamics_loss(self, x, x_next):
         """
@@ -569,7 +604,8 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         else:
             z = z_mu
         return super(LatentSpaceDynamicsLearning, self).\
-            lyapunov_loss_at_samples(z)
+            lyapunov_loss_at_samples(
+                z, self.opt.z_lo_stable, self.opt.z_up_stable)
 
     def kl_loss(self, z_mu, z_log_var):
         """
@@ -580,7 +616,10 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         """
         loss = torch.mean(-.5 * torch.sum(-torch.pow(z_mu, 2) -
                           torch.exp(z_log_var) + z_log_var + 1., dim=1))
-        return self.opt.kl_loss_weight * loss
+        weighted_loss = self.kl_loss_weight(self.n_iter) * loss
+        self.log("KL/original", loss)
+        self.log("KL/weighted", weighted_loss)
+        return weighted_loss
 
     def reconstruction_loss(self, x, x_decoded):
         """
@@ -607,17 +646,22 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             x_next_ = x_next
         x_decoded, x_next_pred_decoded, z_mu, z_log_var, z_next =\
             self.vae_forward(x)
-        loss = self.reconstruction_loss(x, x_decoded)
-        loss += self.reconstruction_loss(x_next_, x_next_pred_decoded)
+        enc_loss = self.reconstruction_loss(x, x_decoded)
+        self.log("Dynamics/encoding", enc_loss)
+        dyn_loss = self.reconstruction_loss(x_next_, x_next_pred_decoded)
+        self.log("Dynamics/latent_dyn", dyn_loss)
+        loss = enc_loss + dyn_loss
         if self.opt.use_variational:
             loss += self.kl_loss(z_mu, z_log_var)
         if self.decoded_equilibrium is not None:
             decoded_equilibrium_pred = self.decoder.forward(
                 self.lyap.system.x_equilibrium.unsqueeze(0))
-            loss += self.opt.decoded_equilibrium_loss_weight *\
+            dec_equ_loss = self.opt.decoded_equilibrium_loss_weight *\
                 self.reconstruction_loss(
                     self.decoded_equilibrium.unsqueeze(0),
                     decoded_equilibrium_pred)
+            self.log("DecodedEquilibirum", dec_equ_loss)
+            loss += dec_equ_loss
         return loss
 
     def rollout(self, x_init, N, decode_intermediate=False):
