@@ -59,7 +59,8 @@ class DynamicsLearning:
         self.log_suffix = ""
         self.n_iter = 0.
         self.lyap_pos_x_adv = lyap.system.x_equilibrium
-        self.lyap_der_x_adv = lyap.system.x_equilibrium
+        self.lyap_der_lo_x_adv = lyap.system.x_equilibrium
+        self.lyap_der_up_x_adv = lyap.system.x_equilibrium
         self.kl_loss_weight = utils.SigmoidAnneal(
             self.opt.dtype, self.opt.kl_weight_lo, self.opt.kl_weight_up,
             self.opt.kl_weight_center_step, self.opt.kl_weight_steps_lo_to_up)
@@ -109,7 +110,8 @@ class DynamicsLearning:
         violate the derivative constraint
         """
         lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda, self.opt.V_eps)
+            self.lyap.system.x_equilibrium, self.opt.V_lambda,
+            self.opt.V_eps_pos)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -126,11 +128,12 @@ class DynamicsLearning:
             if obj > 0:
                 z_adv_pos.append(torch.tensor(
                     [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
-        if num_sol > 0:
+        if len(z_adv_pos) > 0:
             z_adv_pos = torch.cat(z_adv_pos, dim=0)
+
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda, self.opt.V_eps,
-            lyapunov.ConvergenceEps.ExpLower)
+            self.lyap.system.x_equilibrium, self.opt.V_lambda,
+            self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -149,11 +152,37 @@ class DynamicsLearning:
             if obj > 0:
                 z_adv_der.append(torch.tensor(
                     [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
-        if num_sol > 0:
-            z_adv_der = torch.cat(z_adv_der, dim=0)
-        return z_adv_pos, z_adv_der
+        if len(z_adv_der) > 0:
+            z_adv_der_lo = torch.cat(z_adv_der, dim=0)
 
-    def lyapunov_loss(self, lyap_pos_threshold=0., lyap_der_threshold=0.):
+        lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
+            self.lyap.system.x_equilibrium, self.opt.V_lambda,
+            self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper)
+        lyap_der_mip = lyap_der_mip_[0]
+        x_var = lyap_der_mip_[1]
+        lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                           False)
+        if self.opt.lyap_loss_optimal:
+            lyap_der_mip.gurobi_model.optimize()
+        else:
+            lyap_der_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback())
+        num_sol = lyap_der_mip.gurobi_model.solCount
+        z_adv_der = []
+        for i in range(num_sol):
+            lyap_der_mip.gurobi_model.setParam(
+                gurobipy.GRB.Param.SolutionNumber, i)
+            obj = lyap_der_mip.gurobi_model.PoolObjVal
+            if obj > 0:
+                z_adv_der.append(torch.tensor(
+                    [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
+        if len(z_adv_der) > 0:
+            z_adv_der_up = torch.cat(z_adv_der, dim=0)
+
+        return z_adv_pos, z_adv_der_lo, z_adv_der_up
+
+    def lyapunov_loss(self, lyap_pos_threshold=0.,
+                      lyap_der_lo_threshold=0., lyap_der_up_threshold=0.):
         """
         compute the Lyapunov losses
         @param lyap_pos_threshold float the thresold used when computing an
@@ -172,11 +201,11 @@ class DynamicsLearning:
         if self.opt.lyap_loss_warmstart:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
                 self.lyap.system.x_equilibrium, self.opt.V_lambda,
-                self.opt.V_eps, x_warmstart=self.lyap_pos_x_adv)
+                self.opt.V_eps_pos, x_warmstart=self.lyap_pos_x_adv)
         else:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
                 self.lyap.system.x_equilibrium, self.opt.V_lambda,
-                self.opt.V_eps)
+                self.opt.V_eps_pos)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -197,41 +226,78 @@ class DynamicsLearning:
         if self.opt.lyap_loss_warmstart:
             self.lyap_pos_x_adv = torch.tensor(
                 [var.X for var in x_var], dtype=self.opt.dtype)
+
         if self.opt.lyap_loss_warmstart:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps, lyapunov.ConvergenceEps.ExpLower,
-                x_warmstart=self.lyap_der_x_adv)
+                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
+                x_warmstart=self.lyap_der_lo_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps, lyapunov.ConvergenceEps.ExpLower)
+                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
             lyap_der_mip.gurobi_model.optimize()
-            lyap_der_loss = lyap_der_mip.\
+            lyap_der_lo_loss = lyap_der_mip.\
                 compute_objective_from_mip_data_and_solution()
         else:
             lyap_der_mip.gurobi_model.optimize(
                 utils.get_gurobi_terminate_if_callback(
-                    threshold=lyap_der_threshold))
+                    threshold=lyap_der_lo_threshold))
             try:
-                lyap_der_loss = lyap_der_mip.\
+                lyap_der_lo_loss = lyap_der_mip.\
                     compute_objective_from_mip_data_and_solution()
             except IncorrectActiveConstraint:
                 print("WARNING: Cannot find the right " +
                       "constraints to get gradient.")
-                lyap_der_loss = torch.tensor(0, dtype=self.opt.dtype)
+                lyap_der_lo_loss = torch.tensor(0, dtype=self.opt.dtype)
         if self.opt.lyap_loss_warmstart:
-            self.lyap_der_x_adv = torch.tensor(
+            self.lyap_der_lo_x_adv = torch.tensor(
                 [var.X for var in x_var], dtype=self.opt.dtype)
+
+        if self.opt.lyap_loss_warmstart:
+            lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
+                x_warmstart=self.lyap_der_up_x_adv)
+        else:
+            lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper)
+        lyap_der_mip = lyap_der_mip_return[0]
+        x_var = lyap_der_mip_return[1]
+        lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                           False)
+        if self.opt.lyap_loss_optimal:
+            lyap_der_mip.gurobi_model.optimize()
+            lyap_der_up_loss = lyap_der_mip.\
+                compute_objective_from_mip_data_and_solution()
+        else:
+            lyap_der_mip.gurobi_model.optimize(
+                utils.get_gurobi_terminate_if_callback(
+                    threshold=lyap_der_up_threshold))
+            try:
+                lyap_der_up_loss = lyap_der_mip.\
+                    compute_objective_from_mip_data_and_solution()
+            except IncorrectActiveConstraint:
+                print("WARNING: Cannot find the right " +
+                      "constraints to get gradient.")
+                lyap_der_up_loss = torch.tensor(0, dtype=self.opt.dtype)
+        if self.opt.lyap_loss_warmstart:
+            self.lyap_der_up_x_adv = torch.tensor(
+                [var.X for var in x_var], dtype=self.opt.dtype)
+
         return (self.opt.lyap_pos_loss_weight * lyap_pos_loss,
-                self.opt.lyap_der_loss_weight * lyap_der_loss)
+                self.opt.lyap_der_lo_loss_weight * lyap_der_lo_loss,
+                self.opt.lyap_der_up_loss_weight * lyap_der_up_loss)
 
     def lyapunov_loss_at_samples(self, x_all, x_lo, x_up):
         """
@@ -245,25 +311,35 @@ class DynamicsLearning:
         x = x_all[torch.all(x_all <= x_up.to(x_all.device), dim=1), :]
         x = x[torch.all(x >= x_lo.to(x_all.device), dim=1), :]
         if x.shape[0] == 0:
-            sample_der_loss = torch.zeros(1, dtype=self.opt.dtype).to(
-                x_all.device)
             sample_pos_loss = torch.zeros(1, dtype=self.opt.dtype).to(
                 x_all.device)
-            return sample_pos_loss, sample_der_loss
+            sample_der_lo_loss = torch.zeros(1, dtype=self.opt.dtype).to(
+                x_all.device)
+            sample_der_up_loss = torch.zeros(1, dtype=self.opt.dtype).to(
+                x_all.device)
+            return sample_pos_loss, sample_der_lo_loss, sample_der_up_loss
         x_next = self.lyap.system.step_forward(x)
         relu_at_equilibrium = self.lyap.lyapunov_relu.forward(
             self.lyap.system.x_equilibrium)
         sample_pos_loss = \
             self.lyap.lyapunov_positivity_loss_at_samples(
                 relu_at_equilibrium, self.lyap.system.x_equilibrium, x,
-                self.opt.V_lambda, self.opt.V_eps)
-        sample_der_loss = \
+                self.opt.V_lambda, self.opt.V_eps_pos)
+        sample_der_lo_loss = \
             self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(
-                self.opt.V_lambda, self.opt.V_eps, x, x_next,
+                self.opt.V_lambda, self.opt.V_eps_der_lo, x, x_next,
                 self.lyap.system.x_equilibrium,
                 lyapunov.ConvergenceEps.ExpLower)
+        sample_der_up_loss = \
+            self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(
+                self.opt.V_lambda, self.opt.V_eps_der_up, x, x_next,
+                self.lyap.system.x_equilibrium,
+                lyapunov.ConvergenceEps.ExpUpper)
         return (self.opt.lyap_pos_loss_at_samples_weight * sample_pos_loss,
-                self.opt.lyap_der_loss_at_samples_weight * sample_der_loss)
+                self.opt.lyap_der_lo_loss_at_samples_weight *
+                sample_der_lo_loss,
+                self.opt.lyap_der_up_loss_at_samples_weight *
+                sample_der_up_loss)
 
     def rollout_validation(self, rollouts, device='cpu'):
         """
@@ -318,64 +394,87 @@ class DynamicsLearning:
                     x_next = x_next.to(device)
                     self.optimizer.zero_grad()
                     dyn_loss = self.dynamics_loss(x, x_next)
-                    lyap_pos_loss_at_samples, lyap_der_loss_at_samples = self.\
+                    (lyap_pos_loss_at_samples,
+                     lyap_der_lo_loss_at_samples,
+                     lyap_der_up_loss_at_samples) = self.\
                         lyapunov_loss_at_samples(x)
-                    loss = dyn_loss + lyap_pos_loss_at_samples +\
-                        lyap_der_loss_at_samples
+                    loss = dyn_loss +\
+                        lyap_pos_loss_at_samples +\
+                        lyap_der_lo_loss_at_samples +\
+                        lyap_der_up_loss_at_samples
                     loss.backward()
                     self.optimizer.step()
                     self.log('Dynamics', dyn_loss)
                     self.log('LyapunovPosSamples', lyap_pos_loss_at_samples)
-                    self.log('LyapunovDerSamples', lyap_der_loss_at_samples)
+                    self.log('LyapunovDerSamples/low',
+                             lyap_der_lo_loss_at_samples)
+                    self.log('LyapunovDerSamples/up',
+                             lyap_der_up_loss_at_samples)
                     if ((self.opt.lyap_loss_freq > 0) and
                        ((self.n_iter % self.opt.lyap_loss_freq) == 0)):
                         with torch.no_grad():
                             (lyap_pos_loss_at_samples,
-                             lyap_der_loss_at_samples) =\
+                             lyap_der_lo_loss_at_samples,
+                             lyap_der_up_loss_at_samples) =\
                                 self.lyapunov_loss_at_samples(x)
                         lyap_pos_threshold = lyap_pos_loss_at_samples.item()
-                        lyap_der_threshold = lyap_der_loss_at_samples.item()
+                        lyap_der_lo_threshold = lyap_der_lo_loss_at_samples.\
+                            item()
+                        lyap_der_up_threshold = lyap_der_up_loss_at_samples.\
+                            item()
                         self.optimizer.zero_grad()
                         self.lyapunov_to_device('cpu')
-                        lyap_pos_loss, lyap_der_loss = self.lyapunov_loss(
-                            lyap_pos_threshold=lyap_pos_threshold,
-                            lyap_der_threshold=lyap_der_threshold)
-                        loss = (lyap_pos_loss + lyap_der_loss)
+                        lyap_pos_loss, lyap_der_lo_loss, lyap_der_up_loss =\
+                            self.lyapunov_loss(
+                                lyap_pos_threshold=lyap_pos_threshold,
+                                lyap_der_lo_threshold=lyap_der_lo_threshold,
+                                lyap_der_up_threshold=lyap_der_up_threshold)
+                        loss = (lyap_pos_loss +
+                                lyap_der_lo_loss +
+                                lyap_der_up_loss)
                         loss.backward()
                         self.lyapunov_to_device(device)
                         loss = loss.to(device)
                         self.optimizer.step()
                         self.log('LyapunovPos', lyap_pos_loss)
-                        self.log('LyapunovDer', lyap_der_loss)
+                        self.log('LyapunovDer/low', lyap_der_lo_loss)
+                        self.log('LyapunovDer/up', lyap_der_up_loss)
                     self.n_iter += 1
                 if validate:
                     self.log_suffix = "validate"
                     with torch.no_grad():
                         dyn_loss = 0.
                         lyap_pos_loss_at_samples = 0.
-                        lyap_der_loss_at_samples = 0.
+                        lyap_der_lo_loss_at_samples = 0.
+                        lyap_der_up_loss_at_samples = 0.
                         n_samples = 0.
                         for x, x_next in self.validation_dataloader:
                             x = x.to(device)
                             x_next = x_next.to(device)
                             dyn_loss_ = self.dynamics_loss(x, x_next)
                             (lyap_pos_loss_at_samples_,
-                             lyap_der_loss_at_samples_) =\
+                             lyap_der_lo_loss_at_samples_,
+                             lyap_der_up_loss_at_samples_) =\
                                 self.lyapunov_loss_at_samples(x)
                             dyn_loss += dyn_loss_ * x.shape[0]
                             lyap_pos_loss_at_samples +=\
                                 lyap_pos_loss_at_samples_ * x.shape[0]
-                            lyap_der_loss_at_samples +=\
-                                lyap_der_loss_at_samples_ * x.shape[0]
+                            lyap_der_lo_loss_at_samples +=\
+                                lyap_der_lo_loss_at_samples_ * x.shape[0]
+                            lyap_der_up_loss_at_samples +=\
+                                lyap_der_up_loss_at_samples_ * x.shape[0]
                             n_samples += x.shape[0]
                         dyn_loss /= n_samples
                         lyap_pos_loss_at_samples /= n_samples
-                        lyap_der_loss_at_samples /= n_samples
+                        lyap_der_lo_loss_at_samples /= n_samples
+                        lyap_der_up_loss_at_samples /= n_samples
                         self.log('Dynamics', dyn_loss)
                         self.log('LyapunovPosSamples',
                                  lyap_pos_loss_at_samples)
-                        self.log('LyapunovDerSamples',
-                                 lyap_der_loss_at_samples)
+                        self.log('LyapunovDerSamples/low',
+                                 lyap_der_lo_loss_at_samples)
+                        self.log('LyapunovDerSamples/up',
+                                 lyap_der_up_loss_at_samples)
                 if save_rate > 0 and epoch_i % save_rate == 0:
                     assert(save_path is not None)
                     self.save(save_path)
