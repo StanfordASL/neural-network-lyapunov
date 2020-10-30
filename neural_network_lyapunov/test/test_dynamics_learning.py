@@ -31,6 +31,8 @@ opt_default = dict(
 
     x_dim=2,
     x_equilibrium=torch.tensor([np.pi, 0], dtype=dtype),
+    x_lo_stable=torch.tensor([np.pi/4, -.5], dtype=dtype),
+    x_up_stable=torch.tensor([np.pi + 3*np.pi/4, .5], dtype=dtype),
 
     dataset_x_lo=torch.tensor([0., -5.], dtype=dtype),
     dataset_x_up=torch.tensor([2.*np.pi, 5.], dtype=dtype),
@@ -57,14 +59,21 @@ opt_default = dict(
     # encoder (image-space learning)
     encoder_class=encoders.CNNEncoder2,
     decoder_class=encoders.CNNDecoder2,
+
     use_bce=True,
+
     use_variational=False,
-    kl_loss_weight=1.,
+    kl_weight_lo=1.,
+    kl_weight_up=1.,
+    kl_weight_center_step=0,
+    kl_weight_steps_lo_to_up=1,
+
     decoded_equilibrium_loss_weight=1e-3,
+
     z_dim=z_dim,
-    z_lo=-1.*torch.ones(z_dim, dtype=dtype),
-    z_up=torch.ones(z_dim, dtype=dtype),
     z_equilibrium=torch.zeros(z_dim, dtype=dtype),
+    z_lo_stable=-1.*torch.ones(z_dim, dtype=dtype),
+    z_up_stable=torch.ones(z_dim, dtype=dtype),
 )
 opt_variants = dict(
     unstable=dict(
@@ -162,6 +171,24 @@ class TestDynamicsLearning(unittest.TestCase):
             self.assertGreaterEqual(lyap_der_loss.item(), 0.)
             self.assertGreaterEqual(lyap_der_loss_sub.item(), 0.)
             self.assertGreaterEqual(lyap_der_loss_samp.item(), 0.)
+
+    def test_lyapunov_sample_boundaries(self):
+        lyap_pos_loss_samp, lyap_der_loss_samp = self.ss_dyn_learner.\
+            lyapunov_loss_at_samples(self.opt.x_up_stable.unsqueeze(0) + 10.)
+        self.assertEqual(lyap_pos_loss_samp, 0.)
+        self.assertEqual(lyap_der_loss_samp, 0.)
+        lyap_pos_loss_samp, lyap_der_loss_samp = self.ss_dyn_learner.\
+            lyapunov_loss_at_samples(self.opt.x_lo_stable.unsqueeze(0) - 10.)
+        self.assertEqual(lyap_pos_loss_samp, 0.)
+        self.assertEqual(lyap_der_loss_samp, 0.)
+        self.opt.set_option("use_vae", False)
+        z = self.latent_dyn_learner.encoder.forward(
+            self.X_data[0:1, :] + 10000.)[0]
+        self.assertTrue(torch.all(z > self.opt.z_up_stable))
+        lyap_pos_loss_samp, lyap_der_loss_samp = self.latent_dyn_learner.\
+            lyapunov_loss_at_samples(self.X_data[0:1, :] + 10000.)
+        self.assertEqual(lyap_pos_loss_samp, 0.)
+        self.assertEqual(lyap_der_loss_samp, 0.)
 
     def test_adversarial_samples(self):
         for dyn_learner in [self.ss_dyn_learner, self.latent_dyn_learner]:

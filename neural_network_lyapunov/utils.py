@@ -933,3 +933,31 @@ def network_zero_grad(network):
             pass
         else:
             raise Exception("network_zero_grad: unsupported layer.")
+
+
+class SigmoidAnneal:
+    def __init__(self, dtype, lo, up, center_step, steps_lo_to_up):
+        """
+        provides a sigmoid function that can be used to do weight scheduling
+        for training
+        @dtype torch data type
+        @param lo float lower value for the sigmoid
+        @param up float upper value for the sigmoid
+        @param center_step int step where the sigmoid will be halfway up
+        @param steps_lo_to_up in width of the sigmoid
+        """
+        self.dtype = dtype
+        self.lo = lo
+        self.up = up
+        self.center_step = center_step
+        self.steps_lo_to_up = steps_lo_to_up
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def __call__(self, step):
+        """
+        @param step int step number
+        @return value of the sigmoid at that point
+        """
+        return self.lo + (self.up - self.lo) * self.sigmoid(torch.tensor(
+            float(step - self.center_step) / float(self.steps_lo_to_up),
+            dtype=self.dtype))
