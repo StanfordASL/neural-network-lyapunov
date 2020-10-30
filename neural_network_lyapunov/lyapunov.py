@@ -616,6 +616,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         @param state_next The next state x̅[n+1], state_next[i] is the next
         state for the i'th sample x̅ⁱ[n+1]
         @param x_equilibrium x*.
+        @param exp_type The interpretation of epsilon. If exp_type=ExpLower,
+        then the loss wrt to the convergence lower bound. If exp_type=ExpUpper,
+        then the loss is with respect to the upper bound
         @param margin We might want to shift the margin for the Lyapunov
         loss.
         @return loss The loss

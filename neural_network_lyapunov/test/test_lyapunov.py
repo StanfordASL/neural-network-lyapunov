@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 import os
+import copy
 
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
@@ -1130,14 +1131,15 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         lyapunov_relu1 = setup_relu(torch.float64)
         lyapunov_relu2 = setup_leaky_relu(torch.float64)
 
-        x_samples = []
-        x_samples.append(torch.tensor([-0.5, -0.2], dtype=self.dtype))
-        x_samples.append(torch.tensor([-0.5, 0.25], dtype=self.dtype))
-        x_samples.append(torch.tensor([-0.7, -0.55], dtype=self.dtype))
-        x_samples.append(torch.tensor([0.1, 0.85], dtype=self.dtype))
-        x_samples.append(torch.tensor([0.45, 0.35], dtype=self.dtype))
-        x_samples.append(torch.tensor([0.45, -0.78], dtype=self.dtype))
-        x_samples.append(torch.tensor([0.95, -0.23], dtype=self.dtype))
+        x_samples_lower = []
+        x_samples_lower.append(torch.tensor([-0.5, -0.2], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([-0.5, 0.25], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([-0.7, -0.55], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([0.1, 0.85], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([0.45, 0.35], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([0.45, -0.78], dtype=self.dtype))
+        x_samples_lower.append(torch.tensor([0.95, -0.23], dtype=self.dtype))
+        x_samples_upper = copy.deepcopy(x_samples_lower)
         margin = 0.1
         x_equilibrium = torch.tensor([0, 0], dtype=self.dtype)
         V_lambda = 0.1
