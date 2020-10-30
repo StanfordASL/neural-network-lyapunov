@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 import queue
+from enum import Enum
 
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
@@ -11,6 +12,21 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+
+
+class ConvergenceEps(Enum):
+    """
+    The epsilon constant in the Lyapunov derivative has different
+    interpretations, it could represent the exponential convergence rate,
+    where ε_min ≤ −V̇/V ≤ ε_max, or it can represent the asymptotic
+    convergence, namely V̇ ≤ −ε |x−x*|₁.
+    """
+    # Exponential convergence rate upper bound.
+    ExpUpper = 1
+    # Exponential convergence rate lower bound.
+    ExpLower = 2
+    # Asymptotic convergence.
+    Asymp = 3
 
 
 class LyapunovHybridLinearSystem:
@@ -372,21 +388,28 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return [V_next - V + epsilon * V for V_next in V_next_possible]
 
     def lyapunov_derivative_as_milp(
-            self, x_equilibrium, V_lambda, epsilon,
+        self, x_equilibrium, V_lambda, epsilon, exp_type: ConvergenceEps, *,
             lyapunov_lower=None, lyapunov_upper=None, x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
         state.
-        Formulate the Lyapunov condition
-        V(x[n+1]) - V(x[n]) <= -ε * V(x[n]) ∀x[n] satisfying
-        lower <= V(x[n]) <= upper
-        as the maximal of following optimization problem is no larger
-        than 0.
-        max V(x[n+1]) - V(x[n]) + ε * V(x[n])
+        In order to prove that the system converges exponentially, with a
+        convergence rate between [ε_min, ε_max], we need to show
+        ε_min <= -(V(x[n+1]) - V(x[n])) / V(x[n]) <= ε_max. To show this, we
+        consider the following two MILPs
+        MILP1, for converge rate lower bound
+        max (ε_min-1)*V(x[n]) + V(x[n+1])
         s.t lower <= V(x[n]) <= upper
-        We would formulate this optimization problem as an MILP.
+
+        MILP2
+        max -V(x[n+1]) + (1-ε_max)*V(x[n])
+        s.t lower <= V(x[n]) <= upper
+        Formulate the Lyapunov condition
         @param V_lambda λ in the documentation above.
+        @param exp_type The interpretation of epsilon. If exp_type=ExpLower,
+        then we formulate MILP1. If exp_type=ExpUpper, then we formulate
+        MILP2.
         @param lyapunov_lower the "lower" bound in the documentation above. If
         lyapunov_lower = None, then we ignore the lower bound on V(x[n]).
         @param lyapunov_upper the "upper" bound in the documentation above. If
@@ -413,6 +436,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_upper, float))
         assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
+        assert(isinstance(exp_type, ConvergenceEps))
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
@@ -485,18 +509,27 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                 self.lyapunov_relu, beta_next,
                 self.system.step_forward(x_warmstart))
 
-        # The cost function is
+        # For MILP1, the cost function is (ε-1)*V(x[n]) + V(x[n+1]), equals to
         # max ReLU(x[n+1]) + λ|x[n+1]-x*|₁ - ReLU(x[n]) - λ|x[n]-x*|₁ +
         #     epsilon * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
-        milp.setObjective(
-            [a_out, (epsilon - 1) * a_out,
-             V_lambda *
-             torch.ones((self.system.x_dim,), dtype=self.system.dtype),
-             (epsilon-1) * V_lambda*torch.ones((self.system.x_dim,),
-                                               dtype=self.system.dtype)],
-            [z_next, z, s_x_next_norm, s_x_norm],
-            epsilon * (b_out - relu_x_equilibrium.squeeze()),
-            gurobipy.GRB.MAXIMIZE)
+        # For MILP2, the cost function is the negation of MILP1.
+        if exp_type == ConvergenceEps.ExpLower or \
+                exp_type == ConvergenceEps.ExpUpper:
+            obj_coeff = [a_out, (epsilon - 1) * a_out, V_lambda * torch.ones(
+                (self.system.x_dim,), dtype=self.system.dtype),
+                (epsilon - 1) * V_lambda * torch.ones(
+                    (self.system.x_dim,), dtype=self.system.dtype)]
+            obj_constant = epsilon * (b_out - relu_x_equilibrium.squeeze())
+            obj_vars = [z_next, z, s_x_next_norm, s_x_norm]
+            if exp_type == ConvergenceEps.ExpLower:
+                milp.setObjective(
+                    obj_coeff, obj_vars, obj_constant, gurobipy.GRB.MAXIMIZE)
+            elif exp_type == ConvergenceEps.ExpUpper:
+                milp.setObjective(
+                    [-c for c in obj_coeff], obj_vars, -obj_constant,
+                    gurobipy.GRB.MAXIMIZE)
+        else:
+            raise NotImplementedError
 
         return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
 
@@ -982,7 +1015,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (z, z_coeff, xdot_coeff)
 
     def lyapunov_derivative_as_milp2(
-            self, x_equilibrium, V_lambda, epsilon,
+            self, x_equilibrium, V_lambda, epsilon, eps_type,
             lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
@@ -1024,6 +1057,9 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_upper, float))
         assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
+        assert(isinstance(eps_type, ConvergenceEps))
+        if eps_type != ConvergenceEps.ExpLower:
+            raise NotImplementedError
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
@@ -1127,8 +1163,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         return (milp, x, relu_beta, gamma)
 
     def lyapunov_derivative_as_milp(
-            self, x_equilibrium, V_lambda, epsilon,
-            lyapunov_lower=None, lyapunov_upper=None):
+            self, x_equilibrium, V_lambda, epsilon, eps_type: ConvergenceEps,
+            *, lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -1171,6 +1207,9 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
             assert(isinstance(lyapunov_upper, float))
         assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
+        assert(isinstance(eps_type, ConvergenceEps))
+        if eps_type != ConvergenceEps.ExpLower:
+            raise NotImplementedError
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 

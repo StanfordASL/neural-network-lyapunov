@@ -6,6 +6,7 @@ import copy
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.train_utils as train_utils
+import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.line_search_gd as line_search_gd
 import neural_network_lyapunov.line_search_adam as line_search_adam
@@ -213,7 +214,8 @@ class TrainLyapunovReLU:
             lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
                 lyapunov_derivative_as_milp(
                     self.x_equilibrium, self.V_lambda,
-                    self.lyapunov_derivative_epsilon)
+                    self.lyapunov_derivative_epsilon,
+                    lyapunov.ConvergenceEps.ExpLower)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
