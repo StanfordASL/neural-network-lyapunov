@@ -274,7 +274,6 @@ class TrainLyapunovReLU:
                     relu_at_equilibrium, self.x_equilibrium,
                     positivity_state_samples_in_pool, self.V_lambda,
                     self.lyapunov_positivity_epsilon,
-                    lyapunov.ConvergenceEps.ExpLower,
                     margin=self.lyapunov_positivity_sample_margin)
         else:
             positivity_sample_loss = 0.
