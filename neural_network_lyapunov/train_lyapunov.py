@@ -93,12 +93,12 @@ class TrainLyapunovReLU:
         self.lyapunov_positivity_mip_cost_weight = 10.
         # The number of (sub)optimal solutions for the MIP
         # min_x V(x) - V(x*) - ε₂ |x - x*|₁
-        self.lyapunov_positivity_mip_pool_solutions = 10
+        self.lyapunov_positivity_mip_pool_solutions = 1
         # The weight of max_x dV(x) + εV(x)
         self.lyapunov_derivative_mip_cost_weight = 10.
         # The number of (sub)optimal solutions for the MIP
         # max_x dV(x) + εV(x)
-        self.lyapunov_derivative_mip_pool_solutions = 10
+        self.lyapunov_derivative_mip_pool_solutions = 1
         # If set to true, we will print some messages during training.
         self.output_flag = False
         # The MIP objective loss is ∑ⱼ rʲ * j_th_objective. r is the decay
