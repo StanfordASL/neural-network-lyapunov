@@ -260,7 +260,8 @@ class DynamicsLearning:
         sample_der_loss = \
             self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(
                 self.opt.V_lambda, self.opt.V_eps, x, x_next,
-                self.lyap.system.x_equilibrium)
+                self.lyap.system.x_equilibrium,
+                lyapunov.ConvergenceEps.ExpLower)
         return (self.opt.lyap_pos_loss_at_samples_weight * sample_pos_loss,
                 self.opt.lyap_der_loss_at_samples_weight * sample_der_loss)
 
