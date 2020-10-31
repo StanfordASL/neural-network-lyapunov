@@ -733,5 +733,72 @@ class TestSigmoidAnneal(unittest.TestCase):
         self.assertAlmostEqual(sa(-100).item(), 1e-3, places=5)
 
 
+class TestPropagateBoundsIA(unittest.TestCase):
+    def test_relu(self):
+        layer = torch.nn.ReLU()
+        input_lo = torch.tensor([-2., 2., -3.], dtype=torch.float64)
+        input_up = torch.tensor([3., 6., -1.], dtype=torch.float64)
+        output_lo, output_up = utils.propagate_bounds_IA(
+            layer, input_lo, input_up)
+        np.testing.assert_allclose(output_lo, np.array([0, 2., 0.]))
+        np.testing.assert_allclose(output_up, np.array([3., 6., 0.]))
+
+    def test_leaky_relu(self):
+        layer = torch.nn.LeakyReLU(0.1)
+        input_lo = torch.tensor([-2., 2., -3.], dtype=torch.float64)
+        input_up = torch.tensor([3., 6., -1.], dtype=torch.float64)
+        output_lo, output_up = utils.propagate_bounds_IA(
+            layer, input_lo, input_up)
+        np.testing.assert_allclose(output_lo, np.array([-0.2, 2., -0.3]))
+        np.testing.assert_allclose(output_up, np.array([3., 6., -0.1]))
+
+    def test_linear_layer_no_bias(self):
+        layer = torch.nn.Linear(3, 2, bias=False)
+        layer.weight.data = torch.tensor(
+            [[-1, 0, 2], [3, -2, -1]], dtype=torch.float64)
+        input_lo = torch.tensor([-2, 2, -3], dtype=torch.float64)
+        input_up = torch.tensor([3, 6, -1], dtype=torch.float64)
+        output_lo, output_up = utils.propagate_bounds_IA(
+            layer, input_lo, input_up)
+        np.testing.assert_allclose(
+            output_lo.detach().numpy(), np.array([-9., -17]))
+        np.testing.assert_allclose(
+            output_up.detach().numpy(), np.array([0., 8.]))
+        # Now check we can take the gradient.
+        loss = output_lo.sum() + output_up.sum()
+        loss.backward()
+
+        for s in np.linspace(0, 1, 11):
+            output = layer(s * input_lo + (1-s) * input_up)
+            np.testing.assert_array_less(
+                output.detach().numpy(), output_up.detach().numpy() + 1E-10)
+            np.testing.assert_array_less(
+                output_lo.detach().numpy() - 1E-10, output.detach().numpy())
+
+    def test_linear_layer_bias(self):
+        layer = torch.nn.Linear(3, 2, bias=True)
+        layer.weight.data = torch.tensor(
+            [[-1, 0, 2], [3, -2, -1]], dtype=torch.float64)
+        layer.bias.data = torch.tensor([2., -1.], dtype=torch.float64)
+        input_lo = torch.tensor([-2, 2, -3], dtype=torch.float64)
+        input_up = torch.tensor([3, 6, -1], dtype=torch.float64)
+        output_lo, output_up = utils.propagate_bounds_IA(
+            layer, input_lo, input_up)
+        np.testing.assert_allclose(
+            output_lo.detach().numpy(), np.array([-7., -18.]))
+        np.testing.assert_allclose(
+            output_up.detach().numpy(), np.array([2., 7.]))
+        # Now check we can take the gradient.
+        loss = output_lo.sum() + output_up.sum()
+        loss.backward()
+
+        for s in np.linspace(0, 1, 11):
+            output = layer(s * input_lo + (1-s) * input_up)
+            np.testing.assert_array_less(
+                output.detach().numpy(), output_up.detach().numpy() + 1E-10)
+            np.testing.assert_array_less(
+                output_lo.detach().numpy() - 1E-10, output.detach().numpy())
+
+
 if __name__ == "__main__":
     unittest.main()

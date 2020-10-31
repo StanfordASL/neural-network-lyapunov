@@ -344,7 +344,8 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = 200
     dut.lyapunov_positivity_epsilon = 0.05
-    dut.lyapunov_derivative_epsilon = 0.05
+    dut.lyapunov_derivative_epsilon = 0.01
+    dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (51, 51), dtype=torch.float64)
     dut.output_flag = True

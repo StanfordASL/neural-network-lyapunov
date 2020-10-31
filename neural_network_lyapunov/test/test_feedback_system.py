@@ -31,6 +31,13 @@ class TestFeedbackSystem(unittest.TestCase):
             (4, 3, 2, 1), controller_network_params2, negative_slope=0.01,
             bias=True, dtype=self.dtype)
 
+        # A simple linear controller
+        self.controller_network3 = torch.nn.Linear(4, 1)
+        self.controller_network3.weight.data = torch.tensor([[
+            0.5, 0.6, 0.7, 0.8]], dtype=self.dtype)
+        self.controller_network3.bias.data = torch.tensor(
+            [1.5], dtype=self.dtype)
+
     def add_dynamics_mip_constraint_tester(
         self, forward_system, controller_network, x_equilibrium, u_equilibrium,
             x_val, u_lower_limit, u_upper_limit):
@@ -212,6 +219,14 @@ class TestFeedbackSystem(unittest.TestCase):
             torch.tensor([0.1, 0.0, 0.0, 0.8], dtype=self.dtype),
             np.array([0.]), np.array([10.]))
 
+        # Test with controller network3, a simple linear network.
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, self.controller_network3,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([0.1, 0.0, 0.2, 0.5], dtype=self.dtype),
+            np.array([-10.]), np.array([10.]))
+
     def test_add_dynamics_mip_constraint_relu_system_given_equilibrium(self):
         # Construct a ReLUSystemGivenEquilibrium as the forward dynamical
         # system.
@@ -372,6 +387,54 @@ class TestFeedbackSystem(unittest.TestCase):
             torch.tensor([0.2, -0.1, 0.5, 0.3], dtype=self.dtype),
             torch.tensor([0.2], dtype=self.dtype), np.array([-10.]),
             np.array([0.2]))
+
+    def add_controller_mip_constraint_controller(self, dut, x_val):
+        mip = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
+        x_var = mip.addVars(
+            dut.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x")
+        u_var = mip.addVars(
+            dut.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="u")
+        dut._add_controller_mip_constraint(
+            mip, x_var, u_var, "slack", "binary")
+        # Now add constraint on x_var = x_val
+        mip.addMConstrs([torch.eye(dut.x_dim, dtype=torch.float64)], [x_var],
+                        b=x_val, sense=gurobipy.GRB.EQUAL)
+        mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        mip.gurobi_model.optimize()
+
+        u_val = np.array([u.x for u in u_var])
+        u_val_expected = dut.compute_u(x_val)
+        np.testing.assert_allclose(u_val, u_val_expected.detach().numpy())
+
+    def test_add_controller_mip_constraint(self):
+        """
+        Test _add_controller_mip_constraint when the controller_network is
+        1. a torch.nn.Sequential, with both linear and relu layers.
+        2. a torch.nn.Linear layer.
+        """
+        q_equilibrium = torch.tensor([0.5, 0.4], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.1], dtype=self.dtype)
+        dt = 0.01
+
+        forward_system = self.\
+            construct_relu_second_order_forward_system_given_equilibrium(
+                q_equilibrium, u_equilibrium, dt)
+        for controller_network in (self.controller_network2,
+                                   self.controller_network3):
+            u_bounds = [(np.array([-20.]), np.array([20.]))]
+            u_bounds.append((np.array([1.]), np.array([10.])))
+            u_bounds.append((np.array([-np.inf]), np.array([np.inf])))
+            for (u_lo, u_up) in u_bounds:
+                dut = feedback_system.FeedbackSystem(
+                    forward_system, controller_network,
+                    forward_system.x_equilibrium,
+                    torch.tensor([2.], dtype=self.dtype), u_lo, u_up)
+                self.add_controller_mip_constraint_controller(
+                    dut, torch.tensor([2., 0.5, 0.6, 3.1], dtype=self.dtype))
+                self.add_controller_mip_constraint_controller(
+                    dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
 
 
 if __name__ == "__main__":

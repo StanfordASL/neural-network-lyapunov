@@ -62,9 +62,17 @@ class FeedbackSystem:
         self.x_lo_all = self.forward_system.x_lo_all
         self.x_up_all = self.forward_system.x_up_all
         self.dtype = self.forward_system.dtype
-        assert(controller_network[0].in_features == self.forward_system.x_dim)
-        assert(controller_network[-1].out_features ==
-               self.forward_system.u_dim)
+        if isinstance(controller_network, torch.nn.Sequential):
+            assert(controller_network[0].in_features ==
+                   self.forward_system.x_dim)
+            assert(controller_network[-1].out_features ==
+                   self.forward_system.u_dim)
+        elif isinstance(controller_network, torch.nn.Linear):
+            assert(controller_network.in_features == self.forward_system.x_dim)
+            assert(controller_network.out_features ==
+                   self.forward_system.u_dim)
+        else:
+            raise Exception("Unknown controller type.")
         self.controller_network = controller_network
         assert(x_equilibrium.shape == (self.forward_system.x_dim,))
         assert(x_equilibrium.dtype == self.dtype)
@@ -72,15 +80,95 @@ class FeedbackSystem:
         assert(u_equilibrium.shape == (self.forward_system.u_dim,))
         assert(u_equilibrium.dtype == self.dtype)
         self.u_equilibrium = u_equilibrium
-        self.controller_relu_free_pattern = \
-            relu_to_optimization.ReLUFreePattern(
-                self.controller_network, self.dtype)
+        if isinstance(self.controller_network, torch.nn.Sequential):
+            self.controller_relu_free_pattern = \
+                relu_to_optimization.ReLUFreePattern(
+                    self.controller_network, self.dtype)
         assert(isinstance(u_lower_limit, np.ndarray))
         assert(u_lower_limit.shape == (self.forward_system.u_dim,))
         assert(isinstance(u_upper_limit, np.ndarray))
         assert(u_upper_limit.shape == (self.forward_system.u_dim,))
         self.u_lower_limit = u_lower_limit
         self.u_upper_limit = u_upper_limit
+
+    def _add_controller_mip_constraint(
+        self, mip, x_var, u_var, controller_slack_var_name,
+            controller_binary_var_name):
+        # Add the constraint on the controller between x and u.
+        if isinstance(self.controller_network, torch.nn.Sequential):
+            controller_mip_cnstr, _, _, controller_z_post_relu_lo,\
+                controller_z_post_relu_up = \
+                self.controller_relu_free_pattern.output_constraint(
+                    torch.from_numpy(self.forward_system.x_lo_all),
+                    torch.from_numpy(self.forward_system.x_up_all))
+            assert(controller_mip_cnstr.Aout_input is None)
+            assert(controller_mip_cnstr.Aout_binary is None)
+            controller_slack, controller_binary = \
+                mip.add_mixed_integer_linear_constraints(
+                    controller_mip_cnstr, x_var, None,
+                    controller_slack_var_name, controller_binary_var_name,
+                    "controller_ineq", "controller_eq", "")
+        elif isinstance(self.controller_network, torch.nn.Linear):
+            controller_slack = None
+            controller_binary = None
+
+        # Add the input saturation constraint
+        # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
+        # and u[n] = saturation(u_pre_sat)
+        # Namely Aout_slack * controller_slack -u_pre_sat = ϕᵤ(x*) - u* -Cout
+        u_pre_sat = mip.addVars(
+            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="u_pre_sat")
+        controller_relu_at_x_equilibrium = self.controller_network(
+            self.x_equilibrium)
+        if isinstance(self.controller_network, torch.nn.Sequential):
+            mip.addMConstrs([
+                controller_mip_cnstr.Aout_slack.reshape(
+                    (self.forward_system.u_dim, len(controller_slack))),
+                -torch.eye(
+                    self.forward_system.u_dim, dtype=self.forward_system.dtype)
+                ], [controller_slack, u_pre_sat], sense=gurobipy.GRB.EQUAL,
+                b=controller_relu_at_x_equilibrium - self.u_equilibrium
+                - controller_mip_cnstr.Cout, name="controller_output")
+        elif isinstance(self.controller_network, torch.nn.Linear):
+            mip.addMConstrs([torch.eye(
+                self.forward_system.u_dim, dtype=self.dtype),
+                -self.controller_network.weight], [u_pre_sat, x_var],
+                b=self.u_equilibrium-controller_relu_at_x_equilibrium +
+                self.controller_network.bias, sense=gurobipy.GRB.EQUAL,
+                name="controller")
+        else:
+            raise Exception("Unknown controller network type.")
+
+        # Now add the saturation limit constraint
+        if isinstance(self.controller_network, torch.nn.Sequential):
+            controller_network_output_lo, controller_network_output_up = \
+                self.controller_relu_free_pattern.output_bounds_IA(
+                    controller_z_post_relu_lo, controller_z_post_relu_up)
+        elif isinstance(self.controller_network, torch.nn.Linear):
+            controller_network_output_lo, controller_network_output_up =\
+                utils.propagate_bounds_IA(
+                    self.controller_network,
+                    torch.from_numpy(self.forward_system.x_lo_all),
+                    torch.from_numpy(self.forward_system.x_up_all))
+        for i in range(self.forward_system.u_dim):
+            if np.isinf(self.u_lower_limit[i]) and\
+                    np.isinf(self.u_upper_limit[i]):
+                mip.addLConstr(
+                    [torch.tensor([1, -1], dtype=self.dtype)],
+                    [[u_var[i], u_pre_sat[i]]], rhs=0.,
+                    sense=gurobipy.GRB.EQUAL)
+            else:
+                assert(not np.isinf(self.u_lower_limit[i]) and
+                       not np.isinf(self.u_upper_limit[i]))
+                u_lower_bound = controller_network_output_lo[i] -\
+                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
+                u_upper_bound = controller_network_output_up[i] -\
+                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
+                utils.add_saturation_as_mixed_integer_constraint(
+                    mip, u_pre_sat[i], u_var[i], self.u_lower_limit[i],
+                    self.u_upper_limit[i], u_lower_bound, u_upper_bound)
+        return controller_slack, controller_binary
 
     def add_dynamics_mip_constraint(
         self, mip, x_var, x_next_var, u_var_name, forward_slack_var_name,
@@ -99,58 +187,11 @@ class FeedbackSystem:
                 "forward_dynamics_ineq", "forward_dynamics_eq",
                 "forward_dynamics_output")
 
-        # Now add the controller mip constraint.
-        controller_mip_cnstr, _, _, controller_z_post_relu_lo,\
-            controller_z_post_relu_up = \
-            self.controller_relu_free_pattern.output_constraint(
-                torch.from_numpy(self.forward_system.x_lo_all),
-                torch.from_numpy(self.forward_system.x_up_all))
-        assert(controller_mip_cnstr.Aout_input is None)
-        assert(controller_mip_cnstr.Aout_binary is None)
         controller_slack, controller_binary = \
-            mip.add_mixed_integer_linear_constraints(
-                controller_mip_cnstr, x_var, None, controller_slack_var_name,
-                controller_binary_var_name, "controller_ineq", "controller_eq",
-                "")
+            self._add_controller_mip_constraint(
+                mip, x_var, u, controller_slack_var_name,
+                controller_binary_var_name)
 
-        # Add the input saturation constraint
-        # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
-        # and u[n] = saturation(u_pre_sat)
-        # Namely Aout_slack * controller_slack -u_pre_sat = ϕᵤ(x*) - u* -Cout
-        u_pre_sat = mip.addVars(
-            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="u_pre_sat")
-        controller_relu_at_x_equilibrium = self.controller_network(
-            self.x_equilibrium)
-        mip.addMConstrs([
-            controller_mip_cnstr.Aout_slack.reshape(
-                (self.forward_system.u_dim, len(controller_slack))),
-            -torch.eye(
-                self.forward_system.u_dim, dtype=self.forward_system.dtype)],
-            [controller_slack, u_pre_sat], sense=gurobipy.GRB.EQUAL,
-            b=controller_relu_at_x_equilibrium - self.u_equilibrium
-            - controller_mip_cnstr.Cout, name="controller_output")
-
-        # Now add the saturation limit constraint
-        controller_relu_output_lo, controller_relu_output_up = \
-            self.controller_relu_free_pattern.output_bounds_IA(
-                controller_z_post_relu_lo, controller_z_post_relu_up)
-        for i in range(self.forward_system.u_dim):
-            if np.isinf(self.u_lower_limit[i]) and\
-                    np.isinf(self.u_upper_limit[i]):
-                mip.addLConstr(
-                    [torch.tensor([1, -1], dtype=self.dtype)],
-                    [[u[i], u_pre_sat[i]]], rhs=0., sense=gurobipy.GRB.EQUAL)
-            else:
-                assert(not np.isinf(self.u_lower_limit[i]) and
-                       not np.isinf(self.u_upper_limit[i]))
-                u_lower_bound = controller_relu_output_lo[i] -\
-                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
-                u_upper_bound = controller_relu_output_up[i] -\
-                    controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
-                utils.add_saturation_as_mixed_integer_constraint(
-                    mip, u_pre_sat[i], u[i], self.u_lower_limit[i],
-                    self.u_upper_limit[i], u_lower_bound, u_upper_bound)
         return u, forward_slack, controller_slack, forward_binary,\
             controller_binary
 
