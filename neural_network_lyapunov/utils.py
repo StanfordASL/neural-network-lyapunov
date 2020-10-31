@@ -961,3 +961,40 @@ class SigmoidAnneal:
         return self.lo + (self.up - self.lo) * self.sigmoid(torch.tensor(
             float(step - self.center_step) / float(self.steps_lo_to_up),
             dtype=self.dtype))
+
+
+def propagate_bounds_IA(layer, input_lo, input_up):
+    """
+    Given the bound of the layer's input, find the bound of the output through
+    Interval Arithmetics (IA).
+    """
+    assert(isinstance(input_lo, torch.Tensor))
+    assert(isinstance(input_up, torch.Tensor))
+    dtype = input_lo.dtype
+    if isinstance(layer, torch.nn.ReLU):
+        # ReLU is a monotonic increasing function.
+        output_lo = layer(input_lo)
+        output_up = layer(input_up)
+    elif isinstance(layer, torch.nn.LeakyReLU):
+        assert(layer.negative_slope >= 0)
+        # Leaky ReLU is a monotonic increasing function
+        output_lo = layer(input_lo)
+        output_up = layer(input_up)
+    elif isinstance(layer, torch.nn.Linear):
+        if layer.bias is None:
+            output_lo = torch.zeros((layer.out_features,), dtype=dtype)
+            output_up = torch.zeros((layer.out_features,), dtype=dtype)
+        else:
+            output_lo = layer.bias.clone()
+            output_up = layer.bias.clone()
+        for j in range(layer.in_features):
+            for i in range(layer.out_features):
+                if layer.weight[i, j] < 0:
+                    output_lo[i] += layer.weight[i, j] * input_up[j]
+                    output_up[i] += layer.weight[i, j] * input_lo[j]
+                else:
+                    output_lo[i] += layer.weight[i, j] * input_lo[j]
+                    output_up[i] += layer.weight[i, j] * input_up[j]
+    else:
+        raise Exception("progagate_bounds_IA(): unknown layer type.")
+    return output_lo, output_up
