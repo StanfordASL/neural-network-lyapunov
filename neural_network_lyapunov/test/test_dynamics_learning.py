@@ -48,7 +48,9 @@ opt_default = dict(
     long_horizon_num_val_rollouts=10,
 
     V_lambda=0.,
-    V_eps=0.1,
+    V_eps_pos=.01,
+    V_eps_der_lo=0.1,
+    V_eps_der_up=0.001,
 
     # dynamics nn
     dyn_nn_width=(z_dim, z_dim*5, z_dim*3, z_dim),
@@ -81,18 +83,22 @@ opt_variants = dict(
         lyap_loss_warmstart=False,
         lyap_loss_freq=0,
         lyap_pos_loss_at_samples_weight=0.,
-        lyap_der_loss_at_samples_weight=0.,
+        lyap_der_lo_loss_at_samples_weight=0.,
+        lyap_der_up_loss_at_samples_weight=0.,
         lyap_pos_loss_weight=0.,
-        lyap_der_loss_weight=0.,
+        lyap_der_lo_loss_weight=0.,
+        lyap_der_up_loss_weight=0.,
     ),
     stable=dict(
         lyap_loss_optimal=True,
         lyap_loss_warmstart=False,
         lyap_loss_freq=2,
         lyap_pos_loss_at_samples_weight=1.,
-        lyap_der_loss_at_samples_weight=1.,
+        lyap_der_lo_loss_at_samples_weight=1.,
+        lyap_der_up_loss_at_samples_weight=1.,
         lyap_pos_loss_weight=1.,
-        lyap_der_loss_weight=1.,
+        lyap_der_lo_loss_weight=1.,
+        lyap_der_up_loss_weight=1.,
     ),
 )
 
@@ -156,11 +162,13 @@ class TestDynamicsLearning(unittest.TestCase):
         for dyn_learner, data in [(self.ss_dyn_learner, self.x_data),
                                   (self.latent_dyn_learner, self.X_data)]:
             self.opt.set_option("lyap_loss_optimal", True)
-            lyap_pos_loss, lyap_der_loss = dyn_learner.lyapunov_loss()
+            lyap_pos_loss, lyap_der_lo_loss, lyap_der_up_loss =\
+                dyn_learner.lyapunov_loss()
             self.opt.set_option("lyap_loss_optimal", False)
-            lyap_pos_loss_sub, lyap_der_loss_sub = dyn_learner.lyapunov_loss()
-            lyap_pos_loss_samp, lyap_der_loss_samp = dyn_learner.\
-                lyapunov_loss_at_samples(data)
+            lyap_pos_loss_sub, lyap_der_lo_loss_sub, lyap_der_up_loss_sub =\
+                dyn_learner.lyapunov_loss()
+            lyap_pos_loss_samp, lyap_der_lo_loss_samp, lyap_der_up_loss_samp =\
+                dyn_learner.lyapunov_loss_at_samples(data)
             self.assertLessEqual(lyap_pos_loss_samp.item(),
                                  lyap_pos_loss.item())
             self.assertLessEqual(lyap_pos_loss_sub.item(),
@@ -168,48 +176,64 @@ class TestDynamicsLearning(unittest.TestCase):
             self.assertGreaterEqual(lyap_pos_loss.item(), 0.)
             self.assertGreaterEqual(lyap_pos_loss_sub.item(), 0.)
             self.assertGreaterEqual(lyap_pos_loss_samp.item(), 0.)
-            self.assertGreaterEqual(lyap_der_loss.item(), 0.)
-            self.assertGreaterEqual(lyap_der_loss_sub.item(), 0.)
-            self.assertGreaterEqual(lyap_der_loss_samp.item(), 0.)
+            self.assertGreaterEqual(lyap_der_lo_loss.item(), 0.)
+            self.assertGreaterEqual(lyap_der_lo_loss_sub.item(), 0.)
+            self.assertGreaterEqual(lyap_der_lo_loss_samp.item(), 0.)
+            self.assertGreaterEqual(lyap_der_up_loss.item(), 0.)
+            self.assertGreaterEqual(lyap_der_up_loss_sub.item(), 0.)
+            self.assertGreaterEqual(lyap_der_up_loss_samp.item(), 0.)
 
     def test_lyapunov_sample_boundaries(self):
-        lyap_pos_loss_samp, lyap_der_loss_samp = self.ss_dyn_learner.\
-            lyapunov_loss_at_samples(self.opt.x_up_stable.unsqueeze(0) + 10.)
+        lyap_pos_loss_samp, lyap_der_lo_loss_samp, lyap_der_up_loss_samp =\
+            self.ss_dyn_learner.lyapunov_loss_at_samples(
+                self.opt.x_up_stable.unsqueeze(0) + 10.)
         self.assertEqual(lyap_pos_loss_samp, 0.)
-        self.assertEqual(lyap_der_loss_samp, 0.)
-        lyap_pos_loss_samp, lyap_der_loss_samp = self.ss_dyn_learner.\
-            lyapunov_loss_at_samples(self.opt.x_lo_stable.unsqueeze(0) - 10.)
+        self.assertEqual(lyap_der_lo_loss_samp, 0.)
+        self.assertEqual(lyap_der_up_loss_samp, 0.)
+        lyap_pos_loss_samp, lyap_der_lo_loss_samp, lyap_der_up_loss_samp =\
+            self.ss_dyn_learner.lyapunov_loss_at_samples(
+                self.opt.x_lo_stable.unsqueeze(0) - 10.)
         self.assertEqual(lyap_pos_loss_samp, 0.)
-        self.assertEqual(lyap_der_loss_samp, 0.)
+        self.assertEqual(lyap_der_lo_loss_samp, 0.)
+        self.assertEqual(lyap_der_up_loss_samp, 0.)
         self.opt.set_option("use_vae", False)
         z = self.latent_dyn_learner.encoder.forward(
             self.X_data[0:1, :] + 10000.)[0]
         self.assertTrue(torch.all(z > self.opt.z_up_stable))
-        lyap_pos_loss_samp, lyap_der_loss_samp = self.latent_dyn_learner.\
-            lyapunov_loss_at_samples(self.X_data[0:1, :] + 10000.)
+        lyap_pos_loss_samp, lyap_der_lo_loss_samp, lyap_der_up_loss_samp =\
+            self.latent_dyn_learner.lyapunov_loss_at_samples(
+                self.X_data[0:1, :] + 10000.)
         self.assertEqual(lyap_pos_loss_samp, 0.)
-        self.assertEqual(lyap_der_loss_samp, 0.)
+        self.assertEqual(lyap_der_lo_loss_samp, 0.)
+        self.assertEqual(lyap_der_up_loss_samp, 0.)
 
     def test_adversarial_samples(self):
         for dyn_learner in [self.ss_dyn_learner, self.latent_dyn_learner]:
             for optimality in [True, False]:
                 self.opt.set_option("lyap_loss_optimal", optimality)
-                z_adv_pos, z_adv_der = dyn_learner.adversarial_samples()
+                z_adv_pos, z_adv_der_lo, z_adv_der_up = dyn_learner.\
+                    adversarial_samples()
                 self.assertGreaterEqual(z_adv_pos.shape[0], 1)
-                self.assertGreaterEqual(z_adv_der.shape[0], 1)
+                self.assertGreaterEqual(z_adv_der_lo.shape[0], 1)
+                self.assertGreaterEqual(z_adv_der_up.shape[0], 1)
                 for k in range(z_adv_pos.shape[0]):
                     V = self.lyap.lyapunov_value(
                         z_adv_pos[k, :], self.lyap.system.x_equilibrium,
                         self.opt.V_lambda)
                     self.assertLessEqual(
-                        V.item() - self.opt.V_eps * torch.norm(
+                        V.item() - self.opt.V_eps_pos * torch.norm(
                             z_adv_pos[k, :] - self.lyap.system.x_equilibrium,
                             p=1), 0.)
-                for k in range(z_adv_der.shape[0]):
+                for k in range(z_adv_der_lo.shape[0]):
                     dV = self.lyap.lyapunov_derivative(
-                        z_adv_der[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, self.opt.V_eps)
+                        z_adv_der_lo[k, :], self.lyap.system.x_equilibrium,
+                        self.opt.V_lambda, self.opt.V_eps_der_lo)
                     [self.assertGreaterEqual(dv.item(), 0.) for dv in dV]
+                for k in range(z_adv_der_up.shape[0]):
+                    dV = self.lyap.lyapunov_derivative(
+                        z_adv_der_up[k, :], self.lyap.system.x_equilibrium,
+                        self.opt.V_lambda, self.opt.V_eps_der_up)
+                    [self.assertLessEqual(dv.item(), 0.) for dv in dV]
 
     def test_dynamics_loss(self):
         loss = self.ss_dyn_learner.dynamics_loss(self.x_data, self.x_next_data)
@@ -382,16 +406,22 @@ class TestDynamicsLearning(unittest.TestCase):
         for dyn_learner, data in [(self.ss_dyn_learner, self.x_data),
                                   (self.latent_dyn_learner, self.X_data)]:
             self.opt.set_option("lyap_loss_optimal", True)
-            lyap_pos_loss1, lyap_der_loss1 = dyn_learner.lyapunov_loss()
+            lyap_pos_loss1, lyap_der_lo_loss1, lyap_der_up_loss1 =\
+                dyn_learner.lyapunov_loss()
             self.opt.set_option("lyap_loss_optimal", False)
-            lyap_pos_loss2, lyap_der_loss2 = dyn_learner.lyapunov_loss(
-                lyap_pos_threshold=lyap_pos_loss1,
-                lyap_der_threshold=lyap_der_loss1)
-            lyap_pos_loss3, lyap_der_loss3 = dyn_learner.lyapunov_loss()
+            lyap_pos_loss2, lyap_der_lo_loss2, lyap_der_up_loss2 =\
+                dyn_learner.lyapunov_loss(
+                    lyap_pos_threshold=lyap_pos_loss1,
+                    lyap_der_lo_threshold=lyap_der_lo_loss1,
+                    lyap_der_up_threshold=lyap_der_up_loss1)
+            lyap_pos_loss3, lyap_der_lo_loss3, lyap_der_up_loss3 =\
+                dyn_learner.lyapunov_loss()
             self.assertEqual(lyap_pos_loss1, lyap_pos_loss2)
-            self.assertEqual(lyap_der_loss1, lyap_der_loss2)
-            self.assertLess(lyap_pos_loss3, lyap_pos_loss1)
-            self.assertLess(lyap_der_loss3, lyap_der_loss1)
+            self.assertEqual(lyap_der_lo_loss1, lyap_der_lo_loss2)
+            self.assertEqual(lyap_der_up_loss1, lyap_der_up_loss2)
+            self.assertLessEqual(lyap_pos_loss3, lyap_pos_loss1)
+            self.assertLessEqual(lyap_der_lo_loss3, lyap_der_lo_loss1)
+            self.assertLessEqual(lyap_der_up_loss3, lyap_der_up_loss1)
 
 
 if __name__ == "__main__":
