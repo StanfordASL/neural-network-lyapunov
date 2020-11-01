@@ -228,17 +228,6 @@ def pendulum_closed_loop_dynamics(
     return plant.dynamics(x, u)
 
 
-def step_system(system, x_start, steps):
-    """
-    Step forward a closed loop system for N steps. Returns the whole path.
-    """
-    path = [x_start]
-    with torch.no_grad():
-        for i in range(steps):
-            path.append(system.step_forward(path[-1]))
-    return path
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="pendulum training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")

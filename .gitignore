@@ -141,3 +141,5 @@ notebooks/runs
 notebooks/*.p
 
 *.DS_Store
+
+*wandb
