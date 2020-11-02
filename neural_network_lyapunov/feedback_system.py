@@ -109,8 +109,8 @@ class FeedbackSystem:
                     controller_slack_var_name, controller_binary_var_name,
                     "controller_ineq", "controller_eq", "")
         elif isinstance(self.controller_network, torch.nn.Linear):
-            controller_slack = None
-            controller_binary = None
+            controller_slack = []
+            controller_binary = []
 
         # Add the input saturation constraint
         # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*

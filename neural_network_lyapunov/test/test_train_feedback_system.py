@@ -39,6 +39,7 @@ class TestLyapunov(unittest.TestCase):
         self.dtype = torch.float64
         self._create_feedback_hybrid_system()
         self._create_feedback_second_order_system()
+        self._create_linear_feedback_second_order_system()
 
     def _create_feedback_hybrid_system(self):
         # First system is a piecewise linear hybrid system. Neither the
@@ -110,6 +111,47 @@ class TestLyapunov(unittest.TestCase):
         self.lyapunov_hybrid_system2 = \
             lyapunov.LyapunovDiscreteTimeHybridSystem(
                 self.closed_loop_system2, self.lyapunov_relu2)
+
+    def _create_linear_feedback_second_order_system(self):
+        forward_network_params = torch.tensor([
+            0.2, 0.4, 0.1, 0.5, 0.4, -0.2, 0.4, 0.5, 0.9, -0.3, 1.2, -2.1, 0.1,
+            0.45, 0.2, 0.8, 0.7, 0.3, 0.2, 0.5, 0.4, 0.8, 2.1, 0.4, 0.5, 0.2,
+            -0.4, -0.5, 0.3, -2.1, 0.4, 0.2, 0.1, 0.5], dtype=self.dtype)
+        forward_network = utils.setup_relu(
+            (5, 4, 2), forward_network_params, negative_slope=0.01, bias=True,
+            dtype=self.dtype)
+        q_equilibrium = torch.tensor([0.5, 0.4], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.5], dtype=self.dtype)
+        dt = 0.01
+        self.forward_system3 = \
+            relu_system.ReLUSecondOrderSystemGivenEquilibrium(
+                self.dtype, torch.tensor([-2, -2, -4, -4], dtype=self.dtype),
+                torch.tensor([2, 2, 4, 4], dtype=self.dtype),
+                torch.tensor([-10], dtype=self.dtype),
+                torch.tensor([10], dtype=self.dtype), forward_network,
+                q_equilibrium, u_equilibrium, dt)
+        self.controller_network3 = torch.nn.Linear(4, 1, bias=True)
+        self.controller_network3.weight.data = torch.tensor(
+            [[0.1, 0.4, 0.2, -0.5]], dtype=self.dtype)
+        self.controller_network3.bias.data = torch.tensor(
+            [0.5], dtype=self.dtype)
+        self.closed_loop_system3 = feedback_system.FeedbackSystem(
+            self.forward_system3, self.controller_network3,
+            x_equilibrium=self.forward_system3.x_equilibrium,
+            u_equilibrium=self.forward_system3.u_equilibrium,
+            u_lower_limit=np.array([-10.]),
+            u_upper_limit=np.array([10.]))
+        self.lyapunov_relu3 = utils.setup_relu(
+            (4, 4, 4, 1), torch.tensor([
+                0.1, 0.2, 0.3, -0.1, 0.3, 0.9, 1.2, 0.4, -0.2, -0.5, 0.5, 0.9,
+                1.2, 1.4, 1.6, 2.4, 2.1, -0.6, -0.9, -.8, 2.1, -0.5, -1.2, 2.1,
+                0.5, 0.4, 0.6, 1.2, 0.7, 0.1, -0.2, 0.3, -1.2, 0.5, 0.1, 0.8,
+                0.7, 0.2, 0.1, -0.5, 0.3, 0.6, -0.2, 1.2, 0.1],
+                dtype=self.dtype), negative_slope=0.01, bias=True,
+            dtype=self.dtype)
+        self.lyapunov_hybrid_system3 = \
+            lyapunov.LyapunovDiscreteTimeHybridSystem(
+                self.closed_loop_system3, self.lyapunov_relu3)
 
     def compute_lyapunov_positivity_loss_at_samples(
             self, dut, state_samples, V_lambda, epsilon, margin):
@@ -240,31 +282,55 @@ class TestLyapunov(unittest.TestCase):
                 self.lyapunov_hybrid_system2, training_params, state_samples,
                 eps_type)
 
-    def test_total_loss1(self):
+    def test_lyapunov_derivative_loss_at_samples3(self):
         state_samples = torch.tensor(
-            [[0.5, 0.5], [-0.5, -0.5], [1, 1], [1, -1], [-1, 1], [-1, -1]],
+            [[0.5, 0.5, 0.2, 0.4], [-0.5, -0.5, 0.1, 0.6], [1, 1, -2, -2],
+             [1, -1, 0.4, 0.9], [-1, 1, 0.4, 0.2], [-1, -1, -0.2, 0.4]],
             dtype=self.dtype)
+        training_params = list(self.controller_network3.parameters()) +\
+            list(self.lyapunov_relu3.parameters())
+        for eps_type in list(lyapunov.ConvergenceEps):
+            self.lyapunov_derivative_loss_at_sample_tester(
+                self.lyapunov_hybrid_system3, training_params, state_samples,
+                eps_type)
+
+    def total_loss_tester(self, lyap, training_params, state_samples):
         state_samples_next = torch.stack([
-            self.lyapunov_hybrid_system1.system.step_forward(
+            lyap.system.step_forward(
                 state_samples[i]) for i in range(state_samples.shape[0])],
             dim=0)
         V_lambda = 0.1
         trainer = train_lyapunov.TrainLyapunovReLU(
-            self.lyapunov_hybrid_system1, V_lambda,
-            self.lyapunov_hybrid_system1.system.x_equilibrium)
-        optimizer = torch.optim.Adam(list(
-            self.controller_network1.parameters()) +
-            list(self.lyapunov_relu1.parameters()))
+            lyap, V_lambda, lyap.system.x_equilibrium)
+        optimizer = torch.optim.Adam(training_params)
         for iter_count in range(2):
             optimizer.zero_grad()
             state_samples_next = torch.stack([
-                self.lyapunov_hybrid_system1.system.step_forward(
+                lyap.system.step_forward(
                     state_samples[i]) for i in range(state_samples.shape[0])],
                 dim=0)
             loss = trainer.total_loss(
-                state_samples, state_samples, state_samples_next, 1., 1., None,
-                None)
+                state_samples, state_samples, state_samples_next, 1., 1., 1, 1)
             loss[0].backward()
+
+    def test_total_loss1(self):
+        state_samples = torch.tensor(
+            [[0.5, 0.5], [-0.5, -0.5], [1, 1], [1, -1], [-1, 1], [-1, -1]],
+            dtype=self.dtype)
+        training_params = list(self.controller_network1.parameters()) +\
+            list(self.lyapunov_relu1.parameters())
+        self.total_loss_tester(
+            self.lyapunov_hybrid_system1, training_params, state_samples)
+
+    def test_total_loss3(self):
+        state_samples = torch.tensor(
+            [[0.5, 0.5, 0.2, 0.4], [-0.5, -0.5, 0.1, 0.6], [1, 1, -2, -2],
+             [1, -1, 0.4, 0.9], [-1, 1, 0.4, 0.2], [-1, -1, -0.2, 0.4]],
+            dtype=self.dtype)
+        training_params = list(self.controller_network3.parameters()) +\
+            list(self.lyapunov_relu3.parameters())
+        self.total_loss_tester(
+            self.lyapunov_hybrid_system3, training_params, state_samples)
 
 
 if __name__ == "__main__":

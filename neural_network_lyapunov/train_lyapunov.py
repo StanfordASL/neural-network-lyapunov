@@ -3,6 +3,7 @@ import torch.utils.tensorboard
 import numpy as np
 import gurobipy
 import copy
+import wandb
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.train_utils as train_utils
@@ -133,6 +134,9 @@ class TrainLyapunovReLU:
         # If summary writer is not None, then we use tensorboard to write
         # training loss to the summary writer.
         self.summary_writer_folder = None
+
+        # Enable wandb to log the data.
+        self.enable_wandb = False
 
         # parameter used in SGD
         self.momentum = 0.
@@ -447,6 +451,12 @@ class TrainLyapunovReLU:
                   "positivity mip cost " +
                   f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
                   f"mip cost {lyapunov_derivative_mip_costs[iter_count]}\n")
+            if self.enable_wandb:
+                wandb.log({
+                    "iter_count": iter_count, "loss": losses[iter_count],
+                    "positivity MIP cost": lyapunov_positivity_mip_costs[
+                        iter_count], "derivative MIP cost":
+                    lyapunov_derivative_mip_costs[iter_count]})
             if self.summary_writer_folder is not None:
                 writer.add_scalar(
                     "loss", losses[iter_count], iter_count)
@@ -464,12 +474,17 @@ class TrainLyapunovReLU:
         assert(
             state_samples_all.shape[1] ==
             self.lyapunov_hybrid_system.system.x_dim)
+        if self.enable_wandb:
+            wandb.init(project="train-lyapunov")
         positivity_state_samples = state_samples_all.clone()
         derivative_state_samples = state_samples_all.clone()
-        derivative_state_samples_next = torch.stack([
-            self.lyapunov_hybrid_system.system.step_forward(
-                derivative_state_samples[i]) for i in
-            range(derivative_state_samples.shape[0])], dim=0)
+        if (state_samples_all.shape[0] > 0):
+            derivative_state_samples_next = torch.stack([
+                self.lyapunov_hybrid_system.system.step_forward(
+                    derivative_state_samples[i]) for i in
+                range(derivative_state_samples.shape[0])], dim=0)
+        else:
+            derivative_state_samples_next = torch.empty_like(state_samples_all)
         iter_count = 0
         if isinstance(
             self.lyapunov_hybrid_system.system,
@@ -511,10 +526,14 @@ class TrainLyapunovReLU:
                 # changes in each iteration.
                 # TODO(hongkai.dai): if the forward system is a relu system,
                 # then we can compute the derivative in a batch.
-                derivative_state_samples_next = torch.stack([
-                    self.lyapunov_hybrid_system.system.step_forward(
-                        derivative_state_samples[i]) for i in
-                    range(derivative_state_samples.shape[0])], dim=0)
+                if (state_samples_all.shape[0] > 0):
+                    derivative_state_samples_next = torch.stack([
+                        self.lyapunov_hybrid_system.system.step_forward(
+                            derivative_state_samples[i]) for i in
+                        range(derivative_state_samples.shape[0])], dim=0)
+                else:
+                    derivative_state_samples_next = torch.empty_like(
+                        state_samples_all)
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], \
                 positivity_sample_loss, derivative_sample_loss,\
@@ -530,6 +549,12 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_mip_cost_weight)
             losses[iter_count] = loss.item()
 
+            if self.enable_wandb:
+                wandb.log({
+                    "iter_count": iter_count, "loss": losses[iter_count],
+                    "positivity MIP cost": lyapunov_positivity_mip_costs[
+                        iter_count], "derivative MIP cost":
+                    lyapunov_derivative_mip_costs[iter_count]})
             if self.summary_writer_folder is not None:
                 writer.add_scalar("loss", loss.item(), iter_count)
                 writer.add_scalar(
