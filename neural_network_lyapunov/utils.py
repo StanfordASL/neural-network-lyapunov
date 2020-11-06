@@ -1009,3 +1009,66 @@ def step_system(system, x_start, steps):
         for i in range(steps):
             path.append(system.step_forward(path[-1]))
     return path
+
+
+def compute_range_by_lp(
+    A: np.ndarray, b: np.ndarray, x_lb: np.ndarray, x_ub: np.ndarray,
+        C: np.ndarray, d: np.ndarray) -> (np.ndarray, np.ndarray):
+    """
+    Given x_lb <= x <= x_ub and C * x <= d, compute the range of y = A * x + b
+    through linear programming
+    @param x_lb Either np.ndarray or None
+    @param x_ub Either np.ndarray or None
+    @param C Either np.ndarray or None
+    @param d Either np.ndarray or None
+    """
+    assert(isinstance(A, np.ndarray))
+    assert(isinstance(b, np.ndarray))
+    assert(isinstance(x_lb, np.ndarray) or x_lb is None)
+    assert(isinstance(x_ub, np.ndarray) or x_ub is None)
+    assert(isinstance(C, np.ndarray) or C is None)
+    assert(isinstance(d, np.ndarray) or d is None)
+
+    y_dim = A.shape[0]
+    x_dim = A.shape[1]
+    if x_lb is None:
+        x_lb = np.full((x_dim,), -np.inf)
+    if x_ub is None:
+        x_ub = np.full((x_dim,), np.inf)
+    y_lb = np.empty(y_dim)
+    y_ub = np.empty(y_dim)
+    model = gurobipy.Model()
+    x = model.addMVar(x_dim, lb=x_lb, ub=x_ub)
+    if C is not None:
+        model.addMConstrs(C, x, gurobipy.GRB.LESS_EQUAL, d)
+    for i in range(y_dim):
+        # First find the upper bound.
+        model.setMObjective(Q=None, c=A[i], constant=b[i], xQ_L=None,
+                            xQ_R=None, xc=x, sense=gurobipy.GRB.MAXIMIZE)
+        model.update()
+        model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        model.optimize()
+        if model.status == gurobipy.GRB.Status.OPTIMAL:
+            y_ub[i] = model.ObjVal
+        elif model.status == gurobipy.GRB.Status.INFEASIBLE:
+            y_ub[i] = -np.inf
+        elif model.status == gurobipy.GRB.Status.UNBOUNDED:
+            y_ub[i] = np.inf
+        else:
+            raise Exception("compute_range_by_lp: unknown status.")
+
+        # Now find the lower bound.
+        model.setMObjective(Q=None, c=A[i], constant=b[i], xQ_L=None,
+                            xQ_R=None, xc=x, sense=gurobipy.GRB.MINIMIZE)
+        model.update()
+        model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        model.optimize()
+        if model.status == gurobipy.GRB.Status.OPTIMAL:
+            y_lb[i] = model.ObjVal
+        elif model.status == gurobipy.GRB.Status.INFEASIBLE:
+            y_lb[i] = np.inf
+        elif model.status == gurobipy.GRB.Status.UNBOUNDED:
+            y_lb[i] = -np.inf
+        else:
+            raise Exception("compute_range_by_lp: unknown status.")
+    return (y_lb, y_ub)
