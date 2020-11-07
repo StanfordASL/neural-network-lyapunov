@@ -800,5 +800,47 @@ class TestPropagateBoundsIA(unittest.TestCase):
                 output_lo.detach().numpy() - 1E-10, output.detach().numpy())
 
 
+class TestComputeRangeByLP(unittest.TestCase):
+    def test_x_bounds(self):
+        # Test with only bounds on x.
+        x_lb = np.array([1., 2.])
+        x_ub = np.array([3., 4.])
+        A = np.array([[0., 1.], [1., 1.], [2., -1.]])
+        b = np.array([0., 1., 3.])
+        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
+        y_lb_expected = np.array([2., 4, 1.])
+        y_ub_expected = np.array([4, 8., 7.])
+        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
+        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
+
+        # Some of the bounds should be infinity.
+        x_lb = np.array([1., -np.inf])
+        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
+        y_lb_expected = np.array([-np.inf, -np.inf, 1.])
+        y_ub_expected = np.array([4, 8., np.inf])
+        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
+        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
+
+        # Now the problem is infeasible as x_lb > x_ub
+        x_lb = np.array([4., 2])
+        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
+        np.testing.assert_allclose(y_lb, np.full((3,), np.inf))
+        np.testing.assert_allclose(y_ub, np.full((3,), -np.inf))
+
+    def test_ineq_bounds(self):
+        # x has both bounds x_lb <= x <= x_ub and inequality bounds C * x <= d
+        x_lb = np.array([-1., -2.])
+        x_ub = np.array([3., 4.])
+        C = np.array([[1., 1.], [1., -1], [-1, 1], [-1, -1.]])
+        d = np.array([2, 2, 2, 2])
+        A = np.array([[0., 1.], [1., 1.], [2., -1.]])
+        b = np.array([0., 1., 3.])
+        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, C, d)
+        y_lb_expected = np.array([-2, -1, 0.])
+        y_ub_expected = np.array([2., 3, 7.])
+        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
+        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
+
+
 if __name__ == "__main__":
     unittest.main()
