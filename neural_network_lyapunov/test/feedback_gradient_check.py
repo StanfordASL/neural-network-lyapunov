@@ -6,11 +6,11 @@ import neural_network_lyapunov.train_lyapunov as train_lyapunov
 
 
 def check_sample_loss_grad(
-        lyap, V_lambda, x_equilibrium, x_samples, atol, rtol):
+        lyap, V_lambda, x_equilibrium, R, x_samples, atol, rtol):
     utils.network_zero_grad(lyap.lyapunov_relu)
     utils.network_zero_grad(lyap.system.controller_network)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, x_equilibrium)
+        lyap, V_lambda, x_equilibrium, R)
     x_next_samples = torch.cat([lyap.system.step_forward(
         x_samples[i]).reshape((1, -1)) for i in range(x_samples.shape[0])],
         dim=0)

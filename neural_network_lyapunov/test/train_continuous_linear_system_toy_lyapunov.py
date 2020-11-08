@@ -201,8 +201,9 @@ if __name__ == "__main__":
             [state_samples_all[i, :] for i in range(state_samples_all.shape[0])
              if state_samples_all[i, 0] + state_samples_all[i, 1] >= 0])
 
+    R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate
@@ -251,14 +252,16 @@ if __name__ == "__main__":
                 result1, loss1 = approximator.train(
                     system_simulate, relu, V_lambda, x_equilibrium,
                     lambda x: 0.1 * torch.norm(x - x_equilibrium, p=2),
-                    state_samples_all, 100., False, x_equilibrium,
+                    state_samples_all, 100., False,
+                    torch.eye(2, dtype=torch.float64), x_equilibrium,
                     lambda x: torch.norm(x - x_equilibrium, p=2) < 0.01 and
                     torch.any(x - x_equilibrium <= x_lower) and
                     torch.any(x - x_equilibrium >= x_upper))
             else:
                 x0_value_samples = torch.load(args.load_cost_to_go_data)
                 result1, loss1 = approximator.train_with_cost_to_go(
-                    relu, x0_value_samples, V_lambda, x_equilibrium)
+                    relu, x0_value_samples, V_lambda, x_equilibrium,
+                    torch.eye(2, dtype=torch.float64))
                 train_2d_lyapunov_utils.plot_cost_to_go_approximator(
                     relu, x0_value_samples, x_equilibrium, V_lambda, x_lower,
                     x_upper, (101, 101), 0.)

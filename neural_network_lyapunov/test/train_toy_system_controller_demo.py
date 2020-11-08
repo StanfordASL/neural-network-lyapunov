@@ -67,8 +67,9 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
 
+    R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5

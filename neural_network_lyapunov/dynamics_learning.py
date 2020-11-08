@@ -111,7 +111,7 @@ class DynamicsLearning:
         """
         lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
             self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_pos)
+            self.opt.V_eps_pos, R=self.opt.R)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -133,7 +133,8 @@ class DynamicsLearning:
 
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
             self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower)
+            self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
+            R=self.opt.R)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -157,7 +158,8 @@ class DynamicsLearning:
 
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
             self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper)
+            self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
+            R=self.opt.R)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -205,7 +207,7 @@ class DynamicsLearning:
         else:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
                 self.lyap.system.x_equilibrium, self.opt.V_lambda,
-                self.opt.V_eps_pos)
+                self.opt.V_eps_pos, R=self.opt.R)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -232,12 +234,13 @@ class DynamicsLearning:
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
                 self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
-                x_warmstart=self.lyap_der_lo_x_adv)
+                R=self.opt.R, x_warmstart=self.lyap_der_lo_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower)
+                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
+                R=self.opt.R)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -271,7 +274,8 @@ class DynamicsLearning:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper)
+                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
+                R=self.opt.R)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -324,17 +328,17 @@ class DynamicsLearning:
         sample_pos_loss = \
             self.lyap.lyapunov_positivity_loss_at_samples(
                 relu_at_equilibrium, self.lyap.system.x_equilibrium, x,
-                self.opt.V_lambda, self.opt.V_eps_pos)
+                self.opt.V_lambda, self.opt.V_eps_pos, R=self.opt.R)
         sample_der_lo_loss = \
             self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(
                 self.opt.V_lambda, self.opt.V_eps_der_lo, x, x_next,
                 self.lyap.system.x_equilibrium,
-                lyapunov.ConvergenceEps.ExpLower)
+                lyapunov.ConvergenceEps.ExpLower, R=self.opt.R)
         sample_der_up_loss = \
             self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(
                 self.opt.V_lambda, self.opt.V_eps_der_up, x, x_next,
                 self.lyap.system.x_equilibrium,
-                lyapunov.ConvergenceEps.ExpUpper)
+                lyapunov.ConvergenceEps.ExpUpper, R=self.opt.R)
         return (self.opt.lyap_pos_loss_at_samples_weight * sample_pos_loss,
                 self.opt.lyap_der_lo_loss_at_samples_weight *
                 sample_der_lo_loss,
@@ -563,14 +567,15 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         V_traj = []
         x_traj[0, :] = x_init
         V_traj.append(self.lyap.lyapunov_value(
-            x_init, self.lyap.system.x_equilibrium, self.opt.V_lambda).item())
+            x_init, self.lyap.system.x_equilibrium, self.opt.V_lambda,
+            R=self.opt.R).item())
         for n in range(N):
             with torch.no_grad():
                 x_next_pred = self.lyap.system.step_forward(x_traj[n, :])
                 x_traj[n+1, :] = x_next_pred
                 V_traj.append(self.lyap.lyapunov_value(
                     x_next_pred, self.lyap.system.x_equilibrium,
-                    self.opt.V_lambda).item())
+                    self.opt.V_lambda, R=self.opt.R).item())
         V_traj = torch.tensor(V_traj, dtype=self.opt.dtype)
         return x_traj, V_traj
 
@@ -788,7 +793,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         z_traj.append(self.encoder(x_init.unsqueeze(0))[0])
         V_traj.append(self.lyap.lyapunov_value(
             z_traj[-1].squeeze(), self.lyap.system.x_equilibrium,
-            self.opt.V_lambda).item())
+            self.opt.V_lambda, R=self.opt.R).item())
         for n in range(N):
             with torch.no_grad():
                 if not decode_intermediate:
@@ -798,7 +803,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                     V_traj.append(
                         self.lyap.lyapunov_value(
                             z.squeeze(), self.lyap.system.x_equilibrium,
-                            self.opt.V_lambda).item())
+                            self.opt.V_lambda, R=self.opt.R).item())
                 else:
                     _, x_next_pred_decoded, _, _, z_next =\
                         self.vae_forward(
@@ -811,7 +816,7 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                     V_traj.append(
                         self.lyap.lyapunov_value(
                             z_next.squeeze(), self.lyap.system.x_equilibrium,
-                            self.opt.V_lambda).item())
+                            self.opt.V_lambda, R=self.opt.R).item())
         V_traj = torch.tensor(V_traj, dtype=self.opt.dtype)
         z_traj = torch.cat(z_traj).detach()
         return x_traj, V_traj, z_traj

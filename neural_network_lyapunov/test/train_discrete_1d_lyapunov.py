@@ -89,8 +89,9 @@ if __name__ == "__main__":
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         system, relu)
+    R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
     dut.output_flag = True
     dut.max_iterations = 3000
     dut.learning_rate = 1e-4

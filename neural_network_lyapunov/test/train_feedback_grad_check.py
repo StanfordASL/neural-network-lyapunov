@@ -48,6 +48,7 @@ if __name__ == "__main__":
         dtype=torch.float64)
     lyapunov_relu.load_state_dict(lyapunov_network["state_dict"])
     V_lambda = lyapunov_network["V_lambda"]
+    R = lyapunov_network["R"]
     lyapunov_derivative_epsilon = lyapunov_network[
         "lyapunov_derivative_epsilon"]
     lyapunov_positivity_epsilon = lyapunov_network[
@@ -67,7 +68,7 @@ if __name__ == "__main__":
 
     # Check sample loss.
     feedback_gradient_check.check_sample_loss_grad(
-        lyapunov_hybrid_system, V_lambda, forward_system.x_equilibrium,
+        lyapunov_hybrid_system, V_lambda, forward_system.x_equilibrium, R,
         x_samples, atol=1E-5, rtol=1E-5)
     # Check gradient of positivity MIP cost.
     feedback_gradient_check.check_lyapunov_mip_loss_grad(

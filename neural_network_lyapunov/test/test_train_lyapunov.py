@@ -54,8 +54,9 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         relu = setup_relu()
         lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
             system, relu)
+        R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype)
         dut = train_lyapunov.TrainLyapunovReLU(
-            lyapunov_hybrid_system, V_lambda, x_equilibrium)
+            lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.add_adversarial_state_to_training = True
@@ -99,18 +100,19 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
                 relu_at_equilibrium, x_equilibrium,
                 state_samples_all[-dut.max_sample_pool_size:], V_lambda,
-                dut.lyapunov_positivity_sample_margin)
+                dut.lyapunov_positivity_epsilon,
+                R=R, margin=dut.lyapunov_positivity_sample_margin)
         loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
                 V_lambda, dut.lyapunov_derivative_epsilon,
                 state_samples_all[-dut.max_sample_pool_size:],
                 state_samples_next[-dut.max_sample_pool_size:], x_equilibrium,
-                dut.lyapunov_derivative_eps_type,
-                dut.lyapunov_derivative_sample_margin)
+                dut.lyapunov_derivative_eps_type, R=R,
+                margin=dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon)
+                x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon, R=R)
         lyapunov_positivity_mip = lyapunov_positivity_mip_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -124,7 +126,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         lyapunov_derivative_mip_return = lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
                 x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
-                lyapunov.ConvergenceEps.ExpLower, lyapunov_lower=None,
+                lyapunov.ConvergenceEps.ExpLower, R=R, lyapunov_lower=None,
                 lyapunov_upper=None)
         lyapunov_derivative_mip = lyapunov_derivative_mip_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(
@@ -185,7 +187,8 @@ class TestTrainLyapunov(unittest.TestCase):
             return x @ x
         result = dut.train(
             self.system, self.relu, V_lambda, x_equilibrium,
-            instantaneous_cost, state_samples_all, N, True)
+            instantaneous_cost, state_samples_all, N, True,
+            R=torch.eye(2, dtype=torch.float64))
         self.assertTrue(result[0])
         relu_at_equilibrium = self.relu.forward(x_equilibrium)
         # Now check the total loss.

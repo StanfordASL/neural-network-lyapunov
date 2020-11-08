@@ -51,6 +51,7 @@ opt_default = dict(
     V_eps_pos=.01,
     V_eps_der_lo=0.1,
     V_eps_der_up=0.001,
+    R=None,
 
     # dynamics nn
     dyn_nn_width=(z_dim, z_dim*5, z_dim*3, z_dim),
@@ -219,7 +220,7 @@ class TestDynamicsLearning(unittest.TestCase):
                 for k in range(z_adv_pos.shape[0]):
                     V = self.lyap.lyapunov_value(
                         z_adv_pos[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda)
+                        self.opt.V_lambda, R=self.opt.R)
                     self.assertLessEqual(
                         V.item() - self.opt.V_eps_pos * torch.norm(
                             z_adv_pos[k, :] - self.lyap.system.x_equilibrium,
@@ -227,12 +228,12 @@ class TestDynamicsLearning(unittest.TestCase):
                 for k in range(z_adv_der_lo.shape[0]):
                     dV = self.lyap.lyapunov_derivative(
                         z_adv_der_lo[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, self.opt.V_eps_der_lo)
+                        self.opt.V_lambda, self.opt.V_eps_der_lo, R=self.opt.R)
                     [self.assertGreaterEqual(dv.item(), 0.) for dv in dV]
                 for k in range(z_adv_der_up.shape[0]):
                     dV = self.lyap.lyapunov_derivative(
                         z_adv_der_up[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, self.opt.V_eps_der_up)
+                        self.opt.V_lambda, self.opt.V_eps_der_up, R=self.opt.R)
                     [self.assertLessEqual(dv.item(), 0.) for dv in dV]
 
     def test_dynamics_loss(self):
