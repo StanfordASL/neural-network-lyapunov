@@ -496,11 +496,11 @@ def is_polyhedron_bounded(P):
     con1 = P_np @ x_bar <= np.zeros(P.shape[0])
     for i in range(P.shape[1]):
         prob = cp.Problem(objective, [con1, x_bar[i] == 1.])
-        prob.solve()
+        prob.solve(solver="GUROBI")
         if (prob.status != 'infeasible'):
             return False
         prob = cp.Problem(objective, [con1, x_bar[i] == -1.])
-        prob.solve()
+        prob.solve(solver="GUROBI")
         if (prob.status != 'infeasible'):
             return False
     return True
@@ -704,7 +704,7 @@ def project_to_polyhedron(A, b, x):
         objective = cp.Minimize(cp.sum_squares(x.detach().numpy() - y))
         con = A.detach().numpy() @ y <= b.detach().numpy()
         prob = cp.Problem(objective, [con])
-        prob.solve()
+        prob.solve(solver="GUROBI")
         return torch.from_numpy(y.value).type(x.dtype)
 
 

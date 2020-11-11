@@ -261,13 +261,23 @@ class HybridLinearSystem:
         @return mode An integer correspoding to the mode that was active on
         that step, or None if no mode is active
         """
-        assert(type(x_start) == torch.Tensor)
-        assert(type(u_start) == torch.Tensor)
-        mode = self.mode(x_start, u_start)
-        if mode is None:
-            return (None, None)
-        return (self.A[mode] @ x_start + self.B[mode] @ u_start +
-                self.c[mode], mode)
+        assert(isinstance(x_start, torch.Tensor))
+        assert(isinstance(u_start, torch.Tensor))
+        if len(x_start.shape) == 1:
+            mode = self.mode(x_start, u_start)
+            if mode is None:
+                return (None, None)
+            return (self.A[mode] @ x_start + self.B[mode] @ u_start +
+                    self.c[mode], mode)
+        else:
+            next_states = []
+            next_modes = []
+            for i in range(x_start.shape[0]):
+                next_state, next_mode = self.step_forward(
+                    x_start[i], u_start[i])
+                next_states.append(next_state)
+                next_modes.append(next_mode)
+            return torch.stack(next_states), next_modes
 
     def possible_dx(self, x, u):
         """
@@ -509,14 +519,18 @@ class AutonomousHybridLinearSystem:
         @return x_next The next continuous state.
         """
         assert(isinstance(x, torch.Tensor))
-        assert(x.shape == (self.x_dim,))
-
-        if mode_x is None:
-            mode_x = self.mode(x)
-        if mode_x is None:
-            raise self.StepForwardException(
-                "step_forward(): x is not in any mode.")
-        return self.A[mode_x] @ x + self.g[mode_x]
+        if len(x.shape) == 1:
+            assert(x.shape == (self.x_dim,))
+            if mode_x is None:
+                mode_x = self.mode(x)
+            if mode_x is None:
+                raise self.StepForwardException(
+                    "step_forward(): x is not in any mode.")
+            return self.A[mode_x] @ x + self.g[mode_x]
+        else:
+            assert(mode_x is None)
+            return torch.stack([
+                self.step_forward(x[i]) for i in range(x.shape[0])])
 
     def possible_dx(self, x):
         """

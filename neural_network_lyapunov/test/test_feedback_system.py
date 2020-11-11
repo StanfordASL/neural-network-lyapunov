@@ -279,6 +279,24 @@ class TestFeedbackSystem(unittest.TestCase):
                 np.testing.assert_allclose(
                     u.detach().numpy(), u_expected.detach().numpy())
 
+        # Test a batch of x.
+        x = torch.tensor([[0.2, 0.4, 0.9], [0.5, 0.1, 1.2]], dtype=self.dtype)
+        u = closed_loop_system.compute_u(x)
+        self.assertEqual(u.shape, (2, 2))
+        for i in range(2):
+            np.testing.assert_allclose(
+                u[i].detach().numpy(),
+                closed_loop_system.compute_u(x[i]).detach().numpy())
+
+        x = torch.tensor([[0.2, 1.4, 0.5], [1.6, -0.1, 1.1], [-2.2, 0.5, 1.4]],
+                         dtype=self.dtype)
+        u = closed_loop_system.compute_u(x)
+        self.assertEqual(u.shape, (3, 2))
+        for i in range(3):
+            np.testing.assert_allclose(
+                u[i].detach().numpy(),
+                closed_loop_system.compute_u(x[i]).detach().numpy())
+
     def step_forward_at_equilibrium_test(
         self, forward_system, controller_network, x_equilibrium, u_equilibrium,
             u_lower_limit, u_upper_limit):
@@ -298,16 +316,26 @@ class TestFeedbackSystem(unittest.TestCase):
             u_equilibrium, u_lower_limit, u_upper_limit)
 
         with torch.no_grad():
-            x_next = closed_loop_system.step_forward(x)
-            self.assertIsInstance(x_next, torch.Tensor)
-            self.assertEqual(x_next.shape, (closed_loop_system.x_dim,))
-            u = closed_loop_system.compute_u(x)
-            x_next_expected = forward_system.step_forward(x, u)
-            if isinstance(forward_system,
-                          hybrid_linear_system.HybridLinearSystem):
-                x_next_expected = x_next_expected[0]
-            np.testing.assert_allclose(
+            if len(x.shape) == 1:
+                x_next = closed_loop_system.step_forward(x)
+                self.assertIsInstance(x_next, torch.Tensor)
+                self.assertEqual(x_next.shape, (closed_loop_system.x_dim,))
+                u = closed_loop_system.compute_u(x)
+                x_next_expected = forward_system.step_forward(x, u)
+                if isinstance(forward_system,
+                              hybrid_linear_system.HybridLinearSystem):
+                    x_next_expected = x_next_expected[0]
+                np.testing.assert_allclose(
                     x_next.detach().numpy(), x_next_expected.detach().numpy())
+
+            else:
+                x_next = closed_loop_system.step_forward(x)
+                self.assertIsInstance(x_next, torch.Tensor)
+                self.assertEqual(x.shape, x_next.shape)
+                for i in range(x.shape[0]):
+                    np.testing.assert_allclose(
+                        x_next[i].detach().numpy(),
+                        closed_loop_system.step_forward(x[i]).detach().numpy())
 
     def test_step_forward_hybrid_linear_system(self):
         forward_system = self.construct_hybrid_linear_system_example()
@@ -331,6 +359,11 @@ class TestFeedbackSystem(unittest.TestCase):
         self.step_forward_test(
             forward_system, self.controller_network1, x, x_equilibrium,
             u_equilibrium, np.array([-1., 0]), np.array([10., 10.]))
+        self.step_forward_test(
+            forward_system, self.controller_network1, torch.tensor(
+                [[0.1, -.5, -0.2], [0.4, -0.3, 0.5]], dtype=self.dtype),
+            x_equilibrium, u_equilibrium, np.array([-1, -2.]),
+            np.array([2., 3.]))
 
     def test_step_forward_relu_system_given_equilibrium(self):
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
@@ -352,6 +385,11 @@ class TestFeedbackSystem(unittest.TestCase):
             np.array([-np.inf, -np.inf]), np.array([np.inf, np.inf]))
         self.step_forward_test(
             forward_system, self.controller_network1, x,
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            np.array([-10., -10.]), np.array([0.2, 0.3]))
+        self.step_forward_test(
+            forward_system, self.controller_network1, torch.tensor(
+                [[0.1, -0.4, 0.5], [0.2, -0.5, 0.3]], dtype=self.dtype),
             forward_system.x_equilibrium, forward_system.u_equilibrium,
             np.array([-10., -10.]), np.array([0.2, 0.3]))
 
@@ -387,6 +425,11 @@ class TestFeedbackSystem(unittest.TestCase):
             torch.tensor([0.2, -0.1, 0.5, 0.3], dtype=self.dtype),
             torch.tensor([0.2], dtype=self.dtype), np.array([-10.]),
             np.array([0.2]))
+        self.step_forward_test(
+            forward_system, self.controller_network2, torch.tensor(
+                [[-.3, .7, 0.25, 1.1], [.3, .2, -.1, -0.5]], dtype=self.dtype),
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            np.array([-10.]), np.array([0.2]))
 
     def add_controller_mip_constraint_controller(self, dut, x_val):
         mip = gurobi_torch_mip.GurobiTorchMILP(torch.float64)

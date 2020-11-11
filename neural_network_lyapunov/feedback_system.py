@@ -202,9 +202,15 @@ class FeedbackSystem:
         """
         u_pre_sat = self.controller_network(x) - \
             self.controller_network(self.x_equilibrium) + self.u_equilibrium
-        u = torch.max(torch.min(
-            u_pre_sat, torch.from_numpy(self.u_upper_limit)),
-            torch.from_numpy(self.u_lower_limit))
+        if len(x.shape) == 1:
+            u = torch.max(torch.min(
+                u_pre_sat, torch.from_numpy(self.u_upper_limit)),
+                torch.from_numpy(self.u_lower_limit))
+        else:
+            # batch of x
+            u = torch.max(torch.min(u_pre_sat, torch.from_numpy(
+                self.u_upper_limit).reshape((1, -1))),
+                torch.from_numpy(self.u_lower_limit).reshape((1, -1)))
         return u
 
     def possible_dx(self, x):
