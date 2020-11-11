@@ -20,7 +20,7 @@ class TestControlLyapunovFixedActivationPattern(unittest.TestCase):
         dut = control_lyapunov.ControlLyapunovFixedActivationPattern(
             g, P, q, A, B, d, u_vertices)
         prob = dut.construct_program()
-        prob.solve()
+        prob.solve(solver="GUROBI")
         self.assertEqual(prob.status, cp.OPTIMAL)
         self.assertTrue(np.less_equal(P.dot(dut.x.value), q).all())
         self.assertAlmostEqual(prob.value, g.T.dot(

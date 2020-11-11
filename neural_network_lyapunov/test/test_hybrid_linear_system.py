@@ -762,7 +762,7 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
                  mip_cnstr_return.Ain_binary.detach().numpy() @ gamma_var <=
                  mip_cnstr_return.rhs_in.detach().numpy(),
                  cp.sum(gamma_var) == 1])
-            prob.solve()
+            prob.solve(solver="GUROBI")
             self.assertEqual(prob.status, 'optimal')
             np.testing.assert_allclose(gamma.detach().numpy(), gamma_var.value)
             np.testing.assert_allclose(s.detach().numpy(), s_var.value)
