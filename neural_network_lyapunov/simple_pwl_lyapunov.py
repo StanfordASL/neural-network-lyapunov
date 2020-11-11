@@ -161,5 +161,5 @@ class SimplePWLLyapunov:
         prob = cp.Problem(
             cp.Minimize((1-weight) * self.s1 + weight * self.s2),
             self.constraints)
-        prob.solve()
+        prob.solve(solver="GUROBI")
         return self.c.value, self.d.value, self.s1[0].value, self.s2[0].value
