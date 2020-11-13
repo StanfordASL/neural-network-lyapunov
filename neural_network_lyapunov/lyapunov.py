@@ -618,11 +618,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(state_samples.shape[1] == self.system.x_dim)
         assert(isinstance(eps_type, ConvergenceEps))
         R = _get_R(R, self.system.x_dim, state_samples.device)
-        # TODO(hongkai.dai): write this as a batched operation for relu
-        # systems.
-        state_next = torch.stack([
-            self.system.step_forward(state_samples[i]) for i in
-            range(state_samples.shape[0])], dim=0)
+        state_next = self.system.step_forward(state_samples)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
             V_lambda, epsilon, state_samples, state_next,
