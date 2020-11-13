@@ -824,6 +824,15 @@ class AutonomousHybridLinearSystemTest(unittest.TestCase):
         test_fun(torch.tensor([-0.4, -0.5], dtype=dut.dtype))
         test_fun(torch.tensor([-0.4, 0.5], dtype=dut.dtype))
 
+        x = torch.tensor([[0.4, 0.5], [0.4, -0.5], [-0.4, 0.5]],
+                         dtype=dut.dtype)
+        x_next = dut.step_forward(x)
+        self.assertEqual(x_next.shape, x.shape)
+        for i in range(3):
+            np.testing.assert_allclose(
+                x_next[i].detach().numpy(),
+                dut.step_forward(x[i]).detach().numpy())
+
     def test_step_forward2(self):
         dut1 = setup_trecate_discrete_time_system()
         theta = np.pi / 5

@@ -276,14 +276,12 @@ class ReLUSystem:
     def step_forward(self, x_start, u_start):
         assert(isinstance(x_start, torch.Tensor))
         assert(isinstance(u_start, torch.Tensor))
-        return self.dynamics_relu(torch.cat((x_start, u_start)))
+        return self.dynamics_relu(torch.cat((x_start, u_start), dim=-1))
 
     def possible_dx(self, x, u):
         assert(isinstance(x, torch.Tensor))
-        assert(len(x) == self.x_dim)
         assert(isinstance(u, torch.Tensor))
-        assert(u.shape == (self.u_dim,))
-        return [self.dynamics_relu(torch.cat((x, u)))]
+        return [self.dynamics_relu(torch.cat((x, u), dim=-1))]
 
 
 class ReLUSystemGivenEquilibrium:
@@ -371,16 +369,14 @@ class ReLUSystemGivenEquilibrium:
     def step_forward(self, x_start, u_start):
         assert(isinstance(x_start, torch.Tensor))
         assert(isinstance(u_start, torch.Tensor))
-        x_next = self.dynamics_relu(torch.cat((x_start, u_start))) - \
+        x_next = self.dynamics_relu(torch.cat((x_start, u_start), dim=-1)) - \
             self.dynamics_relu(torch.cat(
                 (self.x_equilibrium, self.u_equilibrium))) + self.x_equilibrium
         return x_next
 
     def possible_dx(self, x, u):
         assert(isinstance(x, torch.Tensor))
-        assert(len(x) == self.x_dim)
         assert(isinstance(u, torch.Tensor))
-        assert(u.shape == (self.u_dim,))
         return [self.step_forward(x, u)]
 
 
@@ -505,16 +501,20 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         # q[n+1] = q[n] + (v[n] + v[n+1]) * dt / 2
         assert(isinstance(x_start, torch.Tensor))
         assert(isinstance(u_start, torch.Tensor))
-        v_next = self.dynamics_relu(torch.cat((x_start, u_start))) - \
+        v_next = self.dynamics_relu(torch.cat((x_start, u_start), dim=-1)) - \
             self.dynamics_relu(torch.cat(
                 (self.x_equilibrium, self.u_equilibrium)))
-        q_next = x_start[:self.nq] + (x_start[self.nq:] + v_next) * self.dt / 2
-        x_next = torch.cat((q_next, v_next))
+        if len(x_start.shape) == 1:
+            q_next = x_start[:self.nq] + (x_start[self.nq:] + v_next) *\
+                self.dt / 2
+        else:
+            # batch of x_start and u_start
+            q_next = x_start[:, :self.nq] + (x_start[:, self.nq:] + v_next) *\
+                self.dt / 2
+        x_next = torch.cat((q_next, v_next), dim=-1)
         return x_next
 
     def possible_dx(self, x, u):
         assert(isinstance(x, torch.Tensor))
-        assert(len(x) == self.x_dim)
         assert(isinstance(u, torch.Tensor))
-        assert(u.shape == (self.u_dim,))
         return [self.step_forward(x, u)]

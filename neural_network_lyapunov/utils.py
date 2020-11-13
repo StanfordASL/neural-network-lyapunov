@@ -704,7 +704,7 @@ def project_to_polyhedron(A, b, x):
         objective = cp.Minimize(cp.sum_squares(x.detach().numpy() - y))
         con = A.detach().numpy() @ y <= b.detach().numpy()
         prob = cp.Problem(objective, [con])
-        prob.solve()
+        prob.solve(solver="GUROBI")
         return torch.from_numpy(y.value).type(x.dtype)
 
 
