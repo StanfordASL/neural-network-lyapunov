@@ -153,7 +153,7 @@ if __name__ == "__main__":
         result1 = approximator.train(
             system_simulate, relu, V_lambda, x_equilibrium,
             lambda x: torch.norm(x - x_equilibrium, p=1),
-            state_samples_all1, 100, True)
+            state_samples_all1, 100, True, R=None)
         print(f"value function approximation error {result1[1]}")
     elif args.system == 2 or args.system == 3:
         if args.load_relu is None:
@@ -178,8 +178,9 @@ if __name__ == "__main__":
             relu = torch.load(args.load_relu)
 
     state_samples_all = state_samples_all1
+    R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate

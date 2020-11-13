@@ -874,7 +874,7 @@ def save_second_order_forward_model(
 
 def save_lyapunov_model(
     lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
-        lyapunov_derivative_epsilon, eps_type, file_path):
+        lyapunov_derivative_epsilon, eps_type, R, file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         lyapunov_relu)
     torch.save({"linear_layer_width": linear_layer_width,
@@ -882,7 +882,7 @@ def save_lyapunov_model(
                 "negative_slope": negative_slope, "V_lambda": V_lambda,
                 "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
                 "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
-                "eps_type": eps_type, "bias": bias}, file_path)
+                "eps_type": eps_type, "bias": bias, "R": R}, file_path)
 
 
 def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):

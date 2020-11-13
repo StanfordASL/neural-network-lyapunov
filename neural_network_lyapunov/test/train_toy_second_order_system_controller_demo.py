@@ -48,12 +48,13 @@ if __name__ == "__main__":
         closed_loop_system, lyapunov_relu)
 
     V_lambda = 1.
+    R = torch.tensor([[1, 1], [-1, 1]], dtype=torch.float64)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, forward_system.x_equilibrium)
+        lyap, V_lambda, forward_system.x_equilibrium, R)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5
-    dut.max_iterations = 2000
+    dut.max_iterations = 5000
     dut.lyapunov_positivity_epsilon = 0.5
     dut.lyapunov_derivative_epsilon = 1E-4
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp

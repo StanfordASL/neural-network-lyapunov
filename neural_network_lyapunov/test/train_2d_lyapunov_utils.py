@@ -113,8 +113,8 @@ def plot_relu_domain_boundary(ax, relu, **kwargs):
 
 
 def plot_lyapunov(
-    ax, relu, V_lambda, x_equilibrium, x_lower, x_upper, mesh_size, fontsize,
-        **kwargs):
+    ax, relu, V_lambda, x_equilibrium, R, x_lower, x_upper, mesh_size,
+        fontsize, **kwargs):
     """
     Plot V(x) in 3D.
     where V(x) = relu(x) + ρ|x-x*|₁
@@ -124,7 +124,8 @@ def plot_lyapunov(
             x_equilibrium, x_lower, x_upper, mesh_size, 0.)
         V = relu(state_samples_all) - relu(x_equilibrium)\
             + V_lambda * torch.norm(
-                state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
+                R @ (state_samples_all - x_equilibrium).T, p=1, dim=0
+                ).reshape((-1, 1))
         V_np = np.empty(mesh_size)
         samples_x = torch.empty(mesh_size)
         samples_y = torch.empty(mesh_size)
@@ -142,7 +143,7 @@ def plot_lyapunov(
 
 
 def plot_lyapunov_colormap(
-    fig, ax, relu, V_lambda, lyapunov_positivity_epsilon, x_equilibrium,
+    fig, ax, relu, V_lambda, lyapunov_positivity_epsilon, x_equilibrium, R,
         x_lower, x_upper, mesh_size, title_fontsize, **kwargs):
     """
     Plot V(x) - epsilon |x - x*|₁ as a color map.
@@ -153,9 +154,11 @@ def plot_lyapunov_colormap(
             x_equilibrium, x_lower, x_upper, mesh_size, 0.)
         V = relu(state_samples_all) - relu(x_equilibrium) +\
             V_lambda * torch.norm(
-                state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
+                R @ (state_samples_all - x_equilibrium).T, p=1, dim=0
+                ).reshape((-1, 1))
         V_minus_l1 = V - lyapunov_positivity_epsilon * torch.norm(
-            state_samples_all - x_equilibrium, p=1, dim=1).reshape((-1, 1))
+            R @ (state_samples_all - x_equilibrium), p=1, dim=0).reshape(
+                (-1, 1))
         V_minus_l1_np = np.empty(mesh_size)
         samples_x = torch.empty(mesh_size)
         samples_y = torch.empty(mesh_size)
@@ -223,7 +226,7 @@ def plot_lyapunov_dot_colormap(
 
 
 def plot_sublevel_set(
-        ax, relu, V_lambda, x_equilibrium, upper_bound, **kwargs):
+        ax, relu, V_lambda, x_equilibrium, R, upper_bound, **kwargs):
     """
     Plot the sub-level set of V(x) <= upper_bound where
     V(x) = network(x) + λ |x-x*|₁
@@ -242,7 +245,7 @@ def plot_sublevel_set(
     x[:, 0] = torch.cos(theta)
     x[:, 1] = torch.sin(theta)
     lyapunov_val = relu(x).squeeze() + \
-        V_lambda * torch.norm(x - x_equilibrium, p=1, dim=1)
+        V_lambda * torch.norm(R @ (x - x_equilibrium).T, p=1, dim=0)
     x = x * (((upper_bound / lyapunov_val).unsqueeze(1)).repeat([1, 2]))
     ax.plot(x[:, 0].detach().numpy(), x[:, 1].detach().numpy(), **kwargs)
     return x
@@ -286,8 +289,8 @@ def plot_phase_portrait(
 
 
 def plot_cost_to_go_approximator(
-    relu, x0_value_samples, x_equilibrium, V_lambda, lower, upper, mesh_size,
-        theta):
+    relu, x0_value_samples, x_equilibrium, V_lambda, R, lower, upper,
+        mesh_size, theta):
     """
     Plot the cost-to-go approximator and the cost-to-go samples.
     The approximator is nn(x) - nn(x*) + ρ|x-x*|₁
@@ -309,7 +312,8 @@ def plot_cost_to_go_approximator(
                 state_sample = torch.tensor(
                     [samples_x[i, j], samples_y[i, j]], dtype=dtype)
                 V[i, j] = relu(state_sample) - relu_at_equilibrium + \
-                    V_lambda * torch.norm(state_sample - x_equilibrium, p=1)
+                    V_lambda * torch.norm(
+                        R @ (state_sample - x_equilibrium), p=1)
 
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()

@@ -11,6 +11,13 @@ import argparse
 import os
 
 
+def rotation_matrix(theta):
+    c_theta = np.cos(theta)
+    s_theta = np.sin(theta)
+    return torch.tensor([[c_theta, -s_theta], [s_theta, c_theta]],
+                        dtype=torch.float64)
+
+
 def generate_pendulum_dynamics_data(dt):
     """
     Generate the pairs (x[n], u[n]) -> (x[n+1])
@@ -235,15 +242,13 @@ if __name__ == "__main__":
     parser.add_argument("--generate_controller_cost_data", action="store_true")
     parser.add_argument("--train_controller_approximator", action="store_true")
     parser.add_argument("--train_cost_approximator", action="store_true")
+    parser.add_argument("--load_controller_cost_data", action="store_true")
     parser.add_argument(
         "--load_lyapunov_relu", type=str, default=None,
         help="path of the saved lyapunov_relu state_dict()")
     parser.add_argument(
         "--load_controller_relu", type=str, default=None,
         help="path of the controller relu state_dict()")
-    parser.add_argument(
-        "--summary_writer_folder", type=str, default=None,
-        help="summary writer folder")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -270,16 +275,16 @@ if __name__ == "__main__":
     if args.generate_controller_cost_data:
         state_samples, control_samples, cost_samples =\
             generate_controller_dataset()
-    else:
+    elif args.load_controller_cost_data:
         controller_cost_data = torch.load(
             dir_path + "/data/pendulum_controller_cost_data.pt")
         state_samples = controller_cost_data["state_samples"]
         control_samples = controller_cost_data["control_samples"]
         cost_samples = controller_cost_data["cost_samples"]
 
-    V_lambda = 0.1
+    V_lambda = 0.6
     controller_relu = utils.setup_relu(
-        (2, 2, 1), params=None, negative_slope=0.1, bias=True,
+        (2, 2, 2, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
     if args.train_controller_approximator:
         train_controller_approximator(
@@ -296,8 +301,10 @@ if __name__ == "__main__":
     lqr_gain = plant.lqr_control(np.diag([1., 10.]), np.array([[1.]]))
 
     lyapunov_relu = utils.setup_relu(
-        (2, 8, 8, 1), params=None, negative_slope=0.1, bias=True,
+        (2, 8, 4, 4, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
+    R = torch.cat((rotation_matrix(np.pi / 4), rotation_matrix(np.pi/10)),
+                  dim=0)
     if args.train_cost_approximator:
         train_cost_approximator(
             state_samples, cost_samples, lyapunov_relu, V_lambda)
@@ -309,12 +316,13 @@ if __name__ == "__main__":
             dtype=torch.float64)
         lyapunov_relu.load_state_dict(lyapunov_data["state_dict"])
         V_lambda = lyapunov_data["V_lambda"]
+        R = lyapunov_data["R"]
 
     # Now train the controller and Lyapunov function together
     q_equilibrium = torch.tensor([np.pi], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([np.pi - 0.1, -0.2], dtype=torch.float64)
-    x_up = torch.tensor([np.pi + 0.1, 0.2], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - np.pi, -5.], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + np.pi, 5.], dtype=torch.float64)
     u_lo = torch.tensor([-20], dtype=torch.float64)
     u_up = torch.tensor([20], dtype=torch.float64)
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
@@ -326,14 +334,15 @@ if __name__ == "__main__":
         u_up.detach().numpy())
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
+
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, closed_loop_system.x_equilibrium)
+        lyapunov_hybrid_system, V_lambda, closed_loop_system.x_equilibrium, R)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
-    dut.max_iterations = 200
-    dut.lyapunov_positivity_epsilon = 0.05
-    dut.lyapunov_derivative_epsilon = 0.01
+    dut.max_iterations = 5000
+    dut.lyapunov_positivity_epsilon = 0.5
+    dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (51, 51), dtype=torch.float64)
@@ -341,6 +350,6 @@ if __name__ == "__main__":
     dut.train_lyapunov_on_samples(
         state_samples_all, num_epochs=100, batch_size=50)
 
-    dut.summary_writer_folder = args.summary_writer_folder
-    dut.train(torch.tensor([[np.pi, 0.]], dtype=torch.float64))
+    dut.enable_wandb = True
+    dut.train(torch.empty((0, 2), dtype=torch.float64))
     pass

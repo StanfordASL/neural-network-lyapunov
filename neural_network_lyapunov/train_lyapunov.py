@@ -41,29 +41,31 @@ class ProjectGradientMethod(Enum):
 class TrainLyapunovReLU:
     """
     We will train a ReLU network, such that the function
-    V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁ is a Lyapunov function that certifies
-    (exponential) convergence. Namely V(x) should satisfy the following
-    conditions
+    V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁ is a Lyapunov function that
+    certifies exponential/asymptotic convergence. Namely V(x) should satisfy
+    the following conditions
     1. V(x) > 0 ∀ x ≠ x*
-    2. dV(x) ≤ -ε V(x) ∀ x
+    2. dV(x) ≤ -ε V(x) ∀ x for exponential convergence
+       dV(x) < 0 for asymptotic convergence
     where dV(x) = V̇(x) for continuous time system, and
     dV(x[n]) = V(x[n+1]) - V(x[n]) for discrete time system.
     In order to find such V(x), we penalize a (weighted) sum of the following
     loss
     1. hinge(-V(xⁱ)) for sampled state xⁱ.
     2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
-    3. -min_x V(x) - ε₂ |x - x*|₁
+    3. -min_x V(x) - ε₂ |R*(x - x*)|₁
     4. max_x dV(x) + ε V(x)
-    where ε₂ is a given positive scalar, and |x - x*|₁ is the 1-norm of x - x*.
+    where ε₂ is a given positive scalar, and |R*(x - x*)|₁ is the 1-norm of
+    R*(x - x*).
     hinge(z) = max(z + margin, 0) where margin is a given scalar.
     """
 
-    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium):
+    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium, R):
         """
         @param lyapunov_hybrid_system This input should define a common
         interface
         lyapunov_positivity_as_milp() (which represents
-        minₓ V(x) - ε₂ |x - x*|₁)
+        minₓ V(x) - ε₂ |R*(x - x*)|₁)
         lyapunov_positivity_loss_at_samples() (which represents
         mean(hinge(-V(xⁱ))))
         lyapunov_derivative_as_milp() (which represents maxₓ dV(x) + ε V(x))
@@ -72,6 +74,8 @@ class TrainLyapunovReLU:
         One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
         @param V_lambda λ in the documentation above.
         @param x_equilibrium The equilibrium state.
+        @param R Should be a full column rank matrix. If R=None, then use
+        identity matrix as R.
         """
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
         assert(isinstance(V_lambda, float))
@@ -79,6 +83,8 @@ class TrainLyapunovReLU:
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim,))
         self.x_equilibrium = x_equilibrium
+        assert(isinstance(R, torch.Tensor) or R is None)
+        self.R = R
         # The learning rate of the optimizer
         self.learning_rate = 0.003
         # Number of iterations in the training.
@@ -203,7 +209,7 @@ class TrainLyapunovReLU:
             lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
                 lyapunov_positivity_as_milp(
                     self.x_equilibrium, self.V_lambda,
-                    self.lyapunov_positivity_epsilon)
+                    self.lyapunov_positivity_epsilon, R=self.R)
             lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -224,7 +230,7 @@ class TrainLyapunovReLU:
                 lyapunov_derivative_as_milp(
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_derivative_epsilon,
-                    self.lyapunov_derivative_eps_type)
+                    self.lyapunov_derivative_eps_type, R=self.R)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -277,7 +283,7 @@ class TrainLyapunovReLU:
                 lyapunov_positivity_loss_at_samples(
                     relu_at_equilibrium, self.x_equilibrium,
                     positivity_state_samples_in_pool, self.V_lambda,
-                    self.lyapunov_positivity_epsilon,
+                    self.lyapunov_positivity_epsilon, R=self.R,
                     margin=self.lyapunov_positivity_sample_margin)
         else:
             positivity_sample_loss = 0.
@@ -298,7 +304,7 @@ class TrainLyapunovReLU:
                     self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
-                    self.lyapunov_derivative_eps_type,
+                    self.lyapunov_derivative_eps_type, R=self.R,
                     margin=self.lyapunov_derivative_sample_margin)
         else:
             derivative_sample_loss = 0.
@@ -474,8 +480,6 @@ class TrainLyapunovReLU:
         assert(
             state_samples_all.shape[1] ==
             self.lyapunov_hybrid_system.system.x_dim)
-        if self.enable_wandb:
-            wandb.init(project="train-lyapunov")
         positivity_state_samples = state_samples_all.clone()
         derivative_state_samples = state_samples_all.clone()
         if (state_samples_all.shape[0] > 0):
@@ -720,11 +724,14 @@ class TrainValueApproximator:
         self.learning_rate = 0.02
 
     def train_with_cost_to_go(
-            self, network, x0_value_samples, V_lambda, x_equilibrium):
+            self, network, x0_value_samples, V_lambda, x_equilibrium, R):
         """
         Similar to train() function, but with given samples on initial_state
         and cost-to-go.
         """
+        if R is None:
+            x_dim = x_equilibrium.numel()
+            R = torch.eye(x_dim, dtype=torch.float64)
         state_samples_all = torch.stack([
             pair[0] for pair in x0_value_samples], dim=0)
         value_samples_all = torch.stack([pair[1] for pair in x0_value_samples])
@@ -735,9 +742,8 @@ class TrainValueApproximator:
             relu_output = network(state_samples_all)
             relu_x_equilibrium = network.forward(x_equilibrium)
             value_relu = relu_output.squeeze() - relu_x_equilibrium +\
-                V_lambda * torch.norm(
-                    state_samples_all - x_equilibrium.reshape((1, -1)).
-                    expand(state_samples_all.shape[0], -1), dim=1, p=1)
+                V_lambda * torch.norm(R @ (
+                    state_samples_all - x_equilibrium).T, dim=0, p=1)
             loss = torch.nn.MSELoss()(value_relu, value_samples_all)
             if (loss.item() <= self.convergence_tolerance):
                 return True, loss.item()
@@ -747,7 +753,7 @@ class TrainValueApproximator:
 
     def train(
         self, system, network, V_lambda, x_equilibrium, instantaneous_cost_fun,
-            x0_samples, T, discrete_time_flag, x_goal=None, pruner=None):
+            x0_samples, T, discrete_time_flag, R, x_goal=None, pruner=None):
         """
         Train a network such that
         network(x) - network(x*) + λ*|x-x*|₁ ≈ cost_to_go(x)
@@ -781,4 +787,4 @@ class TrainValueApproximator:
             system, [x0_samples[i] for i in range(x0_samples.shape[0])], T,
             instantaneous_cost_fun, discrete_time_flag, x_goal, pruner)
         return self.train_with_cost_to_go(
-            network, x0_value_samples, V_lambda, x_equilibrium)
+            network, x0_value_samples, V_lambda, x_equilibrium, R)

@@ -154,18 +154,18 @@ class TestLyapunov(unittest.TestCase):
                 self.closed_loop_system3, self.lyapunov_relu3)
 
     def compute_lyapunov_positivity_loss_at_samples(
-            self, dut, state_samples, V_lambda, epsilon, margin):
+            self, dut, state_samples, V_lambda, epsilon, margin, R):
         assert(isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         num_samples = state_samples.shape[0]
         losses = torch.empty((num_samples,), dtype=self.dtype)
         relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(num_samples):
             losses[i] = torch.min(torch.tensor([dut.lyapunov_value(
-                state_samples[i], dut.system.x_equilibrium, V_lambda,
-                relu_at_equilibrium) -
+                state_samples[i], dut.system.x_equilibrium, V_lambda, R=R,
+                relu_at_equilibrium=relu_at_equilibrium) -
                 epsilon * torch.norm(
-                    state_samples[i] - dut.system.x_equilibrium, p=1) - margin,
-                0.]))
+                    R @ (state_samples[i] - dut.system.x_equilibrium), p=1) -
+                margin, 0.]))
         return -torch.mean(losses)
 
     def test_lyapunov_positivity_loss_at_samples1(self):
@@ -177,15 +177,16 @@ class TestLyapunov(unittest.TestCase):
         V_lambda = 0.1
         epsilon = 0.3
         margin = 0.2
+        R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=torch.float64)
         positivity_sample_loss = \
             self.lyapunov_hybrid_system1.lyapunov_positivity_loss_at_samples(
                 relu_at_equilibrium, self.closed_loop_system1.x_equilibrium,
-                state_samples, V_lambda, epsilon, margin)
+                state_samples, V_lambda, epsilon, R=R, margin=margin)
         self.assertAlmostEqual(
             positivity_sample_loss.item(),
             self.compute_lyapunov_positivity_loss_at_samples(
                 self.lyapunov_hybrid_system1, state_samples, V_lambda, epsilon,
-                margin).item())
+                margin, R).item())
 
         optimizer = torch.optim.Adam(list(
             self.controller_network1.parameters()) +
@@ -199,12 +200,12 @@ class TestLyapunov(unittest.TestCase):
                 lyapunov_positivity_loss_at_samples(
                     relu_at_equilibrium,
                     self.closed_loop_system1.x_equilibrium, state_samples,
-                    V_lambda, epsilon, margin)
+                    V_lambda, epsilon, R=R, margin=margin)
             loss.backward()
             optimizer.step()
 
     def compute_lyapunov_derivative_loss_at_samples(
-            self, dut, state_samples, V_lambda, epsilon, eps_type, margin):
+            self, dut, state_samples, V_lambda, epsilon, eps_type, margin, R):
         assert(isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         state_samples_next = torch.stack([dut.system.step_forward(
             state_samples[i]) for i in range(state_samples.shape[0])], dim=0)
@@ -212,14 +213,14 @@ class TestLyapunov(unittest.TestCase):
         relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(state_samples.shape[0]):
             V = dut.lyapunov_value(
-                state_samples[i], dut.system.x_equilibrium, V_lambda,
-                relu_at_equilibrium)
+                state_samples[i], dut.system.x_equilibrium, V_lambda, R=R,
+                relu_at_equilibrium=relu_at_equilibrium)
             # Note, by using torch.tensor([]), we cannot do auto grad on
             # `losses[i]`. In order to do automatic differentiation, change
             # torch.max to torch.nn.HingeEmbeddingLoss
             V_next = dut.lyapunov_value(
                 state_samples_next[i], dut.system.x_equilibrium, V_lambda,
-                relu_at_equilibrium)
+                R=R, relu_at_equilibrium=relu_at_equilibrium)
             if eps_type == lyapunov.ConvergenceEps.ExpLower:
                 losses[i] = torch.max(torch.tensor([
                     V_next - V + epsilon * V + margin, 0]))
@@ -229,24 +230,24 @@ class TestLyapunov(unittest.TestCase):
             elif eps_type == lyapunov.ConvergenceEps.Asymp:
                 losses[i] = torch.max(torch.tensor([
                     (V_next - V + epsilon * torch.norm(
-                        state_samples[i] - dut.system.x_equilibrium, p=1)) +
-                    margin, 0]))
+                        R @ (state_samples[i] - dut.system.x_equilibrium),
+                        p=1)) + margin, 0]))
 
         return torch.mean(losses)
 
     def lyapunov_derivative_loss_at_sample_tester(
-            self, dut, training_params, state_samples, eps_type):
+            self, dut, R, training_params, state_samples, eps_type):
         assert(isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         V_lambda = 0.1
         epsilon = 0.2
         margin = 0.3
         loss = dut.lyapunov_derivative_loss_at_samples(
             V_lambda, epsilon, state_samples, dut.system.x_equilibrium,
-            eps_type, margin)
+            eps_type, R=R, margin=margin)
         self.assertAlmostEqual(
             loss.item(), self.compute_lyapunov_derivative_loss_at_samples(
-                dut, state_samples, V_lambda, epsilon, eps_type, margin
-                ).item())
+                dut, state_samples, V_lambda, epsilon, eps_type, margin,
+                R).item())
 
         optimizer = torch.optim.Adam(list(
             self.controller_network1.parameters()) +
@@ -255,7 +256,7 @@ class TestLyapunov(unittest.TestCase):
             optimizer.zero_grad()
             loss = dut.lyapunov_derivative_loss_at_samples(
                 V_lambda, epsilon, state_samples, dut.system.x_equilibrium,
-                eps_type, margin)
+                eps_type, R=R, margin=margin)
             loss.backward()
             optimizer.step()
 
@@ -265,43 +266,48 @@ class TestLyapunov(unittest.TestCase):
             dtype=self.dtype)
         training_params = list(self.controller_network1.parameters()) +\
             list(self.lyapunov_relu1.parameters())
+        R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=torch.float64)
         for eps_type in list(lyapunov.ConvergenceEps):
             self.lyapunov_derivative_loss_at_sample_tester(
-                self.lyapunov_hybrid_system1, training_params, state_samples,
-                eps_type)
+                self.lyapunov_hybrid_system1, R, training_params,
+                state_samples, eps_type)
 
     def test_lyapunov_derivative_loss_at_samples2(self):
         state_samples = torch.tensor(
             [[0.5, 0.5, 0.2, 0.4], [-0.5, -0.5, 0.1, 0.6], [1, 1, -2, -2],
              [1, -1, 0.4, 0.9], [-1, 1, 0.4, 0.2], [-1, -1, -0.2, 0.4]],
             dtype=self.dtype)
+        R = torch.cat((torch.eye(4, dtype=torch.float64), torch.tensor(
+            [[1, 1, 1, 1]], dtype=torch.float64)), dim=0)
         training_params = list(self.controller_network2.parameters()) +\
             list(self.lyapunov_relu2.parameters())
         for eps_type in list(lyapunov.ConvergenceEps):
             self.lyapunov_derivative_loss_at_sample_tester(
-                self.lyapunov_hybrid_system2, training_params, state_samples,
-                eps_type)
+                self.lyapunov_hybrid_system2, R, training_params,
+                state_samples, eps_type)
 
     def test_lyapunov_derivative_loss_at_samples3(self):
         state_samples = torch.tensor(
             [[0.5, 0.5, 0.2, 0.4], [-0.5, -0.5, 0.1, 0.6], [1, 1, -2, -2],
              [1, -1, 0.4, 0.9], [-1, 1, 0.4, 0.2], [-1, -1, -0.2, 0.4]],
             dtype=self.dtype)
+        R = torch.cat((torch.eye(4, dtype=torch.float64), torch.tensor(
+            [[1, 1, 1, 1]], dtype=torch.float64)), dim=0)
         training_params = list(self.controller_network3.parameters()) +\
             list(self.lyapunov_relu3.parameters())
         for eps_type in list(lyapunov.ConvergenceEps):
             self.lyapunov_derivative_loss_at_sample_tester(
-                self.lyapunov_hybrid_system3, training_params, state_samples,
-                eps_type)
+                self.lyapunov_hybrid_system3, R, training_params,
+                state_samples, eps_type)
 
-    def total_loss_tester(self, lyap, training_params, state_samples):
+    def total_loss_tester(self, lyap, R, training_params, state_samples):
         state_samples_next = torch.stack([
             lyap.system.step_forward(
                 state_samples[i]) for i in range(state_samples.shape[0])],
             dim=0)
         V_lambda = 0.1
         trainer = train_lyapunov.TrainLyapunovReLU(
-            lyap, V_lambda, lyap.system.x_equilibrium)
+            lyap, V_lambda, lyap.system.x_equilibrium, R)
         optimizer = torch.optim.Adam(training_params)
         for iter_count in range(2):
             optimizer.zero_grad()
@@ -319,8 +325,9 @@ class TestLyapunov(unittest.TestCase):
             dtype=self.dtype)
         training_params = list(self.controller_network1.parameters()) +\
             list(self.lyapunov_relu1.parameters())
+        R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=torch.float64)
         self.total_loss_tester(
-            self.lyapunov_hybrid_system1, training_params, state_samples)
+            self.lyapunov_hybrid_system1, R, training_params, state_samples)
 
     def test_total_loss3(self):
         state_samples = torch.tensor(
@@ -329,8 +336,11 @@ class TestLyapunov(unittest.TestCase):
             dtype=self.dtype)
         training_params = list(self.controller_network3.parameters()) +\
             list(self.lyapunov_relu3.parameters())
+        R = torch.tensor([
+            [1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1],
+            [0, 0, 0, 1]], dtype=torch.float64)
         self.total_loss_tester(
-            self.lyapunov_hybrid_system3, training_params, state_samples)
+            self.lyapunov_hybrid_system3, R, training_params, state_samples)
 
 
 if __name__ == "__main__":
