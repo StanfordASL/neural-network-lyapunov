@@ -12,5 +12,6 @@ class TestQuadrotor2D(unittest.TestCase):
         xdot = plant.dynamics(np.zeros((6,)), u)
         np.testing.assert_allclose(xdot, np.zeros((6,)))
 
+
 if __name__ == "__main__":
     unittest.main()

@@ -78,7 +78,6 @@ def generate_pendulum_dynamics_data(dt):
     return torch.utils.data.TensorDataset(dataset_input, dataset_output)
 
 
-
 def train_forward_model(dynamics_model, model_dataset):
     state_equilibrium = torch.tensor([np.pi, 0], dtype=torch.float64)
     control_equilibrium = torch.tensor([0], dtype=torch.float64)
@@ -187,7 +186,7 @@ def train_cost_approximator(state_samples, cost_samples, cost_relu, V_lambda):
         return model(data) - model(state_equilibrium) + V_lambda * torch.norm(
             data - state_equilibrium, p=1, dim=1).reshape((-1, 1))
 
-    train_approximator(
+    utils.train_approximator(
         cost_dataset, cost_relu, compute_cost, batch_size=20, num_epochs=300,
         lr=0.001)
 
@@ -205,6 +204,8 @@ def pendulum_closed_loop_dynamics(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="pendulum training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
+    parser.add_argument("--load_dynamics_data", type=str, default=None,
+                        help="path of the dynamics data")
     parser.add_argument("--train_forward_model", action="store_true")
     parser.add_argument("--generate_controller_cost_data", action="store_true")
     parser.add_argument("--train_controller_approximator", action="store_true")
@@ -216,13 +217,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--load_controller_relu", type=str, default=None,
         help="path of the controller relu state_dict()")
+    parser.add_argument(
+        "--pretrain_num_epochs", type=int, default=100,
+        help="number of epochs in pre-training on samples.")
+    parser.add_argument(
+        "--max_iterations", type=int, default=5000,
+        help="max number of iterations in searching for controller.")
+    parser.add_argument("--enable_wandb", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
     if args.generate_dynamics_data:
         model_dataset = generate_pendulum_dynamics_data(dt)
-    else:
-        data = torch.load(dir_path + "/data/pendulum_dynamics_dataset.pt")
+    if args.load_dynamics_data is not None:
+        data = torch.load(args.load_dynamics_data)
         model_dataset = torch.utils.data.TensorDataset(
             data["input"], data["output"])
     # Setup forward dynamics model
@@ -307,7 +315,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
-    dut.max_iterations = 5000
+    dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.5
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp
@@ -315,8 +323,8 @@ if __name__ == "__main__":
         x_lo, x_up, (51, 51), dtype=torch.float64)
     dut.output_flag = True
     dut.train_lyapunov_on_samples(
-        state_samples_all, num_epochs=100, batch_size=50)
+        state_samples_all, num_epochs=args.pretrain_num_epochs, batch_size=50)
 
-    dut.enable_wandb = True
+    dut.enable_wandb = args.enable_wandb
     dut.train(torch.empty((0, 2), dtype=torch.float64))
     pass

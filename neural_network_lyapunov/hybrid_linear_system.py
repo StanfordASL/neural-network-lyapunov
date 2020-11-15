@@ -238,7 +238,6 @@ class HybridLinearSystem:
             "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output")
         return slack, binary
 
-
     def mode(self, x_start, u_start):
         """
         Returns the mode of x_start, u_start, namely

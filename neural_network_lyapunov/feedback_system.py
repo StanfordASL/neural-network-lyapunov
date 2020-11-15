@@ -56,7 +56,10 @@ class FeedbackSystem:
             isinstance(forward_system, relu_system.ReLUSystem) or
             isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium)
             or isinstance(forward_system,
-                          relu_system.ReLUSecondOrderSystemGivenEquilibrium))
+                          relu_system.ReLUSecondOrderSystemGivenEquilibrium) or
+            isinstance(
+                forward_system,
+                relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium))
         self.forward_system = forward_system
         self.x_dim = self.forward_system.x_dim
         self.x_lo_all = self.forward_system.x_lo_all
@@ -169,7 +172,6 @@ class FeedbackSystem:
                     mip, u_pre_sat[i], u_var[i], self.u_lower_limit[i],
                     self.u_upper_limit[i], u_lower_bound, u_upper_bound)
         return controller_slack, controller_binary
-
 
     def add_dynamics_mip_constraint(
         self, mip, x_var, x_next_var, u_var_name, forward_slack_var_name,
