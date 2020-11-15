@@ -78,39 +78,6 @@ def generate_pendulum_dynamics_data(dt):
     return torch.utils.data.TensorDataset(dataset_input, dataset_output)
 
 
-def train_approximator(dataset, model, output_fun, batch_size, num_epochs, lr):
-    train_set_size = int(len(dataset) * 0.8)
-    test_set_size = len(dataset) - train_set_size
-    train_set, test_set = torch.utils.data.random_split(
-        dataset, [train_set_size, test_set_size])
-    train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=batch_size, shuffle=True)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    loss = torch.nn.MSELoss()
-
-    model_params = []
-    for epoch in range(num_epochs):
-        running_loss = 0.
-        for i, data in enumerate(train_loader, 0):
-            input_samples, target = data
-            optimizer.zero_grad()
-
-            output_samples = output_fun(model, input_samples)
-            batch_loss = loss(output_samples, target)
-            batch_loss.backward()
-            optimizer.step()
-
-            running_loss += batch_loss.item()
-        test_input_samples, test_target = test_set[:]
-        test_output_samples = output_fun(model, test_input_samples)
-        test_loss = loss(test_output_samples, test_target)
-
-        print(f"epoch {epoch} training loss {running_loss/len(train_loader)},"
-              + f"test loss {test_loss}")
-        model_params.append(utils.extract_relu_parameters(model))
-    pass
-
 
 def train_forward_model(dynamics_model, model_dataset):
     state_equilibrium = torch.tensor([np.pi, 0], dtype=torch.float64)
@@ -125,7 +92,7 @@ def train_forward_model(dynamics_model, model_dataset):
     def compute_next_v(model, state_action):
         return model(state_action) - model(torch.cat((
             state_equilibrium, control_equilibrium)))
-    train_approximator(
+    utils.train_approximator(
         v_dataset, dynamics_model, compute_next_v, batch_size=20,
         num_epochs=100, lr=0.001)
 
@@ -203,7 +170,7 @@ def train_controller_approximator(
     def compute_control(model, dataset):
         return model(dataset) - model(state_equilibrium) + control_equilibrium
 
-    train_approximator(
+    utils.train_approximator(
         control_dataset, controller_relu, compute_control, batch_size=20,
         num_epochs=400, lr=lr)
 

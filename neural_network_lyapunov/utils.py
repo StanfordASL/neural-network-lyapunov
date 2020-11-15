@@ -1072,3 +1072,37 @@ def compute_range_by_lp(
         else:
             raise Exception("compute_range_by_lp: unknown status.")
     return (y_lb, y_ub)
+
+
+def train_approximator(dataset, model, output_fun, batch_size, num_epochs, lr):
+    train_set_size = int(len(dataset) * 0.8)
+    test_set_size = len(dataset) - train_set_size
+    train_set, test_set = torch.utils.data.random_split(
+        dataset, [train_set_size, test_set_size])
+    train_loader = torch.utils.data.DataLoader(
+        train_set, batch_size=batch_size, shuffle=True)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss = torch.nn.MSELoss()
+
+    model_params = []
+    for epoch in range(num_epochs):
+        running_loss = 0.
+        for i, data in enumerate(train_loader, 0):
+            input_samples, target = data
+            optimizer.zero_grad()
+
+            output_samples = output_fun(model, input_samples)
+            batch_loss = loss(output_samples, target)
+            batch_loss.backward()
+            optimizer.step()
+
+            running_loss += batch_loss.item()
+        test_input_samples, test_target = test_set[:]
+        test_output_samples = output_fun(model, test_input_samples)
+        test_loss = loss(test_output_samples, test_target)
+
+        print(f"epoch {epoch} training loss {running_loss/len(train_loader)},"
+              + f"test loss {test_loss}")
+        model_params.append(extract_relu_parameters(model))
+    pass
