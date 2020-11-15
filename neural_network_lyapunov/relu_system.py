@@ -283,6 +283,12 @@ class ReLUSystem:
         assert(isinstance(u, torch.Tensor))
         return [self.dynamics_relu(torch.cat((x, u), dim=-1))]
 
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name, binary_var_name)
+
 
 class ReLUSystemGivenEquilibrium:
     """
@@ -379,6 +385,12 @@ class ReLUSystemGivenEquilibrium:
         assert(isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name, binary_var_name)
+
 
 class ReLUSecondOrderSystemGivenEquilibrium:
     """
@@ -396,7 +408,7 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         self, dtype, x_lo: torch.Tensor, x_up: torch.Tensor,
         u_lo: torch.Tensor, u_up: torch.Tensor, dynamics_relu,
         q_equilibrium: torch.Tensor, u_equilibrium: torch.Tensor,
-            dt: float):
+            dt: float, network_input_x_indices:list):
         """
         @param x_lo The lower bound of state x = [q; v].
         @param x_up The upper bound of state x = [q; v].
@@ -408,6 +420,10 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         @param q_equilibrium The equilibrium position.
         @param u_equilibrium The control at the equilibrium.
         @param dt The integration time step.
+        @param network_input_x_indices For some systems, their acceleration
+        depends on only part of the state, hence the network @p dynamics_relu
+        don't need to take all of (x, u) as the input, but just
+        (x[network_input_x_indices], u) as the input.
         """
         self.dtype = dtype
         self.x_dim = x_lo.numel()
@@ -422,7 +438,9 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         assert(isinstance(u_up, torch.Tensor))
         assert(u_up.shape == (self.u_dim,))
         self.u_up = u_up
-        assert(dynamics_relu[0].in_features == self.x_dim + self.u_dim)
+        assert(isinstance(network_input_x_indices, list))
+        assert(dynamics_relu[0].in_features == len(network_input_x_indices)
+               + self.u_dim)
         self.nv = dynamics_relu[-1].out_features
         self.nq = self.x_dim - self.nv
         self.dynamics_relu = dynamics_relu
@@ -443,6 +461,7 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         assert(isinstance(dt, float))
         assert(dt > 0)
         self.dt = dt
+        self.network_input_x_indices = network_input_x_indices
 
     @property
     def x_lo_all(self):
@@ -518,3 +537,20 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         assert(isinstance(x, torch.Tensor))
         assert(isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name, binary_var_name)
+
+
+def _add_dynamics_mip_constraints(
+    mip, relu_system, x_var, x_next_var, u_var, slack_var_name,
+        binary_var_name):
+    mip_cnstr = relu_system.mixed_integer_constraints()
+    slack, binary = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
+        binary_var_name, "relu_forward_dynamics_ineq",
+        "relu_forward_dynamics_eq", "relu_forward_dynamics_output")
+    return slack, binary
