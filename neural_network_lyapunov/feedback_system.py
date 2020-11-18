@@ -56,7 +56,10 @@ class FeedbackSystem:
             isinstance(forward_system, relu_system.ReLUSystem) or
             isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium)
             or isinstance(forward_system,
-                          relu_system.ReLUSecondOrderSystemGivenEquilibrium))
+                          relu_system.ReLUSecondOrderSystemGivenEquilibrium) or
+            isinstance(
+                forward_system,
+                relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium))
         self.forward_system = forward_system
         self.x_dim = self.forward_system.x_dim
         self.x_lo_all = self.forward_system.x_lo_all
@@ -179,13 +182,10 @@ class FeedbackSystem:
             self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
             vtype=gurobipy.GRB.CONTINUOUS, name=u_var_name)
         # Now add the forward dynamics constraint
-        forward_mip_cnstr = self.forward_system.mixed_integer_constraints()
         forward_slack, forward_binary = \
-            mip.add_mixed_integer_linear_constraints(
-                forward_mip_cnstr, x_var + u, x_next_var,
-                forward_slack_var_name, forward_binary_var_name,
-                "forward_dynamics_ineq", "forward_dynamics_eq",
-                "forward_dynamics_output")
+            self.forward_system.add_dynamics_constraint(
+                mip, x_var, x_next_var, u, forward_slack_var_name,
+                forward_binary_var_name)
 
         controller_slack, controller_binary = \
             self._add_controller_mip_constraint(

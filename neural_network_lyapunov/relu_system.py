@@ -1,6 +1,7 @@
 import torch
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import gurobipy
 
 
 class AutonomousReLUSystem:
@@ -283,6 +284,13 @@ class ReLUSystem:
         assert(isinstance(u, torch.Tensor))
         return [self.dynamics_relu(torch.cat((x, u), dim=-1))]
 
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name)
+
 
 class ReLUSystemGivenEquilibrium:
     """
@@ -378,6 +386,13 @@ class ReLUSystemGivenEquilibrium:
         assert(isinstance(x, torch.Tensor))
         assert(isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name)
 
 
 class ReLUSecondOrderSystemGivenEquilibrium:
@@ -518,3 +533,176 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         assert(isinstance(x, torch.Tensor))
         assert(isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        return _add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name)
+
+
+class ReLUSecondOrderResidueSystemGivenEquilibrium:
+    """
+    A second order system whose dynamics is represented by
+    q[n+1] = q[n] + (v[n] + v[n+1]) * dt / 2
+    v[n+1] - v[n] = ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
+    Note that for the update on the velocity, we use the network to only
+    represent the "residue" part v[n+1] - v[n], not v[n+1] directly.
+    x̅ is a partial state of x. For many system, the "residue" part only
+    depends on part of the state. For example, for a system that is shift
+    invariant (such as a car), its acceleration doesn't depend on the location
+    of the car.
+    """
+    def __init__(
+        self, dtype, x_lo: torch.Tensor, x_up: torch.Tensor,
+        u_lo: torch.Tensor, u_up: torch.Tensor,
+        dynamics_relu: torch.nn.Sequential, q_equilibrium: torch.Tensor,
+        u_equilibrium: torch.Tensor, dt: float,
+            network_input_x_indices: list):
+        """
+        @param dynamics_relu A fully connected network that takes the input as
+        a partial state and the control, and outputs the change of velocity
+        v[n+1] - v[n] = ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
+        @param q_equilibrium The equilibrium position.
+        @param u_equilibrium The control at the equilibrium.
+        @param dt The integration time step.
+        @param network_input_x_indices The partial state
+        x̅=x[network_input_x_indices]
+        """
+        self.dtype = dtype
+        self.x_dim = x_lo.numel()
+        assert(isinstance(x_lo, torch.Tensor))
+        self.x_lo = x_lo
+        assert(isinstance(x_up, torch.Tensor))
+        assert(x_up.shape == (self.x_dim,))
+        self.x_up = x_up
+        self.u_dim = u_lo.numel()
+        assert(isinstance(u_lo, torch.Tensor))
+        self.u_lo = u_lo
+        assert(isinstance(u_up, torch.Tensor))
+        assert(u_up.shape == (self.u_dim,))
+        self.u_up = u_up
+        assert(isinstance(network_input_x_indices, list))
+        assert(dynamics_relu[0].in_features == len(network_input_x_indices) +
+               self.u_dim)
+        self.nv = dynamics_relu[-1].out_features
+        self.nq = self.x_dim - self.nv
+        self.dynamics_relu = dynamics_relu
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        assert(isinstance(q_equilibrium, torch.Tensor))
+        assert(q_equilibrium.shape == (self.nq,))
+        self.q_equilibrium = q_equilibrium
+        self.x_equilibrium = torch.cat((
+            self.q_equilibrium, torch.zeros((self.nv,), dtype=self.dtype)))
+        assert(torch.all(self.x_equilibrium >= self.x_lo))
+        assert(torch.all(self.x_equilibrium <= self.x_up))
+        assert(isinstance(u_equilibrium, torch.Tensor))
+        assert(u_equilibrium.shape == (self.u_dim,))
+        self.u_equilibrium = u_equilibrium
+        assert(torch.all(self.u_equilibrium >= self.u_lo))
+        assert(torch.all(self.u_equilibrium <= self.u_up))
+        assert(isinstance(dt, float))
+        assert(dt > 0)
+        self.dt = dt
+        self._network_input_x_indices = network_input_x_indices
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def step_forward(self, x_start, u_start):
+        """
+        Compute x[n+1] according to
+        q[n+1] = q[n] + (v[n] + v[n+1]) * dt / 2
+        v[n+1] - v[n] = ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
+        """
+        assert(isinstance(x_start, torch.Tensor))
+        assert(isinstance(u_start, torch.Tensor))
+        if len(x_start.shape) == 1:
+            q_start = x_start[:self.nq]
+            v_start = x_start[self.nq:]
+            v_next = v_start + self.dynamics_relu(torch.cat((
+                x_start[self._network_input_x_indices], u_start))) -\
+                self.dynamics_relu(torch.cat((self.x_equilibrium[
+                    self._network_input_x_indices], self.u_equilibrium)))
+            q_next = q_start + (v_start + v_next) * self.dt/2
+            return torch.cat((q_next, v_next))
+        elif len(x_start.shape) == 2:
+            # batch of data.
+            q_start = x_start[:, :self.nq]
+            v_start = x_start[:, self.nq:]
+            v_next = v_start + self.dynamics_relu(torch.cat((x_start[
+                :, self._network_input_x_indices], u_start), dim=-1)) -\
+                self.dynamics_relu(torch.cat((self.x_equilibrium[
+                    self._network_input_x_indices], self.u_equilibrium)))
+            q_next = q_start + (v_start + v_next) * self.dt/2
+            return torch.cat((q_next, v_next), dim=-1)
+
+    def possible_dx(self, x, u):
+        assert(isinstance(x, torch.Tensor))
+        assert(isinstance(u, torch.Tensor))
+        return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
+            output_constraint(torch.cat((self.x_lo[
+                self._network_input_x_indices], self.u_lo)), torch.cat((
+                    self.x_up[self._network_input_x_indices], self.u_up)))
+        # First add mip_cnstr_result, but don't impose the constraint on the
+        # output of the network (we will impose the constraint separately)
+        input_vars = [x_var[i] for i in self._network_input_x_indices] + u_var
+        forward_slack, forward_binary = \
+            mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_result, input_vars, None, slack_var_name,
+                binary_var_name, "residue_forward_dynamics_ineq",
+                "residue_forward_dynamics_eq", None)
+        # We want to impose the constraint
+        # v[n+1] = v[n] + ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
+        #        = v[n] + Aout_slack * s + Cout - ϕ(x̅*, u*)
+        assert(mip_cnstr_result.Aout_input is None)
+        assert(mip_cnstr_result.Aout_binary is None)
+
+        if len(mip_cnstr_result.Aout_slack.shape) == 1:
+            mip_cnstr_result.Aout_slack = mip_cnstr_result.Aout_slack.reshape((
+                1, -1))
+        if len(mip_cnstr_result.Cout.shape) == 0:
+            mip_cnstr_result.Cout = mip_cnstr_result.Cout.reshape((-1))
+        v_next = x_next_var[self.nq:]
+        v_curr = x_var[self.nq:]
+        mip.addMConstrs([torch.eye(self.nv, dtype=self.dtype), -torch.eye(
+            self.nv, dtype=self.dtype), -mip_cnstr_result.Aout_slack],
+            [v_next, v_curr, forward_slack], b=mip_cnstr_result.Cout -
+            self.dynamics_relu(torch.cat((self.x_equilibrium[
+                self._network_input_x_indices], self.u_equilibrium))),
+            sense=gurobipy.GRB.EQUAL, name="residue_forward_dynamics_output")
+        # Now add the constraint
+        # q[n+1] - q[n] = (v[n+1] + v[n]) * dt / 2
+        q_next = x_next_var[:self.nq]
+        q_curr = x_var[:self.nq]
+        mip.addMConstrs([torch.eye(self.nq, dtype=self.dtype), -torch.eye(
+            self.nq, dtype=self.dtype), -self.dt/2 * torch.eye(
+                self.nv, dtype=self.dtype), -self.dt/2 * torch.eye(
+                    self.nv, dtype=self.dtype)],
+                [q_next, q_curr, v_next, v_curr],
+                b=torch.zeros((self.nv), dtype=self.dtype),
+                sense=gurobipy.GRB.EQUAL, name="update_q_next")
+        return forward_slack, forward_binary
+
+
+def _add_dynamics_mip_constraints(
+    mip, relu_system, x_var, x_next_var, u_var, slack_var_name,
+        binary_var_name):
+    mip_cnstr = relu_system.mixed_integer_constraints()
+    slack, binary = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
+        binary_var_name, "relu_forward_dynamics_ineq",
+        "relu_forward_dynamics_eq", "relu_forward_dynamics_output")
+    return slack, binary

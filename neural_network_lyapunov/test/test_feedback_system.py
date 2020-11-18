@@ -192,6 +192,37 @@ class TestFeedbackSystem(unittest.TestCase):
             q_equilibrium, u_equilibrium, dt)
         return forward_system
 
+    def construct_relu_second_order_residue_system_given_equilibrium(self):
+        # Construct a ReLU system with nq = 2, nv = 2 and nu = 1
+        self.dtype = torch.float64
+        dynamics_relu = utils.setup_relu(
+            (3, 5, 2), params=None, negative_slope=0.01, bias=True,
+            dtype=self.dtype)
+        dynamics_relu[0].weight.data = torch.tensor(
+            [[0.1, 0.2, 0.3], [0.5, -0.2, 0.4], [0.1, 0.3, -1.2],
+             [1.5, 0.3, 0.3], [0.2, 1.5, 0.1]], dtype=self.dtype)
+        dynamics_relu[0].bias.data = torch.tensor(
+            [0.1, -1.2, 0.3, 0.2, -0.5], dtype=self.dtype)
+        dynamics_relu[2].weight.data = torch.tensor(
+            [[0.1, -2.3, 1.5, 0.4, 0.2], [0.1, -1.2, -1.3, 0.3, 0.8]],
+            dtype=self.dtype)
+        dynamics_relu[2].bias.data = torch.tensor(
+            [0.2, -1.4], dtype=self.dtype)
+
+        x_lo = torch.tensor([-2, -2, -5, -5], dtype=self.dtype)
+        x_up = torch.tensor([2, 2, 5, 5], dtype=self.dtype)
+        u_lo = torch.tensor([-5], dtype=self.dtype)
+        u_up = torch.tensor([5], dtype=self.dtype)
+        q_equilibrium = torch.tensor([0.5, 0.3], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.4], dtype=self.dtype)
+        dt = 0.01
+        forward_system = relu_system.\
+            ReLUSecondOrderResidueSystemGivenEquilibrium(
+                self.dtype, x_lo, x_up, u_lo, u_up, dynamics_relu,
+                q_equilibrium, u_equilibrium, dt,
+                network_input_x_indices=[1, 3])
+        return forward_system
+
     def test_add_dynamics_mip_constraint_relu_second_order_system_given_equilibrium(self):  # noqa
         q_equilibrium = torch.tensor([0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1], dtype=self.dtype)
@@ -226,6 +257,29 @@ class TestFeedbackSystem(unittest.TestCase):
             forward_system.u_equilibrium,
             torch.tensor([0.1, 0.0, 0.2, 0.5], dtype=self.dtype),
             np.array([-10.]), np.array([10.]))
+
+    def test_add_dynamics_mip_constraint_relu_second_order_residue_system_given_equilibrium(self):  # noqa
+        forward_system = self.\
+            construct_relu_second_order_residue_system_given_equilibrium()
+
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, self.controller_network2,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([0.1, 0.2, 0.3, 0.4], dtype=self.dtype),
+            np.array([0.]), np.array([1.]))
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, self.controller_network2,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([-0.1, 0.2, 0.3, 0.5], dtype=self.dtype),
+            np.array([-10.]), np.array([1.]))
+        self.add_dynamics_mip_constraint_tester(
+            forward_system, self.controller_network2,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium,
+            torch.tensor([0.1, 0.0, 0.0, 0.8], dtype=self.dtype),
+            np.array([0.]), np.array([10.]))
 
     def test_add_dynamics_mip_constraint_relu_system_given_equilibrium(self):
         # Construct a ReLUSystemGivenEquilibrium as the forward dynamical
@@ -409,6 +463,40 @@ class TestFeedbackSystem(unittest.TestCase):
             forward_system, self.controller_network2,
             forward_system.x_equilibrium,
             u_equilibrium, np.array([0.]), np.array([10.]))
+        self.step_forward_test(
+            forward_system, self.controller_network2,
+            torch.tensor([-0.3, 0.4, 0.2, 1.5], dtype=self.dtype),
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            np.array([-np.inf]), np.array([np.inf]))
+        self.step_forward_test(
+            forward_system, self.controller_network2,
+            torch.tensor([-0.3, 0.7, 0.25, 1.1], dtype=self.dtype),
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            np.array([-10.]), np.array([0.2]))
+        self.step_forward_test(
+            forward_system, self.controller_network2,
+            torch.tensor([-0.8, 1.4, 0.4, 1.2], dtype=self.dtype),
+            torch.tensor([0.2, -0.1, 0.5, 0.3], dtype=self.dtype),
+            torch.tensor([0.2], dtype=self.dtype), np.array([-10.]),
+            np.array([0.2]))
+        self.step_forward_test(
+            forward_system, self.controller_network2, torch.tensor(
+                [[-.3, .7, 0.25, 1.1], [.3, .2, -.1, -0.5]], dtype=self.dtype),
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            np.array([-10.]), np.array([0.2]))
+
+    def test_step_forward_relu_second_order_residue_system_given_equilibrium(self):  # noqa
+        forward_system = self.\
+            construct_relu_second_order_residue_system_given_equilibrium()
+        self.step_forward_at_equilibrium_test(
+            forward_system, self.controller_network2,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium, np.array([-np.inf]),
+            np.array([np.inf]))
+        self.step_forward_at_equilibrium_test(
+            forward_system, self.controller_network2,
+            forward_system.x_equilibrium,
+            forward_system.u_equilibrium, np.array([0.]), np.array([10.]))
         self.step_forward_test(
             forward_system, self.controller_network2,
             torch.tensor([-0.3, 0.4, 0.2, 1.5], dtype=self.dtype),

@@ -30,3 +30,4 @@ jobs:
         export PYTHONPATH=${PWD}:${PYTHONPATH}
         python3 neural_network_lyapunov/test/train_discrete_linear_system_toy_lyapunov.py
         python3 neural_network_lyapunov/test/train_continuous_linear_system_toy_lyapunov.py --train_on_sample --train_on_samples_iterations=2 --max_iterations=2
+        python3 neural_network_lyapunov/test/train_pendulum_demo.py --pretrain_num_epochs=4 --max_iterations=3

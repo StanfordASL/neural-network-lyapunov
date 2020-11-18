@@ -228,6 +228,16 @@ class HybridLinearSystem:
         mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
+    def add_dynamics_constraint(
+        self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name):
+        mip_cnstr = self.mixed_integer_constraints()
+        slack, binary = mip.add_mixed_integer_linear_constraints(
+            mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
+            binary_var_name, "hybrid_linear_dynamics_ineq",
+            "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output")
+        return slack, binary
+
     def mode(self, x_start, u_start):
         """
         Returns the mode of x_start, u_start, namely
