@@ -13,6 +13,7 @@ import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 
@@ -930,7 +931,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         s_x_norm = milp_relu.addVars(
             s_dim, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)
         beta_x_norm = milp_relu.addVars(s_dim, vtype=gurobipy.GRB.BINARY)
-        s_lb, s_ub = utils.compute_range_by_lp(
+        s_lb, s_ub = mip_utils.compute_range_by_lp(
             R.detach().numpy(), (-R@x_equilibrium).detach().numpy(),
             self.system1.x_lo_all, self.system1.x_up_all, None, None)
         for i in range(s_dim):

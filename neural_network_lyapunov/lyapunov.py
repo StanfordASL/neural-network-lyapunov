@@ -12,6 +12,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class ConvergenceEps(Enum):
@@ -151,7 +152,7 @@ class LyapunovHybridLinearSystem:
         alpha = milp.addVars(
             s_dim, vtype=gurobipy.GRB.BINARY, name=binary_var_name)
 
-        s_lb, s_ub = utils.compute_range_by_lp(
+        s_lb, s_ub = mip_utils.compute_range_by_lp(
             R.detach().numpy(), (-R @ x_equilibrium).detach().numpy(),
             self.system.x_lo_all, self.system.x_up_all, None, None)
         for i in range(s_dim):

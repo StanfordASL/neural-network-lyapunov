@@ -24,25 +24,22 @@ def generate_quadrotor_dynamics_data(dt):
     zdot_range = [-5, 5]
     thetadot_range = [-2, 2]
     u_range = [-5, 15]
+    # We don't need to take the grid on y and z dimension of the quadrotor,
+    # since the dynamics is invariant along these dimensions.
+    x_samples = torch.cat((
+        torch.zeros((1000, 2), dtype=torch.float64),
+        utils.uniform_sample_in_box(torch.tensor([
+            theta_range[0], ydot_range[0], zdot_range[0], thetadot_range[0]],
+            dtype=torch.float64), torch.tensor([
+                theta_range[1], ydot_range[1], zdot_range[1], thetadot_range[1]
+                ], dtype=torch.float64), 1000)), dim=1).T
+    u_samples = utils.uniform_sample_in_box(
+        torch.full((2,), u_range[0], dtype=dtype),
+        torch.full((2,), u_range[1], dtype=dtype), 1000).T
 
     xu_tensors = []
     x_next_tensors = []
 
-    def scale_uniform_samples(samples, row, lo, up):
-        # scale uniform samples[row, :] to the range [lo, up]
-        samples[row, :] *= (up - lo)
-        samples[row, :] += lo
-    # We don't need to take the grid on y and z dimension of the quadrotor,
-    # since the dynamics is invariant along these dimensions.
-    x_samples = torch.cat((torch.zeros(2, 1000, dtype=torch.float64),
-                           torch.rand(4, 1000, dtype=torch.float64)), dim=0)
-    u_samples = torch.rand(2, 1000, dtype=torch.float64)
-    scale_uniform_samples(x_samples, 2, theta_range[0], theta_range[1])
-    scale_uniform_samples(x_samples, 3, ydot_range[0], ydot_range[1])
-    scale_uniform_samples(x_samples, 4, zdot_range[0], zdot_range[1])
-    scale_uniform_samples(x_samples, 5, thetadot_range[0], thetadot_range[1])
-    scale_uniform_samples(u_samples, 0, u_range[0], u_range[1])
-    scale_uniform_samples(u_samples, 1, u_range[0], u_range[1])
     for i in range(x_samples.shape[1]):
         for j in range(u_samples.shape[1]):
             result = scipy.integrate.solve_ivp(lambda t, x: plant.dynamics(
@@ -77,6 +74,49 @@ def train_forward_model(forward_model, model_dataset):
         num_epochs=100, lr=0.001)
 
 
+def train_lqr_value_approximator(
+    lyapunov_relu, V_lambda, R, x_equilibrium, x_lo, x_up, num_samples,
+        lqr_S: torch.Tensor):
+    """
+    We train both lyapunov_relu and R such that ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁
+    approximates the lqr cost-to-go.
+    """
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    V_samples = torch.sum((
+        x_samples.T - x_equilibrium.reshape((6, 1))) *
+        (lqr_S @ (x_samples.T - x_equilibrium.reshape((6, 1)))), dim=0
+        ).reshape((-1, 1))
+    state_value_dataset = torch.utils.data.TensorDataset(x_samples, V_samples)
+    R.requires_grad_(True)
+
+    def compute_v(model, x):
+        return model(x) - model(x_equilibrium) + V_lambda * torch.norm(
+            R @ (x - x_equilibrium.reshape((1, 6))).T, p=1, dim=0).reshape(
+                (-1, 1))
+
+    utils.train_approximator(
+        state_value_dataset, lyapunov_relu, compute_v, batch_size=50,
+        num_epochs=200, lr=0.001, additional_variable=[R])
+    R.requires_grad_(False)
+
+
+def train_lqr_control_approximator(
+    controller_relu,  x_equilibrium, u_equilibrium, x_lo, x_up, num_samples,
+        lqr_K: torch.Tensor):
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    u_samples = (lqr_K @ (x_samples.T - x_equilibrium.reshape((6, 1)))
+                 + u_equilibrium.reshape((2, 1))).T
+    state_control_dataset = torch.utils.data.TensorDataset(
+        x_samples, u_samples)
+
+    def compute_u(model, x):
+        return model(x) - model(x_equilibrium) + u_equilibrium
+
+    utils.train_approximator(
+        state_control_dataset, controller_relu, compute_u, batch_size=50,
+        num_epochs=50, lr=0.001)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="quadrotor 2d training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -89,6 +129,8 @@ if __name__ == "__main__":
                         help="path to the lyapunov model data.")
     parser.add_argument("--load_controller_relu", type=str, default=None,
                         help="path to the controller data.")
+    parser.add_argument("--train_lqr_approximator", action="store_true")
+    parser.add_argument("--train_on_samples", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -128,11 +170,11 @@ if __name__ == "__main__":
     # R[6:9, :3] = -torch.eye(3, dtype=dtype) / np.sqrt(2)
     # R[6:9, 3:6] = torch.eye(3, dtype=dtype) / np.sqrt(2)
     # R = torch.cat((R, torch.from_numpy(S_eig_vec)), dim=0)
-    # R = torch.from_numpy(S_eig_vec)
-    R = torch.eye(6, dtype=dtype)
+    R = torch.from_numpy(S_eig_vec)
 
     lyapunov_relu = utils.setup_relu(
-        (6, 8, 8, 1), params=None, negative_slope=0.1, bias=True, dtype=dtype)
+        (6, 8, 8, 4, 1), params=None, negative_slope=0.1, bias=True,
+        dtype=dtype)
     V_lambda = 0.9
     if args.load_lyapunov_relu is not None:
         lyapunov_data = torch.load(args.load_lyapunov_relu)
@@ -161,6 +203,15 @@ if __name__ == "__main__":
     x_up = -x_lo
     u_lo = torch.tensor([-15, -15], dtype=dtype)
     u_up = torch.tensor([25, 25], dtype=dtype)
+    if args.train_lqr_approximator:
+        x_equilibrium = torch.cat(
+            (q_equilibrium, torch.zeros((3,), dtype=dtype)))
+        train_lqr_control_approximator(
+            controller_relu, x_equilibrium, u_equilibrium,
+            x_lo, x_up, 100000, torch.from_numpy(K))
+        train_lqr_value_approximator(
+            lyapunov_relu, V_lambda, R, x_equilibrium, x_lo, x_up, 100000,
+            torch.from_numpy(S))
     forward_system = relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium(
         dtype, x_lo, x_up, u_lo, u_up, forward_model, q_equilibrium,
         u_equilibrium, dt, network_input_x_indices=[2])
@@ -176,15 +227,16 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
-    dut.max_iterations = 2000
-    dut.lyapunov_positivity_epsilon = 0.5
+    dut.max_iterations = 5000
+    dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (7, 7, 7, 7, 7, 7), dtype=dtype)
     dut.output_flag = True
-    dut.train_lyapunov_on_samples(
-        state_samples_all, num_epochs=10, batch_size=50)
+    if args.train_on_samples:
+        dut.train_lyapunov_on_samples(
+            state_samples_all, num_epochs=10, batch_size=50)
     dut.enable_wandb = True
     dut.train(torch.empty((0, 6), dtype=dtype))
     pass
