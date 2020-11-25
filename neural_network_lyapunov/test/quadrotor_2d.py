@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import scipy.integrate
 
 
 class Quadrotor2D:
@@ -28,12 +29,61 @@ class Quadrotor2D:
             ])
             return np.concatenate((qdot, qddot))
         elif isinstance(x, torch.Tensor):
-            qddot = torch.tensor([
-                -np.sin(q[2]) / self.mass * (u[0] + u[1]),
-                np.cos(x[2]) / self.mass * (u[0] + u[1]) - self.gravity,
-                self.length / self.inertia * (u[0] - u[1])
-            ], dtype=self.dtype)
+            qddot = torch.stack((
+                -torch.sin(q[2]) / self.mass * (u[0] + u[1]),
+                torch.cos(x[2]) / self.mass * (u[0] + u[1]) - self.gravity,
+                self.length / self.inertia * (u[0] - u[1])))
             return torch.cat((qdot, qddot))
+
+    def linearized_dynamics(self, x, u):
+        """
+        Return ∂ẋ/∂x and ∂ẋ/∂ u
+        """
+        if isinstance(x, np.ndarray):
+            A = np.zeros((6, 6))
+            B = np.zeros((6, 2))
+            A[:3, 3:6] = np.eye(3)
+            theta = x[2]
+            A[3, 2] = -np.cos(theta) / self.mass * (u[0] + u[1])
+            A[4, 2] = -np.sin(theta) / self.mass * (u[0] + u[1])
+            B[3, 0] = -np.sin(theta) / self.mass
+            B[3, 1] = B[3, 0]
+            B[4, 0] = np.cos(theta) / self.mass
+            B[4, 1] = B[4, 0]
+            B[5, 0] = self.length / self.inertia
+            B[5, 1] = -B[5, 0]
+            return A, B
+        elif isinstance(x, torch.Tensor):
+            dtype = x.dtype
+            A = torch.zeros((6, 6), dtype=dtype)
+            B = torch.zeros((6, 2), dtype=dtype)
+            A[:3, 3:6] = torch.eye(3, dtype=dtype)
+            theta = x[2]
+            A[3, 2] = -torch.cos(theta) / self.mass * (u[0] + u[1])
+            A[4, 2] = -torch.sin(theta) / self.mass * (u[0] + u[1])
+            B[3, 0] = -torch.sin(theta) / self.mass
+            B[3, 1] = B[3, 0]
+            B[4, 0] = torch.cos(theta) / self.mass
+            B[4, 1] = B[4, 0]
+            B[5, 0] = self.length / self.inertia
+            B[5, 1] = -B[5, 0]
+            return A, B
+
+    @property
+    def u_equilibrium(self):
+        return torch.full(
+            (2,), (self.mass * self.gravity) / 2, dtype=self.dtype)
+
+    def lqr_control(self, Q, R, x, u):
+        """
+        The control action should be u = K * (x - x*) + u*
+        """
+        x_np = x if isinstance(x, np.ndarray) else x.detach().numpy()
+        u_np = u if isinstance(u, np.ndarray) else u.detach().numpy()
+        A, B = self.linearized_dynamics(x_np, u_np)
+        S = scipy.linalg.solve_continuous_are(A, B, Q, R)
+        K = -np.linalg.solve(R, B.T @ S)
+        return K, S
 
 
 class Quadrotor2DVisualizer:
