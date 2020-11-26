@@ -733,113 +733,19 @@ class TestSigmoidAnneal(unittest.TestCase):
         self.assertAlmostEqual(sa(-100).item(), 1e-3, places=5)
 
 
-class TestPropagateBoundsIA(unittest.TestCase):
-    def test_relu(self):
-        layer = torch.nn.ReLU()
-        input_lo = torch.tensor([-2., 2., -3.], dtype=torch.float64)
-        input_up = torch.tensor([3., 6., -1.], dtype=torch.float64)
-        output_lo, output_up = utils.propagate_bounds_IA(
-            layer, input_lo, input_up)
-        np.testing.assert_allclose(output_lo, np.array([0, 2., 0.]))
-        np.testing.assert_allclose(output_up, np.array([3., 6., 0.]))
+class TestUniformSampleInBox(unittest.TestCase):
+    def test(self):
+        dtype = torch.float64
+        lo = torch.tensor([1, 3], dtype=dtype)
+        hi = torch.tensor([2, 4], dtype=dtype)
+        samples = utils.uniform_sample_in_box(lo, hi, 10)
+        self.assertEqual(samples.shape, (10, 2))
+        for i in range(2):
+            np.testing.assert_array_less(samples[:, i], hi[i])
+            np.testing.assert_array_less(lo[i], samples[:, i])
 
-    def test_leaky_relu(self):
-        layer = torch.nn.LeakyReLU(0.1)
-        input_lo = torch.tensor([-2., 2., -3.], dtype=torch.float64)
-        input_up = torch.tensor([3., 6., -1.], dtype=torch.float64)
-        output_lo, output_up = utils.propagate_bounds_IA(
-            layer, input_lo, input_up)
-        np.testing.assert_allclose(output_lo, np.array([-0.2, 2., -0.3]))
-        np.testing.assert_allclose(output_up, np.array([3., 6., -0.1]))
-
-    def test_linear_layer_no_bias(self):
-        layer = torch.nn.Linear(3, 2, bias=False)
-        layer.weight.data = torch.tensor(
-            [[-1, 0, 2], [3, -2, -1]], dtype=torch.float64)
-        input_lo = torch.tensor([-2, 2, -3], dtype=torch.float64)
-        input_up = torch.tensor([3, 6, -1], dtype=torch.float64)
-        output_lo, output_up = utils.propagate_bounds_IA(
-            layer, input_lo, input_up)
-        np.testing.assert_allclose(
-            output_lo.detach().numpy(), np.array([-9., -17]))
-        np.testing.assert_allclose(
-            output_up.detach().numpy(), np.array([0., 8.]))
-        # Now check we can take the gradient.
-        loss = output_lo.sum() + output_up.sum()
-        loss.backward()
-
-        for s in np.linspace(0, 1, 11):
-            output = layer(s * input_lo + (1-s) * input_up)
-            np.testing.assert_array_less(
-                output.detach().numpy(), output_up.detach().numpy() + 1E-10)
-            np.testing.assert_array_less(
-                output_lo.detach().numpy() - 1E-10, output.detach().numpy())
-
-    def test_linear_layer_bias(self):
-        layer = torch.nn.Linear(3, 2, bias=True)
-        layer.weight.data = torch.tensor(
-            [[-1, 0, 2], [3, -2, -1]], dtype=torch.float64)
-        layer.bias.data = torch.tensor([2., -1.], dtype=torch.float64)
-        input_lo = torch.tensor([-2, 2, -3], dtype=torch.float64)
-        input_up = torch.tensor([3, 6, -1], dtype=torch.float64)
-        output_lo, output_up = utils.propagate_bounds_IA(
-            layer, input_lo, input_up)
-        np.testing.assert_allclose(
-            output_lo.detach().numpy(), np.array([-7., -18.]))
-        np.testing.assert_allclose(
-            output_up.detach().numpy(), np.array([2., 7.]))
-        # Now check we can take the gradient.
-        loss = output_lo.sum() + output_up.sum()
-        loss.backward()
-
-        for s in np.linspace(0, 1, 11):
-            output = layer(s * input_lo + (1-s) * input_up)
-            np.testing.assert_array_less(
-                output.detach().numpy(), output_up.detach().numpy() + 1E-10)
-            np.testing.assert_array_less(
-                output_lo.detach().numpy() - 1E-10, output.detach().numpy())
-
-
-class TestComputeRangeByLP(unittest.TestCase):
-    def test_x_bounds(self):
-        # Test with only bounds on x.
-        x_lb = np.array([1., 2.])
-        x_ub = np.array([3., 4.])
-        A = np.array([[0., 1.], [1., 1.], [2., -1.]])
-        b = np.array([0., 1., 3.])
-        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
-        y_lb_expected = np.array([2., 4, 1.])
-        y_ub_expected = np.array([4, 8., 7.])
-        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
-        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
-
-        # Some of the bounds should be infinity.
-        x_lb = np.array([1., -np.inf])
-        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
-        y_lb_expected = np.array([-np.inf, -np.inf, 1.])
-        y_ub_expected = np.array([4, 8., np.inf])
-        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
-        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
-
-        # Now the problem is infeasible as x_lb > x_ub
-        x_lb = np.array([4., 2])
-        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, None, None)
-        np.testing.assert_allclose(y_lb, np.full((3,), np.inf))
-        np.testing.assert_allclose(y_ub, np.full((3,), -np.inf))
-
-    def test_ineq_bounds(self):
-        # x has both bounds x_lb <= x <= x_ub and inequality bounds C * x <= d
-        x_lb = np.array([-1., -2.])
-        x_ub = np.array([3., 4.])
-        C = np.array([[1., 1.], [1., -1], [-1, 1], [-1, -1.]])
-        d = np.array([2, 2, 2, 2])
-        A = np.array([[0., 1.], [1., 1.], [2., -1.]])
-        b = np.array([0., 1., 3.])
-        y_lb, y_ub = utils.compute_range_by_lp(A, b, x_lb, x_ub, C, d)
-        y_lb_expected = np.array([-2, -1, 0.])
-        y_ub_expected = np.array([2., 3, 7.])
-        np.testing.assert_allclose(y_lb, y_lb_expected, atol=1E-7)
-        np.testing.assert_allclose(y_ub, y_ub_expected, atol=1E-7)
+        samples = utils.uniform_sample_in_box(lo, hi, 2)
+        self.assertEqual(samples.shape, (2, 2))
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class FeedbackSystem:
@@ -150,7 +151,7 @@ class FeedbackSystem:
                     controller_z_post_relu_lo, controller_z_post_relu_up)
         elif isinstance(self.controller_network, torch.nn.Linear):
             controller_network_output_lo, controller_network_output_up =\
-                utils.propagate_bounds_IA(
+                mip_utils.propagate_bounds_IA(
                     self.controller_network,
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all))
