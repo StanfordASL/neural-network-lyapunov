@@ -1,0 +1,117 @@
+\documentclass{article}
+\usepackage{amsmath, amsfonts, graphicx}
+\title{Synthesizing neural-network stabilizing controller for learned dynamics model}
+\begin{document}
+\section{Problem statement}
+Assume that we are given dynamics model represented as neural networks
+\begin{align}
+	\text{discrete time } x[n+1] = f(x[n], u[n]) , u[n]\in\mathcal{U}\\
+	\text{continuous time } \dot{x} = f(x) + G(x)u, u\in\mathcal{U}
+\end{align}
+where $f, G$ contain neural networks which we will describe later, our goal is to synthesize a controller $u=\pi(x)$, also represented by a neural network, and a Lyapunov function $V(x)$, represented by a third neural network, such that we can prove that the closed-loop system is Lyapunov stable. Namely we want to find a controller, such that the closed loop system is Lyapunov exponentially (or asymptotically) stable within a set $\mathcal{S}$, i.e., for the equilibrium state/control $x^*, u^*$, all the states start within $\mathcal{S}$ would eventually converge to equilibrium state.
+
+We assume the set of admissible inputs $\mathcal{U}$ is a box in the input space, namely we have input bounds $u_{min}(i)\leq u(i)\leq u_{max}(i)$ for each dimension of the input.
+
+Notice that we assume the continuous-time system is control affine. We will exploit this property later.
+
+\section{Approach}
+We consider the discrete-time and continuous-time system separately. Let's first consider the discrete-time case. In this project, all the neural networks are feed-forward neural network with leaky Relu units, hence the output of the network is a piecewise affine function of the input.
+\subsection{Discrete time system}
+First we assume that our forward dynamical system is represented by a neural network
+\begin{align}
+	x[n+1] = \phi_{dyn}(x[n], u[n]) - \phi_{dyn}(x^*, u^*) + x^* \label{eq:discrete_forward_dyn}
+\end{align}
+where $\phi_{dyn}$ is a feed-forward neural network with (leaky) ReLU activation units. Notice that by construction \eqref{eq:discrete_forward_dyn} guarantees that with $x[n]=x^*, u[n]=u^*$ the next state is still the equilibrium state $x^*$. This neural network $\phi_{dyn}$ is given and fixed.
+
+The Lyapunov function for exponetial stability is
+\begin{subequations}
+\begin{align}
+	V(x) > 0 \;\forall x\neq x^*, V(x^*) = 0\\
+	V(x[n+1]) - V(x[n]) \le -\epsilon_2 V(x[n])\\
+	x \rightarrow \infty \Rightarrow V(x)\rightarrow \infty
+\end{align}
+\end{subequations}
+ 
+Since we will certify the Lyapunov condition through MILP, which cannot handle strict inequality constraint $V(x) > 0$, we consider the following necessary and sufficient condition
+\begin{subequations}
+\begin{align}
+	V(x) \ge \epsilon_1 |R(x-x^*)|_1\\
+	V(x[n+1]) - V(x[n]) \le -\epsilon_2V(x[n])
+\end{align}
+\label{eq:lyapunov_discrete}
+\end{subequations}
+where $R$ is a matrix with full column rank, $|R(x-x^*)|_1$ is the 1-norm of the vector $R(x-x^*)$.
+
+We design our Lyapunov function as
+\begin{align}
+	V(x) = \phi_{V, \theta}(x) -\phi_{V, \theta}(x^*) + \lambda|R(x-x^*)|_1 \label{eq:lyapunov}
+\end{align}
+where $\phi_{V, \theta}$ is a feedforward neural network with (leaky) ReLU activation functions. $\lambda$ is a given positive constant (with $\lambda > \epsilon_1$). The reason to add the term  $\lambda|R(x-x^*)|_1$ to the Lyapunov function \eqref{eq:lyapunov}, is that it is very hard for the neural network $\phi_{V, \theta}$ to attain its minimum at $x^*$ (Since the neural network $\phi_{V, \theta}$ is a piecewise affine function of $x$. If it were to attain minimal at $x^*$, it implies that $x^*$ is the common vertex of all the neighbouring linear pieces, which is almost impossible to satisfy by gradient descent approach. See fig. \ref{fig:lyapunov_add_l1_3} as a visual explanation.) By adding the function $\lambda|R(x-x^*)|_1$ which has its global minimal at $x^*$, it is much easier to make the Lyapunov function to attain global minimal at $x^*$. Also by construction of \eqref{eq:lyapunov} we have $V(x^*) = 0$.
+\begin{figure}
+	\includegraphics[width=0.8\textwidth]{/home/hongkaidai/Dropbox/talks/pictures/neural_network_controller/lyapunov_add_l1_3.pdf}
+	\caption{Adding the term $\lambda |x-x^*|_1$ helps the neural network to attain (local) minimal at $x^*$.}
+	\label{fig:lyapunov_add_l1_3}
+\end{figure}
+
+Our controller is also represented by a neural network as
+\begin{align}
+	u[n] = saturate(\phi_{u, \eta}(x[n]) - \phi_{u, \eta}(x^*) + u^*)\label{eq:controller}
+\end{align}
+where $\phi_{u, \eta}$ is a feedforward neural network with (leaky) ReLU activation functions. The weights/biases of this network is denoted by $\eta$. $saturate$ is the saturation function that clamp the control within the input limits. Again by construction of \eqref{eq:controller}, the control action at the equilibrium state $x^*$ is $u^*$.
+
+We could solve the following two optimization problem as MILP
+\begin{align}
+	\max_{x} \epsilon_1|R(x-x^*)|_1 - V(x)\\
+	\max_{x[n]} V(x[n+1]) - V(x[n]) + \epsilon_2V(x[n])
+\end{align}
+When the maximal cost of either the function is larger than 0, we find a counter example that violates the Lyapunov condition \eqref{eq:lyapunov_discrete}. Our goal is to find the neural network for controller and Lyapunov function, such that the violation is 0. Namely we solve the following min-max problem.
+\begin{align}
+	\min_{\theta, \eta, R} \left(\max_{x}\epsilon_1|R(x-x^*)|_1 - V(x) + \max_{x[n]} V(x[n+1]) - V(x[n]) + \epsilon_2V(x[n])\right)
+\end{align}
+After solving the inner maximization problem, we then compute the gradient of the maximal cost w.r.t $\theta, \eta, R$, and then use gradient descent to minimize the loss.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Continuous-time system}
+We assume that the continuous time system forward dynamics is
+\begin{align}
+	\dot{x} = \phi_f(x) + \phi_G(x)u - \phi_f(x^*) - \phi_G(x^*)u^*
+\end{align}
+where $\phi_f, \phi_G$ are given feedforward neural networks with leaky ReLU activation units. Without loss of generality we can assume that the bounds on the control input $u$ is 
+\begin{align}
+	-\mathbf{1}\le u \le \mathbf{1}
+\end{align}
+
+Due to the control-affine property of the continuous-time system, we will show that we can search for a control Lyapunov function, instead of a controller and a Lyapunov function as in the discrete-time case. The control Lyapunov function satisfies
+\begin{subequations}
+\begin{align}
+	V(x) \ge \epsilon_1|R(x-x^*)|_1\\
+	\min_{-\mathbf{1}\le u\le \mathbf{1}} \dot{V}\le -\epsilon_2V(x)\label{eq:lyapunov_condition_Vdot_continuous}
+\end{align}
+\label{eq:lyapunov_condition_continuous}
+\end{subequations}
+
+Note that the left-hand side of the condition \eqref{eq:lyapunov_condition_Vdot_continuous} can be rewritten as
+\begin{subequations}
+\begin{align}
+	&\min_{-\mathbf{1}\le u \le \mathbf{1}} \dot{V}\\
+	=&\min_{-\mathbf{1}\le u \le\mathbf{1}}\frac{\partial V}{\partial x}(\phi_f(x) + \phi_G(x)u - \phi_f(x^*) - \phi_G(x^*)u^*)\\
+	=&\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) + \min_{-\mathbf{1}\le u \le \mathbf{1}} \frac{\partial V}{\partial x}\phi_G(x)u\label{eq:control_lyapunov3}\\
+	=&\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) - \left|\frac{\partial V}{\partial x}\phi_G(x)\right|_1\label{eq:control_lyapunov4}
+\end{align}
+\end{subequations}
+From \eqref{eq:control_lyapunov3} to \eqref{eq:control_lyapunov4} we use the fact that $\min_{|x|_{\infty}\le 1} a^Tx = -|a|_1$, namely 1-norm is the \textit{dual norm} of $\infty$-norm.
+
+We represent the control-Lyapunov function through a neural network as
+\begin{align}
+	V(x) = \phi_{V, \theta}(x) - \phi_{V, \theta}(x^*) + \lambda|R(x-x^*)|_1
+\end{align}
+
+And we solve the following two MILPs to either certify the control-Lyapunov condition, or find the counter-examples.
+\begin{align}
+	\max_{x} \epsilon_1|R(x-x^*)|_1 - V(x)\\
+	\max_{x} \underbrace{\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) - \left|\frac{\partial V}{\partial x}\phi_G(x)\right|_1}_{\min_{-\mathbf{1}\le u \le \mathbf{1}} \dot{V}} + \epsilon_2V(x)
+\end{align}
+
+We then compute the gradient of each MILP cost w.r.t $\theta, R$, and then use gradient descent on $\theta, R$ to minimize the loss.
+
+\end{document}
