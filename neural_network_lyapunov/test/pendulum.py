@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import scipy
 import scipy.linalg
+import matplotlib.pyplot as plt
 
 
 class Pendulum:
@@ -80,3 +81,32 @@ class Pendulum:
             A.detach().numpy(), B.detach().numpy(), Q, R)
         K = -np.linalg.solve(R, B.T @ S)
         return K
+
+
+class PendulumVisualizer:
+    def __init__(self, x0):
+        self._plant = Pendulum(torch.float64)
+        self._fig = plt.figure()
+        self._pendulum_ax = self._fig.add_subplot(111)
+        theta0 = x0[0]
+        l_ = self._plant.length
+        self._pendulum_arm, = self._pendulum_ax.plot(
+            np.array([0, l_ * np.sin(theta0)]),
+            np.array([0, -l_ * np.cos(theta0)]), linewidth=5)
+        self._pendulum_sphere, = self._pendulum_ax.plot(
+            l_ * np.sin(theta0), -l_*np.cos(theta0), marker='o', markersize=15)
+        self._pendulum_ax.set_xlim(-l_*1.1, l_*1.1)
+        self._pendulum_ax.set_ylim(-1.1*l_, 1.1*l_)
+        self._pendulum_title = self._pendulum_ax.set_title("t=0s")
+        self._fig.canvas.draw()
+
+    def draw(self, t, x):
+        l_ = self._plant.length
+        sin_theta = np.sin(x[0])
+        cos_theta = np.cos(x[0])
+        self._pendulum_arm.set_xdata(np.array([0, l_ * sin_theta]))
+        self._pendulum_arm.set_ydata(np.array([0, -l_ * cos_theta]))
+        self._pendulum_sphere.set_xdata(l_ * sin_theta)
+        self._pendulum_sphere.set_ydata(-l_ * cos_theta)
+        self._pendulum_title.set_text(f"t={t:.2f}s")
+        self._fig.canvas.draw()
