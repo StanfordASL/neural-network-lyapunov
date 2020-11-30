@@ -84,10 +84,15 @@ class Pendulum:
 
 
 class PendulumVisualizer:
-    def __init__(self, x0):
+    def __init__(self, x0, figsize=(10, 10), subplot=111):
+        """
+        @param figsize The size of the fig
+        @param subplot The argument in add_subplot(subplot) when adding the
+        axis for pendulum.
+        """
         self._plant = Pendulum(torch.float64)
-        self._fig = plt.figure()
-        self._pendulum_ax = self._fig.add_subplot(111)
+        self._fig = plt.figure(figsize=figsize)
+        self._pendulum_ax = self._fig.add_subplot(subplot)
         theta0 = x0[0]
         l_ = self._plant.length
         self._pendulum_arm, = self._pendulum_ax.plot(
@@ -97,6 +102,7 @@ class PendulumVisualizer:
             l_ * np.sin(theta0), -l_*np.cos(theta0), marker='o', markersize=15)
         self._pendulum_ax.set_xlim(-l_*1.1, l_*1.1)
         self._pendulum_ax.set_ylim(-1.1*l_, 1.1*l_)
+        self._pendulum_ax.set_axis_off()
         self._pendulum_title = self._pendulum_ax.set_title("t=0s")
         self._fig.canvas.draw()
 

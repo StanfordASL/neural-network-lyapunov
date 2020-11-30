@@ -93,6 +93,7 @@ class Quadrotor2DVisualizer:
     """
 
     def __init__(self, ax, x_lim, y_lim):
+        self.ax = ax
         self.ax.set_aspect("equal")
         self.ax.set_xlim(x_lim[0], x_lim[1])
         self.ax.set_ylim(y_lim[0], y_lim[1])
