@@ -57,8 +57,8 @@ def generate_pendulum_dynamics_data(dt):
 
     # Now take a grid of x and u, and compute the next state.
     theta_grid = np.linspace(-0.5 * np.pi, 2.5 * np.pi, 101)
-    thetadot_grid = np.linspace(-4, 4, 101)
-    u_grid = np.linspace(-10, 10, 401)
+    thetadot_grid = np.linspace(-5, 5, 101)
+    u_grid = np.linspace(-15, 15, 401)
 
     for i in range(len(theta_grid)):
         for j in range(len(thetadot_grid)):
@@ -223,6 +223,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_iterations", type=int, default=5000,
         help="max number of iterations in searching for controller.")
+    parser.add_argument(
+        "--train_on_samples", action="store_true",
+        help="pretrain Lyapunov controller on samples.")
     parser.add_argument("--enable_wandb", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -241,7 +244,7 @@ if __name__ == "__main__":
         train_forward_model(dynamics_model, model_dataset)
     else:
         dynamics_model_data = torch.load(
-            dir_path + "/data/pendulum_second_order_forward_relu.pt")
+            dir_path + "/data/pendulum/pendulum_second_order_forward_relu2.pt")
         dynamics_model = utils.setup_relu(
             dynamics_model_data["linear_layer_width"], params=None,
             negative_slope=dynamics_model_data["negative_slope"], bias=True,
@@ -322,8 +325,10 @@ if __name__ == "__main__":
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (51, 51), dtype=torch.float64)
     dut.output_flag = True
-    dut.train_lyapunov_on_samples(
-        state_samples_all, num_epochs=args.pretrain_num_epochs, batch_size=50)
+    if args.train_on_samples:
+        dut.train_lyapunov_on_samples(
+            state_samples_all, num_epochs=args.pretrain_num_epochs,
+            batch_size=50)
 
     dut.enable_wandb = args.enable_wandb
     dut.train(torch.empty((0, 2), dtype=torch.float64))

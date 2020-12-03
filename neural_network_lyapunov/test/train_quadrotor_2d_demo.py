@@ -117,6 +117,24 @@ def train_lqr_control_approximator(
         num_epochs=50, lr=0.001)
 
 
+def simulate_quadrotor_with_controller(
+        controller_relu, t_span, x_equilibrium, u_lo, u_up, x0):
+    plant = quadrotor_2d.Quadrotor2D(torch.float64)
+    u_equilibrium = plant.u_equilibrium
+
+    def dyn(t, x):
+        with torch.no_grad():
+            x_torch = torch.from_numpy(x)
+            u_torch = controller_relu(x_torch)\
+                - controller_relu(x_equilibrium) + u_equilibrium
+            u = torch.max(torch.min(u_torch, u_up), u_lo).detach().numpy()
+        return plant.dynamics(x, u)
+
+    result = scipy.integrate.solve_ivp(dyn, t_span, x0, t_eval=np.arange(
+        start=t_span[0], stop=t_span[1], step=0.01))
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="quadrotor 2d training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -199,7 +217,7 @@ if __name__ == "__main__":
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
     x_lo = torch.tensor(
-        [-0.1, -0.1, -np.pi * 0.1, -0.5, -0.5, -0.3], dtype=dtype)
+        [-0.5, -0.5, -np.pi * 0.3, -2.1, -2.1, -1.4], dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([-15, -15], dtype=dtype)
     u_up = torch.tensor([25, 25], dtype=dtype)
@@ -227,6 +245,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
+    dut.lyapunov_positivity_convergence_tol = 5e-6
     dut.max_iterations = 5000
     dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.001
