@@ -19,11 +19,11 @@ def generate_quadrotor_dynamics_data(dt):
     dtype = torch.float64
     plant = quadrotor_2d.Quadrotor2D(dtype)
 
-    theta_range = [-np.pi / 3, np.pi / 3]
+    theta_range = [-np.pi / 2, np.pi / 2]
     ydot_range = [-5, 5]
     zdot_range = [-5, 5]
     thetadot_range = [-2, 2]
-    u_range = [-5, 15]
+    u_range = [-10, 20]
     # We don't need to take the grid on y and z dimension of the quadrotor,
     # since the dynamics is invariant along these dimensions.
     x_samples = torch.cat((
@@ -54,7 +54,7 @@ def generate_quadrotor_dynamics_data(dt):
     return torch.utils.data.TensorDataset(dataset_input, dataset_output)
 
 
-def train_forward_model(forward_model, model_dataset):
+def train_forward_model(forward_model, model_dataset, num_epochs):
     # The forward model maps (theta[n], u1[n], u2[n]) to
     # (ydot[n+1]-ydot[n], zdot[n+1]-zdot[n], thetadot[n+1]-thetadot[n])
     plant = quadrotor_2d.Quadrotor2D(torch.float64)
@@ -71,7 +71,7 @@ def train_forward_model(forward_model, model_dataset):
             (torch.tensor([0], dtype=torch.float64), u_equilibrium)))
     utils.train_approximator(
         v_dataset, forward_model, compute_next_v, batch_size=50,
-        num_epochs=100, lr=0.001)
+        num_epochs=num_epochs, lr=0.001)
 
 
 def train_lqr_value_approximator(
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         (3, 5, 5, 3), params=None, bias=True, negative_slope=0.01,
         dtype=dtype)
     if args.train_forward_model:
-        train_forward_model(forward_model, model_dataset)
+        train_forward_model(forward_model, model_dataset, num_epochs=100)
 
     if args.load_forward_model:
         forward_model_data = torch.load(args.load_forward_model)
@@ -217,10 +217,10 @@ if __name__ == "__main__":
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
     x_lo = torch.tensor(
-        [-0.5, -0.5, -np.pi * 0.3, -2.1, -2.1, -1.4], dtype=dtype)
+        [-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9], dtype=dtype)
     x_up = -x_lo
-    u_lo = torch.tensor([-15, -15], dtype=dtype)
-    u_up = torch.tensor([25, 25], dtype=dtype)
+    u_lo = torch.tensor([-9, -9], dtype=dtype)
+    u_up = torch.tensor([17, 17], dtype=dtype)
     if args.train_lqr_approximator:
         x_equilibrium = torch.cat(
             (q_equilibrium, torch.zeros((3,), dtype=dtype)))
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_convergence_tol = 5e-6
     dut.max_iterations = 5000
     dut.lyapunov_positivity_epsilon = 0.1
-    dut.lyapunov_derivative_epsilon = 0.001
+    dut.lyapunov_derivative_epsilon = 0.003
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (7, 7, 7, 7, 7, 7), dtype=dtype)
