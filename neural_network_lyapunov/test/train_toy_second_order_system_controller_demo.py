@@ -5,6 +5,7 @@ import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.relu_system as relu_system
 
 import torch
+import numpy as np
 
 if __name__ == "__main__":
     # A second order system with qddot = leakyReLU(u)
@@ -49,8 +50,10 @@ if __name__ == "__main__":
 
     V_lambda = 1.
     R = torch.tensor([[1, 1], [-1, 1]], dtype=torch.float64)
+    R_options = train_lyapunov.SearchROptions((3, 2), 0.01)
+    R_options.set_variable_value(np.array([[1, 0.1], [0.1, 1], [1, -1]]))
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, forward_system.x_equilibrium, R)
+        lyap, V_lambda, forward_system.x_equilibrium, R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5
@@ -60,7 +63,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp
     dut.output_flag = True
     state_samples_all = utils.get_meshgrid_samples(x_lo, x_up, (51, 51), dtype)
-    dut.train_lyapunov_on_samples(state_samples_all, 100, 50)
+    dut.train_lyapunov_on_samples(state_samples_all, 10, 50)
 
     dut.train(torch.empty((0, 2), dtype=dtype))
     pass

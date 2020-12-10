@@ -125,7 +125,7 @@ class LyapunovHybridLinearSystem:
 
     def add_state_error_l1_constraint(
             self, milp, x_equilibrium, x, *, R=None, slack_name="s",
-            binary_var_name="alpha"):
+            binary_var_name="alpha", fixed_R=True):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -135,6 +135,11 @@ class LyapunovHybridLinearSystem:
         alpha(i) = 1 => s(i) >= 0, alpha(i) = 0 => s(i) <= 0
         @param R A matrix. We want this matrix to have full column rank. If
         R=None, then we use identity as R.
+        @param fixed_R If set to False, then we will treat R as free
+        variables, which eventually we will need to compute the gradient of R.
+        Hence if fixed_R is True, then we compute the range of R*(x-x*)
+        by linear programming (LP), otherwise we compute the range by interval
+        arithmetic (IA).
         """
         if not torch.all(torch.from_numpy(self.system.x_lo_all) <=
                          x_equilibrium) or\
@@ -152,9 +157,14 @@ class LyapunovHybridLinearSystem:
         alpha = milp.addVars(
             s_dim, vtype=gurobipy.GRB.BINARY, name=binary_var_name)
 
-        s_lb, s_ub = mip_utils.compute_range_by_lp(
-            R.detach().numpy(), (-R @ x_equilibrium).detach().numpy(),
-            self.system.x_lo_all, self.system.x_up_all, None, None)
+        if fixed_R:
+            s_lb, s_ub = mip_utils.compute_range_by_lp(
+                R.detach().numpy(), (-R @ x_equilibrium).detach().numpy(),
+                self.system.x_lo_all, self.system.x_up_all, None, None)
+        else:
+            s_lb, s_ub = mip_utils.compute_range_by_IA(
+                R, -R @ x_equilibrium, torch.from_numpy(self.system.x_lo_all),
+                torch.from_numpy(self.system.x_up_all))
         for i in range(s_dim):
             if s_lb[i] < 0 and s_ub[i] > 0:
                 # Add the constraint s[i] = |R[i, :] * (x - x*)|
@@ -224,7 +234,7 @@ class LyapunovHybridLinearSystem:
                 V_lambda * torch.norm(R @ (x - x_equilibrium).T, p=1, dim=0)
 
     def lyapunov_positivity_as_milp(
-        self, x_equilibrium, V_lambda, V_epsilon, *, R,
+        self, x_equilibrium, V_lambda, V_epsilon, *, R, fixed_R,
             x_warmstart=None):
         """
         For a ReLU network, in order to determine if the function
@@ -246,6 +256,9 @@ class LyapunovHybridLinearSystem:
         @param V_epsilon A scalar. ε in the documentation above.
         @param R This matrix must have full column rank, we will use the
         1-norm of R * (x - x*). If R=None, then we use identity matrix as R.
+        @param fixed_R Whether R is fixed or not. If R is fixed, we compute
+        the range of R * (x-x*) by LP, otherwise we compute it through
+        interval arithmetics.
         @param x_warmstart tensor of size self.system.x_dim. If provided, will
         use x_warmstart as initial guess for the *binary* variables of the
         milp. Instead of warm start beta with the binary variable solution from
@@ -284,7 +297,7 @@ class LyapunovHybridLinearSystem:
         # constraints.
         (s, gamma) = self.add_state_error_l1_constraint(
             milp, x_equilibrium, x, R=R, slack_name="s",
-            binary_var_name="gamma")
+            binary_var_name="gamma", fixed_R=fixed_R)
 
         milp.setObjective(
             [-a_out,
@@ -421,7 +434,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
     def lyapunov_derivative_as_milp(
         self, x_equilibrium, V_lambda, epsilon, eps_type: ConvergenceEps, *,
-            R, lyapunov_lower=None, lyapunov_upper=None, x_warmstart=None):
+        R, fixed_R, lyapunov_lower=None, lyapunov_upper=None,
+            x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁, where x* is the equilibrium
@@ -524,14 +538,14 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # s_x_norm(i) = |R[i,:] * (x[n] - x*)|
         (s_x_norm, beta_x_norm) = self.add_state_error_l1_constraint(
             milp, x_equilibrium, x, R=R, slack_name="|x[n]-x*|",
-            binary_var_name="beta_x_norm")
+            binary_var_name="beta_x_norm", fixed_R=fixed_R)
         # Now add the mixed-integer linear constraint to represent
         # |R*(x[n+1] - x*)|₁. To do so, we introduce the slack variable
         # s_x_next_norm, beta_x_next_norm.
         # s_x_next_norm(i) = |R[i, :] * (x[n+1] - x*)|
         (s_x_next_norm, beta_x_next_norm) = self.add_state_error_l1_constraint(
             milp, x_equilibrium, x_next, R=R, slack_name="|R*(x[n+1]-x*)|",
-            binary_var_name="beta_x_next_norm")
+            binary_var_name="beta_x_next_norm", fixed_R=fixed_R)
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|R*(x[n]-x*)|₁ <= upper
@@ -734,7 +748,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(V_lambda, float))
         assert(isinstance(epsilon, float))
         assert(isinstance(R, torch.Tensor) or R is None)
-        if R is not None:
+        if R is not None and torch.norm(R - torch.eye(
+                self.system.x_dim, dtype=R.dtype)).item() > 0:
             # TODO: implement the case when R is not None.
             raise Exception("Not implemented yet")
         V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
@@ -1107,7 +1122,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
     def lyapunov_derivative_as_milp2(
             self, x_equilibrium, V_lambda, epsilon, eps_type,
-            R, lyapunov_lower=None, lyapunov_upper=None):
+            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -1151,7 +1166,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(eps_type, ConvergenceEps))
         if eps_type != ConvergenceEps.ExpLower:
             raise NotImplementedError
-        if R is not None:
+        if R is not None and torch.norm(R - torch.eye(
+                self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None hasn't been implemented yet.")
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
@@ -1184,7 +1200,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         # t[i] = |x(i)-x*(i)|
         (t, alpha) = self.add_state_error_l1_constraint(
                 milp, x_equilibrium, x, slack_name="t",
-                binary_var_name="alpha")
+                binary_var_name="alpha", fixed_R=fixed_R)
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
@@ -1257,7 +1273,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
 
     def lyapunov_derivative_as_milp(
             self, x_equilibrium, V_lambda, epsilon, eps_type: ConvergenceEps,
-            *, R, lyapunov_lower=None, lyapunov_upper=None):
+            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -1303,7 +1319,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(eps_type, ConvergenceEps))
         if eps_type != ConvergenceEps.ExpLower:
             raise NotImplementedError
-        if R is not None:
+        if R is not None and torch.norm(R - torch.eye(
+                self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
@@ -1338,7 +1355,7 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         # t[i] = |x(i)-x*(i)|
         (t, alpha) = self.add_state_error_l1_constraint(
                 milp, x_equilibrium, x, slack_name="t",
-                binary_var_name="alpha")
+                binary_var_name="alpha", fixed_R=fixed_R)
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
@@ -1418,7 +1435,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(isinstance(state_samples, torch.Tensor))
         assert(state_samples.shape[1] == self.system.x_dim)
         assert(isinstance(eps_type, ConvergenceEps))
-        if R is not None:
+        if R is not None and torch.norm(R - torch.eye(
+                self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
         xdot = torch.empty(
             (state_samples.shape[0], self.system.x_dim),
@@ -1471,7 +1489,8 @@ class LyapunovContinuousTimeHybridSystem(LyapunovHybridLinearSystem):
         assert(xdot_samples.shape[1] == self.system.x_dim)
         assert(state_samples.shape[0] == xdot_samples.shape[0])
         assert(isinstance(eps_type, ConvergenceEps))
-        if R is not None:
+        if R is not None and torch.norm(R - torch.eye(
+                self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
 
         num_samples = state_samples.shape[0]

@@ -224,6 +224,9 @@ if __name__ == "__main__":
         "--max_iterations", type=int, default=5000,
         help="max number of iterations in searching for controller.")
     parser.add_argument(
+        "--search_R", action="store_true",
+        help="search R when searching for controller.")
+    parser.add_argument(
         "--train_on_samples", action="store_true",
         help="pretrain Lyapunov controller on samples.")
     parser.add_argument("--enable_wandb", action="store_true")
@@ -313,8 +316,14 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
 
+    if args.search_R:
+        R_options = train_lyapunov.SearchROptions(R.shape, epsilon=0.01)
+        R_options.set_variable_value(R.detach().numpy())
+    else:
+        R_options = train_lyapunov.FixedROptions(R)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, closed_loop_system.x_equilibrium, R)
+        lyapunov_hybrid_system, V_lambda, closed_loop_system.x_equilibrium,
+        R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5

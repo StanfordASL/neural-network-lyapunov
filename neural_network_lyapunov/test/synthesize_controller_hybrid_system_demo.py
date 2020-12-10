@@ -52,9 +52,9 @@ if __name__ == "__main__":
         closed_loop_system, lyapunov_relu)
 
     V_lambda = 0.0
-    R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium,
+        train_lyapunov.FixedROptions(torch.eye(2, dtype=torch.float64)))
     dut.output_flag = True
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_positivity_mip_pool_solutions = 1
