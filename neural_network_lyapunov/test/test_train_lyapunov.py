@@ -5,6 +5,7 @@ import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import torch
 import torch.nn as nn
+import numpy as np
 import unittest
 import gurobipy
 
@@ -46,6 +47,69 @@ def setup_state_samples_all(mesh_size):
     return torch.stack(state_samples, dim=0)
 
 
+class TestSearchROptions(unittest.TestCase):
+    def test_constructor(self):
+        dut = train_lyapunov.SearchROptions((3, 2), 0.01)
+        self.assertEqual(dut._variables.shape, (5,))
+        self.assertTrue(dut._variables.requires_grad)
+        self.assertEqual(dut.epsilon, 0.01)
+        self.assertFalse(dut.fixed_R)
+
+        # Test a square R.
+        dut = train_lyapunov.SearchROptions((2, 2), 0.01)
+        self.assertEqual(dut._variables.shape, (3,))
+
+    def test_R(self):
+        dut = train_lyapunov.SearchROptions((3, 2), 0.01)
+        dut._variables = torch.tensor(
+            [0.2, 0.3, 0.5, 1.2, 1.5], dtype=torch.float64, requires_grad=True)
+        self.assertTrue(dut._variables.requires_grad)
+        R = dut.R()
+        L_expected = np.array([[0.2, 0], [0.3, 0.5]])
+        R_expected = np.vstack((
+            L_expected @ L_expected.T + dut.epsilon * np.eye(2),
+            np.array([[1.2, 1.5]])))
+        np.testing.assert_allclose(R_expected, R.detach().numpy())
+
+        # Now check the gradient
+        (R.trace() + R[2:, :].sum()).backward()
+        np.testing.assert_allclose(
+            dut._variables.grad[:3].detach().numpy(),
+            2 * dut._variables[:3].detach().numpy())
+        np.testing.assert_allclose(
+            dut._variables.grad[3:].detach().numpy(), np.ones((2,)))
+
+    def test_variables(self):
+        dut = train_lyapunov.SearchROptions((3, 2), 0.01)
+        variables = dut.variables()
+        self.assertIsInstance(variables, list)
+        self.assertEqual(len(variables), 1)
+        self.assertEqual(variables[0].shape, (5,))
+
+    def test_set_variable_value(self):
+        dut = train_lyapunov.SearchROptions((4, 2), 0.01)
+        L_val = np.array([[0.1, 0], [0.5, 1.2]])
+        R_val = np.vstack((L_val @ L_val.T + dut.epsilon * np.eye(2),
+                           np.array([[0.5, -0.3], [0.2, 1.4]])))
+        dut.set_variable_value(R_val)
+        R = dut.R()
+        np.testing.assert_allclose(R.detach().numpy(), R_val)
+        self.assertTrue(dut._variables.requires_grad)
+
+
+class TestFixedROptions(unittest.TestCase):
+    def test(self):
+        R_val = torch.tensor(
+            [[1., 0.], [0., 1.], [1., 1.]], dtype=torch.float64)
+        dut = train_lyapunov.FixedROptions(R_val)
+        self.assertTrue(dut.fixed_R)
+        np.testing.assert_allclose(
+            dut.R().detach().numpy(), R_val.detach().numpy())
+        variables = dut.variables()
+        self.assertIsInstance(variables, list)
+        self.assertEqual(len(variables), 0)
+
+
 class TestTrainLyapunovReLU(unittest.TestCase):
     def test_total_loss(self):
         system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
@@ -54,9 +118,10 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         relu = setup_relu()
         lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
             system, relu)
-        R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype)
+        R_options = train_lyapunov.FixedROptions(torch.tensor(
+            [[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
         dut = train_lyapunov.TrainLyapunovReLU(
-            lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
+            lyapunov_hybrid_system, V_lambda, x_equilibrium, R_options)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.add_adversarial_state_to_training = True
@@ -101,18 +166,19 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                 relu_at_equilibrium, x_equilibrium,
                 state_samples_all[-dut.max_sample_pool_size:], V_lambda,
                 dut.lyapunov_positivity_epsilon,
-                R=R, margin=dut.lyapunov_positivity_sample_margin)
+                R=R_options.R(), margin=dut.lyapunov_positivity_sample_margin)
         loss_expected += dut.lyapunov_derivative_sample_cost_weight *\
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
                 V_lambda, dut.lyapunov_derivative_epsilon,
                 state_samples_all[-dut.max_sample_pool_size:],
                 state_samples_next[-dut.max_sample_pool_size:], x_equilibrium,
-                dut.lyapunov_derivative_eps_type, R=R,
+                dut.lyapunov_derivative_eps_type, R=R_options.R(),
                 margin=dut.lyapunov_derivative_sample_margin)
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
-                x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon, R=R)
+                x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon,
+                R=R_options.R(), fixed_R=R_options.fixed_R)
         lyapunov_positivity_mip = lyapunov_positivity_mip_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -126,7 +192,8 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         lyapunov_derivative_mip_return = lyapunov_hybrid_system.\
             lyapunov_derivative_as_milp(
                 x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
-                lyapunov.ConvergenceEps.ExpLower, R=R, lyapunov_lower=None,
+                lyapunov.ConvergenceEps.ExpLower, R=R_options.R(),
+                fixed_R=R_options.fixed_R, lyapunov_lower=None,
                 lyapunov_upper=None)
         lyapunov_derivative_mip = lyapunov_derivative_mip_return[0]
         lyapunov_derivative_mip.gurobi_model.setParam(

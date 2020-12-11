@@ -203,7 +203,9 @@ if __name__ == "__main__":
 
     R = None
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov_hybrid_system, V_lambda, x_equilibrium, R)
+        lyapunov_hybrid_system, V_lambda, x_equilibrium,
+        train_lyapunov.FixedROptions(torch.eye(
+            x_equilibrium.shape[0], dtype=torch.float64)))
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate

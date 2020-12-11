@@ -38,6 +38,93 @@ class ProjectGradientMethod(Enum):
     EMPHASIZE_POSITIVITY = 4
 
 
+class SearchROptions:
+    """
+    When search for the Lyapunov function, we use the 1-norm of |R*(x-x*)|₁.
+    This class specificies the options to search for R.
+    """
+
+    def __init__(self, R_size, epsilon):
+        """
+        We want R to be a full column rank matrix, with size m x n and m >= n.
+        The first n rows of R (The square matrix on top of R) is parameterized
+        as L * L' + eps * I to make sure the induced 2-norm of R is at least
+        eps.
+        @param R_size the size of R, with R_size[0] >= R_size[1]
+        @param epsilon eps in the documentation above.
+        """
+        assert(len(R_size) == 2)
+        assert(R_size[0] >= R_size[1])
+        self.R_size = R_size
+        self._variables = torch.empty((
+            int(R_size[1] * (R_size[1]+1)/2) + (R_size[0] - R_size[1]) *
+            R_size[1],), dtype=torch.float64, requires_grad=True)
+        assert(epsilon > 0)
+        self.epsilon = epsilon
+
+    def set_variable_value(self, R_val: np.ndarray):
+        assert(isinstance(R_val, np.ndarray))
+        assert(R_val.shape == self.R_size)
+        R_top = R_val[:R_val.shape[1], :]
+        R_top = (R_top + R_top.T) / 2
+        L = np.linalg.cholesky(R_top - self.epsilon * np.eye(R_val.shape[1]))
+        L_entry_count = 0
+        variable_val = np.empty((self._variables.shape[0],))
+        for i in range(self.R_size[1]):
+            variable_val[L_entry_count:L_entry_count+self.R_size[1]-i] =\
+                L[i:, i]
+            L_entry_count += self.R_size[1] - i
+        variable_val[L_entry_count:] = R_val[self.R_size[1]:, :].reshape((-1,))
+        self._variables = torch.from_numpy(variable_val)
+        self._variables.requires_grad = True
+
+    def R(self):
+        L_entry_count = int(self.R_size[1] * (self.R_size[1] + 1) / 2)
+        L_lower_list = torch.split(
+            self._variables[:L_entry_count], np.arange(
+                1, self.R_size[1]+1, 1, dtype=int)[::-1].tolist())
+        L_list = []
+        for i in range(self.R_size[1]):
+            L_list.append(torch.zeros((i,), dtype=torch.float64))
+            L_list.append(L_lower_list[i])
+        L = torch.cat(L_list).reshape((self.R_size[1], self.R_size[1])).T
+        R_bottom = self._variables[L_entry_count:].reshape((
+            self.R_size[0]-self.R_size[1], self.R_size[1]))
+        R = torch.cat((
+            L @ L.T + self.epsilon * torch.eye(
+                self.R_size[1], dtype=torch.float64), R_bottom), dim=0)
+        return R
+
+    def variables(self):
+        return [self._variables]
+
+    @property
+    def fixed_R(self):
+        return False
+
+
+class FixedROptions:
+    """
+    When search for the Lyapunov function, we use the 1-norm of |R*(x-x*)|₁.
+    This class specificies that R is fixed.
+    R should be fixed to a full column rank matrix.
+    """
+
+    def __init__(self, R: torch.Tensor):
+        assert(isinstance(R, torch.Tensor))
+        self._R = R
+
+    def R(self):
+        return self._R
+
+    def variables(self):
+        return []
+
+    @property
+    def fixed_R(self):
+        return True
+
+
 class TrainLyapunovReLU:
     """
     We will train a ReLU network, such that the function
@@ -60,7 +147,8 @@ class TrainLyapunovReLU:
     hinge(z) = max(z + margin, 0) where margin is a given scalar.
     """
 
-    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium, R):
+    def __init__(
+            self, lyapunov_hybrid_system, V_lambda, x_equilibrium, R_options):
         """
         @param lyapunov_hybrid_system This input should define a common
         interface
@@ -74,8 +162,7 @@ class TrainLyapunovReLU:
         One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
         @param V_lambda λ in the documentation above.
         @param x_equilibrium The equilibrium state.
-        @param R Should be a full column rank matrix. If R=None, then use
-        identity matrix as R.
+        @param R_options Either SearchROptions or FixedROptions.
         """
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
         assert(isinstance(V_lambda, float))
@@ -83,8 +170,9 @@ class TrainLyapunovReLU:
         assert(isinstance(x_equilibrium, torch.Tensor))
         assert(x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim,))
         self.x_equilibrium = x_equilibrium
-        assert(isinstance(R, torch.Tensor) or R is None)
-        self.R = R
+        assert(isinstance(R_options, SearchROptions) or
+               isinstance(R_options, FixedROptions))
+        self.R_options = R_options
         # The learning rate of the optimizer
         self.learning_rate = 0.003
         # Number of iterations in the training.
@@ -159,6 +247,9 @@ class TrainLyapunovReLU:
         # system which contains a neural network representing its controller.
         self.search_controller = True
 
+        # Whether to search over R when we use the 1-norm of |R*(x-x*)|₁.
+        self.search_R = False
+
     def total_loss(
             self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
@@ -209,7 +300,8 @@ class TrainLyapunovReLU:
             lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
                 lyapunov_positivity_as_milp(
                     self.x_equilibrium, self.V_lambda,
-                    self.lyapunov_positivity_epsilon, R=self.R)
+                    self.lyapunov_positivity_epsilon, R=self.R_options.R(),
+                    fixed_R=self.R_options.fixed_R)
             lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -230,7 +322,8 @@ class TrainLyapunovReLU:
                 lyapunov_derivative_as_milp(
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_derivative_epsilon,
-                    self.lyapunov_derivative_eps_type, R=self.R)
+                    self.lyapunov_derivative_eps_type, R=self.R_options.R(),
+                    fixed_R=self.R_options.fixed_R)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -283,7 +376,7 @@ class TrainLyapunovReLU:
                 lyapunov_positivity_loss_at_samples(
                     relu_at_equilibrium, self.x_equilibrium,
                     positivity_state_samples_in_pool, self.V_lambda,
-                    self.lyapunov_positivity_epsilon, R=self.R,
+                    self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     margin=self.lyapunov_positivity_sample_margin)
         else:
             positivity_sample_loss = 0.
@@ -304,7 +397,7 @@ class TrainLyapunovReLU:
                     self.V_lambda, self.lyapunov_derivative_epsilon,
                     derivative_state_samples_in_pool,
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
-                    self.lyapunov_derivative_eps_type, R=self.R,
+                    self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     margin=self.lyapunov_derivative_sample_margin)
         else:
             derivative_sample_loss = 0.
@@ -495,14 +588,14 @@ class TrainLyapunovReLU:
                 feedback_system.FeedbackSystem) and self.search_controller:
             # For a feedback system, we train both the Lyapunov network
             # parameters and the controller network parameters.
-            training_params = [
-                {'params': p} for p in
-                (self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                 self.lyapunov_hybrid_system.system.controller_network.
-                 parameters())]
+            training_params = list(
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters()) + list(
+                    self.lyapunov_hybrid_system.system.controller_network.
+                    parameters()) + self.R_options.variables()
         else:
             training_params = \
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters()
+                list(self.lyapunov_hybrid_system.lyapunov_relu.parameters()) +\
+                self.R_options.variables()
 
         if self.optimizer == "Adam":
             optimizer = torch.optim.Adam(
@@ -639,14 +732,14 @@ class TrainLyapunovReLU:
         if isinstance(
             self.lyapunov_hybrid_system.system,
                 feedback_system.FeedbackSystem) and self.search_controller:
-            training_params = [
-                {'params': p} for p in
-                (self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                 self.lyapunov_hybrid_system.system.controller_network.
-                 parameters())]
+            training_params = list(
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters()) + list(
+                    self.lyapunov_hybrid_system.system.controller_network.
+                    parameters()) + self.R_options.variables()
         else:
             training_params = \
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters()
+                list(self.lyapunov_hybrid_system.lyapunov_relu.parameters()) +\
+                self.R_options.variables()
         optimizer = torch.optim.Adam(training_params, lr=self.learning_rate)
         dataset = torch.utils.data.TensorDataset(state_samples_all)
         train_set_size = int(len(dataset) * 0.8)

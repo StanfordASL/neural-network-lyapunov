@@ -307,7 +307,8 @@ class TestLyapunov(unittest.TestCase):
             dim=0)
         V_lambda = 0.1
         trainer = train_lyapunov.TrainLyapunovReLU(
-            lyap, V_lambda, lyap.system.x_equilibrium, R)
+            lyap, V_lambda, lyap.system.x_equilibrium,
+            train_lyapunov.FixedROptions(R))
         optimizer = torch.optim.Adam(training_params)
         for iter_count in range(2):
             optimizer.zero_grad()

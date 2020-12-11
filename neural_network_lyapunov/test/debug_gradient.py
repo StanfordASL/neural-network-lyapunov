@@ -24,7 +24,8 @@ def compute_total_loss(
         relu_layer_width, params_val, bias=bias)
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov.LyapunovContinuousTimeHybridSystem(system, relu), V_lambda,
-        x_equilibrium)
+        x_equilibrium, train_lyapunov.FixedROptions(torch.eye(
+            x_equilibrium.shape[0], dtype=torch.float64)))
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_sample_cost_weight = 0.
     dut.lyapunov_derivative_mip_cost_weight = 1.
@@ -53,11 +54,13 @@ def compute_milp_cost_given_relu(
     dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
     if positivity_milp:
         milp = dut.lyapunov_positivity_as_milp(
-            x_equilibrium, V_lambda, lyapunov_positivity_epsilon)[0]
+            x_equilibrium, V_lambda, lyapunov_positivity_epsilon, R=None,
+            fixed_R=True)[0]
     else:
         milp = dut.lyapunov_derivative_as_milp(
             x_equilibrium, V_lambda, lyapunov_derivative_epsilon,
             lyapunov.ConvergenceEps.ExpLower,
+            R=None, fixed_R=True,
             lyapunov_lower=None, lyapunov_upper=None)[0]
     milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     milp.gurobi_model.optimize()

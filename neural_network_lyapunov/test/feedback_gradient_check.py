@@ -10,7 +10,7 @@ def check_sample_loss_grad(
     utils.network_zero_grad(lyap.lyapunov_relu)
     utils.network_zero_grad(lyap.system.controller_network)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, x_equilibrium, R)
+        lyap, V_lambda, x_equilibrium, train_lyapunov.FixedROptions(R))
     x_next_samples = torch.cat([lyap.system.step_forward(
         x_samples[i]).reshape((1, -1)) for i in range(x_samples.shape[0])],
         dim=0)
@@ -55,9 +55,10 @@ def check_lyapunov_mip_loss_grad(
         positivity_flag, atol, rtol):
     utils.network_zero_grad(lyap.lyapunov_relu)
     utils.network_zero_grad(lyap.system.controller_network)
-    dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, x_equilibrium)
     x_dim = x_equilibrium.shape[0]
+    dut = train_lyapunov.TrainLyapunovReLU(
+        lyap, V_lambda, x_equilibrium, train_lyapunov.FixedROptions(
+            torch.eye(x_dim, dtype=torch.float64)))
     x_samples = torch.empty((0, x_dim), dtype=torch.float64)
     x_next_samples = torch.empty((0, x_dim), dtype=torch.float64)
     if positivity_flag:
@@ -120,10 +121,11 @@ def create_mip(
     utils.network_zero_grad(lyap.lyapunov_relu)
     if positivity_flag:
         mip = lyap.lyapunov_positivity_as_milp(
-            x_equilibrium, V_lambda, V_epsilon)[0]
+            x_equilibrium, V_lambda, V_epsilon, R=None, fixed_R=True)[0]
     else:
         mip = lyap.lyapunov_derivative_as_milp(
-            x_equilibrium, V_lambda, V_epsilon, eps_type)[0]
+            x_equilibrium, V_lambda, V_epsilon, eps_type, R=None,
+            fixed_R=True)[0]
     return mip
 
 

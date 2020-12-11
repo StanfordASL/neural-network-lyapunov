@@ -148,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_controller_relu", type=str, default=None,
                         help="path to the controller data.")
     parser.add_argument("--train_lqr_approximator", action="store_true")
+    parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -240,8 +241,13 @@ if __name__ == "__main__":
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
 
+    if args.search_R:
+        R_options = train_lyapunov.SearchROptions(R.shape, 0.01)
+        R_options.set_variable_value(R.detach().numpy())
+    else:
+        R_options = train_lyapunov.FixedROptions(R)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, closed_loop_system.x_equilibrium, R)
+        lyap, V_lambda, closed_loop_system.x_equilibrium, R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
