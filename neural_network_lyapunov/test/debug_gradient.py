@@ -3,6 +3,8 @@ import gurobipy
 import numpy as np
 
 import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.continuous_time_lyapunov as\
+    continuous_time_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.test.test_hybrid_linear_system as \
     test_hybrid_linear_system
@@ -23,8 +25,9 @@ def compute_total_loss(
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
         relu_layer_width, params_val, bias=bias)
     dut = train_lyapunov.TrainLyapunovReLU(
-        lyapunov.LyapunovContinuousTimeHybridSystem(system, relu), V_lambda,
-        x_equilibrium, train_lyapunov.FixedROptions(torch.eye(
+        continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
+            system, relu), V_lambda, x_equilibrium,
+        train_lyapunov.FixedROptions(torch.eye(
             x_equilibrium.shape[0], dtype=torch.float64)))
     dut.lyapunov_derivative_sample_cost_weight = 0.
     dut.lyapunov_positivity_sample_cost_weight = 0.
@@ -51,7 +54,8 @@ def compute_milp_cost_given_relu(
         requires_grad, positivity_milp):
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
         relu_layer_width, params_val, bias=bias)
-    dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
+    dut = continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
+        system, relu)
     if positivity_milp:
         milp = dut.lyapunov_positivity_as_milp(
             x_equilibrium, V_lambda, lyapunov_positivity_epsilon, R=None,

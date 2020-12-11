@@ -1,5 +1,6 @@
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
-import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.continuous_time_lyapunov as\
+    continuous_time_lyapunov
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import neural_network_lyapunov.test.train_2d_lyapunov_utils as\
@@ -173,8 +174,9 @@ if __name__ == "__main__":
         relu = setup_relu(
             (2, 8, 4), negative_gradient=-1., bias=False, symmetric_x=True)
 
-    lyapunov_hybrid_system = lyapunov.LyapunovContinuousTimeHybridSystem(
-        system, relu)
+    lyapunov_hybrid_system = \
+        continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
+            system, relu)
 
     V_lambda = 0.
 

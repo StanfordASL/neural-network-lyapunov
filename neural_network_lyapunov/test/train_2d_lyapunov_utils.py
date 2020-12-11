@@ -3,6 +3,8 @@ import torch
 import numpy as np
 
 import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.continuous_time_lyapunov as\
+    continuous_time_lyapunov
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 
@@ -189,7 +191,8 @@ def plot_lyapunov_dot_colormap(
     if discrete_time:
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
     else:
-        dut = lyapunov.LyapunovContinuousTimeHybridSystem(system, relu)
+        dut = continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
+            system, relu)
     dtype = torch.float64
     with torch.no_grad():
         state_samples_all = setup_state_samples_all(
