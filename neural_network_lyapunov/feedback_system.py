@@ -151,10 +151,11 @@ class FeedbackSystem:
                     controller_z_post_relu_lo, controller_z_post_relu_up)
         elif isinstance(self.controller_network, torch.nn.Linear):
             controller_network_output_lo, controller_network_output_up =\
-                mip_utils.propagate_bounds_IA(
+                mip_utils.propagate_bounds(
                     self.controller_network,
                     torch.from_numpy(self.forward_system.x_lo_all),
-                    torch.from_numpy(self.forward_system.x_up_all))
+                    torch.from_numpy(self.forward_system.x_up_all),
+                    mip_utils.PropagateBoundsMethod.IA)
         for i in range(self.forward_system.u_dim):
             if np.isinf(self.u_lower_limit[i]) and\
                     np.isinf(self.u_upper_limit[i]):
