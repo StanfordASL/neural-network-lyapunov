@@ -1,6 +1,7 @@
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import unittest
 import numpy as np
 import torch
@@ -875,6 +876,233 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
 
         self.mip_return_gradient_tester(
             network, network_param, x_lo, x_up, atol=1E-5, rtol=1E-5)
+
+
+class TestAddConstraintByLayer(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+        self.linear_with_bias = nn.Linear(2, 4, bias=True)
+        self.linear_with_bias.weight.data = torch.tensor(
+            [[1., 2.], [-2., 1.], [-1., 4], [4., -5.]], dtype=self.dtype)
+        self.linear_with_bias.bias.data = torch.tensor(
+            [0.5, -1., 1.5, -3], dtype=self.dtype)
+        self.linear_no_bias = nn.Linear(2, 4, bias=False)
+        self.linear_no_bias.weight = self.linear_with_bias.weight
+        self.relu = nn.ReLU()
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+
+    def constraint_test(
+            self, linear_layer, relu_layer, z_curr_lo, z_curr_up, method):
+        Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
+            Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
+            z_next_up = relu_to_optimization._add_constraint_by_layer(
+                linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
+        linear_output_lo_expected, linear_output_up_expected =\
+            mip_utils.propagate_bounds(
+                linear_layer, z_curr_lo, z_curr_up, method)
+        np.testing.assert_allclose(
+            linear_output_lo.detach().numpy(),
+            linear_output_lo_expected.detach().numpy())
+        np.testing.assert_allclose(
+            linear_output_up.detach().numpy(),
+            linear_output_up_expected.detach().numpy())
+        z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
+            relu_layer, linear_output_lo, linear_output_up, method)
+        np.testing.assert_allclose(
+            z_next_lo.detach().numpy(), z_next_lo_expected.detach().numpy())
+        np.testing.assert_allclose(
+            z_next_up.detach().numpy(), z_next_up_expected.detach().numpy())
+        # Maker sure we tested all cases, that the relu can be
+        # 1. Both active or inactive.
+        # 2. Only inactive.
+        # 3. Only active.
+        assert(torch.any(
+            torch.logical_and(linear_output_lo < 0, linear_output_up > 0)))
+        assert(torch.any(linear_output_up <= 0))
+        assert(torch.any(linear_output_lo >= 0))
+        # Now form an optimization problem satisfying these added constraints,
+        # and check the solution matches with evaluating the ReLU.
+        z_curr_val = utils.uniform_sample_in_box(z_curr_lo, z_curr_up, 20)
+        for i in range(z_curr_val.shape[0]):
+            model = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            z_curr = model.addVars(
+                linear_layer.in_features, lb=-gurobipy.GRB.INFINITY)
+            z_next = model.addVars(
+                linear_layer.out_features, lb=-gurobipy.GRB.INFINITY)
+            beta = model.addVars(
+                linear_layer.out_features, vtype=gurobipy.GRB.BINARY)
+            model.addMConstrs(
+                [torch.eye(linear_layer.in_features, dtype=self.dtype)],
+                [z_curr], b=z_curr_val[i], sense=gurobipy.GRB.EQUAL)
+            model.addMConstrs(
+                [Ain_z_curr, Ain_z_next, Ain_binary], [z_curr, z_next, beta],
+                b=rhs_in, sense=gurobipy.GRB.LESS_EQUAL)
+            model.addMConstrs(
+                [Aeq_z_curr, Aeq_z_next, Aeq_binary], [z_curr, z_next, beta],
+                b=rhs_eq, sense=gurobipy.GRB.EQUAL)
+            model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            model.gurobi_model.optimize()
+            with torch.no_grad():
+                self.assertEqual(
+                    model.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+                linear_output = linear_layer(z_curr_val[i])
+                z_next_val_expected = relu_layer(linear_output)
+                beta_val_expected = np.array(
+                    [1 if linear_output[j] > 0 else 0 for j in
+                     range(linear_layer.out_features)])
+                z_next_val = np.array(
+                    [z_next[j].x for j in range(len(z_next))])
+                beta_val = np.array([beta[j].x for j in range(len(beta))])
+                np.testing.assert_allclose(
+                    z_next_val, z_next_val_expected.detach().numpy())
+                np.testing.assert_allclose(beta_val, beta_val_expected)
+
+        # Sample many z_curr within the limits, make sure they all satisfy the
+        # constraints.
+        with torch.no_grad():
+            z_curr_val = utils.uniform_sample_in_box(z_curr_lo, z_curr_up, 20)
+            for i in range(z_curr_val.shape[0]):
+                linear_output = linear_layer(z_curr_val[i])
+                beta_val = torch.tensor([
+                    1 if linear_output[j] > 0 else 0 for j in
+                    range(linear_output.shape[0])], dtype=self.dtype)
+                z_next_val = relu_layer(linear_output)
+                np.testing.assert_array_less(
+                    (Ain_z_curr @ z_curr_val[i] + Ain_z_next @ z_next_val +
+                     Ain_binary @ beta_val).detach().numpy().squeeze(),
+                    rhs_in.detach().numpy().squeeze() + 1E-6)
+
+    def constraint_gradient_test(
+            self, linear_layer, relu_layer, z_curr_lo, z_curr_up, method):
+        Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
+            Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
+            z_next_up = relu_to_optimization._add_constraint_by_layer(
+                linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
+
+        (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() + rhs_in.sum()
+         + Aeq_z_curr.sum() + Aeq_z_next.sum() + Aeq_binary.sum() +
+         rhs_eq.sum() + linear_output_lo.sum() + linear_output_up.sum() +
+         z_next_lo.sum() + z_next_up.sum()).backward()
+
+        linear_layer_weight_grad = linear_layer.weight.grad.clone()
+        if linear_layer.bias is not None:
+            linear_layer_bias_grad = linear_layer.bias.grad.clone()
+        input_lo_grad = z_curr_lo.grad.clone()
+        input_up_grad = z_curr_up.grad.clone()
+
+        def eval_fun(linear_layer_weight, linear_layer_bias, input_lo_np,
+                     input_up_np):
+            linear_layer.weight.data = torch.from_numpy(
+                linear_layer_weight.reshape(linear_layer.weight.data.shape))
+            if linear_layer.bias is not None:
+                linear_layer.bias.data = torch.from_numpy(linear_layer_bias)
+            with torch.no_grad():
+                Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr,\
+                    Aeq_z_next, Aeq_binary, rhs_eq, linear_output_lo,\
+                    linear_output_up, z_next_lo, z_next_up =\
+                    relu_to_optimization._add_constraint_by_layer(
+                        linear_layer, relu_layer, torch.from_numpy(
+                            input_lo_np), torch.from_numpy(input_up_np),
+                        method)
+
+                return np.array([(
+                    Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
+                    rhs_in.sum() + Aeq_z_curr.sum() + Aeq_z_next.sum() +
+                    Aeq_binary.sum() + rhs_eq.sum() + linear_output_lo.sum() +
+                    linear_output_up.sum() + z_next_lo.sum() +
+                    z_next_up.sum()).detach()])
+
+        bias_val = linear_layer.bias.data.detach().numpy() if\
+            linear_layer.bias is not None else np.zeros((2,))
+
+        numerical_grads = utils.compute_numerical_gradient(
+            eval_fun, linear_layer.weight.data.detach().numpy().reshape((-1,)),
+            bias_val, z_curr_lo.detach().numpy(), z_curr_up.detach().numpy())
+        np.testing.assert_allclose(numerical_grads[0],
+                                   linear_layer_weight_grad.reshape((1, -1)))
+        if linear_layer.bias is not None:
+            np.testing.assert_allclose(
+                numerical_grads[1].reshape((-1,)), linear_layer_bias_grad)
+        np.testing.assert_allclose(numerical_grads[2].squeeze(), input_lo_grad)
+        np.testing.assert_allclose(numerical_grads[3].squeeze(), input_up_grad)
+
+    def test_with_bias_relu_IA(self):
+        z_curr_lo = torch.tensor(
+            [-1., 2.], dtype=self.dtype, requires_grad=True)
+        z_curr_up = torch.tensor(
+            [2., 4.], dtype=self.dtype, requires_grad=True)
+        method = mip_utils.PropagateBoundsMethod.IA
+        self.constraint_test(
+            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_gradient_test(
+            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
+
+    def test_with_bias_relu_LP(self):
+        z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
+        z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
+        method = mip_utils.PropagateBoundsMethod.LP
+        self.constraint_test(
+            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
+
+    def test_with_bias_leaky_relu_IA(self):
+        z_curr_lo = torch.tensor(
+            [-1., 2.], dtype=self.dtype, requires_grad=True)
+        z_curr_up = torch.tensor(
+            [2., 4.], dtype=self.dtype, requires_grad=True)
+        method = mip_utils.PropagateBoundsMethod.IA
+        self.constraint_test(
+            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
+        self.constraint_gradient_test(
+            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
+
+    def test_with_bias_leaky_relu_LP(self):
+        z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
+        z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
+        method = mip_utils.PropagateBoundsMethod.LP
+        self.constraint_test(
+            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
+
+    def test_no_bias_relu_IA(self):
+        z_curr_lo = torch.tensor(
+            [-1., 2.], dtype=self.dtype, requires_grad=True)
+        z_curr_up = torch.tensor(
+            [2., 4.], dtype=self.dtype, requires_grad=True)
+        method = mip_utils.PropagateBoundsMethod.IA
+        self.constraint_test(
+            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_gradient_test(
+            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
+
+    def test_no_bias_relu_LP(self):
+        z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
+        z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
+        method = mip_utils.PropagateBoundsMethod.LP
+        self.constraint_test(
+            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
+
+    def test_no_bias_leaky_relu_IA(self):
+        z_curr_lo = torch.tensor(
+            [-1., 2.], dtype=self.dtype, requires_grad=True)
+        z_curr_up = torch.tensor(
+            [2., 4.], dtype=self.dtype, requires_grad=True)
+        method = mip_utils.PropagateBoundsMethod.IA
+        self.constraint_test(
+            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
+        self.constraint_gradient_test(
+            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
+
+    def test_no_bias_leaky_relu_LP(self):
+        z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
+        z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
+        method = mip_utils.PropagateBoundsMethod.LP
+        self.constraint_test(
+            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
+            method)
 
 
 if __name__ == "__main__":

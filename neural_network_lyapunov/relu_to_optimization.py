@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
@@ -998,3 +999,100 @@ class ReLUFreePattern:
                 raise Exception("output_gradient_times_vector: we currently " +
                                 "only support linear and ReLU units.")
         return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up)
+
+
+def _add_constraint_by_layer(
+    linear_layer, relu_layer, linear_input_lo, linear_input_up,
+        method: mip_utils.PropagateBoundsMethod):
+    """
+    This function will be called inside output_constraint(). We group the
+    network layers by a linear layer followed by a (leaky) ReLU layer,
+    these two layers together impose a condition
+    zᵢ₊₁ = leaky_relu(Wᵢzᵢ+bᵢ)
+    We add this condition as mixed-integer linear constraints between zᵢ,
+    zᵢ₊₁, and the binary variable representing the activation of ReLU
+    units.
+    """
+    assert(isinstance(linear_layer, nn.Linear))
+    dtype = linear_layer.weight.dtype
+    Ain_z_curr = []
+    Ain_z_next = []
+    Ain_binary = []
+    rhs_in = []
+    Aeq_z_curr = []
+    Aeq_z_next = []
+    Aeq_binary = []
+    rhs_eq = []
+    linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
+        linear_layer, linear_input_lo, linear_input_up, method)
+    bias = linear_layer.bias if linear_layer.bias is not None else \
+        torch.zeros((linear_layer.out_features,), dtype=dtype)
+    for j in range(linear_layer.out_features):
+        if linear_output_lo[j] < 0 and linear_output_up[j] > 0:
+            # The ReLU unit can be either active or inactive.
+            # Now add the mixed-integer linear constraints for each
+            # (leaky) ReLU unit in the ReLU layer.
+            if isinstance(relu_layer, nn.ReLU):
+                A_relu_input, A_relu_output, A_relu_beta, relu_rhs =\
+                    utils.replace_relu_with_mixed_integer_constraint(
+                        linear_output_lo[j], linear_output_up[j], dtype)
+            elif isinstance(relu_layer, nn.LeakyReLU):
+                A_relu_input, A_relu_output, A_relu_beta, relu_rhs =\
+                    utils.replace_leaky_relu_mixed_integer_constraint(
+                        relu_layer.negative_slope, linear_output_lo[j],
+                        linear_output_up[j], dtype)
+            # The constraint is A_relu_input * ((Wᵢzᵢ)(j)+bᵢ(j)) +
+            # A_relu_output * zᵢ₊₁(j) + A_relu_beta * βᵢ(j) <= relu_rhs
+            Ain_z_curr.append(A_relu_input.reshape((-1, 1)) @
+                              linear_layer.weight[j].reshape((1, -1)))
+            z_next_coeff = torch.zeros(
+                (A_relu_input.shape[0], linear_layer.out_features),
+                dtype=dtype)
+            z_next_coeff[:, j] = A_relu_output
+            Ain_z_next.append(z_next_coeff)
+            binary_coeff = torch.zeros(
+                (A_relu_input.shape[0], linear_layer.out_features),
+                dtype=dtype)
+            binary_coeff[:, j] = A_relu_beta
+            Ain_binary.append(binary_coeff)
+            rhs_in.append(relu_rhs - A_relu_input * bias[j])
+        else:
+            # The (leaky) ReLU is always active, or always inactive. If
+            # the lower bound output_lo[j] >= 0, then it is always active,
+            # and we add two linear equality constraints
+            # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j) and βᵢ(j) = 1
+            # If the upper bound output_up[j] <= 0, then it is always
+            # inactive, and we add to linear equality constraints
+            # zᵢ₊₁(j) = c*((Wᵢzᵢ)(j) + bᵢ(j)) and βᵢ(j) = 0
+            if linear_output_lo[j] >= 0:
+                slope = 1.
+                binary_value = 1
+            elif linear_output_up[j] <= 0:
+                slope = relu_layer.negative_slope if\
+                    isinstance(relu_layer, nn.LeakyReLU) else 0.
+                binary_value = 0
+            Aeq_z_curr.append(
+                -slope * linear_layer.weight[j].reshape((1, -1)))
+            z_next_coeff = torch.zeros(
+                (1, linear_layer.out_features), dtype=dtype)
+            z_next_coeff[0, j] = 1.
+            Aeq_z_next.append(z_next_coeff)
+            Aeq_binary.append(torch.zeros(
+                (1, linear_layer.out_features), dtype=dtype))
+            rhs_eq.append(slope * bias[j])
+            # Now add the constraint and βᵢ(j) = 1 or 0
+            beta_coeff = z_next_coeff
+            Aeq_binary.append(beta_coeff)
+            Aeq_z_curr.append(torch.zeros(
+                (1, linear_layer.in_features), dtype=dtype))
+            Aeq_z_next.append(torch.zeros(
+                (1, linear_layer.out_features), dtype=dtype))
+            rhs_eq.append(torch.tensor(binary_value, dtype=dtype))
+    z_next_lo, z_next_up = mip_utils.propagate_bounds(
+        relu_layer, linear_output_lo, linear_output_up, method)
+    # Aggregate all the constraints for each neuron.
+    return torch.cat(Ain_z_curr, dim=0), torch.cat(Ain_z_next, dim=0),\
+        torch.cat(Ain_binary, dim=0), torch.cat(rhs_in, dim=0),\
+        torch.cat(Aeq_z_curr, dim=0), torch.cat(Aeq_z_next, dim=0),\
+        torch.cat(Aeq_binary, dim=0), torch.stack(rhs_eq, dim=0),\
+        linear_output_lo, linear_output_up, z_next_lo, z_next_up
