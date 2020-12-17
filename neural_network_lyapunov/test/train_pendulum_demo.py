@@ -263,9 +263,9 @@ if __name__ == "__main__":
         control_samples = controller_cost_data["control_samples"]
         cost_samples = controller_cost_data["cost_samples"]
 
-    V_lambda = 0.6
+    V_lambda = 0.8
     controller_relu = utils.setup_relu(
-        (2, 2, 2, 1), params=None, negative_slope=0.1, bias=True,
+        (2, 3, 2, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
     if args.train_controller_approximator:
         train_controller_approximator(
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     lqr_gain = plant.lqr_control(np.diag([1., 10.]), np.array([[1.]]))
 
     lyapunov_relu = utils.setup_relu(
-        (2, 8, 4, 4, 1), params=None, negative_slope=0.1, bias=True,
+        (2, 8, 8, 6, 1), params=None, negative_slope=0.1, bias=True,
         dtype=torch.float64)
     R = torch.cat((rotation_matrix(np.pi / 4), rotation_matrix(np.pi/10)),
                   dim=0)
@@ -302,10 +302,10 @@ if __name__ == "__main__":
     # Now train the controller and Lyapunov function together
     q_equilibrium = torch.tensor([np.pi], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([np.pi - np.pi, -5.], dtype=torch.float64)
-    x_up = torch.tensor([np.pi + np.pi, 5.], dtype=torch.float64)
-    u_lo = torch.tensor([-20], dtype=torch.float64)
-    u_up = torch.tensor([20], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - 1.2 * np.pi, -5.], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + 1.2 * np.pi, 5.], dtype=torch.float64)
+    u_lo = torch.tensor([-12], dtype=torch.float64)
+    u_up = torch.tensor([12], dtype=torch.float64)
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
         torch.float64, x_lo, x_up, u_lo, u_up, dynamics_model, q_equilibrium,
         u_equilibrium, dt)
@@ -329,8 +329,8 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.5
-    dut.lyapunov_derivative_epsilon = 0.001
-    dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.Asymp
+    dut.lyapunov_derivative_epsilon = 0.004
+    dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (51, 51), dtype=torch.float64)
     dut.output_flag = True

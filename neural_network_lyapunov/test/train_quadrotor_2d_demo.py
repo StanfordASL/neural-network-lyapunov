@@ -189,7 +189,7 @@ if __name__ == "__main__":
     # R[6:9, :3] = -torch.eye(3, dtype=dtype) / np.sqrt(2)
     # R[6:9, 3:6] = torch.eye(3, dtype=dtype) / np.sqrt(2)
     # R = torch.cat((R, torch.from_numpy(S_eig_vec)), dim=0)
-    R = torch.from_numpy(S_eig_vec)
+    R = torch.from_numpy(S) + 0.01 * torch.eye(6, dtype=dtype)
 
     lyapunov_relu = utils.setup_relu(
         (6, 8, 8, 4, 1), params=None, negative_slope=0.1, bias=True,
