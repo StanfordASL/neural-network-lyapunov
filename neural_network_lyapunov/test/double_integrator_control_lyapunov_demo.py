@@ -1,5 +1,6 @@
 import double_integrator
 import neural_network_lyapunov.control_lyapunov as control_lyapunov
+import neural_network_lyapunov.mip_utils as mip_utils
 import torch.nn as nn
 import torch
 import numpy as np
@@ -100,7 +101,8 @@ def verify_control_lyapunov(model, x_lo, x_up):
         + Ain5.to_dense().detach().numpy() * beta\
         <= rhs.squeeze()
     (mip_constr_return,  _, _, _, _) =\
-        verifier.relu_free_pattern.output_constraint(x_lo, x_up)
+        verifier.relu_free_pattern.output_constraint(
+            x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
     z = cp.Variable(mip_constr_return.Ain_slack.shape[1])
     constraints = [
         constraint1, mip_constr_return.Ain_input.detach().numpy() * x +

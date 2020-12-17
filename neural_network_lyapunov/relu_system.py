@@ -1,6 +1,7 @@
 import torch
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.mip_utils as mip_utils
 import gurobipy
 
 
@@ -52,7 +53,7 @@ class AutonomousReLUSystem:
         """
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up)
+            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         return result
 
     def possible_dx(self, x):
@@ -114,7 +115,7 @@ class AutonomousReLUSystemGivenEquilibrium:
         """
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up)
+            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
             self.x_equilibrium
 
@@ -182,7 +183,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         """
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up)
+            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium)
         if result.Aout_input is None:
             result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
@@ -270,7 +271,7 @@ class ReLUSystem:
         xu_up = torch.cat((self.x_up, self.u_up))
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-            xu_lo, xu_up)
+            xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
 
         return result
 
@@ -365,7 +366,7 @@ class ReLUSystemGivenEquilibrium:
         xu_up = torch.cat((self.x_up, self.u_up))
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-            xu_lo, xu_up)
+            xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
         result.Aout_slack = result.Aout_slack.reshape((self.x_dim, -1))
         result.Cout = result.Cout.reshape((-1))
         result.Cout += -self.dynamics_relu(
@@ -485,7 +486,8 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
          z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
             torch.cat((self.x_lo, self.u_lo)),
-            torch.cat((self.x_up, self.u_up)))
+            torch.cat((self.x_up, self.u_up)),
+            mip_utils.PropagateBoundsMethod.IA)
         assert(result.Aout_input is None)
         assert(result.Aout_binary is None)
         if (len(result.Aout_slack.shape) == 1):
@@ -655,7 +657,8 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(torch.cat((self.x_lo[
                 self._network_input_x_indices], self.u_lo)), torch.cat((
-                    self.x_up[self._network_input_x_indices], self.u_up)))
+                    self.x_up[self._network_input_x_indices], self.u_up)),
+                mip_utils.PropagateBoundsMethod.IA)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
         input_vars = [x_var[i] for i in self._network_input_x_indices] + u_var

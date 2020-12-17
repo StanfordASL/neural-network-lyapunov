@@ -304,7 +304,8 @@ class ReLUFreePattern:
                      torch.tensor(0., dtype=self.dtype))
         return lower_bounds, upper_bounds
 
-    def output_constraint(self, x_lo, x_up):
+    def output_constraint(
+            self, x_lo, x_up, method: mip_utils.PropagateBoundsMethod):
         """
         The output of (leaky) ReLU network is a piecewise linear function of
         the input.
@@ -349,6 +350,10 @@ class ReLUFreePattern:
         β = [β₀; β₁; ...; βₙ₋₁].
         @param x_lo A 1-D vector, the lower bound of input x.
         @param x_up A 1-D vector, the upper bound of input x.
+        @param method The method to propagate the bounds of the inputs in each
+        layer. If you want to take the gradient w.r.t the parameter in this
+        network, then use PropagateBoundsMethod.IA, otherwise use
+        PropagateBoundsMethod.LP.
         @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
         b_out, z_pre_relu_lo, z_pre_relu_up)
         Ain1, Ain2, Ain3, Aeq1, Aeq2, Aeq3, A_out are matrices, rhs_in, rhs_eq,
@@ -366,278 +371,132 @@ class ReLUFreePattern:
         assert(torch.all(torch.le(x_lo, x_up)))
 
         # Each ReLU unit introduces at most 4 inequality constraints.
-        Ain1 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
-                            self.x_size), dtype=self.dtype)
-        Ain2 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
-                            self.num_relu_units), dtype=self.dtype)
-        Ain3 = torch.zeros((4 * self.num_relu_units + 2 * self.x_size,
-                            self.num_relu_units), dtype=self.dtype)
-        rhs_in = torch.empty((4 * self.num_relu_units + 2 * self.x_size, 1),
+        Ain_input = torch.zeros(
+            (4 * self.num_relu_units + 2 * self.x_size, self.x_size),
+            dtype=self.dtype)
+        Ain_slack = torch.zeros(
+            (4 * self.num_relu_units + 2 * self.x_size, self.num_relu_units),
+            dtype=self.dtype)
+        Ain_binary = torch.zeros(
+            (4 * self.num_relu_units + 2 * self.x_size, self.num_relu_units),
+            dtype=self.dtype)
+        rhs_in = torch.empty((4 * self.num_relu_units + 2 * self.x_size,),
                              dtype=self.dtype)
         # Each ReLU unit introduces at most 2 equality constraints.
-        Aeq1 = torch.zeros((2 * self.num_relu_units, self.x_size),
-                           dtype=self.dtype)
-        Aeq2 = torch.zeros((2 * self.num_relu_units, self.num_relu_units),
-                           dtype=self.dtype)
-        Aeq3 = torch.zeros((2 * self.num_relu_units, self.num_relu_units),
-                           dtype=self.dtype)
-        rhs_eq = torch.empty((2 * self.num_relu_units, 1), dtype=self.dtype)
+        Aeq_input = torch.zeros(
+            (2 * self.num_relu_units, self.x_size), dtype=self.dtype)
+        Aeq_slack = torch.zeros(
+            (2 * self.num_relu_units, self.num_relu_units), dtype=self.dtype)
+        Aeq_binary = torch.zeros(
+            (2 * self.num_relu_units, self.num_relu_units), dtype=self.dtype)
+        rhs_eq = torch.empty((2 * self.num_relu_units,), dtype=self.dtype)
 
-        eq_constraint_count = 0
-        ineq_constraint_count = 0
-        # First add the constraint x_lo <= x <= x_up
-        Ain1[:self.x_size] = torch.eye(self.x_size, dtype=self.dtype)
-        rhs_in[:self.x_size] = x_up.reshape((-1, 1))
-        Ain1[self.x_size: 2*self.x_size] =\
-            -torch.eye(self.x_size, dtype=self.dtype)
-        rhs_in[self.x_size:2*self.x_size] = -x_lo.reshape((-1, 1))
-        ineq_constraint_count = 2 * self.x_size
-        layer_count = 0
-        z_pre_relu_lo = [None] * self.num_relu_units
-        z_pre_relu_up = [None] * self.num_relu_units
-        z_post_relu_lo = [None] * self.num_relu_units
-        z_post_relu_up = [None] * self.num_relu_units
-        for layer in self.model:
-            if (isinstance(layer, nn.Linear)):
-                Wi = layer.weight
-                bi = layer.bias if layer.bias is not None else\
-                    torch.zeros((layer.weight.shape[0],), dtype=self.dtype)
-                if (layer_count < len(self.relu_unit_index)):
-                    for j in range(len(self.relu_unit_index[layer_count])):
-                        # First compute zᵤₚ, zₗₒ as the bounds for
-                        # (Wᵢzᵢ)(j) + bᵢ(j)
-                        z_bound_index = self.relu_unit_index[layer_count][j]
-                        # z0 is the input x.
-                        if layer_count == 0:
-                            zi_size = self.x_size
-                            zi_lo = x_lo.clone()
-                            zi_up = x_up.clone()
-                        else:
-                            zi_size = len(
-                                self.relu_unit_index[layer_count - 1])
-                            # Note that z_post_relu_lo and z_post_relu_up are
-                            # lists, not torch tensors (because Tensor[]
-                            # operator is an inplace operator, which causes
-                            # the pytorch autograd to fail. So we have to use
-                            # a for loop below to copy z_post_relu_lo to zi_lo,
-                            # and z_post_relu_up to zi_up.
-                            zi_lo = torch.empty(len(self.relu_unit_index[
-                                layer_count-1]), dtype=self.dtype)
-                            zi_up = torch.empty(len(self.relu_unit_index[
-                                layer_count-1]), dtype=self.dtype)
-                            for k in range(len(self.relu_unit_index[
-                                    layer_count-1])):
-                                zi_lo[k] = z_post_relu_lo[self.relu_unit_index[
-                                    layer_count-1][k]].clone()
-                                zi_up[k] = z_post_relu_up[self.relu_unit_index[
-                                    layer_count-1][k]].clone()
-                        mask1 = torch.where(layer.weight[j] > 0)[0]
-                        mask2 = torch.where(layer.weight[j] <= 0)[0]
-                        z_pre_relu_lo[z_bound_index] = layer.weight[j][mask1] \
-                            @ zi_lo[mask1].reshape((-1)) + \
-                            layer.weight[j][mask2] @ \
-                            zi_up[mask2].reshape((-1)) + \
-                            (layer.bias[j] if layer.bias is not None else
-                             torch.tensor(0., dtype=self.dtype))
-                        z_pre_relu_up[z_bound_index] = layer.weight[j][mask1] \
-                            @ zi_up[mask1].reshape((-1)) + \
-                            layer.weight[j][mask2] @ \
-                            zi_lo[mask2].reshape((-1)) + \
-                            (layer.bias[j] if layer.bias is not None else
-                             torch.tensor(0., dtype=self.dtype))
-                        assert(z_pre_relu_lo[z_bound_index] <=
-                               z_pre_relu_up[z_bound_index])
+        eq_constr_count = 0
+        ineq_constr_count = 0
 
-                else:
-                    # This is for the output layer when the output layer
-                    # doesn't have a ReLU unit.
-                    assert(not self.last_layer_is_relu)
-                    A_out = torch.zeros((
-                        layer.out_features, self.num_relu_units),
-                        dtype=self.dtype)
-                    b_out = torch.zeros(
-                        (layer.out_features,), dtype=self.dtype)
-                    for j in range(layer.out_features):
-                        for k in range(len(
-                           self.relu_unit_index[layer_count - 1])):
-                            A_out[j, self.relu_unit_index[layer_count - 1][
-                              k]] = layer.weight[j][k]
-                        if layer.bias is not None:
-                            b_out[j] = layer.bias[j]
-                        else:
-                            b_out[j] = torch.tensor(0., dtype=self.dtype)
-                    A_out = A_out.squeeze()
-                    b_out = b_out.squeeze()
-            elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
-                # The ReLU network can potentially change the bound on z.
-                negative_slope = layer.negative_slope if\
-                    isinstance(layer, nn.LeakyReLU) else 0.
-                for j in range(len(self.relu_unit_index[layer_count])):
-                    z_bound_index = self.relu_unit_index[layer_count][j]
-                    if z_pre_relu_lo[z_bound_index] < 0 and\
-                            z_pre_relu_up[z_bound_index] > 0:
-                        if (isinstance(layer, nn.ReLU)):
-                            (A_relu_input, A_relu_output, A_relu_beta,
-                                relu_rhs) = utils.\
-                                replace_relu_with_mixed_integer_constraint(
-                                z_pre_relu_lo[z_bound_index],
-                                z_pre_relu_up[z_bound_index], self.dtype)
-                        elif isinstance(layer, nn.LeakyReLU):
-                            A_relu_input, A_relu_output, A_relu_beta, relu_rhs\
-                                = utils.\
-                                replace_leaky_relu_mixed_integer_constraint(
-                                    layer.negative_slope,
-                                    z_pre_relu_lo[z_bound_index],
-                                    z_pre_relu_up[z_bound_index], self.dtype)
-                        if layer_count == 0:
-                            # If this layer is the input layer, then the
-                            # constraint is
-                            # A_relu_input * ((Wᵢx)(j)+bᵢ(j))
-                            # A_relu_output * zᵢ₊₁(j) +
-                            # A_relu_beta * βᵢ(j) <= relu_rhs
-                            Ain1[ineq_constraint_count:
-                                 ineq_constraint_count + 4] =\
-                                     A_relu_input.reshape((-1, 1))\
-                                     @ Wi[j].reshape((1, -1))
-                        else:
-                            # If this layer is not the input layer, then
-                            # the constraint is
-                            # A_relu_input * ((Wᵢzᵢ)(j)+bᵢ(j)) +
-                            # A_relu_output * zᵢ₊₁(j) +
-                            # A_relu_beta * βᵢ(j) <= relu_rhs
-                            Ain2[ineq_constraint_count:
-                                 ineq_constraint_count+4,
-                                 self.relu_unit_index[layer_count - 1]] =\
-                                A_relu_input.reshape((-1, 1)) @\
-                                Wi[j].reshape((1, -1))
-                        Ain2[ineq_constraint_count:ineq_constraint_count+4,
-                             self.relu_unit_index[layer_count][j]] =\
-                            A_relu_output.squeeze()
-                        Ain3[ineq_constraint_count:ineq_constraint_count+4,
-                             self.relu_unit_index[layer_count][j]] =\
-                            A_relu_beta.squeeze()
-                        rhs_in[ineq_constraint_count: ineq_constraint_count
-                               + 4] = relu_rhs.reshape((-1, 1)) -\
-                            A_relu_input.reshape((-1, 1)) * bi[j]
-                        ineq_constraint_count += 4
-                        relu_unit_index_ij =\
-                            self.relu_unit_index[layer_count][j]
-                        if (negative_slope >= 0):
-                            z_post_relu_lo[relu_unit_index_ij] =\
-                                negative_slope * z_pre_relu_lo[
-                                    relu_unit_index_ij]
-                            z_post_relu_up[relu_unit_index_ij] = \
-                                z_pre_relu_up[relu_unit_index_ij].clone()
-                        else:
-                            z_post_relu_lo[relu_unit_index_ij] = \
-                                torch.tensor(0., dtype=self.dtype)
-                            z_post_relu_up[relu_unit_index_ij] = torch.max(
-                                negative_slope * z_pre_relu_lo[
-                                    relu_unit_index_ij], z_pre_relu_up[
-                                        relu_unit_index_ij])
-                    elif z_pre_relu_lo[z_bound_index] >= 0:
-                        # Case 2, introduce 2 equality constraints
-                        # zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
-                        Aeq2[eq_constraint_count][
-                            self.relu_unit_index[layer_count][j]] = 1.
-                        if layer_count == 0:
-                            Aeq1[eq_constraint_count] = -Wi[j]
-                        else:
-                            for k in range(zi_size):
-                                Aeq2[eq_constraint_count][
-                                    self.relu_unit_index[layer_count-1]
-                                    [k]] = -Wi[j][k]
-                        rhs_eq[eq_constraint_count] = bi[j].clone()
-                        eq_constraint_count += 1
-                        # βᵢ(j) = 1
-                        Aeq3[eq_constraint_count][
-                            self.relu_unit_index[layer_count][j]] = 1.
-                        rhs_eq[eq_constraint_count] = 1.
-                        eq_constraint_count += 1
-                        relu_unit_index_ij =\
-                            self.relu_unit_index[layer_count][j]
-                        z_post_relu_lo[relu_unit_index_ij] =\
-                            z_pre_relu_lo[relu_unit_index_ij]
-                        z_post_relu_up[relu_unit_index_ij] =\
-                            z_pre_relu_up[relu_unit_index_ij]
-                    else:
-                        # Case 3, introduce 2 equality constraints
-                        # zᵢ₊₁(j) = negative_slope * ((Wᵢzᵢ)(j) + bᵢ(j))
-                        if (isinstance(layer, nn.ReLU)):
-                            Aeq2[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 0.
-                            eq_constraint_count += 1
-                            # βᵢ(j) = 0
-                            Aeq3[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 0.
-                            eq_constraint_count += 1
-                        elif isinstance(layer, nn.LeakyReLU):
-                            # zᵢ₊₁(j) = negative_slope * ((Wᵢzᵢ)(j) + bᵢ(j))
-                            Aeq2[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            if layer_count == 0:
-                                Aeq1[eq_constraint_count] =\
-                                    -layer.negative_slope * Wi[j]
-                            else:
-                                for k in range(zi_size):
-                                    Aeq2[eq_constraint_count][
-                                        self.relu_unit_index[layer_count-1]
-                                        [k]] = -layer.negative_slope * Wi[j][k]
-                            rhs_eq[eq_constraint_count] =\
-                                layer.negative_slope * bi[j].clone()
-                            eq_constraint_count += 1
-                            # βᵢ(j) = 0
-                            Aeq3[eq_constraint_count][
-                                self.relu_unit_index[layer_count][j]] = 1.
-                            rhs_eq[eq_constraint_count] = 0.
-                            eq_constraint_count += 1
-                        relu_unit_index_ij =\
-                            self.relu_unit_index[layer_count][j]
-                        if negative_slope >= 0:
-                            z_post_relu_lo[relu_unit_index_ij] =\
-                                negative_slope *\
-                                z_pre_relu_lo[relu_unit_index_ij]
-                            z_post_relu_up[relu_unit_index_ij] =\
-                                negative_slope *\
-                                z_pre_relu_up[relu_unit_index_ij]
-                        else:
-                            z_post_relu_lo[relu_unit_index_ij] =\
-                                negative_slope *\
-                                z_pre_relu_up[relu_unit_index_ij]
-                            z_post_relu_up[relu_unit_index_ij] =\
-                                negative_slope *\
-                                z_pre_relu_lo[relu_unit_index_ij]
+        # First add the constraint on the input x_lo <= x <= x_up
+        Ain_input[:self.x_size] = torch.eye(self.x_size, dtype=self.dtype)
+        Ain_input[self.x_size:2*self.x_size] = -torch.eye(
+            self.x_size, dtype=self.dtype)
+        rhs_in[:self.x_size] = x_up
+        rhs_in[self.x_size: 2*self.x_size] = -x_lo
+        ineq_constr_count += 2 * self.x_size
 
-                layer_count += 1
-        if self.last_layer_is_relu:
-            # TODO: implement multiple relu ouputs (not really needed)
-            assert(self.model[-2].out_features == 1)
-            A_out = torch.zeros((self.num_relu_units,), dtype=self.dtype)
-            A_out[-1] = 1
-            b_out = 0
-        Ain1 = Ain1[:ineq_constraint_count]
-        Ain2 = Ain2[:ineq_constraint_count]
-        Ain3 = Ain3[:ineq_constraint_count]
-        rhs_in = rhs_in[:ineq_constraint_count]
-        Aeq1 = Aeq1[:eq_constraint_count]
-        Aeq2 = Aeq2[:eq_constraint_count]
-        Aeq3 = Aeq3[:eq_constraint_count]
-        rhs_eq = rhs_eq[:eq_constraint_count]
+        linear_layer_input_lo = x_lo.clone()
+        linear_layer_input_up = x_up.clone()
+        z_pre_relu_lo = torch.empty((self.num_relu_units,), dtype=self.dtype)
+        z_pre_relu_up = torch.empty((self.num_relu_units,), dtype=self.dtype)
+        z_post_relu_lo = torch.empty((self.num_relu_units,), dtype=self.dtype)
+        z_post_relu_up = torch.empty((self.num_relu_units,), dtype=self.dtype)
+
+        for layer_count in range(len(self.relu_unit_index)):
+            Ain_z_curr, Ain_z_next, Ain_binary_layer, rhs_in_layer,\
+                Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer,\
+                z_pre_relu_lo[self.relu_unit_index[layer_count]],\
+                z_pre_relu_up[self.relu_unit_index[layer_count]],\
+                z_post_relu_lo[self.relu_unit_index[layer_count]],\
+                z_post_relu_up[self.relu_unit_index[layer_count]] =\
+                _add_constraint_by_layer(
+                    self.model[2*layer_count], self.model[2*layer_count+1],
+                    linear_layer_input_lo, linear_layer_input_up, method)
+            linear_layer_input_lo = z_post_relu_lo[
+                self.relu_unit_index[layer_count]].clone()
+            linear_layer_input_up = z_post_relu_up[
+                self.relu_unit_index[layer_count]].clone()
+            if layer_count == 0:
+                # For the input layer, z_curr is the network input.
+                if Ain_z_curr.shape[0] > 0:
+                    Ain_input[ineq_constr_count: ineq_constr_count +
+                              Ain_z_curr.shape[0]] = Ain_z_curr
+                if Aeq_z_curr.shape[0] > 0:
+                    Aeq_input[
+                        eq_constr_count: eq_constr_count +
+                        Aeq_z_curr.shape[0]] = Aeq_z_curr
+            else:
+                if Ain_z_curr.shape[0] > 0:
+                    Ain_slack[
+                        ineq_constr_count: ineq_constr_count +
+                        Ain_z_curr.shape[0],
+                        self.relu_unit_index[layer_count - 1]] = Ain_z_curr
+                if Aeq_z_curr.shape[0] > 0:
+                    Aeq_slack[
+                        eq_constr_count: eq_constr_count +
+                        Aeq_z_curr.shape[0],
+                        self.relu_unit_index[layer_count-1]] = Aeq_z_curr
+            if Ain_z_curr.shape[0] > 0:
+                Ain_slack[
+                    ineq_constr_count: ineq_constr_count + Ain_z_curr.shape[0],
+                    self.relu_unit_index[layer_count]] = Ain_z_next
+                Ain_binary[
+                    ineq_constr_count: ineq_constr_count + Ain_z_curr.shape[0],
+                    self.relu_unit_index[layer_count]] = Ain_binary_layer
+                rhs_in[ineq_constr_count: ineq_constr_count +
+                       Ain_z_curr.shape[0]] = rhs_in_layer
+                ineq_constr_count += Ain_z_curr.shape[0]
+            if Aeq_z_curr.shape[0] > 0:
+                Aeq_slack[
+                    eq_constr_count: eq_constr_count + Aeq_z_curr.shape[0],
+                    self.relu_unit_index[layer_count]] = Aeq_z_next
+                Aeq_binary[
+                    eq_constr_count: eq_constr_count + Aeq_z_curr.shape[0],
+                    self.relu_unit_index[layer_count]] = Aeq_binary_layer
+                rhs_eq[eq_constr_count: eq_constr_count +
+                       Aeq_z_curr.shape[0]] = rhs_eq_layer
+                eq_constr_count += Aeq_z_curr.shape[0]
 
         mip_constr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-        mip_constr_return.Aout_slack = A_out
-        mip_constr_return.Cout = b_out
-        mip_constr_return.Ain_input = Ain1
-        mip_constr_return.Ain_slack = Ain2
-        mip_constr_return.Ain_binary = Ain3
-        mip_constr_return.rhs_in = rhs_in
-        mip_constr_return.Aeq_input = Aeq1
-        mip_constr_return.Aeq_slack = Aeq2
-        mip_constr_return.Aeq_binary = Aeq3
-        mip_constr_return.rhs_eq = rhs_eq
+        # Now set the output
+        if self.last_layer_is_relu:
+            # If last layer is relu, then the output is the last chunk of z.
+            mip_constr_return.Aout_slack = torch.zeros((
+                self.model[-2].out_features, self.num_relu_units),
+                dtype=self.dtype)
+            mip_constr_return.Aout_slack[:, self.relu_unit_index[-1]] =\
+                torch.eye(self.model[-2].out_features, dtype=self.dtype)
+            mip_constr_return.Cout = torch.zeros(
+                (self.model[-2].out_features,), dtype=self.dtype)
+        else:
+            # If last layer is not ReLU, then the output is the last linear
+            # layer applied on the last chunk of z.
+            mip_constr_return.Aout_slack = torch.zeros(
+                (self.model[-1].out_features, self.num_relu_units),
+                dtype=self.dtype)
+            mip_constr_return.Aout_slack[:, self.relu_unit_index[-1]] = \
+                self.model[-1].weight.clone()
+            if self.model[-1].bias is None:
+                mip_constr_return.Cout = torch.zeros(
+                    (self.model[-1].out_features,), dtype=self.dtype)
+            else:
+                mip_constr_return.Cout = self.model[-1].bias.clone()
 
+        mip_constr_return.Ain_input = Ain_input[:ineq_constr_count]
+        mip_constr_return.Ain_slack = Ain_slack[:ineq_constr_count]
+        mip_constr_return.Ain_binary = Ain_binary[:ineq_constr_count]
+        mip_constr_return.rhs_in = rhs_in[:ineq_constr_count]
+        mip_constr_return.Aeq_input = Aeq_input[:eq_constr_count]
+        mip_constr_return.Aeq_slack = Aeq_slack[:eq_constr_count]
+        mip_constr_return.Aeq_binary = Aeq_binary[:eq_constr_count]
+        mip_constr_return.rhs_eq = rhs_eq[:eq_constr_count]
         return (mip_constr_return, z_pre_relu_lo, z_pre_relu_up,
                 z_post_relu_lo, z_post_relu_up)
 
@@ -1015,13 +874,13 @@ def _add_constraint_by_layer(
     """
     assert(isinstance(linear_layer, nn.Linear))
     dtype = linear_layer.weight.dtype
-    Ain_z_curr = []
-    Ain_z_next = []
-    Ain_binary = []
-    rhs_in = []
-    Aeq_z_curr = []
-    Aeq_z_next = []
-    Aeq_binary = []
+    Ain_z_curr = [torch.empty((0, linear_layer.in_features), dtype=dtype)]
+    Ain_z_next = [torch.empty((0, linear_layer.out_features), dtype=dtype)]
+    Ain_binary = [torch.empty((0, linear_layer.out_features), dtype=dtype)]
+    rhs_in = [torch.empty((0,), dtype=dtype)]
+    Aeq_z_curr = [torch.empty((0, linear_layer.in_features), dtype=dtype)]
+    Aeq_z_next = [torch.empty((0, linear_layer.out_features), dtype=dtype)]
+    Aeq_binary = [torch.empty((0, linear_layer.out_features), dtype=dtype)]
     rhs_eq = []
     linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
         linear_layer, linear_input_lo, linear_input_up, method)
@@ -1091,8 +950,10 @@ def _add_constraint_by_layer(
     z_next_lo, z_next_up = mip_utils.propagate_bounds(
         relu_layer, linear_output_lo, linear_output_up, method)
     # Aggregate all the constraints for each neuron.
+    rhs_eq_all = torch.empty((0,), dtype=dtype) if len(rhs_eq) == 0 else\
+        torch.stack(rhs_eq, dim=0)
     return torch.cat(Ain_z_curr, dim=0), torch.cat(Ain_z_next, dim=0),\
         torch.cat(Ain_binary, dim=0), torch.cat(rhs_in, dim=0),\
         torch.cat(Aeq_z_curr, dim=0), torch.cat(Aeq_z_next, dim=0),\
-        torch.cat(Aeq_binary, dim=0), torch.stack(rhs_eq, dim=0),\
+        torch.cat(Aeq_binary, dim=0), rhs_eq_all,\
         linear_output_lo, linear_output_up, z_next_lo, z_next_up

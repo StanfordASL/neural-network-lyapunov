@@ -923,7 +923,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             lyapunov_relu1, dut.system.dtype)
         mip_constr_return, _, _, _, _ = relu1_free_pattern.output_constraint(
                 torch.tensor([-1.0, -1.0], dtype=dut.system.dtype),
-                torch.tensor([1.0, 1.0], dtype=dut.system.dtype))
+                torch.tensor([1.0, 1.0], dtype=dut.system.dtype),
+                mip_utils.PropagateBoundsMethod.IA)
         x = milp_relu.addVars(
             2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS)
         z, beta = milp_relu.add_mixed_integer_linear_constraints(
@@ -954,7 +955,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 x_equilibrium)
         relu_x_equilibrium = lyapunov_relu1.forward(x_equilibrium).item()
         milp_relu.setObjective(
-            [mip_constr_return.Aout_slack, V_lambda *
+            [mip_constr_return.Aout_slack.squeeze(), V_lambda *
              torch.ones((s_dim,), dtype=self.system1.dtype)],
             [z, s_x_norm], float(mip_constr_return.Cout) - relu_x_equilibrium,
             sense=gurobipy.GRB.MAXIMIZE)
@@ -969,7 +970,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             relu_at_equilibrium=relu_x_equilibrium).item(),
             v_upper)
         milp_relu.setObjective(
-            [mip_constr_return.Aout_slack, V_lambda *
+            [mip_constr_return.Aout_slack.squeeze(), V_lambda *
              torch.ones((s_dim,), dtype=self.system1.dtype)],
             [z, s_x_norm], float(mip_constr_return.Cout) - relu_x_equilibrium,
             sense=gurobipy.GRB.MINIMIZE)

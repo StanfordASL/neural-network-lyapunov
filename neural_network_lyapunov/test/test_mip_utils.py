@@ -107,7 +107,8 @@ class TestPropagateBounds(unittest.TestCase):
         np.testing.assert_allclose(output_lo, np.array([0, 2., 0.]))
         np.testing.assert_allclose(output_up, np.array([3., 6., 0.]))
 
-    def test_leaky_relu(self):
+    def test_leaky_relu1(self):
+        # negative_slope > 0
         layer = torch.nn.LeakyReLU(0.1)
         input_lo = torch.tensor([-2., 2., -3.], dtype=torch.float64)
         input_up = torch.tensor([3., 6., -1.], dtype=torch.float64)
@@ -115,6 +116,16 @@ class TestPropagateBounds(unittest.TestCase):
             layer, input_lo, input_up, mip_utils.PropagateBoundsMethod.IA)
         np.testing.assert_allclose(output_lo, np.array([-0.2, 2., -0.3]))
         np.testing.assert_allclose(output_up, np.array([3., 6., -0.1]))
+
+    def test_leaky_relu2(self):
+        # negative_slope < 0
+        layer = torch.nn.LeakyReLU(-0.1)
+        input_lo = torch.tensor([-10, 2, -8, -1], dtype=torch.float64)
+        input_up = torch.tensor([0.5, 8, -2, 4], dtype=torch.float64)
+        output_lo, output_up = mip_utils.propagate_bounds(
+            layer, input_lo, input_up, mip_utils.PropagateBoundsMethod.IA)
+        np.testing.assert_allclose(output_lo, np.array([0, 2, 0.2, 0]))
+        np.testing.assert_allclose(output_up, np.array([1., 8., 0.8, 4]))
 
     def test_linear_layer_no_bias_IA(self):
         layer = torch.nn.Linear(3, 2, bias=False)

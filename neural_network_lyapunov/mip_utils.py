@@ -84,16 +84,16 @@ def compute_range_by_IA(
     assert(isinstance(x_ub, torch.Tensor))
     assert(x_lb.shape == (x_dim,))
     assert(x_ub.shape == (x_dim,))
-    output_lb = b.clone()
-    output_ub = b.clone()
-    for j in range(x_dim):
-        for i in range(output_dim):
-            if A[i, j] < 0:
-                output_lb[i] += A[i, j] * x_ub[j]
-                output_ub[i] += A[i, j] * x_lb[j]
-            else:
-                output_lb[i] += A[i, j] * x_lb[j]
-                output_ub[i] += A[i, j] * x_ub[j]
+    output_lb = torch.empty(b.shape, dtype=b.dtype)
+    output_ub = torch.empty(b.shape, dtype=b.dtype)
+
+    for i in range(output_dim):
+        mask1 = torch.where(A[i] > 0)[0]
+        mask2 = torch.where(A[i] <= 0)[0]
+        output_lb[i] = A[i][mask1] @ x_lb[mask1] + A[i][mask2] @ x_ub[mask2]\
+            + b[i]
+        output_ub[i] = A[i][mask1] @ x_ub[mask1] + A[i][mask2] @ x_lb[mask2]\
+            + b[i]
     return output_lb, output_ub
 
 
@@ -118,10 +118,15 @@ def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
         output_lo = layer(input_lo)
         output_up = layer(input_up)
     elif isinstance(layer, torch.nn.LeakyReLU):
-        assert(layer.negative_slope >= 0)
-        # Leaky ReLU is a monotonic increasing function
-        output_lo = layer(input_lo)
-        output_up = layer(input_up)
+        lo = layer(input_lo)
+        up = layer(input_up)
+        if layer.negative_slope < 0:
+            output_lo = torch.min(lo, up)
+            output_lo[torch.logical_and(input_lo < 0, input_up > 0)] = 0
+            output_up = torch.max(lo, up)
+        else:
+            output_lo = lo
+            output_up = up
     elif isinstance(layer, torch.nn.Linear):
         bias = torch.zeros((layer.out_features,), dtype=dtype) if\
             layer.bias is None else layer.bias.clone()

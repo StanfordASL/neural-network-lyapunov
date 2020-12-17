@@ -114,12 +114,13 @@ class LyapunovHybridLinearSystem:
         mip_constr_return, _, _, _, _ = \
             self.lyapunov_relu_free_pattern.output_constraint(
                  torch.from_numpy(self.system.x_lo_all),
-                 torch.from_numpy(self.system.x_up_all))
+                 torch.from_numpy(self.system.x_up_all),
+                 mip_utils.PropagateBoundsMethod.IA)
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
             mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "")
-        return (relu_z, relu_beta, mip_constr_return.Aout_slack,
-                mip_constr_return.Cout)
+        return (relu_z, relu_beta, mip_constr_return.Aout_slack.squeeze(),
+                mip_constr_return.Cout.squeeze())
 
     def add_state_error_l1_constraint(
             self, milp, x_equilibrium, x, *, R=None, slack_name="s",
@@ -298,7 +299,7 @@ class LyapunovHybridLinearSystem:
             binary_var_name="gamma", fixed_R=fixed_R)
 
         milp.setObjective(
-            [-a_out,
+            [-a_out.squeeze(),
              (V_epsilon-V_lambda) *
              torch.ones((len(s),), dtype=dtype)],
             [z, s], constant=-b_out + relu_x_equilibrium.squeeze(),
