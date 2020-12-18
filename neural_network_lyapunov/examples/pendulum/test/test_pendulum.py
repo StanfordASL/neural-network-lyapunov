@@ -1,4 +1,4 @@
-import neural_network_lyapunov.test.pendulum as pendulum
+import neural_network_lyapunov.examples.pendulum.pendulum as pendulum
 
 import unittest
 

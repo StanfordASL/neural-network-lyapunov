@@ -1,4 +1,5 @@
-import neural_network_lyapunov.test.quadrotor_2d as quadrotor_2d
+import neural_network_lyapunov.examples.quadrotor2d.quadrotor_2d as\
+    quadrotor_2d
 
 import unittest
 import numpy as np

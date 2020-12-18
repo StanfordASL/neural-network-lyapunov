@@ -1,4 +1,4 @@
-import neural_network_lyapunov.test.pendulum as pendulum
+import neural_network_lyapunov.examples.pendulum.pendulum as pendulum
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
@@ -247,7 +247,7 @@ if __name__ == "__main__":
         train_forward_model(dynamics_model, model_dataset)
     else:
         dynamics_model_data = torch.load(
-            dir_path + "/data/pendulum/pendulum_second_order_forward_relu2.pt")
+            dir_path + "/data/pendulum_second_order_forward_relu2.pt")
         dynamics_model = utils.setup_relu(
             dynamics_model_data["linear_layer_width"], params=None,
             negative_slope=dynamics_model_data["negative_slope"], bias=True,
