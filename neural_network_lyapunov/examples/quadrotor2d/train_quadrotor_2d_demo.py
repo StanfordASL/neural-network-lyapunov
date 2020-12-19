@@ -1,4 +1,5 @@
-import neural_network_lyapunov.test.quadrotor_2d as quadrotor_2d
+import neural_network_lyapunov.examples.quadrotor2d.quadrotor_2d as\
+    quadrotor_2d
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
