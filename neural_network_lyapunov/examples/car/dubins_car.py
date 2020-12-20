@@ -219,3 +219,35 @@ class DubinsCarReLUModel:
                        rhs=0.,
                        name="dubins_car_theta_dynamics")
         return forward_slack, forward_binary
+
+
+class DubinsCarVisualizer:
+    def __init__(self, ax, x_lim, y_lim):
+        self.ax = ax
+        self.ax.set_aspect("equal")
+        self.ax.set_xlim(x_lim[0], x_lim[1])
+        self.ax.set_ylim(y_lim[0], y_lim[1])
+
+        self.car_length = 0.1
+        self.car_width = 0.05
+
+        self.base = np.vstack(
+            (self.car_length / 2 * np.array([1, -1, -1, 1, 1]),
+             self.car_width / 2 * np.array([1, 1, -1, -1, 1])))
+
+        self.base_fill = self.ax.fill(self.base[0, :],
+                                      self.base[1, :],
+                                      zorder=1,
+                                      edgecolor="k",
+                                      facecolor=[.6, .6, .6])
+        self.goal = self.ax.plot(0, 0, marker='*', markersize=10)
+
+    def draw(self, t, x):
+        theta = x[2]
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        R = np.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
+        p = np.dot(R, self.base)
+        self.base_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
+        self.base_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
+        self.ax.set_title("t = {:.2f}s".format(t))

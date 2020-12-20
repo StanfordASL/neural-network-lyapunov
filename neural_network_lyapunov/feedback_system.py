@@ -16,7 +16,6 @@ import numpy as np
 import gurobipy
 
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
-import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
@@ -36,7 +35,9 @@ class FeedbackSystem:
             u_upper_limit: np.ndarray):
         """
         @param forward_system. The forward dynamical system representing
-        x[n+1] = f(x[n], u[n])
+        x[n+1] = f(x[n], u[n]). This system must implements functions like
+        add_dynamics_constraint(). Check ReLUSystemGivenEquilibrium in
+        relu_system.py as a reference.
         @param controller_network The network ϕᵤ, where the control law is
         u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         @param x_equilibrium The equilibrium state.
@@ -52,15 +53,6 @@ class FeedbackSystem:
         @note If a control has a lower limit, it has to also have an upper
         limit, and vice versa.
         """
-        assert(isinstance(
-            forward_system, hybrid_linear_system.HybridLinearSystem) or
-            isinstance(forward_system, relu_system.ReLUSystem) or
-            isinstance(forward_system, relu_system.ReLUSystemGivenEquilibrium)
-            or isinstance(forward_system,
-                          relu_system.ReLUSecondOrderSystemGivenEquilibrium) or
-            isinstance(
-                forward_system,
-                relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium))
         self.forward_system = forward_system
         self.x_dim = self.forward_system.x_dim
         self.x_lo_all = self.forward_system.x_lo_all
