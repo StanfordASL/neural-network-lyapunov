@@ -27,6 +27,7 @@ jobs:
     - name: Test with python unittest
       run: |
         python3 -m unittest discover neural_network_lyapunov/test
+        python3 -m unittest discover neural_network_lyapunov/examples/car/test
         python3 -m unittest discover neural_network_lyapunov/examples/pendulum/test
         python3 -m unittest discover neural_network_lyapunov/examples/quadrotor2d/test
         export PYTHONPATH=${PWD}:${PYTHONPATH}
