@@ -104,7 +104,8 @@ class FeedbackSystem:
                 controller_z_post_relu_up = \
                 self.controller_relu_free_pattern.output_constraint(
                     torch.from_numpy(self.forward_system.x_lo_all),
-                    torch.from_numpy(self.forward_system.x_up_all))
+                    torch.from_numpy(self.forward_system.x_up_all),
+                    mip_utils.PropagateBoundsMethod.IA)
             assert(controller_mip_cnstr.Aout_input is None)
             assert(controller_mip_cnstr.Aout_binary is None)
             controller_slack, controller_binary = \
