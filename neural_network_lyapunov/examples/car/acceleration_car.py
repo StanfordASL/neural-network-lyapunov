@@ -38,7 +38,7 @@ class AccelerationCar:
         state (x, y, yaw, vel) and control (yaw_rate, accel) after dt.
         """
         assert (isinstance(x, np.ndarray))
-        assert (isinstance(u, np.ndarray))
+        # assert (isinstance(u, np.ndarray))
         result = scipy.integrate.solve_ivp(
             lambda t, x_val: self.dynamics(x_val, u), (0, dt), x)
         return result.y[:3, -1]
