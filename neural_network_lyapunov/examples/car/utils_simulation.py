@@ -3,6 +3,7 @@ import numpy as np
 # Helper functions for setting up obstacle environments, simulating
 # dynamics, etc.
 
+
 # Parameters
 def get_parameters():
 
