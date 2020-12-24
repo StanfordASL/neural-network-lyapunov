@@ -167,15 +167,20 @@ def check_mixed_integer_constraints(tester, dut, x_val, u_val, autonomous):
         x_next_val_expected.detach().numpy(), decimal=5)
 
 
-def check_add_dynamics_constraint(dut, x_val, u_val):
+def check_add_dynamics_constraint(dut, x_val, u_val, atol=0, rtol=1E-7):
     mip = gurobi_torch_mip.GurobiTorchMIP(dut.dtype)
+    assert(torch.all(x_val <= dut.x_up))
+    assert(torch.all(x_val >= dut.x_lo))
+    assert(torch.all(u_val <= dut.u_up))
+    assert(torch.all(u_val >= dut.u_lo))
     x = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY,
                     vtype=gurobipy.GRB.CONTINUOUS)
     u = mip.addVars(dut.u_dim, lb=-gurobipy.GRB.INFINITY,
                     vtype=gurobipy.GRB.CONTINUOUS)
     x_next = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS)
-    dut.add_dynamics_constraint(mip, x, x_next, u, "s", "gamma")
+    forward_slack, forward_binary = dut.add_dynamics_constraint(
+        mip, x, x_next, u, "s", "gamma")
     mip.addMConstrs([torch.eye(dut.x_dim, dtype=dut.dtype)], [x], b=x_val,
                     sense=gurobipy.GRB.EQUAL)
     mip.addMConstrs([torch.eye(dut.u_dim, dtype=dut.dtype)], [u], b=u_val,
@@ -184,7 +189,8 @@ def check_add_dynamics_constraint(dut, x_val, u_val):
     mip.gurobi_model.optimize()
     x_next_expected = dut.step_forward(x_val, u_val)
     x_next_val = np.array([x_next[i].x for i in range(dut.x_dim)])
-    np.testing.assert_allclose(x_next_val, x_next_expected.detach().numpy())
+    np.testing.assert_allclose(
+        x_next_val, x_next_expected.detach().numpy(), atol=atol, rtol=rtol)
 
 
 class TestReLUSystem(unittest.TestCase):
