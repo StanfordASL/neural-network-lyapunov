@@ -170,11 +170,15 @@ def car_dynamics_training(u, x, xn, nf):
 def visualize_model(depth_model, u, d, next_d):
     u_tensor = torch.from_numpy(u.T)
     d_tensor = torch.from_numpy(d.T)
-    d_pred = depth_model(torch.cat((u_tensor, d_tensor)))
-    plt.subplot(121)
+    d_pred = depth_model(torch.cat((d_tensor, u_tensor)))
+    plt.subplot(131)
+    plt.plot(d)
+    plt.title('Current Depth Sensor')
+    plt.show()
+    plt.subplot(132)
     plt.plot(d_pred.detach().numpy())
     plt.title('Depth Sensor Model Prediction')
-    plt.subplot(122)
+    plt.subplot(133)
     plt.plot(next_d)
     plt.title('Actual Depth Sensor')
     plt.show()
@@ -238,7 +242,22 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_model", action="store_true")
+    parser.add_argument("--visualize_model", type=str,
+                        help="path to the model file for visualization")
     args = parser.parse_args()
+
+    if args.visualize_model is not None:
+        input_dim = u.shape[1] + d.shape[1]
+        model = nn.Sequential(
+            nn.Linear(input_dim, nf), nn.LeakyReLU(0.1),
+            nn.Linear(nf, d.shape[1]))
+        model.load_state_dict(torch.load('depth_model/' +
+                                         args.visualize_model))
+        model.eval()
+        model.double()
+        index = 6000
+        visualize_model(model, u[index, :],
+                        d[index, :], dn[index, :])
 
     writer = SummaryWriter(filename_suffix="sensor_dynamics")
     depth_model, model_name = train_depth_model(
@@ -248,6 +267,6 @@ if __name__ == "__main__":
     # car_model = car_dynamics_training(u, x, xn, nf_car)
     # torch.save(car_model.state_dict(), 'car_model/'+args.model_name)
     writer.close()
-    # index = 888
-    # visualize_model(depth_model, u[:, index],
-    #                 d[:, index], d[:, index + 1])
+    index = 888
+    visualize_model(depth_model, u[index, :],
+                    d[index, :], dn[index, :])
