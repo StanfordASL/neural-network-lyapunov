@@ -4,6 +4,7 @@ import torch
 import cvxpy as cp
 import gurobipy
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import scipy.integrate
 
 
 def update_progress(progress):
@@ -972,6 +973,27 @@ def step_system(system, x_start, steps):
         for i in range(steps):
             path.append(system.step_forward(path[-1]))
     return path
+
+
+def simulate_plant_with_controller(
+    plant, controller_relu, t_span, x_equilibrium, u_equilibrium, u_lo, u_up,
+        x0):
+    """
+    Simulate a continuous time system with a controller. The controller is
+    computed as u = saturate(ϕ(x) − ϕ(x*) + u*)
+    """
+
+    def dyn(t, x):
+        with torch.no_grad():
+            x_torch = torch.from_numpy(x)
+            u_torch = controller_relu(x_torch)\
+                - controller_relu(x_equilibrium) + u_equilibrium
+            u = torch.max(torch.min(u_torch, u_up), u_lo).detach().numpy()
+        return plant.dynamics(x, u)
+
+    result = scipy.integrate.solve_ivp(dyn, t_span, x0, t_eval=np.arange(
+        start=t_span[0], stop=t_span[1], step=0.01))
+    return result
 
 
 def train_approximator(
