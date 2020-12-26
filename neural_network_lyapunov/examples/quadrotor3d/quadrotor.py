@@ -1,7 +1,118 @@
 import torch
+import numpy as np
 import gurobipy
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.geometry_transform as geometry_transform
 import neural_network_lyapunov.mip_utils as mip_utils
+
+
+class Quadrotor:
+    """
+    A quadrotor that directly commands the thrusts.
+    The state is [pos_x, pos_y, pos_z, roll, pitch, yaw, pos_xdot, pos_ydot,
+    pos_zdot, angular_vel_x, angular_vel_y, angular_vel_z], where
+    angular_vel_x/y/z are the angular velocity measured in the body frame.
+    Notice that unlike many models where uses the linear velocity in the body
+    frame as the state, we use the linear velocit in the world frame as the
+    state. The reason is that the update from linear velocity to next position
+    is a linear constraint, and we don't need to use a neural network to encode
+    this update.
+    """
+    def __init__(self, dtype):
+        """
+        The parameter of this quadrotor is obtained from
+        Attitude stabilization of a VTOL quadrotor aircraft
+        by Abdelhamid Tayebi and Stephen McGilvray.
+        """
+        self.mass = 0.468
+        self.gravity = 9.81
+        self.arm_length = 0.225
+        # The inertia matrix is diagonal, we only store Ixx, Iyy and Izz.
+        self.inertia = np.array([4.9E-3, 4.9E-3, 8.8E-3])
+        # The ratio between the torque along the z axis versus the force.
+        self.z_torque_to_force_factor = 1.1 / 29
+        self.dtype = dtype
+        self.hover_thrust = self.mass * self.gravity / 4
+
+    def dynamics(self, x, u):
+        # Compute the time derivative of the state.
+        # The dynamics is explained in
+        # Minimum Snap Trajectory Generation and Control for Quadrotors
+        # by Daniel Mellinger and Vijay Kumar
+        # @param u the thrust generated in each propeller
+        rpy = x[3:6]
+        pos_dot = x[6:9]
+        omega = x[9:12]
+
+        if isinstance(x, np.ndarray):
+            # plant_input is [total_thrust, torque_x, torque_y, torque_z]
+            plant_input = np.array([[1, 1, 1, 1],
+                                    [0, self.arm_length, 0, -self.arm_length],
+                                    [-self.arm_length, 0, self.arm_length, 0],
+                                    [
+                                        self.z_torque_to_force_factor,
+                                        -self.z_torque_to_force_factor,
+                                        self.z_torque_to_force_factor,
+                                        -self.z_torque_to_force_factor
+                                    ]]) @ u
+            R = geometry_transform.rpy2rotmat(rpy)
+            pos_ddot = np.array([
+                0, 0, -self.gravity
+            ]) + R @ np.array([0, 0, plant_input[0]]) / self.mass
+            # Here we exploit the fact that the inertia matrix is diagonal.
+            omega_dot = (np.cross(-omega, self.inertia * omega) +
+                         plant_input[1:]) / self.inertia
+            # Convert the angular velocity to the roll-pitch-yaw time
+            # derivative.
+            sin_roll = np.sin(rpy[0])
+            cos_roll = np.cos(rpy[0])
+            tan_pitch = np.tan(rpy[1])
+            cos_pitch = np.cos(rpy[1])
+            # Equation 2.7 in quadrotor control: modeling, nonlinear control
+            # design and simulation by Francesco Sabatino
+            rpy_dot = np.array(
+                [[1., sin_roll * tan_pitch, cos_roll * tan_pitch],
+                 [0., cos_roll, -sin_roll],
+                 [0, sin_roll / cos_pitch, cos_roll / cos_pitch]]) @ omega
+            return np.hstack((pos_dot, rpy_dot, pos_ddot, omega_dot))
+        elif isinstance(x, torch.Tensor):
+            # plant_input is [total_thrust, torque_x, torque_y, torque_z]
+            plant_input = torch.tensor(
+                [[1, 1, 1, 1], [0, self.arm_length, 0, -self.arm_length],
+                 [-self.arm_length, 0, self.arm_length, 0],
+                 [
+                     self.z_torque_to_force_factor,
+                     -self.z_torque_to_force_factor,
+                     self.z_torque_to_force_factor,
+                     -self.z_torque_to_force_factor
+                 ]],
+                dtype=x.dtype) @ u
+            R = geometry_transform.rpy2rotmat(rpy)
+            pos_ddot = torch.tensor(
+                [0, 0, -self.gravity],
+                dtype=x.dtype) + R[:, 2] * plant_input[0] / self.mass
+            # Here we exploit the fact that the inertia matrix is diagonal.
+            omega_dot = (torch.cross(-omega,
+                                     torch.from_numpy(self.inertia) * omega) +
+                         plant_input[1:]) / torch.from_numpy(self.inertia)
+            # Convert the angular velocity to the roll-pitch-yaw time
+            # derivative.
+            sin_roll = torch.sin(rpy[0])
+            cos_roll = torch.cos(rpy[0])
+            tan_pitch = torch.tan(rpy[1])
+            cos_pitch = torch.cos(rpy[1])
+            # Equation 2.7 in quadrotor control: modeling, nonlinear control
+            # design and simulation by Francesco Sabatino
+            T = torch.zeros((3, 3), dtype=x.dtype)
+            T[0, 0] = 1
+            T[0, 1] = sin_roll * tan_pitch
+            T[0, 2] = cos_roll * tan_pitch
+            T[1, 1] = cos_roll
+            T[1, 2] = -sin_roll
+            T[2, 1] = sin_roll / cos_pitch
+            T[2, 2] = cos_roll / cos_pitch
+            rpy_dot = T @ omega
+            return torch.cat((pos_dot, rpy_dot, pos_ddot, omega_dot))
 
 
 class QuadrotorWithPixhawkReLUSystem:
