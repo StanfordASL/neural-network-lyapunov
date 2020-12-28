@@ -282,3 +282,163 @@ class QuadrotorWithPixhawkReLUSystem:
                         sense=gurobipy.GRB.EQUAL,
                         name="update_pos_next")
         return forward_slack, forward_binary
+
+
+class QuadrotorReLUSystem:
+    """
+    Approximate the discrete-time dynamics of a quadrotor (with thrust as the
+    input) using a neural network (with ReLU activations).
+    The neural network takes the input as (rpy[n], angular_vel[n], thrust[n]).
+    The dynamics is
+    pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
+    (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
+    = ϕ(rpy[n], angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+    where ϕ is the neural network. Note here we use the fact that the quadrotor
+    acceleration doesn't depend on its position and linear velocity.
+    """
+    def __init__(self, dtype, x_lo: torch.Tensor, x_up: torch.Tensor,
+                 u_lo: torch.Tensor, u_up: torch.Tensor,
+                 dynamics_relu: torch.nn.Sequential, hover_thrust: float,
+                 dt: float):
+        """
+        @param u_lo The lower limit of the input. Note that the system input is
+        the thrust, so this lower limit should be non-negative.
+        @param dynamics_relu The neural network ϕ in the documentation above.
+        @param hover_thrust a float. The hovering thrust for each motor.
+        """
+        self.dtype = dtype
+        self.x_dim = 12
+        assert (isinstance(x_lo, torch.Tensor))
+        assert (x_lo.shape == (self.x_dim, ))
+        self.x_lo = x_lo
+        assert (isinstance(x_up, torch.Tensor))
+        assert (x_up.shape == (self.x_dim, ))
+        self.x_up = x_up
+        self.u_dim = 4
+        assert (isinstance(u_lo, torch.Tensor))
+        assert (u_lo.shape == (self.u_dim, ))
+        self.u_lo = u_lo
+        assert (isinstance(u_up, torch.Tensor))
+        assert (u_up.shape == (self.u_dim, ))
+        self.u_up = u_up
+        assert (dynamics_relu[0].in_features == 10)
+        assert (dynamics_relu[-1].out_features == 9)
+        self.dynamics_relu = dynamics_relu
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        self.x_equilibrium = torch.zeros((self.x_dim, ), dtype=self.dtype)
+        self.u_equilibrium = hover_thrust * torch.ones((4, ), dtype=self.dtype)
+        assert (isinstance(dt, float))
+        assert (dt > 0)
+        self.dt = dt
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def step_forward(self, x_start: torch.Tensor, u_start: torch.Tensor):
+        """
+        Compute the next state as
+        pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
+        (rpy[n+1], pos_dot[n+1]-pos_dot[n], angular_vel[n+1])
+        = ϕ(rpy[n], angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+        """
+        assert (isinstance(x_start, torch.Tensor))
+        assert (isinstance(u_start, torch.Tensor))
+        if len(x_start.shape) == 1:
+            # single state.
+            rpy_delta_posdot_angularvel_next = self.dynamics_relu(
+                torch.cat(
+                    (x_start[3:6], x_start[9:12], u_start),
+                    dim=0)) - self.dynamics_relu(
+                        torch.cat(
+                            (self.x_equilibrium[3:6], self.x_equilibrium[9:12],
+                             self.u_equilibrium),
+                            dim=0))
+            posdot_next = x_start[6:9] + rpy_delta_posdot_angularvel_next[3:6]
+            pos_next = x_start[:3] + (x_start[6:9] + posdot_next) / 2 * self.dt
+            rpy_next = rpy_delta_posdot_angularvel_next[:3]
+            angularvel_next = rpy_delta_posdot_angularvel_next[6:9]
+            return torch.cat(
+                (pos_next, rpy_next, posdot_next, angularvel_next), dim=0)
+        elif len(x_start.shape) == 2:
+            # batch of state/control.
+            rpy_delta_posdot_angularvel_next = self.dynamics_relu(
+                torch.cat(
+                    (x_start[:, 3:6], x_start[:, 9:12], u_start),
+                    dim=1)) - self.dynamics_relu(
+                        torch.cat(
+                            (self.x_equilibrium[3:6], self.x_equilibrium[9:12],
+                             self.u_equilibrium),
+                            dim=0))
+            posdot_next = x_start[:,
+                                  6:9] + rpy_delta_posdot_angularvel_next[:,
+                                                                          3:6]
+            pos_next = x_start[:, :3] + (x_start[:, 6:9] +
+                                         posdot_next) / 2 * self.dt
+            rpy_next = rpy_delta_posdot_angularvel_next[:, :3]
+            angularvel_next = rpy_delta_posdot_angularvel_next[:, 6:9]
+            return torch.cat(
+                (pos_next, rpy_next, posdot_next, angularvel_next), dim=-1)
+
+    def possible_dx(self, x, u):
+        return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
+                                slack_var_name, binary_var_name):
+        """
+        Add the dynamics constraints
+        pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
+        (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
+        = ϕ(rpy[n],, angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+        """
+        mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
+            output_constraint(
+                torch.cat((self.x_lo[3:6], self.x_lo[9:12], self.u_lo)),
+                torch.cat((self.x_up[3:6], self.x_up[9:12], self.u_up)),
+                mip_utils.PropagateBoundsMethod.IA)
+        # First add mip_cnstr_result, but don't impose the constraint on the
+        # output of the network (we will impose the constraint separately)
+        input_vars = x_var[3:6] + x_var[9:12] + u_var
+        forward_slack, forward_binary = \
+            mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_result, input_vars, None, slack_var_name,
+                binary_var_name, "quadrotor_dynamics_ineq",
+                "quadrotor_dynamics_eq", None)
+        # Impose the constraint
+        # (rpy[n+1], pos_dot[n+1]-pos_dot[n], angular_vel[n+1])
+        # = ϕ(rpy[n], angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+        # = Aout_slack * s + Cout - ϕ(0, 0, hover_thrust)
+        assert (mip_cnstr_result.Aout_input is None)
+        assert (mip_cnstr_result.Aout_binary is None)
+        posdot_next = x_next_var[6:9]
+        posdot_curr = x_var[6:9]
+        posdot_curr_coeff = torch.zeros((9, 3), dtype=self.dtype)
+        posdot_curr_coeff[3:6, :] = -torch.eye(3, dtype=self.dtype)
+        mip.addMConstrs(
+            [
+                torch.eye(9, dtype=self.dtype), posdot_curr_coeff,
+                -mip_cnstr_result.Aout_slack
+            ], [x_next_var[3:12], posdot_curr, forward_slack],
+            b=mip_cnstr_result.Cout - self.dynamics_relu(
+                torch.cat((self.x_equilibrium[3:6], self.x_equilibrium[9:12],
+                           self.u_equilibrium))),
+            sense=gurobipy.GRB.EQUAL,
+            name="quadrotor_dynamics_output")
+        # Now add the constraint
+        # pos[n+1] - pos[n] = (posdot[n+1] + posdot[n]) * dt / 2
+        pos_next = x_next_var[:3]
+        pos_curr = x_var[:3]
+        mip.addMConstrs([
+            torch.eye(3, dtype=self.dtype), -torch.eye(3, dtype=self.dtype),
+            -self.dt / 2 * torch.eye(3, dtype=self.dtype),
+            -self.dt / 2 * torch.eye(3, dtype=self.dtype)
+        ], [pos_next, pos_curr, posdot_next, posdot_curr],
+                        b=torch.zeros((3, ), dtype=self.dtype),
+                        sense=gurobipy.GRB.EQUAL,
+                        name="update_pos")
+        return forward_slack, forward_binary

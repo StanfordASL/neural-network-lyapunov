@@ -172,5 +172,103 @@ class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
             torch.tensor([0.1, 0.9, 0.3, 1.5], dtype=self.dtype))
 
 
+class TestQuadrotorReLUSystem(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+        torch.manual_seed(0)
+        dynamics_relu = utils.setup_relu((10, 15, 15, 9),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=torch.float64)
+        x_lo = torch.tensor([
+            -5, -5, -5, -0.5 * np.pi, -0.5 * np.pi, -np.pi, -7, -7, -7, -np.pi,
+            -np.pi, -np.pi
+        ],
+                            dtype=self.dtype)
+        x_up = -x_lo
+        u_lo = torch.tensor([0., 0., 0., 0.], dtype=self.dtype)
+        u_up = torch.tensor([10., 10., 10., 10.], dtype=self.dtype)
+        hover_thrust = 5.
+        dt = 0.01
+        self.dut = quadrotor.QuadrotorReLUSystem(self.dtype, x_lo, x_up, u_lo,
+                                                 u_up, dynamics_relu,
+                                                 hover_thrust, dt)
+        np.testing.assert_allclose(self.dut.x_equilibrium.detach().numpy(),
+                                   np.zeros((12, )))
+        np.testing.assert_allclose(self.dut.u_equilibrium.detach().numpy(),
+                                   hover_thrust * np.ones((4, )))
+
+    def test_step_forward(self):
+        # Test equilibrium
+        x_next = self.dut.step_forward(self.dut.x_equilibrium,
+                                       self.dut.u_equilibrium)
+        np.testing.assert_allclose(x_next.detach().numpy(),
+                                   self.dut.x_equilibrium.detach().numpy())
+
+        def compute_next_state(x_val, u_val):
+            rpy_delta_posdot_angularvel_next = self.dut.dynamics_relu(
+                torch.cat((x_val[3:6], x_val[9:12],
+                           u_val))) - self.dut.dynamics_relu(
+                               torch.cat((self.dut.x_equilibrium[3:6],
+                                          self.dut.x_equilibrium[9:12],
+                                          self.dut.u_equilibrium)))
+            rpy_next = rpy_delta_posdot_angularvel_next[:3]
+            posdot_next = x_val[6:9] + rpy_delta_posdot_angularvel_next[3:6]
+            angularvel_next = rpy_delta_posdot_angularvel_next[6:9]
+            pos_next = x_val[:3] + (x_val[6:9] + posdot_next) * self.dut.dt / 2
+            return torch.cat(
+                (pos_next, rpy_next, posdot_next, angularvel_next))
+
+        # Test a single state/control
+        x_val = torch.tensor(
+            [0.5, 0.4, 1.2, 0.45, 0.3, -0.6, -2., 4., 1.5, 0.75, 0.32, 0.43],
+            dtype=self.dtype)
+        u_val = torch.tensor([0.24, 0.51, 0.42, 1.54], dtype=self.dtype)
+        np.testing.assert_allclose(
+            self.dut.step_forward(x_val, u_val).detach().numpy(),
+            compute_next_state(x_val, u_val).detach().numpy())
+        x_val = torch.tensor(
+            [-1.5, 9.4, 10.2, 0.35, 4.3, -0.6, -3., 4., 1.5, 2.75, 1.32, 0.43],
+            dtype=self.dtype)
+        u_val = torch.tensor([2.4, 5.1, 4.2, 1.54], dtype=self.dtype)
+        np.testing.assert_allclose(
+            self.dut.step_forward(x_val, u_val).detach().numpy(),
+            compute_next_state(x_val, u_val).detach().numpy())
+
+        # Test a batch of state/control
+        x_val = torch.tensor([[
+            0.5, 0.4, 1.2, 0.45, 0.3, -0.6, -2., 4., 1.5, 0.75, 0.32, 0.43
+        ], [0.12, 4.5, 3.2, -0.5, 0.9, 1.3, 0.25, 4.1, 0.9, 1.6, -0.7, -2.1]],
+                             dtype=self.dtype)
+        u_val = torch.tensor(
+            [[0.24, 0.51, 0.42, 1.54], [1.32, 0.64, 4.3, 8.2]],
+            dtype=self.dtype)
+        x_next = self.dut.step_forward(x_val, u_val)
+        for i in range(x_val.shape[0]):
+            np.testing.assert_allclose(
+                x_next[i].detach().numpy(),
+                compute_next_state(x_val[i], u_val[i]).detach().numpy())
+
+    def test_add_dynamics_constraint(self):
+        test_relu_system.check_add_dynamics_constraint(self.dut,
+                                                       self.dut.x_equilibrium,
+                                                       self.dut.u_equilibrium,
+                                                       atol=1E-10)
+        test_relu_system.check_add_dynamics_constraint(
+            self.dut,
+            torch.tensor(
+                [0.1, 0.5, -0.3, 0.2, 0.9, 1.1, 1.5, -1.1, 0.4, 0.5, 1.2, 2.4],
+                dtype=self.dtype),
+            torch.tensor([0.5, 3.8, 2.4, 1.2], dtype=self.dtype))
+        test_relu_system.check_add_dynamics_constraint(
+            self.dut,
+            torch.tensor([
+                4.1, 3.5, -4.3, 1.2, 1.1, 2.1, 1.7, -1.1, 1.4, 0.7, 2.2, -2.4
+            ],
+                         dtype=self.dtype),
+            torch.tensor([4.5, 3.8, 6.4, 1.2], dtype=self.dtype))
+
+
 if __name__ == "__main__":
     unittest.main()
