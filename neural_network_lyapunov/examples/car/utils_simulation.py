@@ -11,7 +11,7 @@ def get_parameters():
     # number of rays for sensor measurements for control
     params['num_rays_control'] = 30
     # number of rays for sensor measurements for data collection
-    params['num_rays_data'] = 101
+    params['num_rays_data'] = 26  # 101
     params['senseRadius'] = 100.0  # sensing radius
     params['robotRadius'] = 0.02  # 0.27  # radius of robot
     params['robotHeight'] = 0.15 / 2  # rough height of COM of robot
@@ -35,7 +35,7 @@ def get_parameters():
     # vector of sensor's angles to cover all 360 degrees range
     # for data collection
     params['psi_nominal_full'] = np.reshape(
-        np.linspace(-np.pi, np.pi,
+        np.linspace(-np.pi / 2, np.pi / 2,  # -np.pi, np.pi,
                     params['num_rays_data']), (params['num_rays_data'], 1))
 
     return params
@@ -336,7 +336,10 @@ def getDistances(
         numRays,
         senseRadius,
         psi_nominal,
-        data=False):
+        data=False,
+        visualize=False,
+        RGB=[1, 0, 0],
+        parentObjectId=None):
     """
     Get depths rays emanate from the robot
     @param p: pybullet instance
@@ -374,11 +377,33 @@ def getDistances(
     dists = np.zeros(numRays)
     for i in range(numRays):
         dists[i] = senseRadius * coll[i][2]
+        if visualize:
+            if coll[i][3] == (0, 0, 0):
+                p.addUserDebugLine(
+                    (state[0], state[1], robotHeight), raysTo[i],
+                    lineColorRGB=RGB)
+            else:
+                p.addUserDebugLine(
+                    (state[0], state[1], robotHeight), coll[i][3],
+                    lineColorRGB=RGB)
 
     if data:
         return dists[:-1]
+        # not including the last ray to avoid replica (0 vs 2pi)
     else:
         return dists
+
+
+# Top Down Image
+def getImage(p, state, robotHeight):
+    viewMatrix = p.computeViewMatrixFromYawPitchRoll(
+        [state[0], state[1], robotHeight], 10,
+        state[2] * 180 / np.pi - 180, -90, 0, 2)
+    proj_matrix = p.computeProjectionMatrixFOV(20, 1, 0.01, 100)
+    w, h, rgba, depth, mask = p.getCameraImage(
+        400, 400, viewMatrix=viewMatrix,
+        projectionMatrix=proj_matrix, shadow=0)
+    return depth
 
 
 def save_data(

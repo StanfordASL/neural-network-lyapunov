@@ -29,14 +29,18 @@ class LocalityNet(nn.Module):
 
 
 def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
-                      weighted=False, resume=False, resume_file=None):
+                      asymmetric_loss=None, resume=False, resume_file=None):
     """
     @param nf: hidden layer neuron
     @param delta_dynamics: bool. True: train different between current and next
     depth measurements
     @param local: bool. True: train with locality model(CNN); False: train
     with FNN
-    @param weighted: bool. True: weighted loss.
+    @param asymmetric_loss: 'dist','underapprox'.
+    'dist': weighted loss.smaller dn has larger loss.
+    'underapprox': less cost on errors when prediction is closer than actual
+    measurement. Asymmetric cost such that the model favors conservative
+    estimation of obstacle distances.
     @param resume: bool. True: resume training a pre-trained model
     """
     input_dim = u.shape[1] + d.shape[1]
@@ -44,12 +48,14 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
 
     if delta_dynamics:
         model_name += "_delta_dynamics"
-    if weighted:
-        model_name += "_weighted_loss"
+    if asymmetric_loss == "dist":
+        model_name += "_dist_weighted"
+    elif asymmetric_loss == "underapprox":
+        model_name += "_under_approx"
 
     if local:
         # Use locality model
-        model = LocalityNet(input_dim, d.shape[1], nf, 7)
+        model = LocalityNet(input_dim, d.shape[1], nf)
         device = next(model.parameters()).device
         u_tensor = torch.from_numpy(u).to(device)
         d_tensor = torch.from_numpy(d).to(device)
@@ -78,18 +84,18 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
     model.double()
 
     if config["loss_type"] == "mse":
-        if weighted:
+        if asymmetric_loss is not None:
             loss_fn = nn.MSELoss(reduction="none")
         else:
             loss_fn = nn.MSELoss()  # reduction="sum")
     elif config["loss_type"] == "l1":
-        if weighted:
+        if asymmetric_loss is not None:
             loss_fn = nn.L1Loss(reduction="none")
         else:
             loss_fn = nn.L1Loss()
         model_name += "_l1"
     elif config["loss_type"] == "smoothL1":
-        if weighted:
+        if asymmetric_loss is not None:
             loss_fn = nn.SmoothL1Loss(reduction="none")
         else:
             loss_fn = nn.SmoothL1Loss()
@@ -118,13 +124,17 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
         else:
             target = dn_tensor[index, :]
 
-        if weighted:
-            weights = calculate_weight(
-                d[index, :], std=2)
+        if asymmetric_loss == "dist":
+            weights = calculate_weight(dn[index, :], std=1.6)
             loss_vector = loss_fn(d_pred, target)
             loss = torch.sum(weights * loss_vector) / torch.numel(loss_vector)
             # print(torch.sum(loss_fn(d_pred, dn_tensor-d_tensor))
             #       /torch.numel(dn_tensor))
+        elif asymmetric_loss == "underapprox":
+            weights = calculate_weight(
+                d_pred - target, "underapprox", slope=0.2)
+            loss_vector = loss_fn(d_pred, target)
+            loss = torch.sum(weights * loss_vector) / torch.numel(loss_vector)
         else:
             loss = loss_fn(d_pred, target)
 
@@ -189,7 +199,8 @@ def visualize_model(
     d,
     next_d,
     local=False,
-        delta_dynamics=False):
+    delta_dynamics=False,
+        model_name=None):
     u_tensor = torch.from_numpy(u.T)
     d_tensor = torch.from_numpy(d.T)
     if local:
@@ -197,7 +208,7 @@ def visualize_model(
         d_tensor.resize_(1, 1, d.shape[0])
         pred = depth_model(d_tensor, u_tensor)[0, 0]
     else:
-        pred = depth_model(torch.cat(d_tensor, u_tensor))
+        pred = depth_model(torch.cat((d_tensor, u_tensor)))
     if delta_dynamics:
         d_pred = pred.detach().numpy() + d
     else:
@@ -205,19 +216,30 @@ def visualize_model(
     plt.subplot(121)
     plt.plot(d_pred, label='next')
     plt.plot(d, 'r--', label='current')
+    plt.xlabel('Ray Index')
+    plt.ylabel('Depth Measurement (m)')
     plt.title('Depth Sensor Model Prediction')
     plt.legend(loc='best')
     plt.subplot(122)
     plt.plot(next_d, label='next')
     plt.plot(d, 'r--', label='current')
+    plt.xlabel('Ray Index')
+    plt.ylabel('Depth Measurement (m)')
     plt.title('Actual Depth Sensor')
     plt.legend(loc='best')
+    if model_name is not None:
+        assert (isinstance(model_name, str))
+        plt.savefig(model_name + '.png')
     plt.show()
     # plt.subplot(133)
     plt.plot(next_d, label='actual')
     plt.plot(d_pred, label='prediction')
+    plt.xlabel('Ray Index')
+    plt.ylabel('Depth Measurement (m)')
     plt.title('Actual vs Prediction at next time step')
     plt.legend(loc='best')
+    if model_name is not None:
+        plt.savefig(model_name + '_compare.png')
     plt.show()
 
 
@@ -238,15 +260,18 @@ def whiten(X):
 
 
 def down_sample(X, factor=1):
-    low = 24  # 0
-    high = 74  # 100
+    low = 25  # 0
+    high = 76  # 100
     return X[:, np.arange(low, high, factor).astype(int)]
 
 
-def calculate_weight(d, option="normal", std=1):
+def calculate_weight(d, option="normal", std=1, slope=0.1):
     # TODO: different weights
     if option == "normal":
         weights = torch.from_numpy(10 * scipy.stats.norm.pdf(d, scale=std))
+    elif option == "underapprox":
+        leaky_relu = nn.LeakyReLU(slope)
+        weights = torch.abs(leaky_relu(d))
     return weights
 
 
@@ -274,7 +299,7 @@ if __name__ == "__main__":
     # u = standardize(u)
     # d = standardize(d)
     config = load_config()
-    nf = 50
+    nf = 100
     nf_car = 8
     delta_dynamics = True
     local = True
@@ -309,19 +334,19 @@ if __name__ == "__main__":
     else:
         writer = SummaryWriter(filename_suffix="sensor_dynamics")
         depth_model, model_name = train_depth_model(
-            u, d, dn, nf, config, local=local, weighted=False,
+            u, d, dn, nf, config, local=local, asymmetric_loss="underapprox",
             delta_dynamics=delta_dynamics)
         # car_model = car_dynamics_training(u, x, xn, nf_car)
         # torch.save(car_model.state_dict(), 'car_model/'+args.model_name)
         writer.close()
-        index = 800
+        index = 8
         visualize_model(depth_model, u[index, :], d[index, :],
                         dn[index, :], local=local,
                         delta_dynamics=delta_dynamics)
         index = 22
         visualize_model(depth_model, u[index, :],
                         d[index, :], dn[index, :], local=local,
-                        delta_dynamics=delta_dynamics)
+                        delta_dynamics=delta_dynamics, model_name=model_name)
 
         if args.save_model:
             torch.save(depth_model.state_dict(), 'depth_model/' + model_name)

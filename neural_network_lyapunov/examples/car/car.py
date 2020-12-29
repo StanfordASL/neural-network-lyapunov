@@ -3,7 +3,7 @@
 
 import pybullet as pybullet
 import numpy as np
-# import time
+import time
 import utils_simulation
 import argparse
 from pynput import keyboard
@@ -284,6 +284,7 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
     next_state_data = []
     plant = dubins_car.DubinsCar(None)
     for env in range(0, numEnvs):
+        visualize_ray = False
         # Sample environment
         heightObs = 20 * robotHeight
         obsUid = utils_simulation.generate_obstacles(
@@ -317,6 +318,21 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                     state[0], state[1], robotHeight], [
                     0, 0, 0, 1])
 
+            if t == 8:
+                utils_simulation.getImage(pybullet, state, robotHeight)
+                time.sleep(0.1)
+                visualize_ray = True
+
+            if (GUI):
+                pybullet.resetDebugVisualizerCamera(
+                    cameraDistance=5.0,
+                    cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
+                    cameraPitch=-89.9,  # -45.0,
+                    cameraTargetPosition=[
+                        state[0],
+                        state[1],
+                        2 * robotHeight])
+
             # Get depth sensor measurement with FOV > pi/2
             depth = utils_simulation.getDistances(
                 pybullet,
@@ -325,7 +341,10 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                 num_rays_data,
                 senseRadius,
                 params['psi_nominal_full'],
-                True)
+                data=True,
+                visualize=visualize_ray,
+                RGB=[1, 0, 0],
+                parentObjectId=husky)
 
             u = [np.random.uniform(-2, 5), np.random.uniform(-0.5, 0.5)]
             u_data.append(u)
@@ -352,15 +371,22 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                 num_rays_data,
                 senseRadius,
                 params['psi_nominal_full'],
-                True)
+                data=True,
+                visualize=visualize_ray,
+                RGB=[0, 0, 1],
+                parentObjectId=husky)
             next_depth_data.append(depth)
             next_state_data.append(state)
+
+            if t == 8:
+                utils_simulation.getImage(pybullet, state, robotHeight)
+                time.sleep(0.1)
 
             if (GUI):
                 pybullet.resetDebugVisualizerCamera(
                     cameraDistance=5.0,
-                    cameraYaw=0.0,
-                    cameraPitch=-45.0,
+                    cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
+                    cameraPitch=-89.9,  # -45.0,
                     cameraTargetPosition=[
                         state[0],
                         state[1],
@@ -431,11 +457,11 @@ if __name__ == "__main__":
 
     # continuous_user_input()
     # Play videos
-    u_data, depth_data, state_data = \
-        simulate_controller(numEnvs, params, husky, sphere, GUI, random_seed)
-    # u_data, depth_data, state_data, next_depth_data, next_state_data = \
-    #     simulate_random_sample(numEnvs, params, husky, sphere,
-    #                            GUI, random_seed)
+    # u_data, depth_data, state_data = \
+    #     simulate_controller(numEnvs, params, husky, sphere, GUI, random_seed)
+    u_data, depth_data, state_data, next_depth_data, next_state_data = \
+        simulate_random_sample(numEnvs, params, husky, sphere,
+                               GUI, random_seed)
 
     # Disconect from pybullet
     pybullet.disconnect()
