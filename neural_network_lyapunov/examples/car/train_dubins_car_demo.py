@@ -106,7 +106,7 @@ if __name__ == "__main__":
         dynamics_dataset = torch.load(args.load_dynamics_data)
 
     thetadot_as_input = True
-    dynamics_relu = utils.setup_relu((3, 7, 7, 2),
+    dynamics_relu = utils.setup_relu((3, 8, 8, 2),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -128,7 +128,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.8
-    controller_relu = utils.setup_relu((3, 7, 7, 2),
+    controller_relu = utils.setup_relu((3, 9, 9, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -143,7 +143,7 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 7, 7, 4, 1),
+    lyapunov_relu = utils.setup_relu((3, 8, 8, 8, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.4
-    dut.lyapunov_derivative_epsilon = 0.004
+    dut.lyapunov_derivative_epsilon = 0.02
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (31, 31, 31),
