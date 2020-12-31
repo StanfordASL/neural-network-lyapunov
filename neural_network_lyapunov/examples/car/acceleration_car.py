@@ -170,7 +170,7 @@ class AccelerationCarReLUModel:
             self.dynamics_relu_free_pattern.output_constraint(
                 network_input_lo,
                 network_input_up,
-                method=mip_utils.PropagateBoundsMethod.IA)
+                method=mip_utils.PropagateBoundsMethod.LP)
         # First add mip_cnstr_result. But don't impose the constraint on the
         # output of the network (we will impose the output constraint
         # afterwards inside this function)
