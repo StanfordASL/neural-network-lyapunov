@@ -51,7 +51,7 @@ class DubinsCarReLUModel:
     perceptron with (leaky) ReLU units.
     We consider the origin being the equilibrium state of the Dubins car. The
     neural network predicts the next state as the following
-    [delta_pos_x, delta_pos_y] = ϕ(θ, vel, θ_dot) - ϕ(0, 0, 0)
+    [delta_pos_x, delta_pos_y] = ϕ(θ, vel, θ_dot) - ϕ(θ, 0, θ_dot)
     where vel is the velocity along the car heading direction.
     """
     def __init__(self, dtype, x_lo: torch.Tensor, x_up: torch.Tensor,
@@ -112,11 +112,13 @@ class DubinsCarReLUModel:
             torch.Tensor:
         """
         Compute x[n+1] according to
-        [pos_x[n+1], pos_y[n+1]] = [pos_x[n], pos_y[n]]
-                                   + ϕ(network_input) − ϕ(0)
         θ[n+1] = θ[n] + θ̇_dot[n]*dt
-        where network_input is [θ[n], vel[n], θ_dot[n]] when thetadot_as_input
-        is True, and [θ[n], vel[n]] when thetadot_as_input is false.
+        when thetadot_as_input is true
+        [pos_x[n+1], pos_y[n+1]] =
+        [pos_x[n], pos_y[n]] + ϕ(θ[n], vel[n], θ_dot[n]) − ϕ(θ[n], 0, θ_dot[n])
+        else
+        [pos_x[n+1], pos_y[n+1]] =
+        [pos_x[n], pos_y[n]] + ϕ(θ[n], vel[n]) − ϕ(θ[n], 0)
         """
         assert (isinstance(x_start, torch.Tensor))
         assert (isinstance(u_start, torch.Tensor))
@@ -127,10 +129,13 @@ class DubinsCarReLUModel:
             if self.thetadot_as_input:
                 network_input = torch.stack(
                     (x_start[2], u_start[0], u_start[1]))
-                network_input_zero = torch.zeros((3, ), dtype=self.dtype)
+                network_input_zero = torch.stack(
+                    (x_start[2], torch.tensor(0,
+                                              dtype=self.dtype), u_start[1]))
             else:
                 network_input = torch.stack((x_start[2], u_start[0]))
-                network_input_zero = torch.zeros((2, ), dtype=self.dtype)
+                network_input_zero = torch.stack(
+                    (x_start[2], torch.tensor(0, dtype=self.dtype)))
             delta_position = self.dynamics_relu(
                 network_input) - self.dynamics_relu(network_input_zero)
             position_next = x_start[:2] + delta_position
@@ -142,12 +147,20 @@ class DubinsCarReLUModel:
                 network_input = torch.cat((x_start[:, 2].reshape(
                     (-1, 1)), u_start),
                                           dim=1)
-                network_input_zero = torch.zeros((3, ), dtype=self.dtype)
+                network_input_zero = torch.cat(
+                    (x_start[:, 2].reshape((-1, 1)),
+                     torch.zeros((x_start.shape[0], 1),
+                                 dtype=self.dtype), u_start[:, 1].reshape(
+                                     (-1, 1))),
+                    dim=1)
             else:
                 network_input = torch.cat((x_start[:, 2].reshape(
                     (-1, 1)), u_start[:, 0].reshape((-1, 1))),
                                           dim=1)
-                network_input_zero = torch.zeros((2, ), dtype=self.dtype)
+                network_input_zero = torch.cat(
+                    (x_start[:, 2].reshape((-1, 1)),
+                     torch.zeros((x_start.shape[0], 1), dtype=self.dtype)),
+                    dim=1)
             delta_position = self.dynamics_relu(
                 network_input) - self.dynamics_relu(network_input_zero)
             position_next = x_start[:, :2] + delta_position
@@ -170,6 +183,16 @@ class DubinsCarReLUModel:
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
+        The constraints are
+        θ[n+1] = θ[n] + θ̇_dot[n]*dt
+        when thetadot_as_input is true
+        [pos_x[n+1], pos_y[n+1]] =
+        [pos_x[n], pos_y[n]] + ϕ(θ[n], vel[n], θ_dot[n]) − ϕ(θ[n], 0, θ_dot[n])
+        else
+        [pos_x[n+1], pos_y[n+1]] =
+        [pos_x[n], pos_y[n]] + ϕ(θ[n], vel[n]) − ϕ(θ[n], 0)
+        Note that the network ϕ takes two different set of inputs, one is
+        (θ[n], vel[n], θ_dot[n]), another one is (θ[n], 0, θ_dot[n])
         """
         assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
         if self.thetadot_as_input:
@@ -177,38 +200,68 @@ class DubinsCarReLUModel:
                 (self.x_lo[2], self.u_lo[0], self.u_lo[1]))
             network_input_up = torch.stack(
                 (self.x_up[2], self.u_up[0], self.u_up[1]))
+            # The lower/upper bound for the (theta, 0, thetadot)
+            network_input_zero_vel_lo = torch.stack(
+                (self.x_lo[2], torch.tensor(0,
+                                            dtype=self.dtype), self.u_lo[1]))
+            network_input_zero_vel_up = torch.stack(
+                (self.x_up[2], torch.tensor(0,
+                                            dtype=self.dtype), self.u_up[1]))
         else:
             network_input_lo = torch.stack((self.x_lo[2], self.u_lo[0]))
             network_input_up = torch.stack((self.x_up[2], self.u_up[0]))
+            network_input_zero_vel_lo = torch.stack(
+                (self.x_lo[2], torch.tensor(0, dtype=self.dtype)))
+            network_input_zero_vel_up = torch.stack(
+                (self.x_up[2], torch.tensor(0, dtype=self.dtype)))
         mip_cnstr_result, _, _, _, _ = \
             self.dynamics_relu_free_pattern.output_constraint(
-                    network_input_lo, network_input_up,
-                    method=mip_utils.PropagateBoundsMethod.IA)
+                network_input_lo, network_input_up,
+                method=mip_utils.PropagateBoundsMethod.LP)
+        mip_cnstr_result_zero_vel, _, _, _, _ = \
+            self.dynamics_relu_free_pattern.output_constraint(
+                network_input_zero_vel_lo, network_input_zero_vel_up,
+                method=mip_utils.PropagateBoundsMethod.LP)
         # First add mip_cnstr_result. But don't impose the constraint on the
         # output of the network (we will impose the output constraint
         # afterwards inside this function)
+        vel_zero_var = mip.addVars(1,
+                                   lb=0,
+                                   ub=0,
+                                   vtype=gurobipy.GRB.CONTINUOUS,
+                                   name="zero_vel")[0]
         if self.thetadot_as_input:
             input_vars = [x_var[2], u_var[0], u_var[1]]
+            input_vars_zero_vel = [x_var[2], vel_zero_var, u_var[1]]
         else:
             input_vars = [x_var[2], u_var[0]]
+            input_vars_zero_vel = [x_var[2], vel_zero_var]
         forward_slack, forward_binary = \
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "dubins_car_forward_dynamics_ineq",
                 "dubins_car_forward_dyamics_eq", None)
+        forward_slack_zero_vel, forward_binary_zero_vel = \
+            mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_result_zero_vel, input_vars_zero_vel, None,
+                slack_var_name + "zero_vel", binary_var_name + "zero_vel",
+                "dubins_car_forward_dynamics_zero_vel_ineq",
+                "dubins_car_forward_dynamics_zero_vel_eq", None)
         # Now add the constraint on the output of the network, that
-        # [delta_pos_x, delta_pos_y] = ϕ(θ[n], vel[n], θ_dot[n])−ϕ(0, 0, 0)
+        # [delta_pos_x, delta_pos_y] =
+        # ϕ(θ[n], vel[n], θ_dot[n])−ϕ(θ[n], 0, θ_dot[n])
         # Namely [x_next[0] - x[0], x_next[1] - x[1]] = Aout_slack * s + Cout
-        # - ϕ(0, 0)
+        # - Aout_slack_zero_vel * s_zero_vel - Cout_zero_vel
         assert (mip_cnstr_result.Aout_input is None)
         assert (mip_cnstr_result.Aout_binary is None)
+        assert (mip_cnstr_result_zero_vel.Aout_input is None)
+        assert (mip_cnstr_result_zero_vel.Aout_binary is None)
         mip.addMConstrs([
             torch.eye(2, dtype=self.dtype), -torch.eye(2, dtype=self.dtype),
-            -mip_cnstr_result.Aout_slack
-        ], [x_next_var[:2], x_var[:2], forward_slack],
-                        b=mip_cnstr_result.Cout - self.dynamics_relu(
-                            torch.zeros(
-                                (len(input_vars), ), dtype=self.dtype)),
+            -mip_cnstr_result.Aout_slack, mip_cnstr_result_zero_vel.Aout_slack
+        ], [x_next_var[:2], x_var[:2], forward_slack, forward_slack_zero_vel],
+                        b=mip_cnstr_result.Cout -
+                        mip_cnstr_result_zero_vel.Cout,
                         sense=gurobipy.GRB.EQUAL,
                         name="dubins_car_forward_dynamics_output")
 
