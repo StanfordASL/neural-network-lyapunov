@@ -1,4 +1,3 @@
-import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
@@ -7,7 +6,6 @@ import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 
 import torch
 import numpy as np
-import scipy.integrate
 import argparse
 import os
 
