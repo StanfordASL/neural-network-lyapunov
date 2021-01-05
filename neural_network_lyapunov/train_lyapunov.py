@@ -621,16 +621,13 @@ class TrainLyapunovReLU:
                 # If we train a feedback system, then we will modify the
                 # controller in each iteration, hence the next sample state
                 # changes in each iteration.
-                # TODO(hongkai.dai): if the forward system is a relu system,
-                # then we can compute the derivative in a batch.
-                if (state_samples_all.shape[0] > 0):
-                    derivative_state_samples_next = torch.stack([
+                if (derivative_state_samples.shape[0] > 0):
+                    derivative_state_samples_next =\
                         self.lyapunov_hybrid_system.system.step_forward(
-                            derivative_state_samples[i]) for i in
-                        range(derivative_state_samples.shape[0])], dim=0)
+                            derivative_state_samples)
                 else:
                     derivative_state_samples_next = torch.empty_like(
-                        state_samples_all)
+                        derivative_state_samples)
             loss, lyapunov_positivity_mip_costs[iter_count],\
                 lyapunov_derivative_mip_costs[iter_count], \
                 positivity_sample_loss, derivative_sample_loss,\
