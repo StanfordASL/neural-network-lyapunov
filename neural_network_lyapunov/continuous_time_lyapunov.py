@@ -581,7 +581,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
     def lyapunov_derivative_as_milp(
             self, x_equilibrium, V_lambda, epsilon,
             eps_type: lyapunov.ConvergenceEps,
-            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None):
+            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None,
+            x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -607,6 +608,12 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         @param epsilon The rate of exponential convergence. If the goal is to
         verify convergence but not exponential convergence, then set epsilon
         to 0.
+        @param x_warmstart tensor of size self.system.x_dim. If provided, will
+        use x_warmstart as initial guess for the *binary* variables of the
+        milp. Instead of warm start beta with the binary variable solution from
+        the previous iteration, we choose to recompute beta using the previous
+        adversarial state `x` in the current neural network, so as to make
+        sure that this initial guess of beta is always a feasible solution.
         @return (milp, x, relu_beta, gamma) milp is the GurobiTorchMILP
         object such that if the maximal of this MILP is 0, the condition
         V̇(x) ≤ -ε V(x) is satisfied. x is the decision variable in the milp
@@ -652,6 +659,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # activation of beta and the network input.
         (relu_z, relu_beta, a_relu_out, b_relu_out) = \
             self.add_relu_output_constraint(milp, x)
+
+        # warmstart the binary variables
+        if x_warmstart is not None:
+            relu_to_optimization.set_activation_warmstart(
+                self.lyapunov_relu, relu_beta, x_warmstart)
 
         # for each mode, we want to compute ∂V/∂x*ẋ
         # where ∂V/∂x=∂ReLU(x)/∂x + λ*sign(x-x*)
