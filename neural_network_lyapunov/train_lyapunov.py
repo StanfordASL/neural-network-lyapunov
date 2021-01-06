@@ -494,14 +494,14 @@ class TrainLyapunovReLU:
             if iter_count % self.save_network_iterations == 0:
                 torch.save(
                     self.lyapunov_hybrid_system.lyapunov_relu,
-                    self.save_network_path + f"/lyapunov.pt")
+                    self.save_network_path + f'{"/lyapunov.pt"}')
                 torch.save(self.R_options.R(),
-                           self.save_network_path + f"/R.pt")
+                           self.save_network_path + f'{"/R.pt"}')
                 if isinstance(self.lyapunov_hybrid_system.system,
                               feedback_system.FeedbackSystem):
                     torch.save(
                         self.lyapunov_hybrid_system.system.controller_network,
-                        self.save_network_path + f"/controller.pt")
+                        self.save_network_path + f'{"/controller.pt"}')
 
     def train(self, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
