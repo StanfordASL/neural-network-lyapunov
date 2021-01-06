@@ -5,36 +5,8 @@ import gurobipy
 import copy
 import wandb
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
-import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
-import neural_network_lyapunov.line_search_gd as line_search_gd
-import neural_network_lyapunov.line_search_adam as line_search_adam
-
-from enum import Enum
-
-
-# We want to minimize two losses to 0, one is the violation of the Lyapunov
-# positivity constraint, the second is the violation of the Lyapunov derivative
-# constraint. The gradient of these two losses might be in opposite directions,
-# so minimizing one loss might increase the other loss. Hence we consider to
-# project the gradient of one loss to the null space of another loss. If we
-# take a small step along this projected gradient, it should not decrease one
-# loss but do not affect the other.
-# We provide 4 methods
-# 1. No projection, just use the sum of the gradient.
-# 2. Use the sum of the projected gradient.
-# 3. Alternating between the two projected gradient. In one iteration decrease
-#    one loss, in the next iteation decrease the other loss.
-# 4. Emphasize on positivity loss, we project the derivative loss gradient to
-#    the nullspace of the positivity gradient, add this projected gradient to
-#    the positivity loss gradient.
-class ProjectGradientMethod(Enum):
-    # Do not project the gradient
-    NONE = 1
-    SUM = 2
-    ALTERNATE = 3
-    EMPHASIZE_POSITIVITY = 4
 
 
 class SearchROptions:
@@ -222,14 +194,19 @@ class TrainLyapunovReLU:
         # We support Adam or SGD.
         self.optimizer = "Adam"
 
-        self.project_gradient_method = ProjectGradientMethod.NONE
-
         # If summary writer is not None, then we use tensorboard to write
         # training loss to the summary writer.
         self.summary_writer_folder = None
 
         # Enable wandb to log the data.
         self.enable_wandb = False
+
+        # Save the neural network model to this folder. If set to None, then
+        # don't save the network.
+        self.save_network_path = None
+        # By default, every 10 iterations in the optimizer, we save the
+        # network.
+        self.save_network_iterations = 10
 
         # parameter used in SGD
         self.momentum = 0.
@@ -473,97 +450,19 @@ class TrainLyapunovReLU:
             positivity_state_samples, derivative_state_samples,\
             derivative_state_samples_next
 
-    def train_with_line_search(self, state_samples_all):
-        assert(isinstance(state_samples_all, torch.Tensor))
-        assert(
-            state_samples_all.shape[1] ==
-            self.lyapunov_hybrid_system.system.x_dim)
-        positivity_state_samples = state_samples_all.clone()
-        derivative_state_samples = state_samples_all.clone()
-        derivative_state_samples_next = torch.stack([
-            self.lyapunov_hybrid_system.system.step_forward(
-                derivative_state_samples[i]) for i in
-            range(derivative_state_samples.shape[0])], dim=0)
-        lyapunov_positivity_mip_costs = [None] * self.max_iterations
-        lyapunov_derivative_mip_costs = [None] * self.max_iterations
-        losses = [None] * self.max_iterations
-        if self.summary_writer_folder is not None:
-            writer = torch.utils.tensorboard.SummaryWriter(
-                self.summary_writer_folder)
-
-        iter_count = 0
-
-        def closure():
-            self.lyapunov_hybrid_system.lyapunov_relu.zero_grad()
-            loss, lyapunov_positivity_mip_costs[iter_count],\
-                lyapunov_derivative_mip_costs[iter_count], _, _, _, _, _, _, _\
-                = self.total_loss(
-                    positivity_state_samples, derivative_state_samples,
-                    derivative_state_samples_next,
-                    self.lyapunov_positivity_sample_cost_weight,
-                    self.lyapunov_derivative_sample_cost_weight,
-                    self.lyapunov_positivity_mip_cost_weight,
-                    self.lyapunov_derivative_mip_cost_weight)
-            print("derivative mip loss " +
-                  f"{lyapunov_derivative_mip_costs[iter_count]}")
-            return loss
-
-        relu_params = [None] * self.max_iterations
-
-        loss = closure()
-        loss.backward()
-        losses[0] = loss.item()
-        relu_params[iter_count] = torch.cat(
-            [p.data.reshape((-1,)) for p in
-             self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
-        iter_count = 1
-        if self.optimizer == "GD":
-            optimizer = line_search_gd.LineSearchGD(
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                lr=self.learning_rate,
-                momentum=self.momentum, min_step_size_decrease=1e-4,
-                loss_minimal_decrement=self.loss_minimal_decrement,
-                step_size_reduction=0.2, min_improvement=self.min_improvement)
-        elif self.optimizer == "LineSearchAdam":
-            optimizer = line_search_adam.LineSearchAdam(
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters(),
-                lr=self.learning_rate,
-                min_step_size_decrease=1e-4,
-                loss_minimal_decrement=self.loss_minimal_decrement,
-                step_size_reduction=0.2, min_improvement=self.min_improvement)
-        while iter_count < self.max_iterations:
-            loss = optimizer.step(closure, losses[iter_count-1])
-            loss.backward()
-            losses[iter_count] = loss.item()
-            relu_params[iter_count] = torch.cat(
-                [p.data.reshape((-1,)) for p in
-                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
-            if lyapunov_positivity_mip_costs[iter_count] < \
-                self.lyapunov_positivity_convergence_tol and \
-                lyapunov_derivative_mip_costs[iter_count] < \
-                    self.lyapunov_derivative_convergence_tol:
-                return True
-            print(f"iter {iter_count}, loss {losses[iter_count]}," +
-                  "positivity mip cost " +
-                  f"{lyapunov_positivity_mip_costs[iter_count]}, derivative " +
-                  f"mip cost {lyapunov_derivative_mip_costs[iter_count]}\n")
-            if self.enable_wandb:
-                wandb.log({
-                    "iter_count": iter_count, "loss": losses[iter_count],
-                    "positivity MIP cost": lyapunov_positivity_mip_costs[
-                        iter_count], "derivative MIP cost":
-                    lyapunov_derivative_mip_costs[iter_count]})
-            if self.summary_writer_folder is not None:
-                writer.add_scalar(
-                    "loss", losses[iter_count], iter_count)
-                writer.add_scalar(
-                    "positivity MIP cost",
-                    lyapunov_positivity_mip_costs[iter_count], iter_count)
-                writer.add_scalar(
-                    "derivative MIP cost",
-                    lyapunov_derivative_mip_costs[iter_count], iter_count)
-            iter_count += 1
-        return False
+    def _save_network(self, iter_count):
+        if self.save_network_path:
+            if iter_count % self.save_network_iterations == 0:
+                torch.save(
+                    self.lyapunov_hybrid_system.lyapunov_relu,
+                    self.save_network_path + f"/lyapunov.pt")
+                torch.save(self.R_options.R(),
+                           self.save_network_path + f"/R.pt")
+                if isinstance(self.lyapunov_hybrid_system.system,
+                              feedback_system.FeedbackSystem):
+                    torch.save(
+                        self.lyapunov_hybrid_system.system.controller_network,
+                        self.save_network_path + f"/controller.pt")
 
     def train(self, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
@@ -603,15 +502,11 @@ class TrainLyapunovReLU:
         else:
             raise Exception(
                 "train: unknown optimizer, only support Adam or SGD.")
-        lyapunov_positivity_mip_costs = [None] * self.max_iterations
-        lyapunov_derivative_mip_costs = [None] * self.max_iterations
-        losses = [None] * self.max_iterations
         if self.summary_writer_folder is not None:
             writer = torch.utils.tensorboard.SummaryWriter(
                 self.summary_writer_folder)
-        relu_params = [None] * self.max_iterations
-        gradients = [None] * self.max_iterations
         while iter_count < self.max_iterations:
+            self._save_network(iter_count)
             optimizer.zero_grad()
             if isinstance(self.lyapunov_hybrid_system.system,
                           feedback_system.FeedbackSystem):
@@ -625,8 +520,8 @@ class TrainLyapunovReLU:
                 else:
                     derivative_state_samples_next = torch.empty_like(
                         derivative_state_samples)
-            loss, lyapunov_positivity_mip_costs[iter_count],\
-                lyapunov_derivative_mip_costs[iter_count], \
+            loss, lyapunov_positivity_mip_cost,\
+                lyapunov_derivative_mip_cost, \
                 positivity_sample_loss, derivative_sample_loss,\
                 positivity_mip_loss, derivative_mip_loss,\
                 positivity_state_samples, derivative_state_samples,\
@@ -638,69 +533,39 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_sample_cost_weight,
                     self.lyapunov_positivity_mip_cost_weight,
                     self.lyapunov_derivative_mip_cost_weight)
-            losses[iter_count] = loss.item()
 
             if self.enable_wandb:
                 wandb.log({
-                    "iter_count": iter_count, "loss": losses[iter_count],
-                    "positivity MIP cost": lyapunov_positivity_mip_costs[
-                        iter_count], "derivative MIP cost":
-                    lyapunov_derivative_mip_costs[iter_count]})
+                    "iter_count": iter_count, "loss": loss.item(),
+                    "positivity MIP cost": lyapunov_positivity_mip_cost,
+                    "derivative MIP cost":
+                    lyapunov_derivative_mip_cost})
             if self.summary_writer_folder is not None:
                 writer.add_scalar("loss", loss.item(), iter_count)
                 writer.add_scalar(
                     "positivity MIP cost",
-                    lyapunov_positivity_mip_costs[iter_count], iter_count)
+                    lyapunov_positivity_mip_cost, iter_count)
                 writer.add_scalar(
                     "derivative MIP cost",
-                    lyapunov_derivative_mip_costs[iter_count], iter_count)
+                    lyapunov_derivative_mip_cost, iter_count)
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
                       "positivity cost " +
-                      f"{lyapunov_positivity_mip_costs[iter_count]}, " +
+                      f"{lyapunov_positivity_mip_cost}, " +
                       "derivative_cost " +
-                      f"{lyapunov_derivative_mip_costs[iter_count]}")
-            if lyapunov_positivity_mip_costs[iter_count] >=\
-                -self.lyapunov_positivity_convergence_tol and\
-                lyapunov_derivative_mip_costs[iter_count] <= \
+                      f"{lyapunov_derivative_mip_cost}")
+            if lyapunov_positivity_mip_cost <=\
+                self.lyapunov_positivity_convergence_tol and\
+                lyapunov_derivative_mip_cost <= \
                     self.lyapunov_derivative_convergence_tol:
-                return (True, losses[:iter_count+1],
-                        lyapunov_positivity_mip_costs[:iter_count+1],
-                        lyapunov_derivative_mip_costs[:iter_count+1])
-            if self.project_gradient_method == ProjectGradientMethod.SUM:
-                project_gradient_mode = train_utils.ProjectGradientMode.BOTH
-            elif self.project_gradient_method == \
-                    ProjectGradientMethod.ALTERNATE:
-                if iter_count == 0:
-                    project_gradient_mode = train_utils.ProjectGradientMode.\
-                        LOSS2
-                else:
-                    project_gradient_mode = train_utils.ProjectGradientMode.\
-                        LOSS1 if project_gradient_mode == \
-                        train_utils.ProjectGradientMode.LOSS2 else \
-                        train_utils.ProjectGradientMode.LOSS2
-            elif self.project_gradient_method == \
-                    ProjectGradientMethod.EMPHASIZE_POSITIVITY:
-                project_gradient_mode = train_utils.ProjectGradientMode.\
-                    EMPHASIZE_LOSS1
-            if self.project_gradient_method == ProjectGradientMethod.NONE:
-                loss.backward()
-            else:
-                (need_projection, n1, n2) = train_utils.project_gradient(
-                    self.lyapunov_hybrid_system.lyapunov_relu,
-                    positivity_sample_loss + positivity_mip_loss,
-                    derivative_sample_loss + derivative_mip_loss,
-                    project_gradient_mode, retain_graph=False)
-            relu_params[iter_count] = torch.cat(
-                [p.data.reshape((-1,)) for p in
-                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
-            gradients[iter_count] = torch.cat(
-                [p.grad.reshape((-1,)) for p in
-                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()])
+                return (True, loss.item(),
+                        lyapunov_positivity_mip_cost,
+                        lyapunov_derivative_mip_cost)
+            loss.backward()
             optimizer.step()
             iter_count += 1
-        return (False, losses, lyapunov_positivity_mip_costs,
-                lyapunov_derivative_mip_costs)
+        return (False, loss.item(), lyapunov_positivity_mip_cost,
+                lyapunov_derivative_mip_cost)
 
     def train_lyapunov_on_samples(
             self, state_samples_all, num_epochs, batch_size):

@@ -107,9 +107,6 @@ if __name__ == "__main__":
         "--train_on_samples_iterations", type=int, default=200,
         help="max number of iterations to pretrain on sampled states.")
     parser.add_argument(
-        "--project_gradient_method", type=str, default="NONE",
-        help="accept NONE, SUM, EMPHASIZE_POSITIVITY or ALTERNATE")
-    parser.add_argument(
         "--momentum", type=float, default=0.,
         help="momentum in SGD and GD")
     parser.add_argument(
@@ -228,19 +225,6 @@ if __name__ == "__main__":
     dut.min_improvement = args.min_improvement
     dut.add_adversarial_state_to_training =\
         args.add_adversarial_state_to_training
-    if args.project_gradient_method == "NONE":
-        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.NONE
-    elif args.project_gradient_method == "SUM":
-        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.SUM
-    elif args.project_gradient_method == "ALTERNATE":
-        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.\
-            ALTERNATE
-    elif args.project_gradient_method == "EMPHASIZE_POSITIVITY":
-        dut.project_gradient_method = train_lyapunov.ProjectGradientMethod.\
-            EMPHASIZE_POSITIVITY
-    else:
-        raise Exception("Unknown project gradient method.")
-
     if args.load_relu is None:
         if args.train_on_sample:
             # Train the Lyapunov loss on many sampled states
@@ -292,12 +276,9 @@ if __name__ == "__main__":
         state_samples = torch.stack(
             [state_samples[i, :] for i in range(state_samples.shape[0])
              if state_samples[i, 0] + state_samples[i, 1] >= 0])
-    if dut.optimizer == "GD" or dut.optimizer == "LineSearchAdam":
-        result = dut.train_with_line_search(state_samples)
-    else:
-        start_time = time.time()
-        result = dut.train(state_samples)
-        print(f"training time: {time.time()-start_time}s")
+    start_time = time.time()
+    result = dut.train(state_samples)
+    print(f"training time: {time.time()-start_time}s")
     if args.visualize:
         fig = plt.figure()
         ax1 = fig.add_subplot(3, 1, 1)
