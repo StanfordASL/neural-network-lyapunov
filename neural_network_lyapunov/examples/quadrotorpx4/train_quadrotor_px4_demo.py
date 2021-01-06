@@ -59,9 +59,9 @@ if __name__ == "__main__":
 
     V_lambda = 0.9
     x_lo = torch.tensor(
-        [-.5, -.5, .5, -np.pi/8, -np.pi/8, -np.pi/8, -1, -1, -1], dtype=dtype)
+        [-.5, -.5, -.5, -np.pi/8, -np.pi/8, -np.pi/8, -1, -1, -1], dtype=dtype)
     x_up = torch.tensor(
-        [.5, .5, 1.5, np.pi/8, np.pi/8, np.pi/8, 1, 1, 1], dtype=dtype)
+        [.5, .5, .5, np.pi/8, np.pi/8, np.pi/8, 1, 1, 1], dtype=dtype)
     u_lo = torch.tensor([-np.pi/2, -np.pi/2, -np.pi/2, 0.], dtype=dtype)
     u_up = torch.tensor([np.pi/2, np.pi/2, np.pi/2, 1.], dtype=dtype)
 
