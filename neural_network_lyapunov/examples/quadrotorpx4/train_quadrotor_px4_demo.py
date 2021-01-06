@@ -8,6 +8,7 @@ import torch
 import numpy as np
 import argparse
 import os
+import sys
 
 
 def train_forward_model(forward_model, xu_equilibrium, model_dataset,
@@ -34,6 +35,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_forward_model", type=str, default=None,
                         help="path to load dynamics model")
     parser.add_argument("--train_forward_model", action="store_true")
+    parser.add_argument("--forward_model_only", action="store_true")
     parser.add_argument("--save_forward_model", type=str, default=None,
                         help="path to save dynamics model")
     parser.add_argument("--load_lyapunov", type=str, default=None,
@@ -56,6 +58,9 @@ if __name__ == "__main__":
     xu_equilibrium = torch.tensor(
         [0., 0., 0., 0., 0., 0., 0., 0., 0., hover_thrust], dtype=dtype)
     R = 0.1 * torch.eye(9, dtype=dtype)
+
+    # make R tall
+
     V_lambda = 0.9
     x_lo = torch.tensor(
         [-5, -5, 0, -np.pi, -np.pi, -np.pi, -5, -5, -5], dtype=dtype)
@@ -75,6 +80,8 @@ if __name__ == "__main__":
                             num_epochs=100)
     if args.save_forward_model:
         torch.save(forward_model, args.save_forward_model)
+    if args.forward_model_only:
+        sys.exit(0)
 
     if args.load_lyapunov:
         lyapunov_relu = torch.load(args.load_lyapunov)
@@ -106,10 +113,14 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.lyapunov_positivity_convergence_tol = 5e-6
-    dut.max_iterations = 100
+    dut.max_iterations = 500
     dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.003
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
+    dut.lyapunov_positivity_mip_term_threshold = 1e-5
+    dut.lyapunov_derivative_mip_term_threshold = .1
+    dut.lyapunov_positivity_mip_warmstart = True
+    dut.lyapunov_derivative_mip_warmstart = True
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (3, 3, 3, 3, 3, 3, 3, 3, 3), dtype=dtype)
     dut.output_flag = True
