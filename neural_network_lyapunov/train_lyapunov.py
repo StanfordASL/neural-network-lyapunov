@@ -7,6 +7,7 @@ import wandb
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
+import neural_network_lyapunov.utils as utils
 
 
 class SearchROptions:
@@ -234,6 +235,21 @@ class TrainLyapunovReLU:
         self.lyapunov_derivative_mip_params = {
             gurobipy.GRB.Param.OutputFlag: False}
 
+        # Early termination: if None, will
+        # find the most adversarial state, otherwise will terminate the search
+        # as soon as it finds a state that violates the positivity or
+        # derivative condition by at least the given parameter
+        self.lyapunov_positivity_mip_term_threshold = None
+        self.lyapunov_derivative_mip_term_threshold = None
+
+        # Warmstart: Boolean as to whether or not reuse
+        # the last adversarial samples as warmstart for the current loss
+        # evaluation
+        self.lyapunov_positivity_mip_warmstart = False
+        self.lyapunov_derivative_mip_warmstart = False
+        self.lyapunov_positivity_last_x_adv = None
+        self.lyapunov_derivative_last_x_adv = None
+
     def total_loss(
             self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
@@ -285,7 +301,8 @@ class TrainLyapunovReLU:
                 lyapunov_positivity_as_milp(
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
-                    fixed_R=self.R_options.fixed_R)
+                    fixed_R=self.R_options.fixed_R,
+                    x_warmstart=self.lyapunov_positivity_last_x_adv)
             lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -295,9 +312,18 @@ class TrainLyapunovReLU:
                 lyapunov_positivity_mip.gurobi_model.setParam(
                     gurobipy.GRB.Param.PoolSolutions,
                     self.lyapunov_positivity_mip_pool_solutions)
-            lyapunov_positivity_mip.gurobi_model.optimize()
+            if self.lyapunov_positivity_mip_term_threshold is not None:
+                lyapunov_positivity_mip.gurobi_model.optimize(
+                    utils.get_gurobi_terminate_if_callback(
+                        threshold=self.lyapunov_positivity_mip_term_threshold))
+            else:
+                lyapunov_positivity_mip.gurobi_model.optimize()
             lyapunov_positivity_mip_obj = \
                 lyapunov_positivity_mip.gurobi_model.ObjVal
+            if self.lyapunov_positivity_mip_warmstart:
+                self.lyapunov_positivity_last_x_adv = torch.tensor([
+                    v.x for v in lyapunov_positivity_as_milp_return[1]],
+                    dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_positivity_mip_obj = np.nan
 
@@ -307,7 +333,8 @@ class TrainLyapunovReLU:
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_derivative_epsilon,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
-                    fixed_R=self.R_options.fixed_R)
+                    fixed_R=self.R_options.fixed_R,
+                    x_warmstart=self.lyapunov_derivative_last_x_adv)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             for param, val in self.lyapunov_derivative_mip_params.items():
                 lyapunov_derivative_mip.gurobi_model.setParam(param, val)
@@ -317,7 +344,12 @@ class TrainLyapunovReLU:
                 lyapunov_derivative_mip.gurobi_model.setParam(
                     gurobipy.GRB.Param.PoolSolutions,
                     self.lyapunov_derivative_mip_pool_solutions)
-            lyapunov_derivative_mip.gurobi_model.optimize()
+            if self.lyapunov_derivative_mip_term_threshold is not None:
+                lyapunov_derivative_mip.gurobi_model.optimize(
+                    utils.get_gurobi_terminate_if_callback(
+                        threshold=self.lyapunov_derivative_mip_term_threshold))
+            else:
+                lyapunov_derivative_mip.gurobi_model.optimize()
             lyapunov_derivative_mip_obj = \
                 lyapunov_derivative_mip.gurobi_model.ObjVal
 
@@ -329,6 +361,10 @@ class TrainLyapunovReLU:
                 print(
                     "adversarial x " +
                     f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
+            if self.lyapunov_derivative_mip_warmstart:
+                self.lyapunov_derivative_last_x_adv = torch.tensor([
+                    v.x for v in lyapunov_derivative_as_milp_return[1]],
+                    dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_derivative_mip_obj = np.nan
 
@@ -414,14 +450,16 @@ class TrainLyapunovReLU:
         # MIP to the training set. Note we solve positivity MIP and derivative
         # MIP separately. This is different from adding the most adversarial
         # state of the total loss.
-        if self.add_positivity_adversarial_state:
+        if self.add_positivity_adversarial_state and \
+                lyapunov_positivity_mip_cost_weight is not None:
             positivity_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_positivity_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
             positivity_state_samples = torch.cat(
                 [positivity_state_samples,
                  positivity_mip_adversarial.unsqueeze(0)], dim=0)
-        if self.add_derivative_adversarial_state:
+        if self.add_derivative_adversarial_state and \
+                lyapunov_derivative_mip_cost_weight is not None:
             derivative_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_derivative_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
@@ -455,14 +493,14 @@ class TrainLyapunovReLU:
             if iter_count % self.save_network_iterations == 0:
                 torch.save(
                     self.lyapunov_hybrid_system.lyapunov_relu,
-                    self.save_network_path + f"/lyapunov.pt")
+                    self.save_network_path + f'{"/lyapunov.pt"}')
                 torch.save(self.R_options.R(),
-                           self.save_network_path + f"/R.pt")
+                           self.save_network_path + f'{"/R.pt"}')
                 if isinstance(self.lyapunov_hybrid_system.system,
                               feedback_system.FeedbackSystem):
                     torch.save(
                         self.lyapunov_hybrid_system.system.controller_network,
-                        self.save_network_path + f"/controller.pt")
+                        self.save_network_path + f'{"/controller.pt"}')
 
     def train(self, state_samples_all):
         assert(isinstance(state_samples_all, torch.Tensor))
