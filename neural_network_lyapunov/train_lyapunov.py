@@ -5,7 +5,6 @@ import gurobipy
 import copy
 import wandb
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
-import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
@@ -237,8 +236,12 @@ class TrainLyapunovReLU:
         # parameter used in line search optimizer
         self.loss_minimal_decrement = 0.
 
-        # Whether we add the adversarial states to the training set.
-        self.add_adversarial_state_to_training = False
+        # Whether we add the positivity condition adversarial states to the
+        # training set.
+        self.add_positivity_adversarial_state = False
+        # Whether we add the derivative condition adversarial states to the
+        # training set.
+        self.add_derivative_adversarial_state = False
         # We compute the sample loss on the most recent max_sample_pool_size
         # samples.
         self.max_sample_pool_size = 500
@@ -339,18 +342,7 @@ class TrainLyapunovReLU:
 
             relu_zeta_val = np.array([
                 np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
-            relu_activation_pattern = relu_to_optimization.\
-                relu_activation_binary_to_pattern(
-                    self.lyapunov_hybrid_system.lyapunov_relu, relu_zeta_val)
-            relu_gradient, _, _, _ = relu_to_optimization.\
-                ReLUGivenActivationPattern(
-                    self.lyapunov_hybrid_system.lyapunov_relu,
-                    self.lyapunov_hybrid_system.system.x_dim,
-                    relu_activation_pattern,
-                    self.lyapunov_hybrid_system.system.dtype)
             if self.output_flag:
-                print("relu gradient " +
-                      f"{relu_gradient.squeeze().detach().numpy()}")
                 print("lyapunov derivative MIP Relu activation: "
                       f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
                 print(
@@ -441,10 +433,14 @@ class TrainLyapunovReLU:
         # MIP to the training set. Note we solve positivity MIP and derivative
         # MIP separately. This is different from adding the most adversarial
         # state of the total loss.
-        if self.add_adversarial_state_to_training:
+        if self.add_positivity_adversarial_state:
             positivity_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_positivity_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
+            positivity_state_samples = torch.cat(
+                [positivity_state_samples,
+                 positivity_mip_adversarial.unsqueeze(0)], dim=0)
+        if self.add_derivative_adversarial_state:
             derivative_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_derivative_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
@@ -460,9 +456,6 @@ class TrainLyapunovReLU:
             else:
                 derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
                     system.step_forward(derivative_mip_adversarial)
-            positivity_state_samples = torch.cat(
-                [positivity_state_samples,
-                 positivity_mip_adversarial.unsqueeze(0)], dim=0)
             derivative_state_samples = torch.cat(
                 [derivative_state_samples,
                  derivative_mip_adversarial.unsqueeze(0)], dim=0)

@@ -124,7 +124,8 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             lyapunov_hybrid_system, V_lambda, x_equilibrium, R_options)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
-        dut.add_adversarial_state_to_training = True
+        dut.add_positivity_adversarial_state = True
+        dut.add_derivative_adversarial_state = True
         dut.max_sample_pool_size = 400
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = torch.stack([
