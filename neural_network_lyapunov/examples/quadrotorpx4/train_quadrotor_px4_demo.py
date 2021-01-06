@@ -30,33 +30,25 @@ def train_forward_model(forward_model, xu_equilibrium, model_dataset,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PX4 quadrotor training demo")
-
     parser.add_argument("load_dynamics_data", type=str,
                         help="path to the dynamics data.")
-
     parser.add_argument("--load_forward_model", type=str, default=None,
                         help="path to load dynamics model")
     parser.add_argument("--train_forward_model", action="store_true")
     parser.add_argument("--forward_model_only", action="store_true")
     parser.add_argument("--save_forward_model", type=str, default=None,
                         help="path to save dynamics model")
-
     parser.add_argument("--load_folder", type=str, default=None,
                         help="path to load lyapunov, R and controller models")
-
     parser.add_argument("--train_on_samples", action="store_true")
-
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dtype = torch.float64
-
     model_dataset = torch.load(args.load_dynamics_data)
-
     dt = 1./30.
     hover_thrust = .705
     xu_equilibrium = torch.tensor(
         [0., 0., 0., 0., 0., 0., 0., 0., 0., hover_thrust], dtype=dtype)
-
     V_lambda = 0.9
     x_lo = torch.tensor(
         [-.5, -.5, -.5, -np.pi/8, -np.pi/8, -np.pi/8, -1, -1, -1], dtype=dtype)
@@ -64,7 +56,6 @@ if __name__ == "__main__":
         [.5, .5, .5, np.pi/8, np.pi/8, np.pi/8, 1, 1, 1], dtype=dtype)
     u_lo = torch.tensor([-np.pi/2, -np.pi/2, -np.pi/2, 0.], dtype=dtype)
     u_up = torch.tensor([np.pi/2, np.pi/2, np.pi/2, 1.], dtype=dtype)
-
     if args.load_forward_model:
         forward_model = torch.load(args.load_forward_model)
     else:
@@ -78,18 +69,23 @@ if __name__ == "__main__":
         torch.save(forward_model, args.save_forward_model)
     if args.forward_model_only:
         sys.exit(0)
-
-    # TODO: load from folder
-    R = torch.cat(
-        (.1 * torch.eye(9, dtype=dtype),
-         .123 * torch.ones((6, 9), dtype=dtype)), dim=0)
-    lyapunov_relu = utils.setup_relu(
-        (9, 12, 6, 1), params=None, negative_slope=0.1, bias=True,
-        dtype=dtype)
-    controller_relu = utils.setup_relu(
-        (9, 6, 4), params=None, negative_slope=0.01, bias=True,
-        dtype=dtype)
-
+    if args.load_folder:
+        R_path = os.path.join(args.load_folder, "R.pt")
+        lyapunov_path = os.path.join(args.load_folder, "lyapunov.pt")
+        controller_path = os.path.join(args.load_folder, "controller.pt")
+        R = torch.load(R_path)
+        lyapunov_relu = torch.load(lyapunov_path)
+        controller_relu = torch.load(controller_path)
+    else:
+        R = torch.cat(
+            (.1 * torch.eye(9, dtype=dtype),
+             .123 * torch.ones((6, 9), dtype=dtype)), dim=0)
+        lyapunov_relu = utils.setup_relu(
+            (9, 12, 6, 1), params=None, negative_slope=0.1, bias=True,
+            dtype=dtype)
+        controller_relu = utils.setup_relu(
+            (9, 6, 4), params=None, negative_slope=0.01, bias=True,
+            dtype=dtype)
     forward_system = quadrotor.QuadrotorWithPixhawkReLUSystem(
         dtype, x_lo, x_up, u_lo, u_up, forward_model, hover_thrust, dt)
     closed_loop_system = feedback_system.FeedbackSystem(
@@ -102,15 +98,13 @@ if __name__ == "__main__":
     R_options.set_variable_value(R.detach().numpy())
     dut = train_lyapunov.TrainLyapunovReLU(
         lyap, V_lambda, closed_loop_system.x_equilibrium, R_options)
-
     dut.max_iterations = 1000
     dut.search_R = True
     dut.add_derivative_adversarial_state = True
     dut.lyapunov_positivity_mip_term_threshold = 1e-5
-    dut.lyapunov_derivative_mip_term_threshold = .01
+    dut.lyapunov_derivative_mip_term_threshold = 1e-4
     dut.lyapunov_positivity_mip_warmstart = True
     dut.lyapunov_derivative_mip_warmstart = True
-
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
@@ -118,16 +112,12 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.003
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
-
     dut.save_network_path = 'models'
-
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
     dut.output_flag = True
     if args.train_on_samples:
         dut.train_lyapunov_on_samples(
             state_samples_all, num_epochs=10, batch_size=50)
-
     dut.enable_wandb = True
     dut.train(torch.empty((0, 9), dtype=dtype))
-
     pass
