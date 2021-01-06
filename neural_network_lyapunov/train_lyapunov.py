@@ -450,14 +450,16 @@ class TrainLyapunovReLU:
         # MIP to the training set. Note we solve positivity MIP and derivative
         # MIP separately. This is different from adding the most adversarial
         # state of the total loss.
-        if self.add_positivity_adversarial_state:
+        if self.add_positivity_adversarial_state and \
+                lyapunov_positivity_mip_cost_weight is not None:
             positivity_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_positivity_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
             positivity_state_samples = torch.cat(
                 [positivity_state_samples,
                  positivity_mip_adversarial.unsqueeze(0)], dim=0)
-        if self.add_derivative_adversarial_state:
+        if self.add_derivative_adversarial_state and \
+                lyapunov_derivative_mip_cost_weight is not None:
             derivative_mip_adversarial = torch.tensor([
                 v.x for v in lyapunov_derivative_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
