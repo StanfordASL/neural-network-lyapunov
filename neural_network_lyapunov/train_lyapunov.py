@@ -320,6 +320,10 @@ class TrainLyapunovReLU:
                 lyapunov_positivity_mip.gurobi_model.optimize()
             lyapunov_positivity_mip_obj = \
                 lyapunov_positivity_mip.gurobi_model.ObjVal
+            if self.lyapunov_positivity_mip_warmstart:
+                self.lyapunov_positivity_last_x_adv = torch.tensor([
+                    v.x for v in lyapunov_positivity_as_milp_return[1]],
+                    dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_positivity_mip_obj = np.nan
 
@@ -357,6 +361,10 @@ class TrainLyapunovReLU:
                 print(
                     "adversarial x " +
                     f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
+            if self.lyapunov_derivative_mip_warmstart:
+                self.lyapunov_derivative_last_x_adv = torch.tensor([
+                    v.x for v in lyapunov_derivative_as_milp_return[1]],
+                    dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_derivative_mip_obj = np.nan
 
@@ -471,17 +479,6 @@ class TrainLyapunovReLU:
             derivative_state_samples_next = torch.cat(
                 [derivative_state_samples_next,
                  derivative_mip_adversarial_next.unsqueeze(0)], dim=0)
-
-        if (lyapunov_positivity_mip_cost_weight is not None and
-                self.lyapunov_positivity_mip_warmstart):
-            self.lyapunov_positivity_last_x_adv = torch.tensor([
-                v.x for v in lyapunov_positivity_as_milp_return[1]],
-                dtype=self.lyapunov_hybrid_system.system.dtype)
-        if (lyapunov_derivative_mip_cost_weight is not None and
-                self.lyapunov_derivative_mip_warmstart):
-            self.lyapunov_derivative_last_x_adv = torch.tensor([
-                v.x for v in lyapunov_derivative_as_milp_return[1]],
-                dtype=self.lyapunov_hybrid_system.system.dtype)
 
         return loss, lyapunov_positivity_mip_obj, lyapunov_derivative_mip_obj,\
             positivity_sample_loss, derivative_sample_loss,\
