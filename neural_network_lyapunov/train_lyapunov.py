@@ -250,6 +250,10 @@ class TrainLyapunovReLU:
         # Whether to search over R when we use the 1-norm of |R*(x-x*)|₁.
         self.search_R = False
 
+        # All the Lyapunov derivative MIP params (except pool solutions).
+        self.lyapunov_derivative_mip_params = {
+            gurobipy.GRB.Param.OutputFlag: False}
+
     def total_loss(
             self, positivity_state_samples, derivative_state_samples,
             derivative_state_samples_next,
@@ -325,8 +329,8 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     fixed_R=self.R_options.fixed_R)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
-            lyapunov_derivative_mip.gurobi_model.setParam(
-                gurobipy.GRB.Param.OutputFlag, False)
+            for param, val in self.lyapunov_derivative_mip_params.items():
+                lyapunov_derivative_mip.gurobi_model.setParam(param, val)
             if (self.lyapunov_derivative_mip_pool_solutions > 1):
                 lyapunov_derivative_mip.gurobi_model.setParam(
                     gurobipy.GRB.Param.PoolSearchMode, 2)
