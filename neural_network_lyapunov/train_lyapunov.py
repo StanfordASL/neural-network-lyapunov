@@ -4,6 +4,7 @@ import numpy as np
 import gurobipy
 import copy
 import wandb
+import inspect
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
@@ -211,8 +212,6 @@ class TrainLyapunovReLU:
 
         # parameter used in SGD
         self.momentum = 0.
-        # parameter used in line search optimizer
-        self.loss_minimal_decrement = 0.
 
         # Whether we add the positivity condition adversarial states to the
         # training set.
@@ -502,7 +501,19 @@ class TrainLyapunovReLU:
                         self.lyapunov_hybrid_system.system.controller_network,
                         self.save_network_path + f'{"/controller.pt"}')
 
+    def print(self):
+        """
+        Print the settings of this training device.
+        """
+        for attr in inspect.getmembers(self):
+            if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
+                if attr[0] not in ('lyapunov_hybrid_system', 'R_options',
+                                   'summary_writer_folder'):
+                    print(attr)
+
     def train(self, state_samples_all):
+        if self.output_flag:
+            self.print()
         assert(isinstance(state_samples_all, torch.Tensor))
         assert(
             state_samples_all.shape[1] ==
