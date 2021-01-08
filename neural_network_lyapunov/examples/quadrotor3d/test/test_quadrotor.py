@@ -95,7 +95,7 @@ class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         torch.manual_seed(0)
-        dynamics_relu = utils.setup_relu((10, 15, 10, 6),
+        dynamics_relu = utils.setup_relu((7, 15, 10, 6),
                                          params=None,
                                          negative_slope=0.1,
                                          bias=True,
@@ -104,7 +104,8 @@ class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
             [-2, -2, -2, -0.5 * np.pi, -0.3 * np.pi, -np.pi, -3, -3, -3],
             dtype=self.dtype)
         x_up = -x_lo
-        u_lo = torch.tensor([-0.5 * np.pi, -0.3 * np.pi, -np.pi, -5])
+        u_lo = torch.tensor([-0.5 * np.pi, -0.3 * np.pi, -np.pi, -5],
+                            dtype=self.dtype)
         u_up = -u_lo
         hover_thrust = 3.
         dt = 0.03
@@ -123,10 +124,10 @@ class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
             rpy_current = x_val[3:6]
             vel_current = x_val[6:9]
             delta_vel_rpy = self.dut.dynamics_relu(
-                torch.cat((vel_current, rpy_current,
+                torch.cat((rpy_current,
                            u_val))) - self.dut.dynamics_relu(
                                torch.cat((torch.zeros(
-                                   (6, ),
+                                   (3, ),
                                    dtype=self.dtype), self.dut.u_equilibrium)))
             vel_next = vel_current + delta_vel_rpy[:3]
             pos_next = pos_current + (vel_current + vel_next) * self.dut.dt / 2
