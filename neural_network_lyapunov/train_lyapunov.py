@@ -5,6 +5,7 @@ import gurobipy
 import copy
 import wandb
 import inspect
+import time
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
@@ -372,6 +373,75 @@ class TrainLyapunovReLU:
             self.lyapunov_hybrid_system.lyapunov_relu.forward(
                 self.x_equilibrium)
 
+        positivity_mip_loss = 0.
+        if lyapunov_positivity_mip_cost_weight != 0 and\
+                lyapunov_positivity_mip_cost_weight is not None:
+            for mip_sol_number in range(
+                    self.lyapunov_positivity_mip_pool_solutions):
+                if mip_sol_number < \
+                        lyapunov_positivity_mip.gurobi_model.solCount:
+                    positivity_mip_loss += \
+                        lyapunov_positivity_mip_cost_weight * \
+                        torch.pow(torch.tensor(
+                            self.lyapunov_positivity_mip_cost_decay_rate,
+                            dtype=dtype), mip_sol_number) *\
+                        lyapunov_positivity_mip.\
+                        compute_objective_from_mip_data_and_solution(
+                            solution_number=mip_sol_number, penalty=1e-13)
+        derivative_mip_loss = 0
+        if lyapunov_derivative_mip_cost_weight != 0\
+                and lyapunov_derivative_mip_cost_weight is not None:
+            for mip_sol_number in range(
+                    self.lyapunov_derivative_mip_pool_solutions):
+                if (mip_sol_number <
+                        lyapunov_derivative_mip.gurobi_model.solCount):
+                    mip_cost = lyapunov_derivative_mip.\
+                        compute_objective_from_mip_data_and_solution(
+                            solution_number=mip_sol_number, penalty=1e-13)
+                    derivative_mip_loss += \
+                        lyapunov_derivative_mip_cost_weight *\
+                        torch.pow(torch.tensor(
+                            self.lyapunov_derivative_mip_cost_decay_rate,
+                            dtype=dtype), mip_sol_number) * mip_cost
+                    lyapunov_derivative_mip.gurobi_model.setParam(
+                        gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
+
+        # We add the most adverisal states of the positivity MIP and derivative
+        # MIP to the training set. Note we solve positivity MIP and derivative
+        # MIP separately. This is different from adding the most adversarial
+        # state of the total loss.
+        if self.add_positivity_adversarial_state and \
+                lyapunov_positivity_mip_cost_weight is not None:
+            positivity_mip_adversarial = torch.tensor([
+                v.x for v in lyapunov_positivity_as_milp_return[1]],
+                dtype=self.lyapunov_hybrid_system.system.dtype)
+            positivity_state_samples = torch.cat(
+                [positivity_state_samples,
+                 positivity_mip_adversarial.unsqueeze(0)], dim=0)
+        if self.add_derivative_adversarial_state and \
+                lyapunov_derivative_mip_cost_weight is not None:
+            derivative_mip_adversarial = torch.tensor([
+                v.x for v in lyapunov_derivative_as_milp_return[1]],
+                dtype=self.lyapunov_hybrid_system.system.dtype)
+            if isinstance(self.lyapunov_hybrid_system.system,
+                          hybrid_linear_system.AutonomousHybridLinearSystem):
+                derivative_mip_adversarial_mode = np.argwhere(np.array(
+                    [v.x for v in lyapunov_derivative_as_milp_return[3]])
+                    > 0.99)[0][0]
+                derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
+                    system.step_forward(
+                        derivative_mip_adversarial,
+                        derivative_mip_adversarial_mode)
+            else:
+                derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
+                    system.step_forward(derivative_mip_adversarial)
+            derivative_state_samples = torch.cat(
+                [derivative_state_samples,
+                 derivative_mip_adversarial.unsqueeze(0)], dim=0)
+            derivative_state_samples_next = torch.cat(
+                [derivative_state_samples_next,
+                 derivative_mip_adversarial_next.unsqueeze(0)], dim=0)
+
         if lyapunov_positivity_sample_cost_weight != 0 and\
                 positivity_state_samples.shape[0] > 0:
             if positivity_state_samples.shape[0] > self.max_sample_pool_size:
@@ -410,76 +480,8 @@ class TrainLyapunovReLU:
         else:
             derivative_sample_loss = 0.
 
-        positivity_mip_loss = 0.
-        if lyapunov_positivity_mip_cost_weight != 0 and\
-                lyapunov_positivity_mip_cost_weight is not None:
-            for mip_sol_number in range(
-                    self.lyapunov_positivity_mip_pool_solutions):
-                if mip_sol_number < \
-                        lyapunov_positivity_mip.gurobi_model.solCount:
-                    positivity_mip_loss += \
-                        lyapunov_positivity_mip_cost_weight * \
-                        torch.pow(torch.tensor(
-                            self.lyapunov_positivity_mip_cost_decay_rate,
-                            dtype=dtype), mip_sol_number) *\
-                        lyapunov_positivity_mip.\
-                        compute_objective_from_mip_data_and_solution(
-                            solution_number=mip_sol_number, penalty=1e-13)
-        derivative_mip_loss = 0
-        if lyapunov_derivative_mip_cost_weight != 0\
-                and lyapunov_derivative_mip_cost_weight is not None:
-            for mip_sol_number in range(
-                    self.lyapunov_derivative_mip_pool_solutions):
-                if (mip_sol_number <
-                        lyapunov_derivative_mip.gurobi_model.solCount):
-                    mip_cost = lyapunov_derivative_mip.\
-                        compute_objective_from_mip_data_and_solution(
-                            solution_number=mip_sol_number, penalty=1e-13)
-                    derivative_mip_loss += \
-                        lyapunov_derivative_mip_cost_weight *\
-                        torch.pow(torch.tensor(
-                            self.lyapunov_derivative_mip_cost_decay_rate,
-                            dtype=dtype), mip_sol_number) * mip_cost
-                    lyapunov_derivative_mip.gurobi_model.setParam(
-                        gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
         loss = positivity_sample_loss + derivative_sample_loss + \
             positivity_mip_loss + derivative_mip_loss
-
-        # We add the most adverisal states of the positivity MIP and derivative
-        # MIP to the training set. Note we solve positivity MIP and derivative
-        # MIP separately. This is different from adding the most adversarial
-        # state of the total loss.
-        if self.add_positivity_adversarial_state and \
-                lyapunov_positivity_mip_cost_weight is not None:
-            positivity_mip_adversarial = torch.tensor([
-                v.x for v in lyapunov_positivity_as_milp_return[1]],
-                dtype=self.lyapunov_hybrid_system.system.dtype)
-            positivity_state_samples = torch.cat(
-                [positivity_state_samples,
-                 positivity_mip_adversarial.unsqueeze(0)], dim=0)
-        if self.add_derivative_adversarial_state and \
-                lyapunov_derivative_mip_cost_weight is not None:
-            derivative_mip_adversarial = torch.tensor([
-                v.x for v in lyapunov_derivative_as_milp_return[1]],
-                dtype=self.lyapunov_hybrid_system.system.dtype)
-            if isinstance(self.lyapunov_hybrid_system.system,
-                          hybrid_linear_system.AutonomousHybridLinearSystem):
-                derivative_mip_adversarial_mode = np.argwhere(np.array(
-                    [v.x for v in lyapunov_derivative_as_milp_return[3]])
-                    > 0.99)[0][0]
-                derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
-                    system.step_forward(
-                        derivative_mip_adversarial,
-                        derivative_mip_adversarial_mode)
-            else:
-                derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
-                    system.step_forward(derivative_mip_adversarial)
-            derivative_state_samples = torch.cat(
-                [derivative_state_samples,
-                 derivative_mip_adversarial.unsqueeze(0)], dim=0)
-            derivative_state_samples_next = torch.cat(
-                [derivative_state_samples_next,
-                 derivative_mip_adversarial_next.unsqueeze(0)], dim=0)
 
         return loss, lyapunov_positivity_mip_obj, lyapunov_derivative_mip_obj,\
             positivity_sample_loss, derivative_sample_loss,\
@@ -512,6 +514,7 @@ class TrainLyapunovReLU:
                     print(attr)
 
     def train(self, state_samples_all):
+        train_start_time = time.time()
         if self.output_flag:
             self.print()
         assert(isinstance(state_samples_all, torch.Tensor))
@@ -585,10 +588,11 @@ class TrainLyapunovReLU:
 
             if self.enable_wandb:
                 wandb.log({
-                    "iter_count": iter_count, "loss": loss.item(),
+                    "loss": loss.item(),
                     "positivity MIP cost": lyapunov_positivity_mip_cost,
                     "derivative MIP cost":
-                    lyapunov_derivative_mip_cost})
+                    lyapunov_derivative_mip_cost,
+                    "time": time.time() - train_start_time})
             if self.summary_writer_folder is not None:
                 writer.add_scalar("loss", loss.item(), iter_count)
                 writer.add_scalar(

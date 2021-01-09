@@ -302,10 +302,10 @@ if __name__ == "__main__":
     # Now train the controller and Lyapunov function together
     q_equilibrium = torch.tensor([np.pi], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([np.pi - 1.2 * np.pi, -5.], dtype=torch.float64)
-    x_up = torch.tensor([np.pi + 1.2 * np.pi, 5.], dtype=torch.float64)
-    u_lo = torch.tensor([-12], dtype=torch.float64)
-    u_up = torch.tensor([12], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - 0.7 * np.pi, -3.], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + 0.7 * np.pi, 3.], dtype=torch.float64)
+    u_lo = torch.tensor([-20], dtype=torch.float64)
+    u_up = torch.tensor([20], dtype=torch.float64)
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
         torch.float64, x_lo, x_up, u_lo, u_up, dynamics_model, q_equilibrium,
         u_equilibrium, dt)
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.5
-    dut.lyapunov_derivative_epsilon = 0.004
+    dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(
         x_lo, x_up, (51, 51), dtype=torch.float64)
@@ -340,5 +340,9 @@ if __name__ == "__main__":
             batch_size=50)
 
     dut.enable_wandb = args.enable_wandb
+    dut.add_derivative_adversarial_state = True
+    dut.lyapunov_derivative_mip_cost_weight = 0.
+    dut.add_positivity_adversarial_state = True
+    dut.lyapunov_positivity_mip_cost_weight = 0.
     dut.train(torch.empty((0, 2), dtype=torch.float64))
     pass
