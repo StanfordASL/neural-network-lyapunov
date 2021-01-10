@@ -515,7 +515,9 @@ class TrainLyapunovReLU:
             if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
                 if attr[0] not in ('lyapunov_hybrid_system',
                                    'summary_writer_folder'):
-                    print(attr)
+                    print(f"{attr[0]}: {attr[1]}")
+                    if self.enable_wandb:
+                        wandb.config.update({attr[0]: f"{attr[1]}"})
 
     def train(self, state_samples_all):
         train_start_time = time.time()
