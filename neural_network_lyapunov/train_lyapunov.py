@@ -72,6 +72,10 @@ class SearchROptions:
     def variables(self):
         return [self._variables]
 
+    def __str__(self):
+        return f"Search R with size {self.R_size} and epsilon" +\
+            f" {self.epsilon}"
+
     @property
     def fixed_R(self):
         return False
@@ -93,6 +97,9 @@ class FixedROptions:
 
     def variables(self):
         return []
+
+    def __str__(self):
+        return f"Fixed R to \n {self._R}"
 
     @property
     def fixed_R(self):
@@ -227,9 +234,6 @@ class TrainLyapunovReLU:
         # Whether we search for the controller when the dynamical is a feedback
         # system which contains a neural network representing its controller.
         self.search_controller = True
-
-        # Whether to search over R when we use the 1-norm of |R*(x-x*)|₁.
-        self.search_R = False
 
         # All the Lyapunov derivative MIP params (except pool solutions).
         self.lyapunov_derivative_mip_params = {
@@ -509,7 +513,7 @@ class TrainLyapunovReLU:
         """
         for attr in inspect.getmembers(self):
             if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
-                if attr[0] not in ('lyapunov_hybrid_system', 'R_options',
+                if attr[0] not in ('lyapunov_hybrid_system',
                                    'summary_writer_folder'):
                     print(attr)
 
