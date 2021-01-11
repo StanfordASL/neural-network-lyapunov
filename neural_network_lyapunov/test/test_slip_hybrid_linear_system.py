@@ -43,8 +43,9 @@ class SpringHybridLinearSystemTest(unittest.TestCase):
                 res[1] += terrain_height
                 return res
 
-            apex_map_res = apex_map(np.array(
-                [apex_state[0], apex_state[1], apex_state[2], leg_angle]))
+            apex_map_res = apex_map(
+                np.array(
+                    [apex_state[0], apex_state[1], apex_state[2], leg_angle]))
             if (apex_map_res is None):
                 self.assertIsNone(A)
                 self.assertIsNone(B)
@@ -54,22 +55,24 @@ class SpringHybridLinearSystemTest(unittest.TestCase):
                 self.assertIsNone(c_t)
                 self.assertIsNone(P)
                 self.assertIsNone(q)
-            elif(A is not None):
+            elif (A is not None):
                 # print("A is not None")
                 # First check if the constant terms in the linear approximation
                 # are correct.
                 self.assertTrue(
-                    utils.compare_numpy_matrices(
-                        apex_map_res[:3],
-                        (A@(apex_state.reshape((3, 1))) + B * leg_angle + c).
-                        squeeze(), 1e-5, 1e-5))
+                    utils.compare_numpy_matrices(apex_map_res[:3],
+                                                 (A @ (apex_state.reshape(
+                                                     (3, 1))) + B * leg_angle +
+                                                  c).squeeze(), 1e-5, 1e-5))
                 self.assertAlmostEqual(
                     apex_map_res[3],
                     a_t.dot(apex_state) + b_t * leg_angle + c_t, 5)
                 # Now check if the gradient is correct.
                 grad_numerical = utils.compute_numerical_gradient(
-                    apex_map, np.array([apex_state[0], apex_state[1],
-                                        apex_state[2], leg_angle]))
+                    apex_map,
+                    np.array([
+                        apex_state[0], apex_state[1], apex_state[2], leg_angle
+                    ]))
                 self.assertTrue(
                     utils.compare_numpy_matrices(grad_numerical[:3, :3], A,
                                                  1e-5, 1e-5))
@@ -90,8 +93,10 @@ class SpringHybridLinearSystemTest(unittest.TestCase):
                 self.assertEqual(P.shape, (num_constraints, 4))
                 # Now check if the constraints are correct.
                 # First of all, the apex_state should satisfy the constraint.
-                lhs = P.dot(np.array([apex_state[0], apex_state[1],
-                                      apex_state[2], leg_angle]))
+                lhs = P.dot(
+                    np.array([
+                        apex_state[0], apex_state[1], apex_state[2], leg_angle
+                    ]))
                 self.assertTrue(np.alltrue(np.less_equal(lhs, q.squeeze())))
                 # Now check q - lhs.
                 rhs_minus_lhs_expected = np.empty(num_constraints)

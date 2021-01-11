@@ -25,11 +25,11 @@ def double_integrator_lqr(Q, R):
     @return (K, P) K is the control gain, K = R⁻¹BᵀP, P is the cost-to-go
     matrix.
     """
-    assert(Q.dtype == R.dtype)
-    assert(Q.shape[0] == 2)
-    assert(Q.shape[1] == 2)
-    assert(R > 0)
-    assert(Q[0][1] == Q[1][0])
+    assert (Q.dtype == R.dtype)
+    assert (Q.shape[0] == 2)
+    assert (Q.shape[1] == 2)
+    assert (R > 0)
+    assert (Q[0][1] == Q[1][0])
     """
     The LQR cost-to-go matrix P for the double integrator system satisfies the
     following equation
@@ -65,14 +65,14 @@ class TestDoubleIntegratorLQR(unittest.TestCase):
             self.assertGreater(P[1][1], 0)
             self.assertGreater(np.linalg.det(P.data.numpy()), 0)
 
-        test_lqr_util(torch.tensor(
-            [[1, 0], [0, 10]], dtype=dtype), torch.tensor(1, dtype=dtype))
-        test_lqr_util(torch.tensor(
-            [[2, 0], [0, 10]], dtype=dtype), torch.tensor(3, dtype=dtype))
-        test_lqr_util(torch.tensor(
-            [[2, 1], [1, 10]], dtype=dtype), torch.tensor(3, dtype=dtype))
-        test_lqr_util(torch.tensor(
-            [[4, -1], [-1, 10]], dtype=dtype), torch.tensor(3, dtype=dtype))
+        test_lqr_util(torch.tensor([[1, 0], [0, 10]], dtype=dtype),
+                      torch.tensor(1, dtype=dtype))
+        test_lqr_util(torch.tensor([[2, 0], [0, 10]], dtype=dtype),
+                      torch.tensor(3, dtype=dtype))
+        test_lqr_util(torch.tensor([[2, 1], [1, 10]], dtype=dtype),
+                      torch.tensor(3, dtype=dtype))
+        test_lqr_util(torch.tensor([[4, -1], [-1, 10]], dtype=dtype),
+                      torch.tensor(3, dtype=dtype))
 
 
 if __name__ == "__main__":

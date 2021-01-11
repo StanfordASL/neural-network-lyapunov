@@ -4,9 +4,9 @@ import gurobipy
 import enum
 
 
-def compute_range_by_lp(
-    A: np.ndarray, b: np.ndarray, x_lb: np.ndarray, x_ub: np.ndarray,
-        C: np.ndarray, d: np.ndarray) -> (np.ndarray, np.ndarray):
+def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
+                        x_ub: np.ndarray, C: np.ndarray,
+                        d: np.ndarray) -> (np.ndarray, np.ndarray):
     """
     Given x_lb <= x <= x_ub and C * x <= d, compute the range of y = A * x + b
     through linear programming
@@ -15,19 +15,19 @@ def compute_range_by_lp(
     @param C Either np.ndarray or None
     @param d Either np.ndarray or None
     """
-    assert(isinstance(A, np.ndarray))
-    assert(isinstance(b, np.ndarray))
-    assert(isinstance(x_lb, np.ndarray) or x_lb is None)
-    assert(isinstance(x_ub, np.ndarray) or x_ub is None)
-    assert(isinstance(C, np.ndarray) or C is None)
-    assert(isinstance(d, np.ndarray) or d is None)
+    assert (isinstance(A, np.ndarray))
+    assert (isinstance(b, np.ndarray))
+    assert (isinstance(x_lb, np.ndarray) or x_lb is None)
+    assert (isinstance(x_ub, np.ndarray) or x_ub is None)
+    assert (isinstance(C, np.ndarray) or C is None)
+    assert (isinstance(d, np.ndarray) or d is None)
 
     y_dim = A.shape[0]
     x_dim = A.shape[1]
     if x_lb is None:
-        x_lb = np.full((x_dim,), -np.inf)
+        x_lb = np.full((x_dim, ), -np.inf)
     if x_ub is None:
-        x_ub = np.full((x_dim,), np.inf)
+        x_ub = np.full((x_dim, ), np.inf)
     y_lb = np.empty(y_dim)
     y_ub = np.empty(y_dim)
     model = gurobipy.Model()
@@ -36,8 +36,13 @@ def compute_range_by_lp(
         model.addMConstrs(C, x, gurobipy.GRB.LESS_EQUAL, d)
     for i in range(y_dim):
         # First find the upper bound.
-        model.setMObjective(Q=None, c=A[i], constant=b[i], xQ_L=None,
-                            xQ_R=None, xc=x, sense=gurobipy.GRB.MAXIMIZE)
+        model.setMObjective(Q=None,
+                            c=A[i],
+                            constant=b[i],
+                            xQ_L=None,
+                            xQ_R=None,
+                            xc=x,
+                            sense=gurobipy.GRB.MAXIMIZE)
         model.update()
         model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         model.optimize()
@@ -51,8 +56,13 @@ def compute_range_by_lp(
             raise Exception("compute_range_by_lp: unknown status.")
 
         # Now find the lower bound.
-        model.setMObjective(Q=None, c=A[i], constant=b[i], xQ_L=None,
-                            xQ_R=None, xc=x, sense=gurobipy.GRB.MINIMIZE)
+        model.setMObjective(Q=None,
+                            c=A[i],
+                            constant=b[i],
+                            xQ_L=None,
+                            xQ_R=None,
+                            xc=x,
+                            sense=gurobipy.GRB.MINIMIZE)
         model.update()
         model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         model.optimize()
@@ -75,15 +85,15 @@ def compute_range_by_IA(
     arithmetics (IA). Notice that this allows the computed bounds to be
     differentiable w.r.t the input bounds x_lb, x_ub and parameter A, b.
     """
-    assert(isinstance(A, torch.Tensor))
-    assert(isinstance(b, torch.Tensor))
+    assert (isinstance(A, torch.Tensor))
+    assert (isinstance(b, torch.Tensor))
     output_dim = A.shape[0]
     x_dim = A.shape[1]
-    assert(b.shape == (output_dim,))
-    assert(isinstance(x_lb, torch.Tensor))
-    assert(isinstance(x_ub, torch.Tensor))
-    assert(x_lb.shape == (x_dim,))
-    assert(x_ub.shape == (x_dim,))
+    assert (b.shape == (output_dim, ))
+    assert (isinstance(x_lb, torch.Tensor))
+    assert (isinstance(x_ub, torch.Tensor))
+    assert (x_lb.shape == (x_dim, ))
+    assert (x_ub.shape == (x_dim, ))
     output_lb = torch.empty(b.shape, dtype=b.dtype)
     output_ub = torch.empty(b.shape, dtype=b.dtype)
 
@@ -109,9 +119,9 @@ def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
     (LP) to compute the bounds. Note that LP produces tighter bounds, but loses
     the gradient information (The output bounds will not carry gradient).
     """
-    assert(isinstance(input_lo, torch.Tensor))
-    assert(isinstance(input_up, torch.Tensor))
-    assert(isinstance(method, PropagateBoundsMethod))
+    assert (isinstance(input_lo, torch.Tensor))
+    assert (isinstance(input_up, torch.Tensor))
+    assert (isinstance(method, PropagateBoundsMethod))
     dtype = input_lo.dtype
     if isinstance(layer, torch.nn.ReLU):
         # ReLU is a monotonic increasing function.
@@ -131,13 +141,14 @@ def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
         bias = torch.zeros((layer.out_features,), dtype=dtype) if\
             layer.bias is None else layer.bias.clone()
         if method == PropagateBoundsMethod.IA:
-            output_lo, output_up = compute_range_by_IA(
-                layer.weight, bias, input_lo, input_up)
+            output_lo, output_up = compute_range_by_IA(layer.weight, bias,
+                                                       input_lo, input_up)
         elif method == PropagateBoundsMethod.LP:
             output_lo_np, output_up_np = compute_range_by_lp(
-                layer.weight.detach().numpy(), bias.detach().numpy(),
-                input_lo.detach().numpy(), input_up.detach().numpy(), None,
-                None)
+                layer.weight.detach().numpy(),
+                bias.detach().numpy(),
+                input_lo.detach().numpy(),
+                input_up.detach().numpy(), None, None)
             output_lo = torch.from_numpy(output_lo_np).type(dtype)
             output_up = torch.from_numpy(output_up_np).type(dtype)
         else:

@@ -23,31 +23,30 @@ class TestControlLyapunovFixedActivationPattern(unittest.TestCase):
         prob.solve(solver="GUROBI")
         self.assertEqual(prob.status, cp.OPTIMAL)
         self.assertTrue(np.less_equal(P.dot(dut.x.value), q).all())
-        self.assertAlmostEqual(prob.value, g.T.dot(
-            dut.x.value) + np.min(g.T.dot(B.dot(u_vertices))) + g.T.dot(d), 5)
+        self.assertAlmostEqual(
+            prob.value,
+            g.T.dot(dut.x.value) + np.min(g.T.dot(B.dot(u_vertices))) +
+            g.T.dot(d), 5)
 
 
 class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.linear1 = nn.Linear(2, 3)
-        self.linear1.weight.data = torch.tensor(
-            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
-        self.linear1.bias.data = torch.tensor(
-            [-11, 13, 4], dtype=self.dtype)
+        self.linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                                dtype=self.dtype)
+        self.linear1.bias.data = torch.tensor([-11, 13, 4], dtype=self.dtype)
         self.linear2 = nn.Linear(3, 4)
         self.linear2.weight.data = torch.tensor(
             [[-1, 0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1, 4, 6]],
             dtype=self.dtype)
-        self.linear2.bias.data = torch.tensor(
-            [4, -1, -2, 3], dtype=self.dtype)
+        self.linear2.bias.data = torch.tensor([4, -1, -2, 3], dtype=self.dtype)
         self.linear3 = nn.Linear(4, 1)
-        self.linear3.weight.data = torch.tensor(
-            [[4, 5, 6, 7]], dtype=self.dtype)
+        self.linear3.weight.data = torch.tensor([[4, 5, 6, 7]],
+                                                dtype=self.dtype)
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
         self.model = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
-                                   nn.ReLU(),
-                                   self.linear3)
+                                   nn.ReLU(), self.linear3)
         self.dut = control_lyapunov.ControlLyapunovFreeActivationPattern(
             self.model, self.dtype)
 
@@ -69,12 +68,12 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
             parameterized by Ain1,..., 5 are satisfied, and the cost
             evaluates as expected.
             """
-            assert(torch.all(x.squeeze() <= x_up))
-            assert(torch.all(x.squeeze() >= x_lo))
+            assert (torch.all(x.squeeze() <= x_up))
+            assert (torch.all(x.squeeze() >= x_lo))
 
             # First compute alpha
             alpha = torch.zeros((12, 1), dtype=self.dtype)
-            assert(len(beta) == 2)
+            assert (len(beta) == 2)
             for i0 in range(3):
                 for i1 in range(4):
                     alpha_index = \
@@ -83,19 +82,18 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
                     alpha[alpha_index][0] = 1 if beta[0][i0] == 1 and \
                         beta[1][i1] == 1 else 0
             # Now compute s, s(i, j) = alpha(i) * x(j)
-            s = torch.empty(
-                (alpha.shape[0] * x.shape[0], 1), dtype=self.dtype)
+            s = torch.empty((alpha.shape[0] * x.shape[0], 1), dtype=self.dtype)
             for i in range(alpha.shape[0]):
                 for j in range(x.shape[0]):
                     s[i * x.shape[0] + j][0] = alpha[i][0] * x[j][0]
             # Now compute t = min_i αᵀMBuᵢ
             (M, _, _, _) = self.dut.relu_free_pattern.output_gradient()
-            t = torch.tensor(
-                [[torch.min(alpha.T @ M @ B_dyn @ u_vertices).item()]]
-            ).to(dtype=self.dtype)
-            beta_vec = torch.tensor(
-                [beta_val for beta_layer in beta for beta_val in beta_layer]
-            ).reshape((-1, 1)).to(dtype=self.dtype)
+            t = torch.tensor([[
+                torch.min(alpha.T @ M @ B_dyn @ u_vertices).item()
+            ]]).to(dtype=self.dtype)
+            beta_vec = torch.tensor([
+                beta_val for beta_layer in beta for beta_val in beta_layer
+            ]).reshape((-1, 1)).to(dtype=self.dtype)
 
             def compute_lhs(s_val, t_val, alpha_val):
                 return Ain1.to_dense() @ x \
@@ -110,8 +108,8 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
 
             # Perturb s a bit, the constraint shouldn't be satisfied
             lhs = compute_lhs(
-                s + torch.empty(s.shape[0], 1, dtype=self.dtype).
-                uniform_(-0.1, 0.1), t, alpha)
+                s + torch.empty(s.shape[0], 1, dtype=self.dtype).uniform_(
+                    -0.1, 0.1), t, alpha)
             self.assertFalse(torch.all(lhs < rhs + precision))
             # Now increase t a bit, the constraint shouldn't be satisfied.
             lhs = compute_lhs(s, t + 0.1, alpha)
@@ -131,14 +129,15 @@ class TestControlLyapunovFreeActivationPattern(unittest.TestCase):
             cost = c1.T @ s + t + c2.T @ alpha
             self.assertAlmostEqual(cost.item(), cost_expected.item(), 4)
 
-        test_generate_program_util(torch.tensor([[0.], [0.]],
-                                                dtype=self.dtype), [
-                                   [1, 1, 0], [0, 0, 1, 1]])
-        test_generate_program_util(torch.tensor([[1.], [2.]],
-                                                dtype=self.dtype), [
-                                   [1, 1, 0], [0, 0, 1, 1]])
-        test_generate_program_util(torch.tensor(
-            [[-1.2], [-0.9]], dtype=self.dtype), [[1, 0, 1], [0, 1, 0, 0]])
+        test_generate_program_util(
+            torch.tensor([[0.], [0.]], dtype=self.dtype),
+            [[1, 1, 0], [0, 0, 1, 1]])
+        test_generate_program_util(
+            torch.tensor([[1.], [2.]], dtype=self.dtype),
+            [[1, 1, 0], [0, 0, 1, 1]])
+        test_generate_program_util(
+            torch.tensor([[-1.2], [-0.9]], dtype=self.dtype),
+            [[1, 0, 1], [0, 1, 0, 0]])
 
 
 if __name__ == '__main__':

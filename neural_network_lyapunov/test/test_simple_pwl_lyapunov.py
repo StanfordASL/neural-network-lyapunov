@@ -18,14 +18,14 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         dut = simple_pwl_lyapunov.SimplePWLLyapunov(
             1, 2, lyapunov_positivity_epsilon, lyapunov_derivative_epsilon,
             np.array([0.]), 0)
-        dut.add_lyapunov_derivative_in_mode(
-            0, np.array([[0.], [1.]]), np.array([[-1.]]), np.array([0.]))
-        dut.add_lyapunov_derivative_in_mode(
-            1, np.array([[0.], [-1.]]), np.array([[-2.]]), np.array([0.]))
-        dut.add_lyapunov_positivity_in_mode(
-            0, np.array([[0.], [1.]]), np.array([1]))
-        dut.add_lyapunov_positivity_in_mode(
-            1, np.array([[0.], [-1.]]), np.array([-1]))
+        dut.add_lyapunov_derivative_in_mode(0, np.array([[0.], [1.]]),
+                                            np.array([[-1.]]), np.array([0.]))
+        dut.add_lyapunov_derivative_in_mode(1, np.array([[0.], [-1.]]),
+                                            np.array([[-2.]]), np.array([0.]))
+        dut.add_lyapunov_positivity_in_mode(0, np.array([[0.], [1.]]),
+                                            np.array([1]))
+        dut.add_lyapunov_positivity_in_mode(1, np.array([[0.], [-1.]]),
+                                            np.array([-1]))
         dut.add_continuity_constraint(0, 1, np.array([[0.]]))
 
         c_val, d_val, s1_val, s2_val = dut.solve(0.3)
@@ -35,17 +35,16 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         # Check continuity
         np.testing.assert_allclose(d_val, np.array([0., 0.]), atol=1e-6)
         # Check Vdot <= -epsilon * V
+        self.assertLessEqual(c_val[0, 0] * -1,
+                             -lyapunov_derivative_epsilon * c_val[0, 0] + 1e-6)
         self.assertLessEqual(
-            c_val[0, 0] * -1, -lyapunov_derivative_epsilon * c_val[0, 0] +
-            1e-6)
-        self.assertLessEqual(
-            c_val[0, 1] * -2 * -1, -lyapunov_derivative_epsilon * c_val[0, 1]
-            * -1 + 1e-6)
+            c_val[0, 1] * -2 * -1,
+            -lyapunov_derivative_epsilon * c_val[0, 1] * -1 + 1e-6)
         # Check V >= lyapunov_positivity_epsilon * 1_norm(x - x*)
-        self.assertGreaterEqual(
-            c_val[0, 0] * 1, lyapunov_positivity_epsilon * 1)
-        self.assertGreaterEqual(
-            c_val[0, 1] * -1, lyapunov_positivity_epsilon * 1)
+        self.assertGreaterEqual(c_val[0, 0] * 1,
+                                lyapunov_positivity_epsilon * 1)
+        self.assertGreaterEqual(c_val[0, 1] * -1,
+                                lyapunov_positivity_epsilon * 1)
 
     def test2(self):
         """
@@ -60,46 +59,55 @@ class TestSimplePWLLyapunov(unittest.TestCase):
         mode_vertices = [None] * 3
         A = [None] * 3
         g = [None] * 3
-        mode_vertices[0] = np.array(
-            [[-2., -1.], [-2., 1.], [-1., -1.], [-1., 1.]])
+        mode_vertices[0] = np.array([[-2., -1.], [-2., 1.], [-1., -1.],
+                                     [-1., 1.]])
         A[0] = np.array([[-10., -10.5], [10.5, 9]])
         g[0] = np.array([-11., 7.5])
-        mode_vertices[1] = np.array(
-            [[-1., -1.], [-1., 1.], [1., -1.], [1., 1.]])
+        mode_vertices[1] = np.array([[-1., -1.], [-1., 1.], [1., -1.],
+                                     [1., 1.]])
         A[1] = np.array([[-1., -2.5], [1., -1.]])
         g[1] = np.array([0., 0.])
         mode_vertices[2] = np.array([[1., -1.], [1., 1.], [2., -1.], [2., 1.]])
         A[2] = np.array([[-10., -10.5], [10.5, -20.]])
         g[2] = np.array([11., 50.5])
         for i in range(3):
-            dut.add_lyapunov_derivative_in_mode(
-                i, mode_vertices[i], A[i], g[i])
+            dut.add_lyapunov_derivative_in_mode(i, mode_vertices[i], A[i],
+                                                g[i])
 
         lyapunov_positivity_args = [None] * 8
-        lyapunov_positivity_args[0] = (
-            0, np.array([[-2., -1.], [-2., 0.], [-1., 0.], [-1., -1.]]),
-            np.array([-1, -1]))
-        lyapunov_positivity_args[1] = (
-            0, np.array([[-2., 0.], [-2., 1.], [-1., 1.], [-1., 0.]]),
-            np.array([-1, 1]))
-        lyapunov_positivity_args[2] = (
-            1, np.array([[-1., -1.], [-1., 0.], [0., 0.], [0., -1.]]),
-            np.array([-1, -1]))
-        lyapunov_positivity_args[3] = (
-            1, np.array([[-1., 0.], [-1., 1.], [0., 1.], [0., 0.]]),
-            np.array([-1, 1]))
-        lyapunov_positivity_args[4] = (
-            1, np.array([[0., 0.], [0., 1.], [1., 1.], [1., 0.]]),
-            np.array([1, 1]))
-        lyapunov_positivity_args[5] = (
-            1, np.array([[0., -1.], [0., 0.], [1., 0.], [1., -1.]]),
-            np.array([1, -1]))
-        lyapunov_positivity_args[6] = (
-            2, np.array([[1., 0.], [1., 1.], [2., 1.], [2., 0.]]),
-            np.array([1, 1]))
-        lyapunov_positivity_args[7] = (
-            2, np.array([[1., -1.], [1., 0.], [2., 0.], [2., -1.]]),
-            np.array([1, -1]))
+        lyapunov_positivity_args[0] = (0,
+                                       np.array([[-2., -1.], [-2., 0.],
+                                                 [-1., 0.],
+                                                 [-1.,
+                                                  -1.]]), np.array([-1, -1]))
+        lyapunov_positivity_args[1] = (0,
+                                       np.array([[-2., 0.], [-2.,
+                                                             1.], [-1., 1.],
+                                                 [-1., 0.]]), np.array([-1,
+                                                                        1]))
+        lyapunov_positivity_args[2] = (1,
+                                       np.array([[-1., -1.], [-1.,
+                                                              0.], [0., 0.],
+                                                 [0.,
+                                                  -1.]]), np.array([-1, -1]))
+        lyapunov_positivity_args[3] = (1,
+                                       np.array([[-1., 0.], [-1.,
+                                                             1.], [0., 1.],
+                                                 [0., 0.]]), np.array([-1, 1]))
+        lyapunov_positivity_args[4] = (1,
+                                       np.array([[0., 0.], [0., 1.], [1., 1.],
+                                                 [1., 0.]]), np.array([1, 1]))
+        lyapunov_positivity_args[5] = (1,
+                                       np.array([[0., -1.], [0., 0.], [1., 0.],
+                                                 [1., -1.]]), np.array([1,
+                                                                        -1]))
+        lyapunov_positivity_args[6] = (2,
+                                       np.array([[1., 0.], [1., 1.], [2., 1.],
+                                                 [2., 0.]]), np.array([1, 1]))
+        lyapunov_positivity_args[7] = (2,
+                                       np.array([[1., -1.], [1., 0.], [2., 0.],
+                                                 [2., -1.]]), np.array([1,
+                                                                        -1]))
         for args in lyapunov_positivity_args:
             dut.add_lyapunov_positivity_in_mode(args[0], args[1], args[2])
 
@@ -118,12 +126,13 @@ class TestSimplePWLLyapunov(unittest.TestCase):
             for k in range(args[2].shape[0]):
                 self.assertAlmostEqual(
                     c_val[:, args[0]] @ args[2][k] + d_val[args[0]],
-                    c_val[:, args[1]] @ args[2][k] + d_val[args[1]], places=5)
+                    c_val[:, args[1]] @ args[2][k] + d_val[args[1]],
+                    places=5)
         # Check the Lyapunov derivative constraint.
         for i in range(3):
             for j in range(mode_vertices[i].shape[0]):
                 self.assertGreaterEqual(
-                    s1_val, c_val[:, i] @ (A[i]@mode_vertices[i][j] + g[i]) +
+                    s1_val, c_val[:, i] @ (A[i] @ mode_vertices[i][j] + g[i]) +
                     lyapunov_derivative_epsilon *
                     (c_val[:, i] @ mode_vertices[i][j] + d_val[i]) - 1e-5)
         # Check the Lyapunov positivity constraint
@@ -131,8 +140,8 @@ class TestSimplePWLLyapunov(unittest.TestCase):
             for j in range(args[1].shape[0]):
                 self.assertGreaterEqual(
                     c_val[:, args[0]] @ args[1][j] + d_val[args[0]] -
-                    lyapunov_positivity_epsilon * np.linalg.norm(
-                        args[1][j], ord=1), -s2_val - 1e-5)
+                    lyapunov_positivity_epsilon *
+                    np.linalg.norm(args[1][j], ord=1), -s2_val - 1e-5)
 
 
 if __name__ == "__main__":

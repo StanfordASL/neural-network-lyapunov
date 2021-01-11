@@ -24,7 +24,7 @@ def compute_optical_flow_control(y, params):
     @return: u0 = v; u1 = w.
     """
     num_rays_control = params['num_rays_control']
-    assert(num_rays_control == len(y))
+    assert (num_rays_control == len(y))
     kv = .7
     kw = 1
     mid = int(num_rays_control / 2)  # assume numRays is even
@@ -42,12 +42,11 @@ def compute_optical_flow_control(y, params):
     return u_1  # /np.linalg.norm(u_1)   #Actuation limits
 
 
-def compute_optical_flow_control_goal(
-        y,
-        params,
-        goal_pos=None,
-        state=None,
-        prev_yaw_goal=0):
+def compute_optical_flow_control_goal(y,
+                                      params,
+                                      goal_pos=None,
+                                      state=None,
+                                      prev_yaw_goal=0):
     """
     Driving to the goal position while avoiding obstacles.
     Assume field of view [0,pi/2).
@@ -67,9 +66,8 @@ def compute_optical_flow_control_goal(
     yaw_goal = prev_yaw_goal
     if goal_pos is not None:
         if np.min(y) > .8:
-            yaw_goal = np.arctan2(
-                goal_pos[1] - state[1],
-                goal_pos[0] - state[0])
+            yaw_goal = np.arctan2(goal_pos[1] - state[1],
+                                  goal_pos[0] - state[0])
             if yaw_goal < -0:
                 if prev_yaw_goal > np.pi / 2:
                     yaw_goal += 2 * np.pi  # np arctan discontinuity
@@ -78,6 +76,8 @@ def compute_optical_flow_control_goal(
             if v < params['position_error_threshold']:
                 v = 0
                 return [0, 0]
+
+
 #             u_1[0] = kv*v
     return u_1 / np.linalg.norm(u_1), yaw_goal
 
@@ -131,17 +131,16 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
     for env in range(0, numEnvs):
         # Sample environment
         heightObs = 20 * robotHeight
-        obsUid = utils_simulation.generate_obstacles(
-            pybullet, heightObs, robotRadius)
+        obsUid = utils_simulation.generate_obstacles(pybullet, heightObs,
+                                                     robotRadius)
 
-#         goal_pos = None
+        #         goal_pos = None
         while True:
             goal_pos = np.array(
-                [np.random.uniform(-8, 8), np.random.uniform(-8, 8), 0])
+                [np.random.uniform(-8, 8),
+                 np.random.uniform(-8, 8), 0])
             pybullet.resetBasePositionAndOrientation(
-                sphere, [
-                    goal_pos[0], goal_pos[1], robotHeight], [
-                    0, 0, 0, 1])
+                sphere, [goal_pos[0], goal_pos[1], robotHeight], [0, 0, 0, 1])
             # sphere and obsUid are not in collision
             if pybullet.getClosestPoints(sphere, obsUid, 0.0) == ():
                 goalUid = utils_simulation.generate_goal(pybullet, goal_pos)
@@ -156,35 +155,26 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
         # pi/2 since Husky visualization is rotated by pi/2
         quat = pybullet.getQuaternionFromEuler([0.0, 0.0, state[2]])
 
+        pybullet.resetBasePositionAndOrientation(husky,
+                                                 [state[0], state[1], 0.0],
+                                                 quat)
         pybullet.resetBasePositionAndOrientation(
-            husky, [state[0], state[1], 0.0], quat)
-        pybullet.resetBasePositionAndOrientation(
-            sphere, [
-                state[0], state[1], robotHeight], [
-                0, 0, 0, 1])
+            sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
         yaw_goal = 0
 
         for t in range(0, T_horizon):
             # Get depth sensor measurement for control
-            y_ray = utils_simulation.getDistances(
-                pybullet,
-                state,
-                robotHeight,
-                num_rays_control,
-                senseRadius,
-                psi_nominal)
+            y_ray = utils_simulation.getDistances(pybullet, state, robotHeight,
+                                                  num_rays_control,
+                                                  senseRadius, psi_nominal)
             # Get depth sensor measurement with FOV > pi/2
-            depth = utils_simulation.getDistances(
-                pybullet,
-                state,
-                robotHeight,
-                num_rays_data,
-                senseRadius,
-                params['psi_nominal_full'],
-                True)
+            depth = utils_simulation.getDistances(pybullet, state, robotHeight,
+                                                  num_rays_data, senseRadius,
+                                                  params['psi_nominal_full'],
+                                                  True)
 
             # Compute control input
-#             u = compute_optical_flow_control(y_ray,params)
+            #             u = compute_optical_flow_control(y_ray,params)
             u, yaw_goal = compute_optical_flow_control_goal(
                 y_ray, params, goal_pos, state, yaw_goal)
             u_data.append(u)
@@ -197,22 +187,18 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
             # Update position of pybullet object
             # pi/2 since Husky visualization is rotated by pi/2
             quat = pybullet.getQuaternionFromEuler([0.0, 0.0, state[2]])
+            pybullet.resetBasePositionAndOrientation(husky,
+                                                     [state[0], state[1], 0.0],
+                                                     quat)
             pybullet.resetBasePositionAndOrientation(
-                husky, [state[0], state[1], 0.0], quat)
-            pybullet.resetBasePositionAndOrientation(
-                sphere, [
-                    state[0], state[1], robotHeight], [
-                    0, 0, 0, 1])
+                sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
 
             if (GUI):
                 pybullet.resetDebugVisualizerCamera(
                     cameraDistance=5.0,
                     cameraYaw=0.0,
                     cameraPitch=-45.0,
-                    cameraTargetPosition=[
-                        state[0],
-                        state[1],
-                        2 * robotHeight])
+                    cameraTargetPosition=[state[0], state[1], 2 * robotHeight])
                 # time.sleep(0.025)
 
             # Check if the robot is in collision.
@@ -239,15 +225,15 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
                     pybullet.removeBody(goalUid)
                     reach += 1
                     while True:
-                        goal_pos = np.array(
-                            [np.random.uniform(-8, 8),
-                             np.random.uniform(-8, 8), 0])
+                        goal_pos = np.array([
+                            np.random.uniform(-8, 8),
+                            np.random.uniform(-8, 8), 0
+                        ])
                         pybullet.resetBasePositionAndOrientation(
-                            sphere, [
-                                goal_pos[0], goal_pos[1], robotHeight], [
-                                0, 0, 0, 1])
-                        if pybullet.getClosestPoints(
-                                sphere, obsUid, 0.0) == ():
+                            sphere, [goal_pos[0], goal_pos[1], robotHeight],
+                            [0, 0, 0, 1])
+                        if pybullet.getClosestPoints(sphere, obsUid,
+                                                     0.0) == ():
                             goalUid = utils_simulation.generate_goal(
                                 pybullet, goal_pos)
                             break
@@ -255,6 +241,7 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
         # Remove obstacles
         pybullet.removeBody(obsUid)
         pybullet.removeBody(goalUid)
+
 
 #     print("Collide: "+str(crash))
 #     print("Reach: "+str(reach))
@@ -287,8 +274,8 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
         visualize_ray = False
         # Sample environment
         heightObs = 20 * robotHeight
-        obsUid = utils_simulation.generate_obstacles(
-            pybullet, heightObs, robotRadius)
+        obsUid = utils_simulation.generate_obstacles(pybullet, heightObs,
+                                                     robotRadius)
 
         # # Print
         if (env % 10 == 0):
@@ -297,13 +284,13 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
         for t in range(0, T_horizon):
             # Randomly sample initial position
             while True:
-                state = np.array(
-                    [np.random.uniform(-8, 8), np.random.uniform(-8, 8),
-                     np.random.uniform(-1.5 * np.pi, 1.5 * np.pi)])
+                state = np.array([
+                    np.random.uniform(-8, 8),
+                    np.random.uniform(-8, 8),
+                    np.random.uniform(-1.5 * np.pi, 1.5 * np.pi)
+                ])
                 pybullet.resetBasePositionAndOrientation(
-                    sphere, [
-                        state[0], state[1], robotHeight], [
-                        0, 0, 0, 1])
+                    sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
                 # sphere and obsUid are not in collision
                 if pybullet.getClosestPoints(sphere, obsUid, 0.0) == ():
                     # goalUid = utils_simulation.generate_goal(pybullet,
@@ -311,12 +298,11 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                     break
 
             quat = pybullet.getQuaternionFromEuler([0.0, 0.0, state[2]])
+            pybullet.resetBasePositionAndOrientation(husky,
+                                                     [state[0], state[1], 0.0],
+                                                     quat)
             pybullet.resetBasePositionAndOrientation(
-                husky, [state[0], state[1], 0.0], quat)
-            pybullet.resetBasePositionAndOrientation(
-                sphere, [
-                    state[0], state[1], robotHeight], [
-                    0, 0, 0, 1])
+                sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
 
             if t == 8:
                 utils_simulation.getImage(pybullet, state, robotHeight)
@@ -328,23 +314,19 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                     cameraDistance=5.0,
                     cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
                     cameraPitch=-89.9,  # -45.0,
-                    cameraTargetPosition=[
-                        state[0],
-                        state[1],
-                        2 * robotHeight])
+                    cameraTargetPosition=[state[0], state[1], 2 * robotHeight])
 
             # Get depth sensor measurement with FOV > pi/2
-            depth = utils_simulation.getDistances(
-                pybullet,
-                state,
-                robotHeight,
-                num_rays_data,
-                senseRadius,
-                params['psi_nominal_full'],
-                data=True,
-                visualize=visualize_ray,
-                RGB=[1, 0, 0],
-                parentObjectId=husky)
+            depth = utils_simulation.getDistances(pybullet,
+                                                  state,
+                                                  robotHeight,
+                                                  num_rays_data,
+                                                  senseRadius,
+                                                  params['psi_nominal_full'],
+                                                  data=True,
+                                                  visualize=visualize_ray,
+                                                  RGB=[1, 0, 0],
+                                                  parentObjectId=husky)
 
             u = [np.random.uniform(-2, 5), np.random.uniform(-0.5, 0.5)]
             u_data.append(u)
@@ -357,24 +339,22 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
             # Update position of pybullet object
             # pi/2 since Husky visualization is rotated by pi/2
             quat = pybullet.getQuaternionFromEuler([0.0, 0.0, state[2]])
+            pybullet.resetBasePositionAndOrientation(husky,
+                                                     [state[0], state[1], 0.0],
+                                                     quat)
             pybullet.resetBasePositionAndOrientation(
-                husky, [state[0], state[1], 0.0], quat)
-            pybullet.resetBasePositionAndOrientation(
-                sphere, [
-                    state[0], state[1], robotHeight], [
-                    0, 0, 0, 1])
+                sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
 
-            depth = utils_simulation.getDistances(
-                pybullet,
-                state,
-                robotHeight,
-                num_rays_data,
-                senseRadius,
-                params['psi_nominal_full'],
-                data=True,
-                visualize=visualize_ray,
-                RGB=[0, 0, 1],
-                parentObjectId=husky)
+            depth = utils_simulation.getDistances(pybullet,
+                                                  state,
+                                                  robotHeight,
+                                                  num_rays_data,
+                                                  senseRadius,
+                                                  params['psi_nominal_full'],
+                                                  data=True,
+                                                  visualize=visualize_ray,
+                                                  RGB=[0, 0, 1],
+                                                  parentObjectId=husky)
             next_depth_data.append(depth)
             next_state_data.append(state)
 
@@ -387,10 +367,7 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
                     cameraDistance=5.0,
                     cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
                     cameraPitch=-89.9,  # -45.0,
-                    cameraTargetPosition=[
-                        state[0],
-                        state[1],
-                        2 * robotHeight])
+                    cameraTargetPosition=[state[0], state[1], 2 * robotHeight])
                 # time.sleep(0.1)
 
         # Remove obstacles
@@ -415,11 +392,10 @@ if __name__ == "__main__":
     robotRadius = params['robotRadius']
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-f",
-        "--file_name",
-        type=str,
-        help="file name for storing collected data")
+    parser.add_argument("-f",
+                        "--file_name",
+                        type=str,
+                        help="file name for storing collected data")
     args = parser.parse_args()
 
     # Flag that sets if things are visualized
@@ -441,15 +417,15 @@ if __name__ == "__main__":
     husky = pybullet.loadURDF("./URDFs/husky.urdf", globalScaling=0.5)
 
     # Sphere
-    colSphereId = pybullet.createCollisionShape(
-        pybullet.GEOM_SPHERE, radius=robotRadius)
+    colSphereId = pybullet.createCollisionShape(pybullet.GEOM_SPHERE,
+                                                radius=robotRadius)
     mass = 0
 
     # This just makes sure that the sphere is not visible (we only use the
     # sphere for collision checking)
-    visualShapeId = pybullet.createVisualShape(
-        pybullet.GEOM_SPHERE, radius=robotRadius, rgbaColor=[
-            0.5, 0.5, 0.5, 0.5])
+    visualShapeId = pybullet.createVisualShape(pybullet.GEOM_SPHERE,
+                                               radius=robotRadius,
+                                               rgbaColor=[0.5, 0.5, 0.5, 0.5])
 
     sphere = pybullet.createMultiBody(mass, colSphereId, visualShapeId)
 

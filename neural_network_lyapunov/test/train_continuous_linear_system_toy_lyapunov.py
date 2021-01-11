@@ -14,35 +14,38 @@ import argparse
 import time
 
 import matplotlib.pyplot as plt
-from matplotlib import cm # noqa
-from mpl_toolkits import mplot3d # noqa
+from matplotlib import cm  # noqa
+from mpl_toolkits import mplot3d  # noqa
 
 
-def setup_relu(
-        relu_layer_width, params=None, negative_gradient=0.1, bias=True,
-        symmetric_x=False):
+def setup_relu(relu_layer_width,
+               params=None,
+               negative_gradient=0.1,
+               bias=True,
+               symmetric_x=False):
     """
     @param symmetric_x If true, then we want the network satisfies
     network(x) = network(-x). This requires that bias=False, and the negative
     gradient of the first ReLU unit to be -1.
     """
-    assert(isinstance(relu_layer_width, tuple))
-    assert(relu_layer_width[0] == 2)
+    assert (isinstance(relu_layer_width, tuple))
+    assert (relu_layer_width[0] == 2)
     if params is not None:
-        assert(isinstance(params, torch.Tensor))
+        assert (isinstance(params, torch.Tensor))
     dtype = torch.float64
     if symmetric_x:
-        assert(not bias)
+        assert (not bias)
 
     def set_param(linear, param_count):
-        linear.weight.data = params[
-            param_count: param_count +
-            linear.in_features * linear.out_features].clone().reshape((
-                linear.out_features, linear.in_features))
+        linear.weight.data = params[param_count:param_count +
+                                    linear.in_features *
+                                    linear.out_features].clone().reshape(
+                                        (linear.out_features,
+                                         linear.in_features))
         param_count += linear.in_features * linear.out_features
         if bias:
-            linear.bias.data = params[
-                param_count: param_count + linear.out_features].clone()
+            linear.bias.data = params[param_count:param_count +
+                                      linear.out_features].clone()
             param_count += linear.out_features
         return param_count
 
@@ -51,8 +54,9 @@ def setup_relu(
     for i in range(len(relu_layer_width)):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
-        linear_layers[i] = nn.Linear(
-            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
+        linear_layers[i] = nn.Linear(relu_layer_width[i],
+                                     next_layer_width,
+                                     bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -74,57 +78,76 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="learning lyapunov for toy continuous time hybrid " +
         "linear system.")
+    parser.add_argument("--system",
+                        type=int,
+                        default=1,
+                        help="the system index.")
+    parser.add_argument('--learning_rate',
+                        type=float,
+                        default=1e-3,
+                        help='learning rate for the Lyapunov function.')
+    parser.add_argument("--max_iterations",
+                        type=int,
+                        default=2000,
+                        help="max iteration for learning Lyapunov function.")
+    parser.add_argument("--visualize",
+                        help="visualize the results",
+                        action="store_true")
+    parser.add_argument("--train_on_sample",
+                        help="Train candidate Lyapunov on sampled states",
+                        action="store_true")
     parser.add_argument(
-        "--system", type=int, default=1,
-        help="the system index.")
-    parser.add_argument(
-        '--learning_rate', type=float, default=1e-3,
-        help='learning rate for the Lyapunov function.')
-    parser.add_argument(
-        "--max_iterations", type=int, default=2000,
-        help="max iteration for learning Lyapunov function.")
-    parser.add_argument(
-        "--visualize", help="visualize the results", action="store_true")
-    parser.add_argument(
-        "--train_on_sample", help="Train candidate Lyapunov on sampled states",
-        action="store_true")
-    parser.add_argument(
-        "--approximator_iterations", type=int, default=100,
+        "--approximator_iterations",
+        type=int,
+        default=100,
         help="number of iterations for training a value function approximator")
+    parser.add_argument("--load_cost_to_go_data",
+                        type=str,
+                        default=None,
+                        help="saved pickle file on the cost-to-go samples.")
+    parser.add_argument("--load_relu",
+                        type=str,
+                        default=None,
+                        help="saved pickle file on the relu model.")
+    parser.add_argument("--optimizer",
+                        type=str,
+                        default="Adam",
+                        help="optimizer can be either Adam, SGD or GD.")
+    parser.add_argument("--summary_writer_folder",
+                        type=str,
+                        default=None,
+                        help="folder for the tensorboard summary")
     parser.add_argument(
-        "--load_cost_to_go_data", type=str, default=None,
-        help="saved pickle file on the cost-to-go samples.")
-    parser.add_argument(
-        "--load_relu", type=str, default=None,
-        help="saved pickle file on the relu model.")
-    parser.add_argument(
-        "--optimizer", type=str, default="Adam",
-        help="optimizer can be either Adam, SGD or GD.")
-    parser.add_argument(
-        "--summary_writer_folder", type=str, default=None,
-        help="folder for the tensorboard summary")
-    parser.add_argument(
-        "--train_on_samples_iterations", type=int, default=200,
+        "--train_on_samples_iterations",
+        type=int,
+        default=200,
         help="max number of iterations to pretrain on sampled states.")
-    parser.add_argument(
-        "--momentum", type=float, default=0.,
-        help="momentum in SGD and GD")
-    parser.add_argument(
-        "--lyapunov_positivity_sample_cost_weight", type=float, default=0.)
-    parser.add_argument(
-        "--lyapunov_derivative_sample_cost_weight", type=float, default=0.)
-    parser.add_argument(
-        "--lyapunov_derivative_mip_cost_weight", type=float, default=1.)
-    parser.add_argument(
-        "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
-    parser.add_argument(
-        "--add_adversarial_state_to_training", action="store_true")
-    parser.add_argument(
-        "--loss_minimal_decrement", type=float, default=None,
-        help="check line_search_gd.")
-    parser.add_argument(
-        "--min_improvement", type=float, default=-0.1,
-        help="minimal improvement in line search.")
+    parser.add_argument("--momentum",
+                        type=float,
+                        default=0.,
+                        help="momentum in SGD and GD")
+    parser.add_argument("--lyapunov_positivity_sample_cost_weight",
+                        type=float,
+                        default=0.)
+    parser.add_argument("--lyapunov_derivative_sample_cost_weight",
+                        type=float,
+                        default=0.)
+    parser.add_argument("--lyapunov_derivative_mip_cost_weight",
+                        type=float,
+                        default=1.)
+    parser.add_argument("--lyapunov_positivity_mip_cost_weight",
+                        type=float,
+                        default=1.)
+    parser.add_argument("--add_adversarial_state_to_training",
+                        action="store_true")
+    parser.add_argument("--loss_minimal_decrement",
+                        type=float,
+                        default=None,
+                        help="check line_search_gd.")
+    parser.add_argument("--min_improvement",
+                        type=float,
+                        default=-0.1,
+                        help="minimal improvement in line search.")
     args = parser.parse_args()
 
     bias = False
@@ -144,9 +167,10 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system2(
                 10, keep_symmetric_half=False)
         x_equilibrium = torch.tensor([0., 0.], dtype=system.dtype)
-        relu = setup_relu(
-            (2, 4, 4, 4, 4, 4), negative_gradient=0.1, bias=bias,
-            symmetric_x=True)
+        relu = setup_relu((2, 4, 4, 4, 4, 4),
+                          negative_gradient=0.1,
+                          bias=bias,
+                          symmetric_x=True)
     elif args.system == 3:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
@@ -160,16 +184,20 @@ if __name__ == "__main__":
             setup_johansson_continuous_time_system4(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system4(10)
-        relu = setup_relu(
-            (2, 4, 4, 4), negative_gradient=0.1, bias=False, symmetric_x=True)
+        relu = setup_relu((2, 4, 4, 4),
+                          negative_gradient=0.1,
+                          bias=False,
+                          symmetric_x=True)
     elif args.system == 5:
         x_equilibrium = torch.tensor([0., 0], dtype=torch.float64)
         system = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system5(keep_positive_x=True)
         system_simulate = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system5(10)
-        relu = setup_relu(
-            (2, 8, 4), negative_gradient=-1., bias=False, symmetric_x=True)
+        relu = setup_relu((2, 8, 4),
+                          negative_gradient=-1.,
+                          bias=False,
+                          symmetric_x=True)
 
     lyapunov_hybrid_system = \
         continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
@@ -196,15 +224,16 @@ if __name__ == "__main__":
     keep_symmetric_half = True
     # Only keep the state samples above x+y=0 line for system 2.
     if keep_symmetric_half and args.system == 2:
-        state_samples_all = torch.stack(
-            [state_samples_all[i, :] for i in range(state_samples_all.shape[0])
-             if state_samples_all[i, 0] + state_samples_all[i, 1] >= 0])
+        state_samples_all = torch.stack([
+            state_samples_all[i, :] for i in range(state_samples_all.shape[0])
+            if state_samples_all[i, 0] + state_samples_all[i, 1] >= 0
+        ])
 
     R = None
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
-        train_lyapunov.FixedROptions(torch.eye(
-            x_equilibrium.shape[0], dtype=torch.float64)))
+        train_lyapunov.FixedROptions(
+            torch.eye(x_equilibrium.shape[0], dtype=torch.float64)))
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
     dut.learning_rate = args.learning_rate
@@ -228,9 +257,9 @@ if __name__ == "__main__":
     if args.load_relu is None:
         if args.train_on_sample:
             # Train the Lyapunov loss on many sampled states
-            dut.train_lyapunov_on_samples(
-                state_samples_all, args.train_on_samples_iterations,
-                batch_size=10)
+            dut.train_lyapunov_on_samples(state_samples_all,
+                                          args.train_on_samples_iterations,
+                                          batch_size=10)
         else:
             # First train a ReLU to approximate the value function.
             approximator = train_lyapunov.TrainValueApproximator()
@@ -243,8 +272,8 @@ if __name__ == "__main__":
                     state_samples_all, 100., False,
                     torch.eye(2, dtype=torch.float64), x_equilibrium,
                     lambda x: torch.norm(x - x_equilibrium, p=2) < 0.01 and
-                    torch.any(x - x_equilibrium <= x_lower) and
-                    torch.any(x - x_equilibrium >= x_upper))
+                    torch.any(x - x_equilibrium <= x_lower) and torch.any(
+                        x - x_equilibrium >= x_upper))
             else:
                 x0_value_samples = torch.load(args.load_cost_to_go_data)
                 result1, loss1 = approximator.train_with_cost_to_go(
@@ -273,9 +302,10 @@ if __name__ == "__main__":
             setup_state_samples_on_boundary(
                 x_equilibrium, x_lower, x_upper, (15, 15), 0.)
     if keep_symmetric_half and args.system == 2:
-        state_samples = torch.stack(
-            [state_samples[i, :] for i in range(state_samples.shape[0])
-             if state_samples[i, 0] + state_samples[i, 1] >= 0])
+        state_samples = torch.stack([
+            state_samples[i, :] for i in range(state_samples.shape[0])
+            if state_samples[i, 0] + state_samples[i, 1] >= 0
+        ])
     start_time = time.time()
     result = dut.train(state_samples)
     print(f"training time: {time.time()-start_time}s")

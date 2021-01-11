@@ -33,8 +33,8 @@ class DynamicsLearningOptions():
 
 
 class DynamicsLearning:
-    def __init__(self, train_dataloader, validation_dataloader,
-                 lyap, learning_opt):
+    def __init__(self, train_dataloader, validation_dataloader, lyap,
+                 learning_opt):
         """
         Helper class to train dynamics using lyapunov regularization
         @param train_dataloader torch Dataloader for training
@@ -42,14 +42,13 @@ class DynamicsLearning:
         @param lyap instance of LyapunovHybridLinearSystem class
         @param learning_opt instance of DynamicsLearningOptions class
         """
-        assert(isinstance(lyap, lyapunov.LyapunovHybridLinearSystem))
-        assert(
-            isinstance(
-                lyap.system, relu_system.AutonomousReLUSystemGivenEquilibrium)
-            or isinstance(
-                lyap.system,
-                relu_system.AutonomousResidualReLUSystemGivenEquilibrium))
-        assert(isinstance(learning_opt, DynamicsLearningOptions))
+        assert (isinstance(lyap, lyapunov.LyapunovHybridLinearSystem))
+        assert (isinstance(lyap.system,
+                           relu_system.AutonomousReLUSystemGivenEquilibrium)
+                or isinstance(
+                    lyap.system,
+                    relu_system.AutonomousResidualReLUSystemGivenEquilibrium))
+        assert (isinstance(learning_opt, DynamicsLearningOptions))
         self.train_dataloader = train_dataloader
         self.validation_dataloader = validation_dataloader
         self.lyap = lyap
@@ -110,8 +109,11 @@ class DynamicsLearning:
         violate the derivative constraint
         """
         lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_pos, R=self.opt.R, fixed_R=True)
+            self.lyap.system.x_equilibrium,
+            self.opt.V_lambda,
+            self.opt.V_eps_pos,
+            R=self.opt.R,
+            fixed_R=True)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -126,15 +128,19 @@ class DynamicsLearning:
                 gurobipy.GRB.Param.SolutionNumber, i)
             obj = lyap_pos_mip.gurobi_model.PoolObjVal
             if obj > 0:
-                z_adv_pos.append(torch.tensor(
-                    [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
+                z_adv_pos.append(
+                    torch.tensor([r.xn for r in x_var],
+                                 dtype=self.opt.dtype).unsqueeze(0))
         if len(z_adv_pos) > 0:
             z_adv_pos = torch.cat(z_adv_pos, dim=0)
 
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
-            R=self.opt.R, fixed_R=True)
+            self.lyap.system.x_equilibrium,
+            self.opt.V_lambda,
+            self.opt.V_eps_der_lo,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=self.opt.R,
+            fixed_R=True)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -151,15 +157,19 @@ class DynamicsLearning:
                 gurobipy.GRB.Param.SolutionNumber, i)
             obj = lyap_der_mip.gurobi_model.PoolObjVal
             if obj > 0:
-                z_adv_der.append(torch.tensor(
-                    [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
+                z_adv_der.append(
+                    torch.tensor([r.xn for r in x_var],
+                                 dtype=self.opt.dtype).unsqueeze(0))
         if len(z_adv_der) > 0:
             z_adv_der_lo = torch.cat(z_adv_der, dim=0)
 
         lyap_der_mip_ = self.lyap.lyapunov_derivative_as_milp(
-            self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
-            R=self.opt.R, fixed_R=True)
+            self.lyap.system.x_equilibrium,
+            self.opt.V_lambda,
+            self.opt.V_eps_der_up,
+            lyapunov.ConvergenceEps.ExpUpper,
+            R=self.opt.R,
+            fixed_R=True)
         lyap_der_mip = lyap_der_mip_[0]
         x_var = lyap_der_mip_[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -176,15 +186,18 @@ class DynamicsLearning:
                 gurobipy.GRB.Param.SolutionNumber, i)
             obj = lyap_der_mip.gurobi_model.PoolObjVal
             if obj > 0:
-                z_adv_der.append(torch.tensor(
-                    [r.xn for r in x_var], dtype=self.opt.dtype).unsqueeze(0))
+                z_adv_der.append(
+                    torch.tensor([r.xn for r in x_var],
+                                 dtype=self.opt.dtype).unsqueeze(0))
         if len(z_adv_der) > 0:
             z_adv_der_up = torch.cat(z_adv_der, dim=0)
 
         return z_adv_pos, z_adv_der_lo, z_adv_der_up
 
-    def lyapunov_loss(self, lyap_pos_threshold=0.,
-                      lyap_der_lo_threshold=0., lyap_der_up_threshold=0.):
+    def lyapunov_loss(self,
+                      lyap_pos_threshold=0.,
+                      lyap_der_lo_threshold=0.,
+                      lyap_der_up_threshold=0.):
         """
         compute the Lyapunov losses
         @param lyap_pos_threshold float the thresold used when computing an
@@ -202,13 +215,19 @@ class DynamicsLearning:
         """
         if self.opt.lyap_loss_warmstart:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
-                self.lyap.system.x_equilibrium, self.opt.V_lambda,
-                self.opt.V_eps_pos, x_warmstart=self.lyap_pos_x_adv,
-                R=self.opt.R, fixed_R=True)
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps_pos,
+                x_warmstart=self.lyap_pos_x_adv,
+                R=self.opt.R,
+                fixed_R=True)
         else:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
-                self.lyap.system.x_equilibrium, self.opt.V_lambda,
-                self.opt.V_eps_pos, R=self.opt.R, fixed_R=True)
+                self.lyap.system.x_equilibrium,
+                self.opt.V_lambda,
+                self.opt.V_eps_pos,
+                R=self.opt.R,
+                fixed_R=True)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -227,21 +246,26 @@ class DynamicsLearning:
                       "constraints to get gradient.")
                 lyap_pos_loss = torch.tensor(0, dtype=self.opt.dtype)
         if self.opt.lyap_loss_warmstart:
-            self.lyap_pos_x_adv = torch.tensor(
-                [var.X for var in x_var], dtype=self.opt.dtype)
+            self.lyap_pos_x_adv = torch.tensor([var.X for var in x_var],
+                                               dtype=self.opt.dtype)
 
         if self.opt.lyap_loss_warmstart:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
-                R=self.opt.R, fixed_R=True, x_warmstart=self.lyap_der_lo_x_adv)
+                self.opt.V_eps_der_lo,
+                lyapunov.ConvergenceEps.ExpLower,
+                R=self.opt.R,
+                fixed_R=True,
+                x_warmstart=self.lyap_der_lo_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_lo, lyapunov.ConvergenceEps.ExpLower,
-                R=self.opt.R, fixed_R=True)
+                self.opt.V_eps_der_lo,
+                lyapunov.ConvergenceEps.ExpLower,
+                R=self.opt.R,
+                fixed_R=True)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -262,22 +286,26 @@ class DynamicsLearning:
                       "constraints to get gradient.")
                 lyap_der_lo_loss = torch.tensor(0, dtype=self.opt.dtype)
         if self.opt.lyap_loss_warmstart:
-            self.lyap_der_lo_x_adv = torch.tensor(
-                [var.X for var in x_var], dtype=self.opt.dtype)
+            self.lyap_der_lo_x_adv = torch.tensor([var.X for var in x_var],
+                                                  dtype=self.opt.dtype)
 
         if self.opt.lyap_loss_warmstart:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
-                R=self.opt.R, fixed_R=True,
+                self.opt.V_eps_der_up,
+                lyapunov.ConvergenceEps.ExpUpper,
+                R=self.opt.R,
+                fixed_R=True,
                 x_warmstart=self.lyap_der_up_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
-                self.opt.V_eps_der_up, lyapunov.ConvergenceEps.ExpUpper,
-                R=self.opt.R, fixed_R=True)
+                self.opt.V_eps_der_up,
+                lyapunov.ConvergenceEps.ExpUpper,
+                R=self.opt.R,
+                fixed_R=True)
         lyap_der_mip = lyap_der_mip_return[0]
         x_var = lyap_der_mip_return[1]
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -298,8 +326,8 @@ class DynamicsLearning:
                       "constraints to get gradient.")
                 lyap_der_up_loss = torch.tensor(0, dtype=self.opt.dtype)
         if self.opt.lyap_loss_warmstart:
-            self.lyap_der_up_x_adv = torch.tensor(
-                [var.X for var in x_var], dtype=self.opt.dtype)
+            self.lyap_der_up_x_adv = torch.tensor([var.X for var in x_var],
+                                                  dtype=self.opt.dtype)
 
         return (self.opt.lyap_pos_loss_weight * lyap_pos_loss,
                 self.opt.lyap_der_lo_loss_weight * lyap_der_lo_loss,
@@ -353,11 +381,11 @@ class DynamicsLearning:
         @param rollouts list of tensors, each one of them a rollout
         @param device where to run the computation (e.g. 'cuda')
         """
-        assert(isinstance(rollouts, list))
-        assert(len(rollouts) >= 1)
+        assert (isinstance(rollouts, list))
+        assert (len(rollouts) >= 1)
         self.all_to_device(device)
-        validation_loss = torch.zeros(
-            rollouts[0].shape[0], dtype=self.opt.dtype).to(device)
+        validation_loss = torch.zeros(rollouts[0].shape[0],
+                                      dtype=self.opt.dtype).to(device)
         with torch.no_grad():
             for rollout_expected in rollouts:
                 rollout_expected = rollout_expected.to(device)
@@ -369,13 +397,17 @@ class DynamicsLearning:
     def log(self, name, value):
         if self.writer is not None:
             if self.log_suffix != "":
-                self.writer.add_scalar(
-                    name + '/' + self.log_suffix, value, self.n_iter)
+                self.writer.add_scalar(name + '/' + self.log_suffix, value,
+                                       self.n_iter)
             else:
                 self.writer.add_scalar(name, value, self.n_iter)
 
-    def train(self, num_epoch, validate=False, device='cpu',
-              save_rate=0, save_path=None):
+    def train(self,
+              num_epoch,
+              validate=False,
+              device='cpu',
+              save_rate=0,
+              save_path=None):
         """
         trains all the trainable parameters in the model
         @param num_epoch int number of epochs
@@ -417,7 +449,7 @@ class DynamicsLearning:
                     self.log('LyapunovDerSamples/up',
                              lyap_der_up_loss_at_samples)
                     if ((self.opt.lyap_loss_freq > 0) and
-                       ((self.n_iter % self.opt.lyap_loss_freq) == 0)):
+                            ((self.n_iter % self.opt.lyap_loss_freq) == 0)):
                         with torch.no_grad():
                             (lyap_pos_loss_at_samples,
                              lyap_der_lo_loss_at_samples,
@@ -435,8 +467,7 @@ class DynamicsLearning:
                                 lyap_pos_threshold=lyap_pos_threshold,
                                 lyap_der_lo_threshold=lyap_der_lo_threshold,
                                 lyap_der_up_threshold=lyap_der_up_threshold)
-                        loss = (lyap_pos_loss +
-                                lyap_der_lo_loss +
+                        loss = (lyap_pos_loss + lyap_der_lo_loss +
                                 lyap_der_up_loss)
                         loss.backward()
                         self.lyapunov_to_device(device)
@@ -482,7 +513,7 @@ class DynamicsLearning:
                         self.log('LyapunovDerSamples/up',
                                  lyap_der_up_loss_at_samples)
                 if save_rate > 0 and epoch_i % save_rate == 0:
-                    assert(save_path is not None)
+                    assert (save_path is not None)
                     self.save(save_path)
         except KeyboardInterrupt:
             pass
@@ -492,18 +523,21 @@ class DynamicsLearning:
 
 
 class StateSpaceDynamicsLearning(DynamicsLearning):
-    def __init__(self, train_dataloader, validation_dataloader,
-                 lyap, learning_opt):
-        super(StateSpaceDynamicsLearning, self).__init__(
-            train_dataloader, validation_dataloader, lyap, learning_opt)
+    def __init__(self, train_dataloader, validation_dataloader, lyap,
+                 learning_opt):
+        super(StateSpaceDynamicsLearning,
+              self).__init__(train_dataloader, validation_dataloader, lyap,
+                             learning_opt)
         self.mse_loss = nn.MSELoss()
 
     def get_trainable_parameters(self):
         """
         return a list of lists of parameters that are trainable
         """
-        params = [self.lyap.lyapunov_relu.parameters(),
-                  self.lyap.system.dynamics_relu.parameters()]
+        params = [
+            self.lyap.lyapunov_relu.parameters(),
+            self.lyap.system.dynamics_relu.parameters()
+        ]
         return params
 
     def all_to_device(self, device):
@@ -523,8 +557,8 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
             pickle.dump(self.lyap, output, pickle.HIGHEST_PROTOCOL)
 
     @classmethod
-    def load(cls, load_path,
-             train_dataloader, validation_dataloader, learning_opt):
+    def load(cls, load_path, train_dataloader, validation_dataloader,
+             learning_opt):
         """
         load from what was saved using the save method
         @param load_path string path to load dyn_learner from
@@ -534,8 +568,7 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         """
         with open(os.path.join(load_path, 'dyn_learner.pkl'), 'rb') as input:
             lyap = pickle.load(input)
-        return cls(
-            train_dataloader, validation_dataloader, lyap, learning_opt)
+        return cls(train_dataloader, validation_dataloader, lyap, learning_opt)
 
     def lyapunov_loss_at_samples(self, x):
         """
@@ -562,22 +595,26 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
         @return x_traj [N+1, x_dim] rollout
         @return V_traj tensor N+1 of the lyapunov value along the rollout
         """
-        assert(len(x_init.shape) == 1)
-        assert(x_init.shape[0] == self.opt.x_dim)
-        x_traj = torch.zeros(
-            N+1, self.opt.x_dim, dtype=self.opt.dtype).to(x_init.device)
+        assert (len(x_init.shape) == 1)
+        assert (x_init.shape[0] == self.opt.x_dim)
+        x_traj = torch.zeros(N + 1, self.opt.x_dim,
+                             dtype=self.opt.dtype).to(x_init.device)
         V_traj = []
         x_traj[0, :] = x_init
-        V_traj.append(self.lyap.lyapunov_value(
-            x_init, self.lyap.system.x_equilibrium, self.opt.V_lambda,
-            R=self.opt.R).item())
+        V_traj.append(
+            self.lyap.lyapunov_value(x_init,
+                                     self.lyap.system.x_equilibrium,
+                                     self.opt.V_lambda,
+                                     R=self.opt.R).item())
         for n in range(N):
             with torch.no_grad():
                 x_next_pred = self.lyap.system.step_forward(x_traj[n, :])
-                x_traj[n+1, :] = x_next_pred
-                V_traj.append(self.lyap.lyapunov_value(
-                    x_next_pred, self.lyap.system.x_equilibrium,
-                    self.opt.V_lambda, R=self.opt.R).item())
+                x_traj[n + 1, :] = x_next_pred
+                V_traj.append(
+                    self.lyap.lyapunov_value(x_next_pred,
+                                             self.lyap.system.x_equilibrium,
+                                             self.opt.V_lambda,
+                                             R=self.opt.R).item())
         V_traj = torch.tensor(V_traj, dtype=self.opt.dtype)
         return x_traj, V_traj
 
@@ -595,19 +632,25 @@ class StateSpaceDynamicsLearning(DynamicsLearning):
 
 
 class LatentSpaceDynamicsLearning(DynamicsLearning):
-    def __init__(self, train_dataloader, validation_dataloader,
-                 lyap, learning_opt, encoder, decoder,
+    def __init__(self,
+                 train_dataloader,
+                 validation_dataloader,
+                 lyap,
+                 learning_opt,
+                 encoder,
+                 decoder,
                  decoded_equilibrium=None):
-        super(LatentSpaceDynamicsLearning, self).__init__(
-            train_dataloader, validation_dataloader, lyap, learning_opt)
+        super(LatentSpaceDynamicsLearning,
+              self).__init__(train_dataloader, validation_dataloader, lyap,
+                             learning_opt)
         self.encoder = encoder.type(self.opt.dtype)
         self.decoder = decoder.type(self.opt.dtype)
         if decoded_equilibrium is not None:
-            assert(len(decoded_equilibrium.shape) == 3)
-            assert(decoded_equilibrium.shape[1:] ==
-                   (self.opt.image_width, self.opt.image_height))
-            assert(decoded_equilibrium.shape[0] == 2 or
-                   decoded_equilibrium.shape[0] == 6)
+            assert (len(decoded_equilibrium.shape) == 3)
+            assert (decoded_equilibrium.shape[1:] == (self.opt.image_width,
+                                                      self.opt.image_height))
+            assert (decoded_equilibrium.shape[0] == 2
+                    or decoded_equilibrium.shape[0] == 6)
         self.decoded_equilibrium = decoded_equilibrium
         self.bce_loss = nn.BCELoss(reduction='mean')
         self.bce_loss_none = nn.BCELoss(reduction='none')
@@ -616,10 +659,12 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         """
         return a list of lists of parameters that are trainable
         """
-        params = [self.lyap.lyapunov_relu.parameters(),
-                  self.lyap.system.dynamics_relu.parameters(),
-                  self.encoder.parameters(),
-                  self.decoder.parameters()]
+        params = [
+            self.lyap.lyapunov_relu.parameters(),
+            self.lyap.system.dynamics_relu.parameters(),
+            self.encoder.parameters(),
+            self.decoder.parameters()
+        ]
         return params
 
     def all_to_device(self, device):
@@ -643,12 +688,12 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             pickle.dump(self.lyap, output, pickle.HIGHEST_PROTOCOL)
             pickle.dump(self.encoder, output, pickle.HIGHEST_PROTOCOL)
             pickle.dump(self.decoder, output, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(
-                self.decoded_equilibrium, output, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.decoded_equilibrium, output,
+                        pickle.HIGHEST_PROTOCOL)
 
     @classmethod
-    def load(cls, load_path,
-             train_dataloader, validation_dataloader, learning_opt):
+    def load(cls, load_path, train_dataloader, validation_dataloader,
+             learning_opt):
         """
         load from what was saved using the save method
         @param load_path string path to load dyn_learner from
@@ -661,9 +706,13 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
             encoder = pickle.load(input)
             decoder = pickle.load(input)
             decoded_equilibrium = pickle.load(input)
-        return cls(
-            train_dataloader, validation_dataloader, lyap, learning_opt,
-            encoder, decoder, decoded_equilibrium=decoded_equilibrium)
+        return cls(train_dataloader,
+                   validation_dataloader,
+                   lyap,
+                   learning_opt,
+                   encoder,
+                   decoder,
+                   decoded_equilibrium=decoded_equilibrium)
 
     def reparam(self, z_mu, z_log_var):
         """
@@ -722,8 +771,9 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         @param z_log_var tensor log of the variance of the samples
         @return weighted KL divergence
         """
-        loss = torch.mean(-.5 * torch.sum(-torch.pow(z_mu, 2) -
-                          torch.exp(z_log_var) + z_log_var + 1., dim=1))
+        loss = torch.mean(-.5 * torch.sum(
+            -torch.pow(z_mu, 2) - torch.exp(z_log_var) + z_log_var + 1.,
+            dim=1))
         weighted_loss = self.kl_loss_weight(self.n_iter) * loss
         self.log("KL/original", loss)
         self.log("KL/weighted", weighted_loss)
@@ -783,29 +833,35 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         @return V_traj tensor N+1 of the lyapunov value along the rollout
         @return z_traj tensor [N+1, z_dim] rollout in latent space
         """
-        assert(len(x_init.shape) == 3)
-        num_channels = int(x_init.shape[0]/2)
-        x_traj = torch.zeros(
-            N+2, num_channels, x_init.shape[1], x_init.shape[2],
-            dtype=self.opt.dtype).to(x_init.device)
+        assert (len(x_init.shape) == 3)
+        num_channels = int(x_init.shape[0] / 2)
+        x_traj = torch.zeros(N + 2,
+                             num_channels,
+                             x_init.shape[1],
+                             x_init.shape[2],
+                             dtype=self.opt.dtype).to(x_init.device)
         x_traj[0, :] = x_init[:num_channels, :, :]
         x_traj[1, :] = x_init[num_channels:, :, :]
         z_traj = []
         V_traj = []
         z_traj.append(self.encoder(x_init.unsqueeze(0))[0])
-        V_traj.append(self.lyap.lyapunov_value(
-            z_traj[-1].squeeze(), self.lyap.system.x_equilibrium,
-            self.opt.V_lambda, R=self.opt.R).item())
+        V_traj.append(
+            self.lyap.lyapunov_value(z_traj[-1].squeeze(),
+                                     self.lyap.system.x_equilibrium,
+                                     self.opt.V_lambda,
+                                     R=self.opt.R).item())
         for n in range(N):
             with torch.no_grad():
                 if not decode_intermediate:
                     z = self.lyap.system.step_forward(z_traj[-1])
-                    x_traj[n+2, :] = self.decoder(z)[0, num_channels:, :, :]
+                    x_traj[n + 2, :] = self.decoder(z)[0, num_channels:, :, :]
                     z_traj.append(z)
                     V_traj.append(
                         self.lyap.lyapunov_value(
-                            z.squeeze(), self.lyap.system.x_equilibrium,
-                            self.opt.V_lambda, R=self.opt.R).item())
+                            z.squeeze(),
+                            self.lyap.system.x_equilibrium,
+                            self.opt.V_lambda,
+                            R=self.opt.R).item())
                 else:
                     _, x_next_pred_decoded, _, _, z_next =\
                         self.vae_forward(
@@ -817,8 +873,10 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
                     z_traj.append(z_next)
                     V_traj.append(
                         self.lyap.lyapunov_value(
-                            z_next.squeeze(), self.lyap.system.x_equilibrium,
-                            self.opt.V_lambda, R=self.opt.R).item())
+                            z_next.squeeze(),
+                            self.lyap.system.x_equilibrium,
+                            self.opt.V_lambda,
+                            R=self.opt.R).item())
         V_traj = torch.tensor(V_traj, dtype=self.opt.dtype)
         z_traj = torch.cat(z_traj).detach()
         return x_traj, V_traj, z_traj
@@ -832,11 +890,12 @@ class LatentSpaceDynamicsLearning(DynamicsLearning):
         """
         x0 = torch.cat([rollout_expected[0, :], rollout_expected[1, :]], dim=0)
         rollout_pred, _, _ = self.rollout(
-            x0, rollout_expected.shape[0] - 2,
+            x0,
+            rollout_expected.shape[0] - 2,
             decode_intermediate=decode_intermediate)
         if self.opt.use_bce:
-            loss = self.bce_loss_none(rollout_expected, rollout_pred).mean(
-                dim=[1, 2, 3])
+            loss = self.bce_loss_none(rollout_expected,
+                                      rollout_pred).mean(dim=[1, 2, 3])
         else:
             loss = (rollout_expected - rollout_pred).pow(2).mean(dim=[1, 2, 3])
         return loss

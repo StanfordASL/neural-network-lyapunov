@@ -57,10 +57,16 @@ class LineSearchGD(Optimizer):
 
         The Nesterov version is analogously modified.
     """
-
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, min_step_size_decrease=1e-4,
-                 loss_minimal_decrement=1e-4, step_size_reduction=0.2,
+    def __init__(self,
+                 params,
+                 lr=required,
+                 momentum=0,
+                 dampening=0,
+                 weight_decay=0,
+                 nesterov=False,
+                 min_step_size_decrease=1e-4,
+                 loss_minimal_decrement=1e-4,
+                 step_size_reduction=0.2,
                  min_improvement=0.):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -69,8 +75,11 @@ class LineSearchGD(Optimizer):
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov,
+        defaults = dict(lr=lr,
+                        momentum=momentum,
+                        dampening=dampening,
+                        weight_decay=weight_decay,
+                        nesterov=nesterov,
                         min_step_size_decrease=min_step_size_decrease,
                         loss_minimal_decrement=loss_minimal_decrement,
                         step_size_reduction=step_size_reduction,
@@ -101,13 +110,14 @@ class LineSearchGD(Optimizer):
             min_step_size_decrease = group['min_step_size_decrease']
             min_improvement = group['min_improvement']
 
-        increment = loss_minimal_decrement * torch.sum(torch.stack(
-            [torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
+        increment = loss_minimal_decrement * torch.sum(
+            torch.stack([torch.sum(p[i].grad * d_p[i])
+                         for i in range(len(p))]))
         alpha_prev = 0
         alpha = 1
         while alpha > min_step_size_decrease:
-            loss = self.directional_evaluate(
-                closure, p, (alpha - alpha_prev) * t, d_p)
+            loss = self.directional_evaluate(closure, p,
+                                             (alpha - alpha_prev) * t, d_p)
             if loss <= loss0 + t * increment and \
                     loss <= loss0 - min_improvement:
                 return loss
@@ -123,7 +133,7 @@ class LineSearchGD(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        assert(isinstance(loss0, float))
+        assert (isinstance(loss0, float))
         p_all = []
         dp_all = []
         for group in self.param_groups:

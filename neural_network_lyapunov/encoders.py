@@ -33,8 +33,8 @@ class Encoder(nn.Module):
         @return tuple (num_channels, width, height)
         """
         with torch.no_grad():
-            x_tmp = torch.rand((1, self.num_channels_in,
-                                self.image_width, self.image_height))
+            x_tmp = torch.rand(
+                (1, self.num_channels_in, self.image_width, self.image_height))
             for c_layer in self.conv:
                 x_tmp = c_layer.forward(x_tmp)
         return x_tmp.shape[1:]
@@ -70,8 +70,9 @@ class LinearEncoder1(Encoder):
         super(LinearEncoder1, self).__init__(z_dim, image_width, image_height,
                                              grayscale)
         linear = [
-            nn.Linear(self.num_channels_in * self.image_width *
-                      self.image_height, 500),
+            nn.Linear(
+                self.num_channels_in * self.image_width * self.image_height,
+                500),
             nn.Linear(500, 500),
             nn.Linear(500, self.z_dim * 2),
         ]
@@ -99,8 +100,9 @@ class LinearDecoder1(Decoder):
         linear = [
             nn.Linear(self.z_dim, 500),
             nn.Linear(500, 500),
-            nn.Linear(500, self.num_channels_out * self.image_width *
-                      self.image_height),
+            nn.Linear(
+                500,
+                self.num_channels_out * self.image_width * self.image_height),
         ]
         self.linear = nn.ModuleList(linear)
         self.relu = nn.ReLU()
@@ -110,8 +112,8 @@ class LinearDecoder1(Decoder):
         for l_layer in self.linear[:-1]:
             x = self.relu(l_layer(x))
         x = self.linear[-1](x)
-        x = x.view(x.shape[0], self.num_channels_out,
-                   self.image_width, self.image_height)
+        x = x.view(x.shape[0], self.num_channels_out, self.image_width,
+                   self.image_height)
         x = self.sigmoid(x)
         return x
 
@@ -132,8 +134,9 @@ class CNNEncoder1(Encoder):
         self.conv = nn.ModuleList(conv)
         conv_out_shape = self.layers_output_shape(self.conv)
         linear = [
-            nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
-                      conv_out_shape[2], self.z_dim * 2),
+            nn.Linear(
+                conv_out_shape[0] * conv_out_shape[1] * conv_out_shape[2],
+                self.z_dim * 2),
         ]
         self.linear = nn.ModuleList(linear)
         self.relu = nn.ReLU()
@@ -202,8 +205,9 @@ class CNNEncoder2(Encoder):
         self.conv = nn.ModuleList(conv)
         conv_out_shape = self.layers_output_shape(self.conv)
         linear = [
-            nn.Linear(conv_out_shape[0] * conv_out_shape[1] *
-                      conv_out_shape[2], 500),
+            nn.Linear(
+                conv_out_shape[0] * conv_out_shape[1] * conv_out_shape[2],
+                500),
             nn.Linear(500, self.z_dim * 2),
         ]
         self.linear = nn.ModuleList(linear)
@@ -232,8 +236,8 @@ class CNNDecoder2(Decoder):
         width_in = self.image_width - 4
         height_in = self.image_height - 4
         for k in range(2):
-            width_in = int(width_in/2)
-            height_in = int(height_in/2)
+            width_in = int(width_in / 2)
+            height_in = int(height_in / 2)
             width_in = int(width_in - 4)
             height_in = int(height_in - 4)
         self.height_in = height_in
@@ -249,8 +253,11 @@ class CNNDecoder2(Decoder):
             nn.Upsample(scale_factor=2),
             nn.ConvTranspose2d(32, 32, 5, stride=1, padding=0),
             nn.Upsample(scale_factor=2),
-            nn.ConvTranspose2d(32, self.num_channels_out, 5,
-                               stride=1, padding=0),
+            nn.ConvTranspose2d(32,
+                               self.num_channels_out,
+                               5,
+                               stride=1,
+                               padding=0),
         ]
         self.conv = nn.ModuleList(conv)
         self.relu = nn.ReLU()

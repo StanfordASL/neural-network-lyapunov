@@ -21,9 +21,8 @@ def update_progress(progress):
     block = int(round(bar_length * progress))
 
     clear_output(wait=True)
-    text = "Progress: [{0}] {1:.1f}%".format("#" * block + "-" *
-                                             (bar_length - block),
-                                             progress * 100)
+    text = "Progress: [{0}] {1:.1f}%".format(
+        "#" * block + "-" * (bar_length - block), progress * 100)
     print(text)
 
 
@@ -34,8 +33,8 @@ def find_nearest(array, value):
 
 
 def check_shape_and_type(A, shape_expected, dtype_expected):
-    assert(A.shape == shape_expected)
-    assert(A.dtype == dtype_expected)
+    assert (A.shape == shape_expected)
+    assert (A.dtype == dtype_expected)
 
 
 def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
@@ -59,20 +58,22 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
         x_lo = torch.tensor(x_lo, dtype=dtype)
     if isinstance(x_up, float):
         x_up = torch.tensor(x_up, dtype=dtype)
-    assert(isinstance(x_lo, torch.Tensor))
-    assert(x_lo <= x_up)
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (x_lo <= x_up)
     A_x = torch.tensor([0, 0, 1, -1], dtype=dtype)
     A_s = torch.tensor([-1, 1, -1, 1], dtype=dtype)
     A_alpha = torch.stack((x_lo, -x_up, x_up, -x_lo))
     rhs = torch.zeros(4, dtype=dtype)
-    rhs = torch.stack((
-        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), x_up,
-        -x_lo))
+    rhs = torch.stack(
+        (torch.tensor(0, dtype=dtype), torch.tensor(0,
+                                                    dtype=dtype), x_up, -x_lo))
     return (A_x, A_s, A_alpha, rhs)
 
 
-def leaky_relu_gradient_times_x(
-        x_lo, x_up, negative_slope, dtype=torch.float64):
+def leaky_relu_gradient_times_x(x_lo,
+                                x_up,
+                                negative_slope,
+                                dtype=torch.float64):
     """
     Write the function
     y = x if α = 1
@@ -89,17 +90,17 @@ def leaky_relu_gradient_times_x(
         x_lo = torch.tensor(x_lo, dtype=dtype)
     if isinstance(x_up, float):
         x_up = torch.tensor(x_up, dtype=dtype)
-    assert(isinstance(x_lo, torch.Tensor))
-    assert(x_up >= x_lo)
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (x_up >= x_lo)
     dtype = x_up.dtype
     A_x = torch.tensor([-1, 1, negative_slope, -negative_slope], dtype=dtype)
     A_y = torch.tensor([1, -1, -1, 1], dtype=dtype)
-    A_alpha = torch.stack((
-        (negative_slope-1.) * x_lo, (1. - negative_slope) * x_up,
-        (1. - negative_slope) * x_lo, (negative_slope - 1.) * x_up))
-    rhs = torch.stack((
-        (negative_slope - 1.) * x_lo, (1. - negative_slope) * x_up,
-        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype)))
+    A_alpha = torch.stack(
+        ((negative_slope - 1.) * x_lo, (1. - negative_slope) * x_up,
+         (1. - negative_slope) * x_lo, (negative_slope - 1.) * x_up))
+    rhs = torch.stack(
+        ((negative_slope - 1.) * x_lo, (1. - negative_slope) * x_up,
+         torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype)))
     if negative_slope < 1.:
         return (A_x, A_y, A_alpha, rhs)
     else:
@@ -127,22 +128,23 @@ def replace_absolute_value_with_mixed_integer_constraint(
         x_lo = torch.tensor(x_lo, dtype=dtype)
     if isinstance(x_up, float):
         x_up = torch.tensor(x_up, dtype=dtype)
-    assert(isinstance(x_lo, torch.Tensor))
-    assert(isinstance(x_up, torch.Tensor))
-    assert(x_lo < 0)
-    assert(x_up > 0)
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (isinstance(x_up, torch.Tensor))
+    assert (x_lo < 0)
+    assert (x_up > 0)
     Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
     Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    Ain_alpha = torch.stack((
-        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2*x_lo,
-        -2*x_up))
-    rhs_in = torch.stack((
-        torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2*x_lo,
-        torch.tensor(0, dtype=dtype)))
+    Ain_alpha = torch.stack((torch.tensor(0, dtype=dtype),
+                             torch.tensor(0,
+                                          dtype=dtype), -2 * x_lo, -2 * x_up))
+    rhs_in = torch.stack(
+        (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2 * x_lo,
+         torch.tensor(0, dtype=dtype)))
     return (Ain_x, Ain_s, Ain_alpha, rhs_in)
 
 
-def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
+def replace_relu_with_mixed_integer_constraint(x_lo,
+                                               x_up,
                                                dtype=torch.float64):
     """
     For a ReLU activation unit y = max(0, x), we can replace this function with
@@ -167,8 +169,8 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
     @return (A_x, A_y, A_beta, rhs). A_x, A_y, A_beta, rhs are all 4 x 1 column
     vectors.
     """
-    assert(x_lo < 0)
-    assert(x_up > 0)
+    assert (x_lo < 0)
+    assert (x_up > 0)
     A_x = torch.tensor([0, 1, 0, -1], dtype=dtype)
     A_y = torch.tensor([-1, -1, 1, 1], dtype=dtype)
     A_beta = torch.zeros(4, dtype=dtype)
@@ -179,8 +181,10 @@ def replace_relu_with_mixed_integer_constraint(x_lo, x_up,
     return (A_x, A_y, A_beta, rhs)
 
 
-def replace_leaky_relu_mixed_integer_constraint(
-        negative_slope, x_lo, x_up, dtype=torch.float64):
+def replace_leaky_relu_mixed_integer_constraint(negative_slope,
+                                                x_lo,
+                                                x_up,
+                                                dtype=torch.float64):
     """
     For input x ∈ [x_lo, x_up] (and x_lo < 0 < x_up), the leaky relu output
     y satisfies
@@ -210,24 +214,25 @@ def replace_leaky_relu_mixed_integer_constraint(
     @param x_up The upper bound of input x.
     @return (A_x, A_y, A_beta, rhs)
     """
-    assert(x_lo < 0)
-    assert(x_up > 0)
+    assert (x_lo < 0)
+    assert (x_up > 0)
     A_x = torch.tensor([1., negative_slope, -negative_slope, -1], dtype=dtype)
     A_y = torch.tensor([-1., -1., 1., 1.], dtype=dtype)
     A_beta = torch.zeros(4, dtype=dtype)
-    A_beta[2] = (negative_slope-1) * x_up
-    A_beta[3] = (negative_slope-1) * x_lo
+    A_beta[2] = (negative_slope - 1) * x_up
+    A_beta[3] = (negative_slope - 1) * x_lo
     rhs = torch.zeros(4, dtype=dtype)
-    rhs[3] = (negative_slope-1) * x_lo
+    rhs[3] = (negative_slope - 1) * x_lo
     if negative_slope <= 1:
         return (A_x, A_y, A_beta, rhs)
     else:
         return (-A_x, -A_y, -A_beta, -rhs)
 
 
-def add_saturation_as_mixed_integer_constraint(
-    mip, input_var, output_var, lower_limit, upper_limit, input_lower_bound,
-        input_upper_bound):
+def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
+                                               lower_limit, upper_limit,
+                                               input_lower_bound,
+                                               input_upper_bound):
     """
     For a saturation block
     y = upper_limit if x >= upper_limit
@@ -257,28 +262,29 @@ def add_saturation_as_mixed_integer_constraint(
     happen), we don't add the constraint
     input_lower_bound <= x <= input_upper_bound.
     """
-    assert(isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
-    assert(isinstance(input_var, gurobipy.Var))
-    assert(isinstance(output_var, gurobipy.Var))
+    assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+    assert (isinstance(input_var, gurobipy.Var))
+    assert (isinstance(output_var, gurobipy.Var))
     if input_upper_bound <= lower_limit:
         # The input x will always be <= lower_limit, the output will always be
         # lower_limit.
-        mip.addLConstr(
-            [torch.ones([1], dtype=torch.float64)], [[output_var]],
-            sense=gurobipy.GRB.EQUAL, rhs=lower_limit)
+        mip.addLConstr([torch.ones([1], dtype=torch.float64)], [[output_var]],
+                       sense=gurobipy.GRB.EQUAL,
+                       rhs=lower_limit)
         return []
     elif input_lower_bound >= upper_limit:
         # The input x will always be >= upper_limit, the output will always be
         # upper_limit.
-        mip.addLConstr(
-            [torch.ones([1], dtype=torch.float64)], [[output_var]],
-            sense=gurobipy.GRB.EQUAL, rhs=upper_limit)
+        mip.addLConstr([torch.ones([1], dtype=torch.float64)], [[output_var]],
+                       sense=gurobipy.GRB.EQUAL,
+                       rhs=upper_limit)
         return []
     elif input_lower_bound >= lower_limit and input_upper_bound <= upper_limit:
         # The input is never saturated, the output equals to the input.
-        mip.addLConstr(
-            [torch.tensor([1, -1], dtype=torch.float64)],
-            [[input_var, output_var]], sense=gurobipy.GRB.EQUAL, rhs=0.)
+        mip.addLConstr([torch.tensor([1, -1], dtype=torch.float64)],
+                       [[input_var, output_var]],
+                       sense=gurobipy.GRB.EQUAL,
+                       rhs=0.)
         return []
     elif input_lower_bound < lower_limit and input_upper_bound <= upper_limit:
         # The input can saturate the lower limit. We need a binary variable to
@@ -291,14 +297,16 @@ def add_saturation_as_mixed_integer_constraint(
         # A_x*(x - lower_limit) + A_y*(y-lower_limit) + A_beta*(1-beta) <= rhs
         # Equivalently
         # A_x*x + A_y*y - A_beta*beta <= rhs - A_beta + (A_x+A_y) * lower_limit
-        beta = mip.addVars(
-            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
-            name="saturation_lower")
-        mip.addMConstrs(
-            [A_x.reshape((-1, 1)), A_y.reshape((-1, 1)),
-             -A_beta.reshape((-1, 1))], [[input_var], [output_var], beta],
-            sense=gurobipy.GRB.LESS_EQUAL,
-            b=rhs - A_beta + (A_x+A_y) * lower_limit)
+        beta = mip.addVars(1,
+                           lb=-gurobipy.GRB.INFINITY,
+                           vtype=gurobipy.GRB.BINARY,
+                           name="saturation_lower")
+        mip.addMConstrs([
+            A_x.reshape((-1, 1)),
+            A_y.reshape((-1, 1)), -A_beta.reshape((-1, 1))
+        ], [[input_var], [output_var], beta],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs - A_beta + (A_x + A_y) * lower_limit)
         return beta
     elif input_lower_bound >= lower_limit and input_upper_bound > upper_limit:
         # The input can saturate the upper limit. We need a binary variable to
@@ -310,14 +318,16 @@ def add_saturation_as_mixed_integer_constraint(
         # A_x*(upper_limit-x)+A_y*(upper_limit-y)+A_beta*(1-beta)<=rhs
         # Equilvalently
         # -A_x*x -A_y*y - A_beta*beta <= rhs-A_beta - (A_x+A_y)*upper_limit
-        beta = mip.addVars(
-            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
-            name="saturation_upper")
-        mip.addMConstrs(
-            [-A_x.reshape((-1, 1)), -A_y.reshape((-1, 1)),
-             -A_beta.reshape((-1, 1))], [[input_var], [output_var], beta],
-            sense=gurobipy.GRB.LESS_EQUAL,
-            b=rhs-A_beta-(A_x+A_y)*upper_limit)
+        beta = mip.addVars(1,
+                           lb=-gurobipy.GRB.INFINITY,
+                           vtype=gurobipy.GRB.BINARY,
+                           name="saturation_upper")
+        mip.addMConstrs([
+            -A_x.reshape((-1, 1)), -A_y.reshape((-1, 1)), -A_beta.reshape(
+                (-1, 1))
+        ], [[input_var], [output_var], beta],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs - A_beta - (A_x + A_y) * upper_limit)
         return beta
     else:
         # input_lower_bound < lower_limit < upper_limit < input_upper_bound. We
@@ -327,34 +337,38 @@ def add_saturation_as_mixed_integer_constraint(
         # We introduce a slack continuous variable z
         # z - lower_limit = relu(x - lower_limit)
         # upper_limit - y = relu(upper_limit - z)
-        z = mip.addVars(
-            1, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.CONTINUOUS,
-            name="saturation_slack")
+        z = mip.addVars(1,
+                        lb=-gurobipy.GRB.INFINITY,
+                        vtype=gurobipy.GRB.CONTINUOUS,
+                        name="saturation_slack")
         # beta[0] is active when the lower limit is saturated.
         # beta[1] is active when the upper limit is saturated.
-        beta = mip.addVars(
-            2, lb=-gurobipy.GRB.INFINITY, vtype=gurobipy.GRB.BINARY,
-            name="saturation_binary")
+        beta = mip.addVars(2,
+                           lb=-gurobipy.GRB.INFINITY,
+                           vtype=gurobipy.GRB.BINARY,
+                           name="saturation_binary")
         # The two binary variables cannot be both active.
-        mip.addLConstr(
-            [torch.tensor([1, 1], dtype=torch.float64)], [beta], rhs=1.,
-            sense=gurobipy.GRB.LESS_EQUAL)
+        mip.addLConstr([torch.tensor([1, 1], dtype=torch.float64)], [beta],
+                       rhs=1.,
+                       sense=gurobipy.GRB.LESS_EQUAL)
         # Now add the first constraint z - lower_limit = relu(x - lower_limit)
         A_x1, A_z1, A_beta1, rhs1 = replace_relu_with_mixed_integer_constraint(
             input_lower_bound - lower_limit, input_upper_bound - lower_limit)
-        mip.addMConstrs(
-            [A_x1.reshape((-1, 1)), A_z1.reshape((-1, 1)),
-             -A_beta1.reshape((-1, 1))], [[input_var], z, [beta[0]]],
-            sense=gurobipy.GRB.LESS_EQUAL,
-            b=rhs1 - A_beta1 + (A_x1+A_z1) * lower_limit)
+        mip.addMConstrs([
+            A_x1.reshape((-1, 1)),
+            A_z1.reshape((-1, 1)), -A_beta1.reshape((-1, 1))
+        ], [[input_var], z, [beta[0]]],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs1 - A_beta1 + (A_x1 + A_z1) * lower_limit)
         # Now add the second constraint upper_limit - y = relu(upper_limit - y)
         A_z2, A_y2, A_beta2, rhs2 = replace_relu_with_mixed_integer_constraint(
             upper_limit - input_upper_bound, upper_limit - input_lower_bound)
-        mip.addMConstrs(
-            [-A_z2.reshape((-1, 1)), -A_y2.reshape((-1, 1)),
-             -A_beta2.reshape((-1, 1))], [z, [output_var], [beta[1]]],
-            sense=gurobipy.GRB.LESS_EQUAL,
-            b=rhs2-A_beta2-(A_z2+A_y2)*upper_limit)
+        mip.addMConstrs([
+            -A_z2.reshape((-1, 1)), -A_y2.reshape((-1, 1)), -A_beta2.reshape(
+                (-1, 1))
+        ], [z, [output_var], [beta[1]]],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs2 - A_beta2 - (A_z2 + A_y2) * upper_limit)
         return beta
 
 
@@ -384,22 +398,22 @@ def compute_numerical_gradient(fun, *args, **kwargs):
     array/matrix, namely it is ∂f/∂x.
     """
     dx = kwargs["dx"] if "dx" in kwargs else 1e-7
-    assert(isinstance(dx, float))
+    assert (isinstance(dx, float))
     grad = [None] * len(args)
     perturbed_args = [np.copy(arg) for arg in args]
     fun_type_checked = False
     for arg_index, perturbed_arg in enumerate(perturbed_args):
-        assert(isinstance(perturbed_arg, np.ndarray))
-        assert(len(perturbed_arg.shape) == 1)
+        assert (isinstance(perturbed_arg, np.ndarray))
+        assert (len(perturbed_arg.shape) == 1)
         for i in range(np.size(perturbed_arg)):
             val = perturbed_arg[i]
             perturbed_arg[i] += dx
             fun_plus = fun(*perturbed_args)
             if not fun_type_checked:
-                assert(isinstance(fun_plus, np.ndarray) or
-                       isinstance(fun_plus, float))
+                assert (isinstance(fun_plus, np.ndarray)
+                        or isinstance(fun_plus, float))
                 if (isinstance(fun_plus, np.ndarray)):
-                    assert(len(fun_plus.shape) == 1)
+                    assert (len(fun_plus.shape) == 1)
             perturbed_arg[i] -= 2 * dx
             fun_minus = fun(*perturbed_args)
             perturbed_arg[i] = val
@@ -440,8 +454,13 @@ def torch_to_numpy(torch_array_list, squeeze=True):
     return numpy_array_list
 
 
-def train_model(model, inputs, labels, batch_size=100,
-                num_epoch=1000, learning_rate=1e-3, print_loss=False):
+def train_model(model,
+                inputs,
+                labels,
+                batch_size=100,
+                num_epoch=1000,
+                learning_rate=1e-3,
+                print_loss=False):
     """
     trains a pytorch model with an L2 loss function using the
     Adam training algorithm
@@ -456,13 +475,14 @@ def train_model(model, inputs, labels, batch_size=100,
     device = next(model.parameters()).device
 
     data_set = torch.utils.data.TensorDataset(inputs, labels)
-    data_loader = torch.utils.data.DataLoader(
-        data_set, batch_size=batch_size, shuffle=True)
+    data_loader = torch.utils.data.DataLoader(data_set,
+                                              batch_size=batch_size,
+                                              shuffle=True)
 
     for epoch in range(num_epoch):
         for batch_data, batch_label in data_loader:
-            batch_data, batch_label = batch_data.to(
-                device), batch_label.to(device)
+            batch_data, batch_label = batch_data.to(device), batch_label.to(
+                device)
             y_pred = model(batch_data)
             loss = loss_fn(y_pred, batch_label) / batch_size
             optimizer.zero_grad()
@@ -490,7 +510,7 @@ def is_polyhedron_bounded(P):
         x[i] = -1
     are infeasible.
     """
-    assert(isinstance(P, torch.Tensor))
+    assert (isinstance(P, torch.Tensor))
     P_np = P.detach().numpy()
     x_bar = cp.Variable(P.shape[1])
     objective = cp.Maximize(0)
@@ -535,7 +555,7 @@ def get_simple_trajopt_cost(x_dim, u_dim, alpha_dim, dtype):
     Zt = torch.eye(alpha_dim, dtype=dtype) * 0.12
     zt = torch.ones(alpha_dim, dtype=dtype) * 0.13
 
-    return(Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)
+    return (Q, R, Z, q, r, z, Qt, Rt, Zt, qt, rt, zt)
 
 
 def compute_bounds_from_polytope(P, q, i):
@@ -555,25 +575,26 @@ def compute_bounds_from_polytope(P, q, i):
     """
     if isinstance(P, torch.Tensor):
         P_np = P.detach().numpy()
-    elif(isinstance(P, np.ndarray)):
+    elif (isinstance(P, np.ndarray)):
         P_np = P
     else:
         raise Exception("Unknown P")
     if isinstance(q, torch.Tensor):
         q_np = q.detach().numpy()
-    elif(isinstance(q, np.ndarray)):
+    elif (isinstance(q, np.ndarray)):
         q_np = q
     else:
         raise Exception("Unknown q")
     model = gurobipy.Model()
-    x_vars = model.addVars(
-        P.shape[1], lb=-np.inf, vtype=gurobipy.GRB.CONTINUOUS)
+    x_vars = model.addVars(P.shape[1],
+                           lb=-np.inf,
+                           vtype=gurobipy.GRB.CONTINUOUS)
     x = [x_vars[i] for i in range(P.shape[1])]
 
     for j in range(P.shape[0]):
-        model.addLConstr(
-            gurobipy.LinExpr(P_np[j].tolist(), x),
-            sense=gurobipy.GRB.LESS_EQUAL, rhs=q_np[j])
+        model.addLConstr(gurobipy.LinExpr(P_np[j].tolist(), x),
+                         sense=gurobipy.GRB.LESS_EQUAL,
+                         rhs=q_np[j])
     model.setObjective(gurobipy.LinExpr(1., x[i]), gurobipy.GRB.MAXIMIZE)
     model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
     model.setParam(gurobipy.GRB.Param.DualReductions, 0)
@@ -617,23 +638,23 @@ def linear_program_cost(c, d, A_in, b_in, A_eq, b_eq):
     check_shape_and_type(d, (), torch.float64)
     num_in = A_in.shape[0]
     check_shape_and_type(A_in, (num_in, x_dim), torch.float64)
-    check_shape_and_type(b_in, (num_in,), torch.float64)
+    check_shape_and_type(b_in, (num_in, ), torch.float64)
     num_eq = A_eq.shape[0]
     check_shape_and_type(A_eq, (num_eq, x_dim), torch.float64)
-    check_shape_and_type(b_eq, (num_eq,), torch.float64)
+    check_shape_and_type(b_eq, (num_eq, ), torch.float64)
 
     model = gurobipy.Model()
     x_vars = model.addVars(x_dim, lb=-np.inf, vtype=gurobipy.GRB.CONTINUOUS)
     x = [x_vars[i] for i in range(x_dim)]
 
     for i in range(num_in):
-        model.addLConstr(
-            gurobipy.LinExpr(A_in[i].tolist(), x),
-            sense=gurobipy.GRB.LESS_EQUAL, rhs=b_in[i])
+        model.addLConstr(gurobipy.LinExpr(A_in[i].tolist(), x),
+                         sense=gurobipy.GRB.LESS_EQUAL,
+                         rhs=b_in[i])
     for i in range(num_eq):
-        model.addLConstr(
-            gurobipy.LinExpr(A_eq[i].tolist(), x),
-            sense=gurobipy.GRB.EQUAL, rhs=b_eq[i])
+        model.addLConstr(gurobipy.LinExpr(A_eq[i].tolist(), x),
+                         sense=gurobipy.GRB.EQUAL,
+                         rhs=b_eq[i])
     model.setObjective(gurobipy.LinExpr(c, x) + d, gurobipy.GRB.MAXIMIZE)
     model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
     model.optimize()
@@ -645,7 +666,7 @@ def linear_program_cost(c, d, A_in, b_in, A_eq, b_eq):
     active_in_flag = b_in.detach().numpy() - lhs_in < 1e-5
     num_act = np.sum(active_in_flag) + num_eq
     A_act = torch.empty((num_act, x_dim), dtype=torch.float64)
-    b_act = torch.empty((num_act,), dtype=torch.float64)
+    b_act = torch.empty((num_act, ), dtype=torch.float64)
     A_act[:num_eq, :] = A_eq
     b_act[:num_eq] = b_eq
     active_in_indices = np.nonzero(active_in_flag)
@@ -665,8 +686,8 @@ def leaky_relu_interval(negative_slope, x_lo, x_up):
     @return (output_lo, output_up) The output is in the interval
     [output_lo, output_up]
     """
-    assert(x_up > x_lo)
-    assert(type(x_lo) == type(x_up))
+    assert (x_up > x_lo)
+    assert (type(x_lo) == type(x_up))
     if (negative_slope >= 0):
         if x_lo >= 0:
             if isinstance(x_lo, torch.Tensor):
@@ -709,36 +730,40 @@ def project_to_polyhedron(A, b, x):
         return torch.from_numpy(y.value).type(x.dtype)
 
 
-def setup_relu(
-    relu_layer_width: tuple, params=None, negative_slope: float = 0.01,
-        bias: bool = True, dtype=torch.float64):
+def setup_relu(relu_layer_width: tuple,
+               params=None,
+               negative_slope: float = 0.01,
+               bias: bool = True,
+               dtype=torch.float64):
     """
     Setup a relu network.
     @param negative_slope The negative slope of the leaky relu units.
     @param bias whether the linear layer has bias or not.
     """
-    assert(isinstance(relu_layer_width, tuple))
+    assert (isinstance(relu_layer_width, tuple))
     if params is not None:
-        assert(isinstance(params, torch.Tensor))
+        assert (isinstance(params, torch.Tensor))
 
     def set_param(linear, param_count):
-        linear.weight.data = params[
-            param_count: param_count +
-            linear.in_features * linear.out_features].clone().reshape((
-                linear.out_features, linear.in_features))
+        linear.weight.data = params[param_count:param_count +
+                                    linear.in_features *
+                                    linear.out_features].clone().reshape(
+                                        (linear.out_features,
+                                         linear.in_features))
         param_count += linear.in_features * linear.out_features
         if bias:
-            linear.bias.data = params[
-                param_count: param_count + linear.out_features].clone()
+            linear.bias.data = params[param_count:param_count +
+                                      linear.out_features].clone()
             param_count += linear.out_features
         return param_count
 
     linear_layers = [None] * (len(relu_layer_width) - 1)
     param_count = 0
     for i in range(len(linear_layers)):
-        next_layer_width = relu_layer_width[i+1]
-        linear_layers[i] = torch.nn.Linear(
-            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
+        next_layer_width = relu_layer_width[i + 1]
+        linear_layers[i] = torch.nn.Linear(relu_layer_width[i],
+                                           next_layer_width,
+                                           bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -759,14 +784,15 @@ def update_relu_params(relu, params: torch.Tensor):
     params_count = 0
     for layer in relu:
         if isinstance(layer, torch.nn.Linear):
-            layer.weight.data = params[
-                params_count:
-                params_count + layer.in_features * layer.out_features].reshape(
-                    (layer.out_features, layer.in_features))
+            layer.weight.data = params[params_count:params_count +
+                                       layer.in_features *
+                                       layer.out_features].reshape(
+                                           (layer.out_features,
+                                            layer.in_features))
             params_count += layer.in_features * layer.out_features
             if layer.bias is not None:
-                layer.bias.data = params[
-                    params_count: params_count + layer.out_features]
+                layer.bias.data = params[params_count:params_count +
+                                         layer.out_features]
                 params_count += layer.out_features
 
 
@@ -822,21 +848,21 @@ def extract_relu_structure(relu_network):
             else:
                 linear_layer_width.append(layer.out_features)
             if layer.bias is not None:
-                assert(bias is None or bias)
+                assert (bias is None or bias)
                 bias = True
             else:
-                assert(bias is None or not bias)
+                assert (bias is None or not bias)
                 bias = False
         elif isinstance(layer, torch.nn.ReLU):
             if negative_slope is None:
                 negative_slope = 0.
             else:
-                assert(negative_slope == 0.)
+                assert (negative_slope == 0.)
         elif isinstance(layer, torch.nn.LeakyReLU):
             if negative_slope is None:
                 negative_slope = layer.negative_slope
             else:
-                assert(negative_slope == layer.negative_slope)
+                assert (negative_slope == layer.negative_slope)
         else:
             raise Exception("extract_relu_structure(): unknown layer.")
     return tuple(linear_layer_width), negative_slope, bias
@@ -850,49 +876,66 @@ def get_meshgrid_samples(lower, upper, mesh_size: tuple, dtype) ->\
     each row is a sample in the meshgrid.
     """
     sample_dim = len(mesh_size)
-    assert(len(upper) == sample_dim)
-    assert(len(lower) == sample_dim)
-    assert(len(mesh_size) == sample_dim)
+    assert (len(upper) == sample_dim)
+    assert (len(lower) == sample_dim)
+    assert (len(mesh_size) == sample_dim)
     meshes = []
     for i in range(sample_dim):
-        meshes.append(torch.linspace(
-            lower[i], upper[i], mesh_size[i], dtype=dtype))
+        meshes.append(
+            torch.linspace(lower[i], upper[i], mesh_size[i], dtype=dtype))
     mesh_tensors = torch.meshgrid(*meshes)
-    return torch.cat([
-        mesh_tensors[i].reshape((-1, 1)) for i in range(sample_dim)], dim=1)
+    return torch.cat(
+        [mesh_tensors[i].reshape((-1, 1)) for i in range(sample_dim)], dim=1)
 
 
-def save_second_order_forward_model(
-        forward_relu, q_equilibrium, u_equilibrium, dt, file_path):
+def save_second_order_forward_model(forward_relu, q_equilibrium, u_equilibrium,
+                                    dt, file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         forward_relu)
-    torch.save({"linear_layer_width": linear_layer_width,
-                "state_dict": forward_relu.state_dict(),
-                "negative_slope": negative_slope,
-                "bias": bias, "q_equilibrium": q_equilibrium,
-                "u_equilibrium": u_equilibrium, "dt": dt}, file_path)
+    torch.save(
+        {
+            "linear_layer_width": linear_layer_width,
+            "state_dict": forward_relu.state_dict(),
+            "negative_slope": negative_slope,
+            "bias": bias,
+            "q_equilibrium": q_equilibrium,
+            "u_equilibrium": u_equilibrium,
+            "dt": dt
+        }, file_path)
 
 
-def save_lyapunov_model(
-    lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
-        lyapunov_derivative_epsilon, eps_type, R, file_path):
+def save_lyapunov_model(lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
+                        lyapunov_derivative_epsilon, eps_type, R, file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         lyapunov_relu)
-    torch.save({"linear_layer_width": linear_layer_width,
-                "state_dict": lyapunov_relu.state_dict(),
-                "negative_slope": negative_slope, "V_lambda": V_lambda,
-                "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
-                "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
-                "eps_type": eps_type, "bias": bias, "R": R}, file_path)
+    torch.save(
+        {
+            "linear_layer_width": linear_layer_width,
+            "state_dict": lyapunov_relu.state_dict(),
+            "negative_slope": negative_slope,
+            "V_lambda": V_lambda,
+            "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
+            "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
+            "eps_type": eps_type,
+            "bias": bias,
+            "R": R
+        }, file_path)
 
 
 def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         controller_relu)
-    torch.save({"linear_layer_width": linear_layer_width,
-                "state_dict": controller_relu.state_dict(),
-                "negative_slope": negative_slope, "x_lo": x_lo, "x_up": x_up,
-                "u_lo": u_lo, "u_up": u_up, "bias": bias}, file_path)
+    torch.save(
+        {
+            "linear_layer_width": linear_layer_width,
+            "state_dict": controller_relu.state_dict(),
+            "negative_slope": negative_slope,
+            "x_lo": x_lo,
+            "x_up": x_up,
+            "u_lo": u_lo,
+            "u_up": u_up,
+            "bias": bias
+        }, file_path)
 
 
 def get_gurobi_terminate_if_callback(threshold=0.):
@@ -916,6 +959,7 @@ def get_gurobi_terminate_if_callback(threshold=0.):
                     objbst = model.cbGet(gurobipy.GRB.Callback.MIPNODE_OBJBST)
                     if objbst > threshold:
                         model.terminate()
+
     return gurobi_terminate_if
 
 
@@ -959,9 +1003,10 @@ class SigmoidAnneal:
         @param step int step number
         @return value of the sigmoid at that point
         """
-        return self.lo + (self.up - self.lo) * self.sigmoid(torch.tensor(
-            float(step - self.center_step) / float(self.steps_lo_to_up),
-            dtype=self.dtype))
+        return self.lo + (self.up - self.lo) * self.sigmoid(
+            torch.tensor(
+                float(step - self.center_step) / float(self.steps_lo_to_up),
+                dtype=self.dtype))
 
 
 def step_system(system, x_start, steps):
@@ -975,14 +1020,13 @@ def step_system(system, x_start, steps):
     return path
 
 
-def simulate_plant_with_controller(
-    plant, controller_relu, t_span, x_equilibrium, u_equilibrium, u_lo, u_up,
-        x0):
+def simulate_plant_with_controller(plant, controller_relu, t_span,
+                                   x_equilibrium, u_equilibrium, u_lo, u_up,
+                                   x0):
     """
     Simulate a continuous time system with a controller. The controller is
     computed as u = saturate(ϕ(x) − ϕ(x*) + u*)
     """
-
     def dyn(t, x):
         with torch.no_grad():
             x_torch = torch.from_numpy(x)
@@ -991,14 +1035,22 @@ def simulate_plant_with_controller(
             u = torch.max(torch.min(u_torch, u_up), u_lo).detach().numpy()
         return plant.dynamics(x, u)
 
-    result = scipy.integrate.solve_ivp(dyn, t_span, x0, t_eval=np.arange(
-        start=t_span[0], stop=t_span[1], step=0.01))
+    result = scipy.integrate.solve_ivp(dyn,
+                                       t_span,
+                                       x0,
+                                       t_eval=np.arange(start=t_span[0],
+                                                        stop=t_span[1],
+                                                        step=0.01))
     return result
 
 
-def train_approximator(
-    dataset, model, output_fun, batch_size, num_epochs, lr,
-        additional_variable=None):
+def train_approximator(dataset,
+                       model,
+                       output_fun,
+                       batch_size,
+                       num_epochs,
+                       lr,
+                       additional_variable=None):
     """
     @param additional_variable A list of torch tensors (with
     requires_grad=True), such that we will optimize the model together with
@@ -1008,8 +1060,9 @@ def train_approximator(
     test_set_size = len(dataset) - train_set_size
     train_set, test_set = torch.utils.data.random_split(
         dataset, [train_set_size, test_set_size])
-    train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=batch_size, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(train_set,
+                                               batch_size=batch_size,
+                                               shuffle=True)
 
     variables = model.parameters() if additional_variable is None else\
         list(model.parameters()) + additional_variable
@@ -1033,20 +1086,21 @@ def train_approximator(
         test_output_samples = output_fun(model, test_input_samples)
         test_loss = loss(test_output_samples, test_target)
 
-        print(f"epoch {epoch} training loss {running_loss/len(train_loader)},"
-              + f"test loss {test_loss}")
+        print(
+            f"epoch {epoch} training loss {running_loss/len(train_loader)}," +
+            f"test loss {test_loss}")
         model_params.append(extract_relu_parameters(model))
     pass
 
 
-def uniform_sample_in_box(
-        lo: torch.Tensor, hi: torch.Tensor, num_samples) -> torch.Tensor:
+def uniform_sample_in_box(lo: torch.Tensor, hi: torch.Tensor,
+                          num_samples) -> torch.Tensor:
     """
     Take uniform samples in the box lo <= x <= hi.
     @return samples A num_samples x x_dim tensor.
     """
     x_dim = lo.numel()
-    assert(hi.shape == (x_dim,))
+    assert (hi.shape == (x_dim, ))
     samples = torch.rand(num_samples, x_dim, dtype=torch.float64)
     samples = samples @ torch.diag(hi - lo)
     samples += torch.reshape(lo, (1, x_dim))

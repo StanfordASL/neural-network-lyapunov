@@ -13,7 +13,6 @@ import neural_network_lyapunov.pybullet_data_generation as\
  pybullet_data_generation
 import neural_network_lyapunov.utils as utils
 
-
 z_dim = 2
 dtype = torch.float64
 opt_default = dict(
@@ -28,25 +27,20 @@ opt_default = dict(
     grayscale=True,
     image_width=64,
     image_height=64,
-
     x_dim=2,
     x_equilibrium=torch.tensor([np.pi, 0], dtype=dtype),
-    x_lo_stable=torch.tensor([np.pi/4, -.5], dtype=dtype),
-    x_up_stable=torch.tensor([np.pi + 3*np.pi/4, .5], dtype=dtype),
-
+    x_lo_stable=torch.tensor([np.pi / 4, -.5], dtype=dtype),
+    x_up_stable=torch.tensor([np.pi + 3 * np.pi / 4, .5], dtype=dtype),
     dataset_x_lo=torch.tensor([0., -5.], dtype=dtype),
-    dataset_x_up=torch.tensor([2.*np.pi, 5.], dtype=dtype),
+    dataset_x_up=torch.tensor([2. * np.pi, 5.], dtype=dtype),
     dataset_noise=torch.tensor([.1, .1]),
     dataset_dt=.1,
     dataset_N=1,
     dataset_num_rollouts=25,
     dataset_num_val_rollouts=10,
-
     batch_size=50,
-
     long_horizon_N=10,
     long_horizon_num_val_rollouts=10,
-
     V_lambda=0.,
     V_eps_pos=.01,
     V_eps_der_lo=0.1,
@@ -54,28 +48,24 @@ opt_default = dict(
     R=None,
 
     # dynamics nn
-    dyn_nn_width=(z_dim, z_dim*5, z_dim*3, z_dim),
+    dyn_nn_width=(z_dim, z_dim * 5, z_dim * 3, z_dim),
 
     # lyapunov nn
-    lyap_nn_width=(z_dim, z_dim*5, z_dim*3, 1),
+    lyap_nn_width=(z_dim, z_dim * 5, z_dim * 3, 1),
 
     # encoder (image-space learning)
     encoder_class=encoders.CNNEncoder2,
     decoder_class=encoders.CNNDecoder2,
-
     use_bce=True,
-
     use_variational=False,
     kl_weight_lo=1.,
     kl_weight_up=1.,
     kl_weight_center_step=0,
     kl_weight_steps_lo_to_up=1,
-
     decoded_equilibrium_loss_weight=1e-3,
-
     z_dim=z_dim,
     z_equilibrium=torch.zeros(z_dim, dtype=dtype),
-    z_lo_stable=-1.*torch.ones(z_dim, dtype=dtype),
+    z_lo_stable=-1. * torch.ones(z_dim, dtype=dtype),
     z_up_stable=torch.ones(z_dim, dtype=dtype),
 )
 opt_variants = dict(
@@ -105,26 +95,25 @@ opt_variants = dict(
 
 
 class TestDynamicsLearning(unittest.TestCase):
-
     def setUp(self):
         torch.manual_seed(123)
         opt = dynamics_learning.DynamicsLearningOptions(opt_default)
         opt.set_options(opt_variants["stable"])
         self.opt = opt
-        self.x_data = torch.rand(
-            (2*opt.batch_size, opt.x_dim), dtype=opt.dtype)
-        self.x_next_data = torch.rand(
-            (2*opt.batch_size, opt.x_dim), dtype=opt.dtype)
+        self.x_data = torch.rand((2 * opt.batch_size, opt.x_dim),
+                                 dtype=opt.dtype)
+        self.x_next_data = torch.rand((2 * opt.batch_size, opt.x_dim),
+                                      dtype=opt.dtype)
         if opt.grayscale:
             num_channels = 1
         else:
             num_channels = 3
-        self.X_data = torch.rand(
-            (2*opt.batch_size, 2*num_channels,
-             opt.image_width, opt.image_height), dtype=opt.dtype)
-        self.X_next_data = torch.rand(
-            (2*opt.batch_size, num_channels,
-             opt.image_width, opt.image_height), dtype=opt.dtype)
+        self.X_data = torch.rand((2 * opt.batch_size, 2 * num_channels,
+                                  opt.image_width, opt.image_height),
+                                 dtype=opt.dtype)
+        self.X_next_data = torch.rand((2 * opt.batch_size, num_channels,
+                                       opt.image_width, opt.image_height),
+                                      dtype=opt.dtype)
         self.x_train_dataloader = pybullet_data_generation.get_dataloader(
             self.x_data, self.x_next_data, opt.batch_size)
         self.x_validation_dataloader = pybullet_data_generation.get_dataloader(
@@ -134,24 +123,26 @@ class TestDynamicsLearning(unittest.TestCase):
         self.X_validation_dataloader = pybullet_data_generation.get_dataloader(
             self.X_data, self.X_next_data, opt.batch_size)
         self.X_equilibrium = torch.rand(
-            (2*num_channels, opt.image_width, opt.image_height),
+            (2 * num_channels, opt.image_width, opt.image_height),
             dtype=opt.dtype)
-        self.dyn_nn_model = utils.setup_relu(
-            opt.dyn_nn_width, negative_slope=0., dtype=opt.dtype)
-        self.lyap_nn_model = utils.setup_relu(
-            opt.lyap_nn_width, negative_slope=0., dtype=opt.dtype)
+        self.dyn_nn_model = utils.setup_relu(opt.dyn_nn_width,
+                                             negative_slope=0.,
+                                             dtype=opt.dtype)
+        self.lyap_nn_model = utils.setup_relu(opt.lyap_nn_width,
+                                              negative_slope=0.,
+                                              dtype=opt.dtype)
         self.relu_sys = relu_system.AutonomousReLUSystemGivenEquilibrium(
-            opt.dtype, opt.dataset_x_lo, opt.dataset_x_up,
-            self.dyn_nn_model, opt.x_equilibrium)
+            opt.dtype, opt.dataset_x_lo, opt.dataset_x_up, self.dyn_nn_model,
+            opt.x_equilibrium)
         self.lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(
             self.relu_sys, self.lyap_nn_model)
         self.ss_dyn_learner = dynamics_learning.StateSpaceDynamicsLearning(
-            self.x_train_dataloader, self.x_validation_dataloader,
-            self.lyap, opt)
-        self.encoder = opt.encoder_class(
-            opt.z_dim, opt.image_width, opt.image_height, opt.grayscale)
-        self.decoder = opt.decoder_class(
-            opt.z_dim, opt.image_width, opt.image_height, opt.grayscale)
+            self.x_train_dataloader, self.x_validation_dataloader, self.lyap,
+            opt)
+        self.encoder = opt.encoder_class(opt.z_dim, opt.image_width,
+                                         opt.image_height, opt.grayscale)
+        self.decoder = opt.decoder_class(opt.z_dim, opt.image_width,
+                                         opt.image_height, opt.grayscale)
         self.latent_dyn_learner = dynamics_learning.\
             LatentSpaceDynamicsLearning(
                 self.X_train_dataloader, self.X_validation_dataloader,
@@ -198,8 +189,8 @@ class TestDynamicsLearning(unittest.TestCase):
         self.assertEqual(lyap_der_lo_loss_samp, 0.)
         self.assertEqual(lyap_der_up_loss_samp, 0.)
         self.opt.set_option("use_vae", False)
-        z = self.latent_dyn_learner.encoder.forward(
-            self.X_data[0:1, :] + 10000.)[0]
+        z = self.latent_dyn_learner.encoder.forward(self.X_data[0:1, :] +
+                                                    10000.)[0]
         self.assertTrue(torch.all(z > self.opt.z_up_stable))
         lyap_pos_loss_samp, lyap_der_lo_loss_samp, lyap_der_up_loss_samp =\
             self.latent_dyn_learner.lyapunov_loss_at_samples(
@@ -219,21 +210,29 @@ class TestDynamicsLearning(unittest.TestCase):
                 self.assertGreaterEqual(z_adv_der_up.shape[0], 1)
                 for k in range(z_adv_pos.shape[0]):
                     V = self.lyap.lyapunov_value(
-                        z_adv_pos[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, R=self.opt.R)
+                        z_adv_pos[k, :],
+                        self.lyap.system.x_equilibrium,
+                        self.opt.V_lambda,
+                        R=self.opt.R)
                     self.assertLessEqual(
                         V.item() - self.opt.V_eps_pos * torch.norm(
                             z_adv_pos[k, :] - self.lyap.system.x_equilibrium,
                             p=1), 0.)
                 for k in range(z_adv_der_lo.shape[0]):
                     dV = self.lyap.lyapunov_derivative(
-                        z_adv_der_lo[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, self.opt.V_eps_der_lo, R=self.opt.R)
+                        z_adv_der_lo[k, :],
+                        self.lyap.system.x_equilibrium,
+                        self.opt.V_lambda,
+                        self.opt.V_eps_der_lo,
+                        R=self.opt.R)
                     [self.assertGreaterEqual(dv.item(), 0.) for dv in dV]
                 for k in range(z_adv_der_up.shape[0]):
                     dV = self.lyap.lyapunov_derivative(
-                        z_adv_der_up[k, :], self.lyap.system.x_equilibrium,
-                        self.opt.V_lambda, self.opt.V_eps_der_up, R=self.opt.R)
+                        z_adv_der_up[k, :],
+                        self.lyap.system.x_equilibrium,
+                        self.opt.V_lambda,
+                        self.opt.V_eps_der_up,
+                        R=self.opt.R)
                     [self.assertLessEqual(dv.item(), 0.) for dv in dV]
 
     def test_dynamics_loss(self):
@@ -257,8 +256,8 @@ class TestDynamicsLearning(unittest.TestCase):
         z_mu += (torch.rand(z_mu.shape, dtype=self.opt.dtype) - .5) * 2
         kl1 = self.latent_dyn_learner.kl_loss(z_mu, z_log_var)
         self.assertGreater(kl1, kl)
-        z_log_var -= (torch.rand(
-            z_log_var.shape, dtype=self.opt.dtype) - .5) * 2
+        z_log_var -= (torch.rand(z_log_var.shape, dtype=self.opt.dtype) -
+                      .5) * 2
         kl2 = self.latent_dyn_learner.kl_loss(z_mu, z_log_var)
         self.assertGreater(kl2, kl1)
 
@@ -284,19 +283,19 @@ class TestDynamicsLearning(unittest.TestCase):
     def test_rollout(self):
         x0 = self.x_data[0, :]
         roll, V_roll = self.ss_dyn_learner.rollout(x0, 10)
-        self.assertEqual(roll.shape, (10+1, self.opt.x_dim))
-        self.assertEqual(V_roll.shape, (10+1,))
+        self.assertEqual(roll.shape, (10 + 1, self.opt.x_dim))
+        self.assertEqual(V_roll.shape, (10 + 1, ))
         self.assertTrue(torch.all(x0 == roll[0, :]))
         for decode in [True, False]:
             X0 = self.X_data[0, :]
             roll, V_roll, z_roll = self.latent_dyn_learner.rollout(
                 X0, 10, decode_intermediate=decode)
-            num_channels = int(X0.shape[0]/2)
-            self.assertEqual(
-                roll.shape, (10+2, num_channels,
-                             self.opt.image_width, self.opt.image_height))
-            self.assertEqual(V_roll.shape, (10+1,))
-            self.assertEqual(z_roll.shape, (10+1, self.opt.z_dim))
+            num_channels = int(X0.shape[0] / 2)
+            self.assertEqual(roll.shape,
+                             (10 + 2, num_channels, self.opt.image_width,
+                              self.opt.image_height))
+            self.assertEqual(V_roll.shape, (10 + 1, ))
+            self.assertEqual(z_roll.shape, (10 + 1, self.opt.z_dim))
             self.assertTrue(torch.all(X0[:num_channels, :] == roll[0, :]))
             self.assertTrue(torch.all(X0[num_channels:, :] == roll[1, :]))
 
@@ -304,7 +303,7 @@ class TestDynamicsLearning(unittest.TestCase):
         x0 = self.x_data[0, :]
         roll, V_roll = self.ss_dyn_learner.rollout(x0, 10)
         loss = self.ss_dyn_learner.rollout_loss(roll)
-        self.assertEqual(loss.shape, (11,))
+        self.assertEqual(loss.shape, (11, ))
         self.assertEqual(loss[0].item(), 0.)
         self.assertTrue(torch.all(loss >= 0))
         for decode in [True, False]:
@@ -312,7 +311,7 @@ class TestDynamicsLearning(unittest.TestCase):
             X0 = self.X_data[0, :]
             roll, _, _ = self.latent_dyn_learner.rollout(X0, 10, decode)
             loss = self.latent_dyn_learner.rollout_loss(roll, decode)
-            self.assertEqual(loss.shape, (12,))
+            self.assertEqual(loss.shape, (12, ))
             self.assertEqual(loss[0].item(), 0.)
             self.assertEqual(loss[1].item(), 0.)
             self.assertTrue(torch.all(loss >= 0))
@@ -320,21 +319,23 @@ class TestDynamicsLearning(unittest.TestCase):
             X0 = self.X_data[0, :]
             roll, _, _ = self.latent_dyn_learner.rollout(X0, 10, decode)
             loss = self.latent_dyn_learner.rollout_loss(roll, decode)
-            self.assertEqual(loss.shape, (12,))
+            self.assertEqual(loss.shape, (12, ))
             self.assertTrue(torch.all(loss > 0))
             self.assertTrue(torch.all(loss[0] < loss[2:]))
             self.assertTrue(torch.all(loss[1] < loss[2:]))
 
     def test_rollout_validation_loss(self):
-        rollouts = [torch.rand((10, self.opt.x_dim), dtype=self.opt.dtype)
-                    for i in range(4)]
+        rollouts = [
+            torch.rand((10, self.opt.x_dim), dtype=self.opt.dtype)
+            for i in range(4)
+        ]
         loss = self.ss_dyn_learner.rollout_validation(rollouts)
         self.assertEqual(loss.shape, (10, ))
-        rollouts = [torch.rand(
-            (10, self.X_next_data.shape[1],
-             self.opt.image_width, self.opt.image_height),
-            dtype=self.opt.dtype)
-                    for i in range(4)]
+        rollouts = [
+            torch.rand((10, self.X_next_data.shape[1], self.opt.image_width,
+                        self.opt.image_height),
+                       dtype=self.opt.dtype) for i in range(4)
+        ]
         loss = self.latent_dyn_learner.rollout_validation(rollouts)
         self.assertEqual(loss.shape, (10, ))
         if torch.cuda.is_available():

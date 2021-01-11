@@ -16,24 +16,23 @@ def setup_system():
     """
     dtype = torch.float64
     sys = hybrid_linear_system.AutonomousHybridLinearSystem(1, dtype)
-    sys.add_mode(
-        torch.tensor([[-0.9]], dtype=dtype), torch.tensor([0], dtype=dtype),
-        torch.tensor([[1], [-1]], dtype=dtype),
-        torch.tensor([1, 0], dtype=dtype))
-    sys.add_mode(
-        torch.tensor([[-0.5]], dtype=dtype), torch.tensor([0], dtype=dtype),
-        torch.tensor([[-1], [1]], dtype=dtype),
-        torch.tensor([1, 0], dtype=dtype))
+    sys.add_mode(torch.tensor([[-0.9]], dtype=dtype),
+                 torch.tensor([0], dtype=dtype),
+                 torch.tensor([[1], [-1]], dtype=dtype),
+                 torch.tensor([1, 0], dtype=dtype))
+    sys.add_mode(torch.tensor([[-0.5]], dtype=dtype),
+                 torch.tensor([0], dtype=dtype),
+                 torch.tensor([[-1], [1]], dtype=dtype),
+                 torch.tensor([1, 0], dtype=dtype))
     return sys
 
 
 def setup_relu():
     dtype = torch.float64
     linear1 = nn.Linear(1, 4)
-    linear1.weight.data = torch.tensor(
-        [[0], [0.1], [-0.1], [0.2]], dtype=dtype)
-    linear1.bias.data = torch.tensor(
-        [0.1, 0.01, -0.1, -0.01], dtype=dtype)
+    linear1.weight.data = torch.tensor([[0], [0.1], [-0.1], [0.2]],
+                                       dtype=dtype)
+    linear1.bias.data = torch.tensor([0.1, 0.01, -0.1, -0.01], dtype=dtype)
     linear2 = nn.Linear(4, 1)
     linear2.weight.data = torch.tensor([[0.1, 0.2, -0.1, -0.2]], dtype=dtype)
     linear2.bias.data = torch.tensor([0.1], dtype=dtype)
@@ -82,9 +81,10 @@ if __name__ == "__main__":
     train_value_approximator = train_lyapunov.TrainValueApproximator()
     train_value_approximator.max_epochs = 500
     train_value_approximator.convergence_tolerance = 0.001
-    result1 = train_value_approximator.train(
-        system, relu, V_lambda, x_equilibrium, lambda x: torch.norm(x, p=1),
-        state_samples_all, 100, True)
+    result1 = train_value_approximator.train(system, relu, V_lambda,
+                                             x_equilibrium,
+                                             lambda x: torch.norm(x, p=1),
+                                             state_samples_all, 100, True)
     plot_relu(relu, system, V_lambda, x_equilibrium)
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(

@@ -34,23 +34,32 @@ class LineSearchAdam(Optimizer):
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
     """
-
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, loss_minimal_decrement=1e-4,
-                 min_step_size_decrease=1e-4, step_size_reduction=0.2,
+    def __init__(self,
+                 params,
+                 lr=1e-3,
+                 betas=(0.9, 0.999),
+                 eps=1e-8,
+                 weight_decay=0,
+                 amsgrad=False,
+                 loss_minimal_decrement=1e-4,
+                 min_step_size_decrease=1e-4,
+                 step_size_reduction=0.2,
                  min_improvement=0.):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError(
-                "Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError("Invalid beta parameter at index 0: {}".format(
+                betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError(
-                "Invalid beta parameter at index 1: {}".format(betas[1]))
-        defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad,
+            raise ValueError("Invalid beta parameter at index 1: {}".format(
+                betas[1]))
+        defaults = dict(lr=lr,
+                        betas=betas,
+                        eps=eps,
+                        weight_decay=weight_decay,
+                        amsgrad=amsgrad,
                         loss_minimal_decrement=loss_minimal_decrement,
                         min_step_size_decrease=min_step_size_decrease,
                         step_size_reduction=step_size_reduction,
@@ -79,16 +88,19 @@ class LineSearchAdam(Optimizer):
             min_improvement = group['min_improvement']
 
         if loss_minimal_decrement is not None:
-            decrement = loss_minimal_decrement * torch.sum(torch.stack(
-                [t[i] * torch.sum(p[i].grad * d_p[i]) for i in range(len(p))]))
+            decrement = loss_minimal_decrement * torch.sum(
+                torch.stack([
+                    t[i] * torch.sum(p[i].grad * d_p[i]) for i in range(len(p))
+                ]))
         else:
             decrement = None
 
         alpha_prev = 0
         alpha = 1.
         while alpha > min_step_size_decrease:
-            loss = self.directional_evaluate(
-                closure, p, [(alpha - alpha_prev) * ti for ti in t], d_p)
+            loss = self.directional_evaluate(closure, p,
+                                             [(alpha - alpha_prev) * ti
+                                              for ti in t], d_p)
             if decrement is not None and \
                 loss < loss0 + alpha * decrement and \
                     loss < loss0 - min_improvement:
@@ -144,8 +156,8 @@ class LineSearchAdam(Optimizer):
                 beta1, beta2 = group['betas']
 
                 state['step'] += 1
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+                bias_correction1 = 1 - beta1**state['step']
+                bias_correction2 = 1 - beta2**state['step']
 
                 if group['weight_decay'] != 0:
                     grad.add_(group['weight_decay'], p.data)

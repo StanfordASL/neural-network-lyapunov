@@ -16,7 +16,7 @@ class ModelBounds:
         @param vf An instance of ValueFunction that corresponds
         to the value function to be verified
         """
-        assert(isinstance(vf, value_to_optimization.ValueFunction))
+        assert (isinstance(vf, value_to_optimization.ValueFunction))
         self.vf = vf
         self.model = model
         self.dtype = vf.dtype
@@ -56,12 +56,11 @@ class ModelBounds:
         """
         relu_output_return, _, _, _, _ = self.relu_opt.output_constraint(
             x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
-        (Ain1, Ain2, Ain3, rhs_in,
-         Aeq1, Aeq2, Aeq3, rhs_eq,
-         Q1_val, Q2_val, Q3_val, q1_val, q2_val, q3_val, c) = self.traj_opt
+        (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q1_val, Q2_val,
+         Q3_val, q1_val, q2_val, q3_val, c) = self.traj_opt
 
         # x size equal in both program
-        assert(relu_output_return.Ain_input.shape[1] == Ain1.shape[1])
+        assert (relu_output_return.Ain_input.shape[1] == Ain1.shape[1])
 
         num_x = Ain1.shape[1]
         num_s = Ain2.shape[1]
@@ -74,7 +73,7 @@ class ModelBounds:
 
         num_Ain = rhs_in.shape[0]
         num_Pin = relu_output_return.rhs_in.shape[0]
-        num_in = num_Pin + num_Ain + 2*num_x
+        num_in = num_Pin + num_Ain + 2 * num_x
 
         num_Aeq = rhs_eq.shape[0]
         num_Peq = relu_output_return.rhs_eq.shape[0]
@@ -83,18 +82,18 @@ class ModelBounds:
         s_index_s = 0
         s_index_e = num_s
         z_index_s = num_s
-        z_index_e = num_s+num_z
+        z_index_e = num_s + num_z
 
         alpha_index_s = 0
         alpha_index_e = num_alpha
         beta_index_s = num_alpha
-        beta_index_e = num_alpha+num_beta
+        beta_index_e = num_alpha + num_beta
 
         G0 = torch.zeros(num_in, num_x, dtype=self.dtype)
         G0[0:num_Ain, :] = Ain1
-        G0[num_Ain:num_Ain+num_Pin, :] = relu_output_return.Ain_input
-        G0[num_Ain+num_Pin:num_Ain+num_Pin+num_x,
-            :] = torch.eye(num_x, dtype=self.dtype)
+        G0[num_Ain:num_Ain + num_Pin, :] = relu_output_return.Ain_input
+        G0[num_Ain + num_Pin:num_Ain + num_Pin + num_x, :] = torch.eye(
+            num_x, dtype=self.dtype)
         G0[num_Ain+num_Pin+num_x:num_Ain+num_Pin+2*num_x, :] = - \
             torch.eye(num_x, dtype=self.dtype)
 
@@ -108,12 +107,12 @@ class ModelBounds:
         G2[num_Ain:num_Ain+num_Pin, beta_index_s:beta_index_e] =\
             relu_output_return.Ain_binary
 
-        h = torch.cat((
-            rhs_in, relu_output_return.rhs_in.squeeze(), x_up, -x_lo), 0)
+        h = torch.cat(
+            (rhs_in, relu_output_return.rhs_in.squeeze(), x_up, -x_lo), 0)
 
         A0 = torch.zeros(num_eq, num_x, dtype=self.dtype)
         A0[0:num_Aeq, :] = Aeq1
-        A0[num_Aeq:num_Aeq+num_Peq, :] = relu_output_return.Aeq_input
+        A0[num_Aeq:num_Aeq + num_Peq, :] = relu_output_return.Aeq_input
 
         A1 = torch.zeros(num_eq, num_y, dtype=self.dtype)
         A1[0:num_Aeq, s_index_s:s_index_e] = Aeq2
@@ -146,4 +145,4 @@ class ModelBounds:
 
         k = c - relu_output_return.Cout
 
-        return(Q0, Q1, Q2, q0, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)
+        return (Q0, Q1, Q2, q0, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b)

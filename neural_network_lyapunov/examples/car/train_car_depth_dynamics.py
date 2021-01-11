@@ -10,7 +10,6 @@ import argparse
 
 
 class LocalityNet(nn.Module):
-
     def __init__(self, input_dim, output_dim, nf, neighbors=5):
         super(LocalityNet, self).__init__()
         self.c = nn.Conv1d(1, 1, neighbors, padding=int(
@@ -28,8 +27,16 @@ class LocalityNet(nn.Module):
         return x
 
 
-def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
-                      asymmetric_loss=None, resume=False, resume_file=None):
+def train_depth_model(u,
+                      d,
+                      dn,
+                      nf,
+                      config,
+                      delta_dynamics=False,
+                      local=False,
+                      asymmetric_loss=None,
+                      resume=False,
+                      resume_file=None):
     """
     @param nf: hidden layer neuron
     @param delta_dynamics: bool. True: train different between current and next
@@ -66,8 +73,10 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
         model_name += "_local_model"
     else:
         model = nn.Sequential(  # nn.BatchNorm1d(input_dim),
-            nn.Linear(input_dim, nf), nn.LeakyReLU(0.1),  # nn.ReLU(),
-            nn.Linear(nf, nf), nn.LeakyReLU(0.1),  # nn.ReLU(),
+            nn.Linear(input_dim, nf),
+            nn.LeakyReLU(0.1),  # nn.ReLU(),
+            nn.Linear(nf, nf),
+            nn.LeakyReLU(0.1),  # nn.ReLU(),
             # nn.Linear(nf * 2, nf), nn.LeakyReLU(0.1), #nn.ReLU(),
             # nn.Linear(nf * 2, nf), nn.ReLU(),
             nn.Linear(nf, d.shape[1]))
@@ -113,11 +122,10 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
         index = np.random.randint(0, num_samples, batch_size)
 
         if local:
-            d_pred = model(d_tensor[index, :],
-                           u_tensor[index, :])
+            d_pred = model(d_tensor[index, :], u_tensor[index, :])
         else:
-            d_pred = model(torch.cat((d_tensor[index, :],
-                                      u_tensor[index, :]), 1))
+            d_pred = model(
+                torch.cat((d_tensor[index, :], u_tensor[index, :]), 1))
         if delta_dynamics:
             target = dn_tensor[index, :] - \
                 d_tensor[index, :]
@@ -131,8 +139,9 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
             # print(torch.sum(loss_fn(d_pred, dn_tensor-d_tensor))
             #       /torch.numel(dn_tensor))
         elif asymmetric_loss == "underapprox":
-            weights = calculate_weight(
-                d_pred - target, "underapprox", slope=0.2)
+            weights = calculate_weight(d_pred - target,
+                                       "underapprox",
+                                       slope=0.2)
             loss_vector = loss_fn(d_pred, target)
             loss = torch.sum(weights * loss_vector) / torch.numel(loss_vector)
         else:
@@ -142,10 +151,7 @@ def train_depth_model(u, d, dn, nf, config, delta_dynamics=False, local=False,
         loss.backward()
         optimizer.step()
 
-        writer.add_scalar(
-            "Loss/train_" + model_name,
-            loss,
-            epoch)
+        writer.add_scalar("Loss/train_" + model_name, loss, epoch)
 
     writer.flush()
     return model, model_name
@@ -156,10 +162,13 @@ def car_dynamics_training(u, x, xn, nf):
     # Input to NN:  [theta, velocity, turning_rate]
     # Output of NN: [delta_position_x, delta_position_y]
     input_dim = u.shape[1] + 1
-    model = nn.Sequential(nn.Linear(input_dim, nf), nn.ReLU(),
-                          nn.Linear(nf, nf), nn.ReLU(),
-                          # nn.Linear(nf, nf), nn.ReLU(),
-                          nn.Linear(nf, 2))
+    model = nn.Sequential(
+        nn.Linear(input_dim, nf),
+        nn.ReLU(),
+        nn.Linear(nf, nf),
+        nn.ReLU(),
+        # nn.Linear(nf, nf), nn.ReLU(),
+        nn.Linear(nf, 2))
     model.double()
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -174,15 +183,14 @@ def car_dynamics_training(u, x, xn, nf):
         if epoch % 100 == 0:
             print(epoch)
         for i in range(numEnvs):
-            delta_p_pred = model(torch.cat((x_tensor[i * T_horizon:(i + 1) *
-                                                     T_horizon,
-                                                     2].view(T_horizon, 1),
-                                            u_tensor[i * T_horizon:(i + 1) *
-                                                     T_horizon, :]), 1))
+            delta_p_pred = model(
+                torch.cat((x_tensor[i * T_horizon:(i + 1) * T_horizon, 2].view(
+                    T_horizon,
+                    1), u_tensor[i * T_horizon:(i + 1) * T_horizon, :]), 1))
             # x[n+ 1] =φdyn(x[n],u[n])−φdyn(x∗,u∗) + x∗
             loss = loss_fn(
-                delta_p_pred - model(torch.from_numpy(
-                    np.zeros((T_horizon, 3)))),
+                delta_p_pred - model(torch.from_numpy(np.zeros(
+                    (T_horizon, 3)))),
                 xn_tensor[i * T_horizon:(i + 1) * T_horizon, :-1] -
                 x_tensor[i * T_horizon:(i + 1) * T_horizon, :-1])
             optimizer.zero_grad()
@@ -193,14 +201,13 @@ def car_dynamics_training(u, x, xn, nf):
     return model
 
 
-def visualize_model(
-    depth_model,
-    u,
-    d,
-    next_d,
-    local=False,
-    delta_dynamics=False,
-        model_name=None):
+def visualize_model(depth_model,
+                    u,
+                    d,
+                    next_d,
+                    local=False,
+                    delta_dynamics=False,
+                    model_name=None):
     u_tensor = torch.from_numpy(u.T)
     d_tensor = torch.from_numpy(d.T)
     if local:
@@ -254,8 +261,7 @@ def standardize(X, axis=0):
 def whiten(X):
     import math
     means = np.mean(X, axis=0)
-    norms = (np.linalg.norm(X - means, axis=0)
-             / math.sqrt(X.shape[0]))
+    norms = (np.linalg.norm(X - means, axis=0) / math.sqrt(X.shape[0]))
     return (X - means) / norms
 
 
@@ -306,7 +312,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--save_model", action="store_true")
-    parser.add_argument("--visualize_model", type=str,
+    parser.add_argument("--visualize_model",
+                        type=str,
                         help="path to the model file for visualization")
     args = parser.parse_args()
 
@@ -316,7 +323,8 @@ if __name__ == "__main__":
             model = LocalityNet(input_dim, d.shape[1], nf)
         else:
             model = nn.Sequential(
-                nn.Linear(input_dim, nf), nn.LeakyReLU(0.1),
+                nn.Linear(input_dim, nf),
+                nn.LeakyReLU(0.1),
                 # nn.Linear(nf, nf), nn.LeakyReLU(0.1),
                 nn.Linear(nf, d.shape[1]))
         model.load_state_dict(torch.load('depth_model/' +
@@ -324,29 +332,48 @@ if __name__ == "__main__":
         model.eval()
         model.double()
         index = 800
-        visualize_model(model, u[index, :],
-                        d[index, :], dn[index, :], local=local,
+        visualize_model(model,
+                        u[index, :],
+                        d[index, :],
+                        dn[index, :],
+                        local=local,
                         delta_dynamics=delta_dynamics)
         index = 22
-        visualize_model(model, u[index, :],
-                        d[index, :], dn[index, :], local=local,
+        visualize_model(model,
+                        u[index, :],
+                        d[index, :],
+                        dn[index, :],
+                        local=local,
                         delta_dynamics=delta_dynamics)
     else:
         writer = SummaryWriter(filename_suffix="sensor_dynamics")
         depth_model, model_name = train_depth_model(
-            u, d, dn, nf, config, local=local, asymmetric_loss="underapprox",
+            u,
+            d,
+            dn,
+            nf,
+            config,
+            local=local,
+            asymmetric_loss="underapprox",
             delta_dynamics=delta_dynamics)
         # car_model = car_dynamics_training(u, x, xn, nf_car)
         # torch.save(car_model.state_dict(), 'car_model/'+args.model_name)
         writer.close()
         index = 8
-        visualize_model(depth_model, u[index, :], d[index, :],
-                        dn[index, :], local=local,
+        visualize_model(depth_model,
+                        u[index, :],
+                        d[index, :],
+                        dn[index, :],
+                        local=local,
                         delta_dynamics=delta_dynamics)
         index = 22
-        visualize_model(depth_model, u[index, :],
-                        d[index, :], dn[index, :], local=local,
-                        delta_dynamics=delta_dynamics, model_name=model_name)
+        visualize_model(depth_model,
+                        u[index, :],
+                        d[index, :],
+                        dn[index, :],
+                        local=local,
+                        delta_dynamics=delta_dynamics,
+                        model_name=model_name)
 
         if args.save_model:
             torch.save(depth_model.state_dict(), 'depth_model/' + model_name)

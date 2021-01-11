@@ -24,13 +24,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
     We will formulate these conditions as the optimal objective of certain
     mixed-integer linear programs (MILP) being non-positive/non-negative.
     """
-
     def __init__(self, system, lyapunov_relu):
-        super(LyapunovContinuousTimeHybridSystem, self).__init__(
-            system, lyapunov_relu)
+        super(LyapunovContinuousTimeHybridSystem,
+              self).__init__(system, lyapunov_relu)
 
-    def lyapunov_derivative(
-            self, x, x_equilibrium, V_lambda, epsilon, R):
+    def lyapunov_derivative(self, x, x_equilibrium, V_lambda, epsilon, R):
         """
         Compute V̇(x) + εV(x) for a given x.
         Notice that V̇(x) can have multiple values for a given x, for two
@@ -48,25 +46,27 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         @return possible_lyapunov_derivatives A list of torch tensors
         representing all possible V̇(x) + εV(x).
         """
-        assert(isinstance(x, torch.Tensor))
-        assert(x.shape == (self.system.x_dim,))
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (self.system.x_dim,))
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(epsilon, float))
-        assert(isinstance(R, torch.Tensor) or R is None)
-        if R is not None and torch.norm(R - torch.eye(
-                self.system.x_dim, dtype=R.dtype)).item() > 0:
+        assert (isinstance(x, torch.Tensor))
+        assert (x.shape == (self.system.x_dim, ))
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(R, torch.Tensor) or R is None)
+        if R is not None and torch.norm(
+                R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             # TODO: implement the case when R is not None.
             raise Exception("Not implemented yet")
         V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
         xdot_all = self.system.possible_dx(x)
         possible_activation_patterns = relu_to_optimization.\
             compute_all_relu_activation_patterns(self.lyapunov_relu, x)
-        dReLU_dx_all = [relu_to_optimization.ReLUGivenActivationPattern(
-            self.lyapunov_relu, self.system.x_dim, pattern,
-            self.system.dtype)[0] for
-            pattern in possible_activation_patterns]
+        dReLU_dx_all = [
+            relu_to_optimization.ReLUGivenActivationPattern(
+                self.lyapunov_relu, self.system.x_dim, pattern,
+                self.system.dtype)[0]
+            for pattern in possible_activation_patterns
+        ]
         # ∂|x-x*|₁/∂x can have different values if x(i) = x*(i).
         state_error_grad_queue = queue.Queue()
         state_error_grad_queue.put([])
@@ -91,8 +91,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                     state_error_grad_queue.put(queue_front_clone)
         state_error_grad = [None] * state_error_grad_queue.qsize()
         for i in range(len(state_error_grad)):
-            state_error_grad[i] = torch.tensor(
-                state_error_grad_queue.get(), dtype=self.system.dtype)
+            state_error_grad[i] = torch.tensor(state_error_grad_queue.get(),
+                                               dtype=self.system.dtype)
 
         # First compute dV/dx, then compute Vdot = dV/dx * xdot
         dV_dx = [None] * (len(dReLU_dx_all) * len(state_error_grad))
@@ -143,9 +143,13 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                 self.system.g[i])
         return (gigammai_lower, gigammai_upper)
 
-    def add_relu_gradient_times_Aisi(
-            self, milp, s, beta,
-            Aisi_lower=None, Aisi_upper=None, slack_name="z"):
+    def add_relu_gradient_times_Aisi(self,
+                                     milp,
+                                     s,
+                                     beta,
+                                     Aisi_lower=None,
+                                     Aisi_upper=None,
+                                     slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -161,36 +165,43 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         variables to write ∂ReLU(x)/∂x*Aᵢsᵢ as mixed-integer linear constraint
         a_out[i].dot(z[i]) = ∂ReLU(x)/∂x*Aᵢsᵢ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(s, list))
-        assert(isinstance(beta, list))
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(s, list))
+        assert (isinstance(beta, list))
 
         z = [None] * self.system.num_modes
         a_out = [None] * self.system.num_modes
         if (Aisi_lower is None or Aisi_upper is None):
             Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
         else:
-            assert(len(Aisi_lower) == self.system.num_modes)
-            assert(len(Aisi_upper) == self.system.num_modes)
+            assert (len(Aisi_lower) == self.system.num_modes)
+            assert (len(Aisi_upper) == self.system.num_modes)
         for i in range(self.system.num_modes):
             # First write ∂ReLU(x)/∂x*Aᵢsᵢ
             a_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     Aisi_lower[i], Aisi_upper[i])
-            z[i] = milp.addVars(
-                A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
+            z[i] = milp.addVars(A_z.shape[1],
+                                lb=-gurobipy.GRB.INFINITY,
+                                vtype=gurobipy.GRB.CONTINUOUS,
+                                name=slack_name + "[" + str(i) + "]")
             A_si = A_Aisi @ self.system.A[i]
-            milp.addMConstrs(
-                [A_si, A_z, A_beta],
-                [s[i*self.system.x_dim:(i+1)*self.system.x_dim], z[i], beta],
-                sense=gurobipy.GRB.LESS_EQUAL, b=rhs,
-                name="milp_relu_gradient_times_Aisi")
+            milp.addMConstrs([A_si, A_z, A_beta], [
+                s[i * self.system.x_dim:(i + 1) * self.system.x_dim], z[i],
+                beta
+            ],
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             b=rhs,
+                             name="milp_relu_gradient_times_Aisi")
         return (z, a_out)
 
-    def add_relu_gradient_times_xdot(
-            self, milp, xdot, beta,
-            xdot_lower, xdot_upper, slack_name="z"):
+    def add_relu_gradient_times_xdot(self,
+                                     milp,
+                                     xdot,
+                                     beta,
+                                     xdot_lower,
+                                     xdot_upper,
+                                     slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -205,30 +216,35 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         variables to write ∂ReLU(x)/∂x*ẋ as mixed-integer linear constraint
         a_out[i].dot(z[i]) = ∂ReLU(x)/∂x*ẋ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(beta, list))
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(beta, list))
 
-        assert(isinstance(xdot_lower, np.ndarray))
-        assert(isinstance(xdot_upper, np.ndarray))
-        assert(xdot_lower.shape == (self.system.x_dim,))
-        assert(xdot_upper.shape == (self.system.x_dim,))
+        assert (isinstance(xdot_lower, np.ndarray))
+        assert (isinstance(xdot_upper, np.ndarray))
+        assert (xdot_lower.shape == (self.system.x_dim, ))
+        assert (xdot_upper.shape == (self.system.x_dim, ))
         # First write ∂ReLU(x)/∂x*ẋ
         a_out, A_xdot, A_z, A_beta, rhs, _, _ = \
             self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                 torch.from_numpy(xdot_lower),
                 torch.from_numpy(xdot_upper))
-        z = milp.addVars(
-            A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
-        milp.addMConstrs(
-            [A_xdot, A_z, A_beta], [xdot, z, beta],
-            sense=gurobipy.GRB.LESS_EQUAL, b=rhs,
-            name="milp_relu_gradient_times_xdot")
+        z = milp.addVars(A_z.shape[1],
+                         lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS,
+                         name=slack_name)
+        milp.addMConstrs([A_xdot, A_z, A_beta], [xdot, z, beta],
+                         sense=gurobipy.GRB.LESS_EQUAL,
+                         b=rhs,
+                         name="milp_relu_gradient_times_xdot")
         return (z, a_out)
 
-    def add_relu_gradient_times_gigammai(
-        self, milp, gamma, beta,
-            gigammai_lower=None, gigammai_upper=None, slack_name="z"):
+    def add_relu_gradient_times_gigammai(self,
+                                         milp,
+                                         gamma,
+                                         beta,
+                                         gigammai_lower=None,
+                                         gigammai_upper=None,
+                                         slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -244,10 +260,10 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         variables to write ∂ReLU(x)/∂x*gᵢγᵢ as mixed-integer linear constraint
         a_out[i].dot(z[i]) = ∂ReLU(x)/∂x*gᵢγᵢ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(gamma, list))
-        assert(len(gamma) == self.system.num_modes)
-        assert(isinstance(beta, list))
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(gamma, list))
+        assert (len(gamma) == self.system.num_modes)
+        assert (isinstance(beta, list))
         z = [None] * self.system.num_modes
         a_out = [None] * self.system.num_modes
         if gigammai_lower is None or gigammai_upper is None:
@@ -264,19 +280,25 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             a_out[i], A_gigammai, A_z, A_beta, rhs, _, _ =\
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     gigammai_lower[i], gigammai_upper[i])
-            z[i] = milp.addVars(
-                A_z.shape[1], lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+            z[i] = milp.addVars(A_z.shape[1],
+                                lb=-gurobipy.GRB.INFINITY,
+                                vtype=gurobipy.GRB.CONTINUOUS,
+                                name=slack_name)
             A_gammai = A_gigammai @ self.system.g[i]
-            milp.addMConstrs(
-                [A_gammai.reshape((-1, 1)), A_z, A_beta],
-                [[gamma[i]], z[i], beta], sense=gurobipy.GRB.LESS_EQUAL,
-                b=rhs, name="milp_relu_gradient_times_gigammai")
+            milp.addMConstrs([A_gammai.reshape((-1, 1)), A_z, A_beta],
+                             [[gamma[i]], z[i], beta],
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             b=rhs,
+                             name="milp_relu_gradient_times_gigammai")
         return (z, a_out)
 
-    def add_sign_state_error_times_Aisi(
-            self, milp, s, alpha, Aisi_lower=None, Aisi_upper=None,
-            slack_name="z"):
+    def add_sign_state_error_times_Aisi(self,
+                                        milp,
+                                        s,
+                                        alpha,
+                                        Aisi_lower=None,
+                                        Aisi_upper=None,
+                                        slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -291,27 +313,28 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         the mixed integer linear constraints. z[i][j] = α(j) *(Aᵢsᵢ)(j),
         z_coeff[i].dot(z[i]) + s_coeff[i].dot(sᵢ) = sign(x(i)-x*(i))*Aᵢsᵢ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(s, list))
-        assert(len(s) == self.system.x_dim * self.system.num_modes)
-        assert(isinstance(alpha, list))
-        assert(len(alpha) == self.system.x_dim)
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(s, list))
+        assert (len(s) == self.system.x_dim * self.system.num_modes)
+        assert (isinstance(alpha, list))
+        assert (len(alpha) == self.system.x_dim)
         if Aisi_lower is None or Aisi_upper is None:
             Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
         else:
-            assert(isinstance(Aisi_lower, list))
-            assert(isinstance(Aisi_upper, list))
-            assert(len(Aisi_lower) == self.system.num_modes)
-            assert(len(Aisi_upper) == self.system.num_modes)
+            assert (isinstance(Aisi_lower, list))
+            assert (isinstance(Aisi_upper, list))
+            assert (len(Aisi_lower) == self.system.num_modes)
+            assert (len(Aisi_upper) == self.system.num_modes)
         z = [None] * self.system.num_modes
         z_coeff = [None] * self.system.num_modes
         s_coeff = [None] * self.system.num_modes
         for i in range(self.system.num_modes):
             # since sign(x(j) - x*(j)) = 2 * α(j) - 1
             # sign(x(j)-x*(j)) * (Aᵢsᵢ)(j) = 2α(j)*(Aᵢsᵢ)(j) - (Aᵢsᵢ)(j)
-            z[i] = milp.addVars(
-                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+            z[i] = milp.addVars(self.system.x_dim,
+                                lb=-gurobipy.GRB.INFINITY,
+                                vtype=gurobipy.GRB.CONTINUOUS,
+                                name=slack_name)
             z_coeff[i] = \
                 2 * torch.ones(self.system.x_dim, dtype=self.system.dtype)
             s_coeff[i] = -torch.sum(self.system.A[i], dim=0)
@@ -321,17 +344,25 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                         Aisi_lower[i][j], Aisi_upper[i][j])
                 Ain_si = Ain_Aisi.reshape((-1, 1)) @ \
                     self.system.A[i][j].reshape((1, -1))
-                milp.addMConstrs(
-                    [Ain_si, Ain_z.reshape((-1, 1)),
-                     Ain_alpha.reshape((-1, 1))],
-                    [s[i*self.system.x_dim:(i+1)*self.system.x_dim],
-                     [z[i][j]], [alpha[j]]], sense=gurobipy.GRB.LESS_EQUAL,
-                    b=rhs_in)
+                milp.addMConstrs([
+                    Ain_si,
+                    Ain_z.reshape((-1, 1)),
+                    Ain_alpha.reshape((-1, 1))
+                ], [
+                    s[i * self.system.x_dim:(i + 1) * self.system.x_dim],
+                    [z[i][j]], [alpha[j]]
+                ],
+                                 sense=gurobipy.GRB.LESS_EQUAL,
+                                 b=rhs_in)
         return (z, z_coeff, s_coeff)
 
-    def add_sign_state_error_times_gigammai(
-            self, milp, gamma, alpha, gigammai_lower=None, gigammai_upper=None,
-            slack_name="z"):
+    def add_sign_state_error_times_gigammai(self,
+                                            milp,
+                                            gamma,
+                                            alpha,
+                                            gigammai_lower=None,
+                                            gigammai_upper=None,
+                                            slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -350,44 +381,52 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         in the mixed integer linear constraints. z[i][j] = α(j) *(gᵢγᵢ)(j),
         z_coeff[i].dot(z[i]) + gamma_coeff[i].dot(γᵢ) = sign(x(i)-x*(i))*gᵢγᵢ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(gamma, list))
-        assert(len(gamma) == self.system.num_modes)
-        assert(isinstance(alpha, list))
-        assert(len(alpha) == self.system.x_dim)
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(gamma, list))
+        assert (len(gamma) == self.system.num_modes)
+        assert (isinstance(alpha, list))
+        assert (len(alpha) == self.system.x_dim)
         if gigammai_lower is None or gigammai_upper is None:
             gigammai_lower, gigammai_upper = self.__compute_gigammai_bounds()
         else:
-            assert(isinstance(gigammai_lower, list))
-            assert(isinstance(gigammai_upper, list))
-            assert(len(gigammai_lower) == self.system.num_modes)
-            assert(len(gigammai_upper) == self.system.num_modes)
+            assert (isinstance(gigammai_lower, list))
+            assert (isinstance(gigammai_upper, list))
+            assert (len(gigammai_lower) == self.system.num_modes)
+            assert (len(gigammai_upper) == self.system.num_modes)
         z = [None] * self.system.num_modes
         z_coeff = [None] * self.system.num_modes
         gamma_coeff = [None] * self.system.num_modes
         for i in range(self.system.num_modes):
-            z[i] = milp.addVars(
-                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-                vtype=gurobipy.GRB.CONTINUOUS, name=slack_name+"["+str(i)+"]")
+            z[i] = milp.addVars(self.system.x_dim,
+                                lb=-gurobipy.GRB.INFINITY,
+                                vtype=gurobipy.GRB.CONTINUOUS,
+                                name=slack_name + "[" + str(i) + "]")
             # ∑ⱼ sign(x(j)-x*(j))*(gᵢγᵢ)(j)
             # = ∑ⱼ 2α(j)*(gᵢγᵢ)(j) - (gᵢγᵢ)(j)
-            z_coeff[i] = 2 * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype)
+            z_coeff[i] = 2 * torch.ones(self.system.x_dim,
+                                        dtype=self.system.dtype)
             gamma_coeff[i] = -torch.sum(self.system.g[i]).unsqueeze(0)
             for j in range(self.system.x_dim):
                 Ain_gigammai, Ain_z, Ain_alpha, rhs = utils.\
                     replace_binary_continuous_product(
                         gigammai_lower[i][j], gigammai_upper[i][j])
                 Ain_gammai = Ain_gigammai * self.system.g[i][j]
-                milp.addMConstrs(
-                    [Ain_gammai.reshape((-1, 1)), Ain_z.reshape((-1, 1)),
-                     Ain_alpha.reshape((-1, 1))],
-                    [[gamma[i]], [z[i][j]], [alpha[j]]],
-                    sense=gurobipy.GRB.LESS_EQUAL, b=rhs)
+                milp.addMConstrs([
+                    Ain_gammai.reshape((-1, 1)),
+                    Ain_z.reshape((-1, 1)),
+                    Ain_alpha.reshape((-1, 1))
+                ], [[gamma[i]], [z[i][j]], [alpha[j]]],
+                                 sense=gurobipy.GRB.LESS_EQUAL,
+                                 b=rhs)
         return (z, z_coeff, gamma_coeff)
 
-    def add_sign_state_error_times_xdot(
-            self, milp, xdot, alpha, xdot_lower, xdot_upper, slack_name="z"):
+    def add_sign_state_error_times_xdot(self,
+                                        milp,
+                                        xdot,
+                                        alpha,
+                                        xdot_lower,
+                                        xdot_upper,
+                                        slack_name="z"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -400,36 +439,45 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         in the mixed integer linear constraints. z[i] = α(i) *ẋ(i),
         z_coeff.dot(z) + xdot_coeff[i].dot(xdot) = sign(x(i)-x*(i))*ẋ
         """
-        assert(isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-        assert(isinstance(xdot, list))
-        assert(len(xdot) == self.system.x_dim)
-        assert(isinstance(alpha, list))
-        assert(len(alpha) == self.system.x_dim)
-        assert(isinstance(xdot_lower, np.ndarray))
-        assert(isinstance(xdot_upper, np.ndarray))
+        assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(xdot, list))
+        assert (len(xdot) == self.system.x_dim)
+        assert (isinstance(alpha, list))
+        assert (len(alpha) == self.system.x_dim)
+        assert (isinstance(xdot_lower, np.ndarray))
+        assert (isinstance(xdot_upper, np.ndarray))
         # since sign(x(i) - x*(i)) = 2 * α(i) - 1
         # sign(x(i)-x*(i)) * xdot(j) = 2α(i)*xdot(i) - xdot(i)
-        z = milp.addVars(
-            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name=slack_name)
+        z = milp.addVars(self.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS,
+                         name=slack_name)
         z_coeff = \
             2 * torch.ones(self.system.x_dim, dtype=self.system.dtype)
-        xdot_coeff = -torch.ones(
-            self.system.x_dim, dtype=self.system.dtype)
+        xdot_coeff = -torch.ones(self.system.x_dim, dtype=self.system.dtype)
         for i in range(self.system.x_dim):
             Ain_xdot, Ain_z, Ain_alpha, rhs_in = utils.\
                 replace_binary_continuous_product(
                     xdot_lower[i], xdot_upper[i])
-            milp.addMConstrs(
-                [Ain_xdot.reshape((-1, 1)), Ain_z.reshape((-1, 1)),
-                 Ain_alpha.reshape((-1, 1))],
-                [[xdot[i]], [z[i]], [alpha[i]]],
-                sense=gurobipy.GRB.LESS_EQUAL, b=rhs_in)
+            milp.addMConstrs([
+                Ain_xdot.reshape((-1, 1)),
+                Ain_z.reshape((-1, 1)),
+                Ain_alpha.reshape((-1, 1))
+            ], [[xdot[i]], [z[i]], [alpha[i]]],
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             b=rhs_in)
         return (z, z_coeff, xdot_coeff)
 
-    def lyapunov_derivative_as_milp2(
-            self, x_equilibrium, V_lambda, epsilon, eps_type,
-            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None):
+    def lyapunov_derivative_as_milp2(self,
+                                     x_equilibrium,
+                                     V_lambda,
+                                     epsilon,
+                                     eps_type,
+                                     *,
+                                     R,
+                                     fixed_R,
+                                     lyapunov_lower=None,
+                                     lyapunov_upper=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -462,26 +510,27 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         gamma is the binary variable representing the active hybrid mode
         for the adversarial state x.
         """
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (self.system.x_dim,))
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
         if lyapunov_lower is not None:
-            assert(isinstance(lyapunov_lower, float))
+            assert (isinstance(lyapunov_lower, float))
         if lyapunov_upper is not None:
-            assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(epsilon, float))
-        assert(isinstance(eps_type, lyapunov.ConvergenceEps))
+            assert (isinstance(lyapunov_upper, float))
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(eps_type, lyapunov.ConvergenceEps))
         if eps_type != lyapunov.ConvergenceEps.ExpLower:
             raise NotImplementedError
-        if R is not None and torch.norm(R - torch.eye(
-                self.system.x_dim, dtype=R.dtype)).item() > 0:
+        if R is not None and torch.norm(
+                R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None hasn't been implemented yet.")
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
-        x = milp.addVars(
-            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="x")
+        x = milp.addVars(self.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS,
+                         name="x")
         s, gamma = self.add_system_constraint(milp, x, None)
 
         # V̇ = ∂V/∂x(∑ᵢ Aᵢsᵢ + gᵢγᵢ)
@@ -505,25 +554,33 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # α(j) = 0 => x(j) - x*(j) <= 0
         # Hence sign(x(j) - x*(j)) = 2 * α - 1
         # t[i] = |x(i)-x*(i)|
-        (t, alpha) = self.add_state_error_l1_constraint(
-                milp, x_equilibrium, x, slack_name="t",
-                binary_var_name="alpha", fixed_R=fixed_R)
+        (t,
+         alpha) = self.add_state_error_l1_constraint(milp,
+                                                     x_equilibrium,
+                                                     x,
+                                                     slack_name="t",
+                                                     binary_var_name="alpha",
+                                                     fixed_R=fixed_R)
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
-        self.add_lyapunov_bounds_constraint(
-            lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
-            V_lambda, relu_x_equilibrium, relu_z, t)
+        self.add_lyapunov_bounds_constraint(lyapunov_lower, lyapunov_upper,
+                                            milp, a_relu_out, b_relu_out,
+                                            V_lambda, relu_x_equilibrium,
+                                            relu_z, t)
 
         # z1[i] is the slack variable to write ∂ReLU(x)/∂x*Aᵢsᵢ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
         # z1 in the objective.
         Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
         gigammai_lower, gigammai_upper = self.__compute_gigammai_bounds()
-        z1, cost_z1_coef = self.add_relu_gradient_times_Aisi(
-            milp, s, relu_beta, Aisi_lower,
-            Aisi_upper, slack_name="z1")
+        z1, cost_z1_coef = self.add_relu_gradient_times_Aisi(milp,
+                                                             s,
+                                                             relu_beta,
+                                                             Aisi_lower,
+                                                             Aisi_upper,
+                                                             slack_name="z1")
         z2, cost_z2_coef = self.add_relu_gradient_times_gigammai(
             milp, gamma, relu_beta, slack_name="z2")
         # z3[i] is the slack variable to write sign(x-x*)*Aᵢsᵢ as mixed-integer
@@ -536,7 +593,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # z4[i] is the slack variable to write sign(x-x*)*gᵢγᵢ as mixed-integer
         # linear constraints.
         z4, z4_coef, gamma_coef = self.add_sign_state_error_times_gigammai(
-            milp, gamma, alpha, gigammai_lower, gigammai_upper,
+            milp,
+            gamma,
+            alpha,
+            gigammai_lower,
+            gigammai_upper,
             slack_name="z4")
         # cost_z4_coef[i] is the coefficient of z4[i] in the cost function.
         cost_z4_coef = [coef * V_lambda for coef in z3_coef]
@@ -554,11 +615,14 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # ρ*sign(x-x*) * gᵢγᵢ = z4_coeff[i].dot(z4) * gamma_coef[i].dot(γᵢ)
         # ReLU(x) = a_relu_out.dot(relu_z) + b_relu_out
         # λ|x-x*|₁ = λ * sum(t)
-        cost_vars = [mode_var for var_list in [z1, z2, z3, z4] for mode_var
-                     in var_list]
-        cost_coeffs = [mode_coef for coef_list in [
-            cost_z1_coef, cost_z2_coef, cost_z3_coef, cost_z4_coef] for
-            mode_coef in coef_list]
+        cost_vars = [
+            mode_var for var_list in [z1, z2, z3, z4] for mode_var in var_list
+        ]
+        cost_coeffs = [
+            mode_coef for coef_list in
+            [cost_z1_coef, cost_z2_coef, cost_z3_coef, cost_z4_coef]
+            for mode_coef in coef_list
+        ]
         cost_coeffs.append(torch.cat(cost_s_coef))
         cost_vars.append(s)
         cost_coeffs.append(torch.cat(cost_gamma_coef))
@@ -569,8 +633,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         cost_vars.append(t)
         cost_coeffs.append(
-            epsilon * V_lambda * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype))
+            epsilon * V_lambda *
+            torch.ones(self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
@@ -578,11 +642,17 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         return (milp, x, relu_beta, gamma)
 
-    def lyapunov_derivative_as_milp(
-            self, x_equilibrium, V_lambda, epsilon,
-            eps_type: lyapunov.ConvergenceEps,
-            *, R, fixed_R, lyapunov_lower=None, lyapunov_upper=None,
-            x_warmstart=None):
+    def lyapunov_derivative_as_milp(self,
+                                    x_equilibrium,
+                                    V_lambda,
+                                    epsilon,
+                                    eps_type: lyapunov.ConvergenceEps,
+                                    *,
+                                    R,
+                                    fixed_R,
+                                    lyapunov_lower=None,
+                                    lyapunov_upper=None,
+                                    x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -623,29 +693,31 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         gamma is the binary variable representing the active hybrid mode
         for the adversarial state x.
         """
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (self.system.x_dim,))
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
         if lyapunov_lower is not None:
-            assert(isinstance(lyapunov_lower, float))
+            assert (isinstance(lyapunov_lower, float))
         if lyapunov_upper is not None:
-            assert(isinstance(lyapunov_upper, float))
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(epsilon, float))
-        assert(isinstance(eps_type, lyapunov.ConvergenceEps))
+            assert (isinstance(lyapunov_upper, float))
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(eps_type, lyapunov.ConvergenceEps))
         if eps_type != lyapunov.ConvergenceEps.ExpLower:
             raise NotImplementedError
-        if R is not None and torch.norm(R - torch.eye(
-                self.system.x_dim, dtype=R.dtype)).item() > 0:
+        if R is not None and torch.norm(
+                R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
-        x = milp.addVars(
-            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="x")
-        xdot = milp.addVars(
-            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="xdot")
+        x = milp.addVars(self.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         vtype=gurobipy.GRB.CONTINUOUS,
+                         name="x")
+        xdot = milp.addVars(self.system.x_dim,
+                            lb=-gurobipy.GRB.INFINITY,
+                            vtype=gurobipy.GRB.CONTINUOUS,
+                            name="xdot")
         s, gamma = self.add_system_constraint(milp, x, xdot)
 
         # V̇ = ∂V/∂x * ẋ
@@ -673,25 +745,33 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # α(j) = 0 => x(j) - x*(j) <= 0
         # Hence sign(x(j) - x*(j)) = 2 * α - 1
         # t[i] = |x(i)-x*(i)|
-        (t, alpha) = self.add_state_error_l1_constraint(
-                milp, x_equilibrium, x, slack_name="t",
-                binary_var_name="alpha", fixed_R=fixed_R)
+        (t,
+         alpha) = self.add_state_error_l1_constraint(milp,
+                                                     x_equilibrium,
+                                                     x,
+                                                     slack_name="t",
+                                                     binary_var_name="alpha",
+                                                     fixed_R=fixed_R)
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
-        self.add_lyapunov_bounds_constraint(
-            lyapunov_lower, lyapunov_upper, milp, a_relu_out, b_relu_out,
-            V_lambda, relu_x_equilibrium, relu_z, t)
+        self.add_lyapunov_bounds_constraint(lyapunov_lower, lyapunov_upper,
+                                            milp, a_relu_out, b_relu_out,
+                                            V_lambda, relu_x_equilibrium,
+                                            relu_z, t)
 
         # z1 is the slack variable to write ∂ReLU(x)/∂x*ẋ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
         # z1 in the objective.
         xdot_lower = self.system.dx_lower
         xdot_upper = self.system.dx_upper
-        z1, cost_z1_coef = self.add_relu_gradient_times_xdot(
-            milp, xdot, relu_beta, xdot_lower,
-            xdot_upper, slack_name="z1")
+        z1, cost_z1_coef = self.add_relu_gradient_times_xdot(milp,
+                                                             xdot,
+                                                             relu_beta,
+                                                             xdot_lower,
+                                                             xdot_upper,
+                                                             slack_name="z1")
         # z2 is the slack variable to write sign(x-x*)*ẋ as mixed-integer
         # linear constraints.
         z2, z2_coef, xdot_coef = self.add_sign_state_error_times_xdot(
@@ -716,8 +796,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         cost_vars.append(t)
         cost_coeffs.append(
-            epsilon * V_lambda * torch.ones(
-                self.system.x_dim, dtype=self.system.dtype))
+            epsilon * V_lambda *
+            torch.ones(self.system.x_dim, dtype=self.system.dtype))
         milp.setObjective(
             cost_coeffs, cost_vars,
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
@@ -725,9 +805,15 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         return (milp, x, relu_beta, gamma)
 
-    def lyapunov_derivative_loss_at_samples(
-        self, V_lambda, epsilon, state_samples, x_equilibrium, eps_type,
-            *, R, margin=0.):
+    def lyapunov_derivative_loss_at_samples(self,
+                                            V_lambda,
+                                            epsilon,
+                                            state_samples,
+                                            x_equilibrium,
+                                            eps_type,
+                                            *,
+                                            R,
+                                            margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -750,17 +836,16 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         loss.
         @return loss The loss mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         """
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(epsilon, float))
-        assert(isinstance(state_samples, torch.Tensor))
-        assert(state_samples.shape[1] == self.system.x_dim)
-        assert(isinstance(eps_type, lyapunov.ConvergenceEps))
-        if R is not None and torch.norm(R - torch.eye(
-                self.system.x_dim, dtype=R.dtype)).item() > 0:
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(state_samples, torch.Tensor))
+        assert (state_samples.shape[1] == self.system.x_dim)
+        assert (isinstance(eps_type, lyapunov.ConvergenceEps))
+        if R is not None and torch.norm(
+                R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
-        xdot = torch.empty(
-            (state_samples.shape[0], self.system.x_dim),
-            dtype=self.system.dtype)
+        xdot = torch.empty((state_samples.shape[0], self.system.x_dim),
+                           dtype=self.system.dtype)
         for i in range(state_samples.shape[0]):
             # First compute the next state dx̅/dt
             mode = self.system.mode(state_samples[i])
@@ -772,12 +857,26 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             xdot[i] = self.system.step_forward(state_samples[i], mode)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
-            V_lambda, epsilon, state_samples, xdot, x_equilibrium,
-            eps_type, R=R, margin=margin)
+            V_lambda,
+            epsilon,
+            state_samples,
+            xdot,
+            x_equilibrium,
+            eps_type,
+            R=R,
+            margin=margin)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
-            self, V_lambda, epsilon, state_samples, xdot_samples,
-            x_equilibrium, eps_type, *, R, margin=0.):
+            self,
+            V_lambda,
+            epsilon,
+            state_samples,
+            xdot_samples,
+            x_equilibrium,
+            eps_type,
+            *,
+            R,
+            margin=0.):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -801,16 +900,16 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         loss.
         @return loss The loss mean(max(V̇(x̅ⁱ) + ε*V(x̅ⁱ) + margin, 0))
         """
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(epsilon, float))
-        assert(isinstance(state_samples, torch.Tensor))
-        assert(state_samples.shape[1] == self.system.x_dim)
-        assert(isinstance(xdot_samples, torch.Tensor))
-        assert(xdot_samples.shape[1] == self.system.x_dim)
-        assert(state_samples.shape[0] == xdot_samples.shape[0])
-        assert(isinstance(eps_type, lyapunov.ConvergenceEps))
-        if R is not None and torch.norm(R - torch.eye(
-                self.system.x_dim, dtype=R.dtype)).item() > 0:
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(state_samples, torch.Tensor))
+        assert (state_samples.shape[1] == self.system.x_dim)
+        assert (isinstance(xdot_samples, torch.Tensor))
+        assert (xdot_samples.shape[1] == self.system.x_dim)
+        assert (state_samples.shape[0] == xdot_samples.shape[0])
+        assert (isinstance(eps_type, lyapunov.ConvergenceEps))
+        if R is not None and torch.norm(
+                R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")
 
         num_samples = state_samples.shape[0]
@@ -818,25 +917,27 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         dReLU_dx = [None] * num_samples
         for i in range(num_samples):
             # TODO(hongkai.dai): figure out how to remove this for loop.
-            x_var = torch.autograd.Variable(
-                state_samples[i], requires_grad=True)
+            x_var = torch.autograd.Variable(state_samples[i],
+                                            requires_grad=True)
             relu_output = self.lyapunov_relu(x_var)
-            dReLU_dx[i] = torch.autograd.grad(
-                relu_output, x_var, create_graph=True, allow_unused=True)[0]
+            dReLU_dx[i] = torch.autograd.grad(relu_output,
+                                              x_var,
+                                              create_graph=True,
+                                              allow_unused=True)[0]
         dReLU_dx_tensor = torch.stack(dReLU_dx)
         dV_dx = dReLU_dx_tensor + \
             V_lambda * torch.sign(state_samples - x_equilibrium)
         Vdot = torch.sum(dV_dx * xdot_samples, dim=1)
-        V = self.lyapunov_value(
-            state_samples, x_equilibrium, V_lambda, R=R).squeeze()
+        V = self.lyapunov_value(state_samples, x_equilibrium, V_lambda,
+                                R=R).squeeze()
         if eps_type == lyapunov.ConvergenceEps.ExpLower:
             val = Vdot + epsilon * V
         elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
             val = -(Vdot + epsilon * V)
         elif eps_type == lyapunov.ConvergenceEps.Asymp:
-            val = (Vdot + epsilon * torch.norm(
-                state_samples - x_equilibrium, p=1, dim=1))
+            val = (Vdot + epsilon *
+                   torch.norm(state_samples - x_equilibrium, p=1, dim=1))
         else:
             raise Exception("Unknown eps_type")
-        return torch.nn.HingeEmbeddingLoss(margin=margin)(
-            -val, torch.tensor(-1))
+        return torch.nn.HingeEmbeddingLoss(margin=margin)(-val,
+                                                          torch.tensor(-1))

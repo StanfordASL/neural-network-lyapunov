@@ -8,7 +8,6 @@ class SlipHybridLinearSystem:
     """
     Models a SLIP model running on stepping stones as hybrid linear systems.
     """
-
     def __init__(self, mass, l0, k, g):
         self.slip = spring_loaded_inverted_pendulum.SLIP(mass, l0, k, g)
         self.stepping_stones = []

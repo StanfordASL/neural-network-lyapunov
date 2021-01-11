@@ -28,7 +28,6 @@ class HybridLinearSystem:
     discrete time dynamics is affine.
     Note that the polytope Pᵢ * [x[n]; u[n]] <= qᵢ has to be bounded.
     """
-
     def __init__(self, x_dim, u_dim, dtype):
         """
         @param x_dim The dimension of x.
@@ -70,13 +69,13 @@ class HybridLinearSystem:
         """
         check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
         check_shape_and_type(Bi, (self.x_dim, self.u_dim), self.dtype)
-        check_shape_and_type(ci, (self.x_dim,), self.dtype)
+        check_shape_and_type(ci, (self.x_dim, ), self.dtype)
         num_constraint = Pi.shape[0]
         check_shape_and_type(Pi, (num_constraint, self.x_dim + self.u_dim),
                              self.dtype)
-        check_shape_and_type(qi, (num_constraint,), self.dtype)
+        check_shape_and_type(qi, (num_constraint, ), self.dtype)
         if (check_polyhedron_bounded):
-            assert(is_polyhedron_bounded(Pi))
+            assert (is_polyhedron_bounded(Pi))
         self.A.append(Ai)
         self.B.append(Bi)
         self.c.append(ci)
@@ -101,8 +100,11 @@ class HybridLinearSystem:
         self.u_lo_all = np.amin(np.stack(self.u_lo, axis=1), axis=1)
         self.u_up_all = np.amax(np.stack(self.u_up, axis=1), axis=1)
 
-    def mixed_integer_constraints(
-            self, x_lo=None, x_up=None, u_lo=None, u_up=None):
+    def mixed_integer_constraints(self,
+                                  x_lo=None,
+                                  x_up=None,
+                                  u_lo=None,
+                                  u_up=None):
         """
         We can rewrite the hybrid dynamics as mixed integer linear constraints.
         We denote αᵢ = 1 if the system is in mode i.
@@ -141,12 +143,13 @@ class HybridLinearSystem:
                 check_shape_and_type(array, shape, dtype)
                 return array.detach().numpy()
             elif (isinstance(array, np.ndarray)):
-                assert(array.shape == shape)
+                assert (array.shape == shape)
                 return array
-        x_lo_np = check_and_to_numpy(x_lo, (self.x_dim,), self.dtype)
-        x_up_np = check_and_to_numpy(x_up, (self.x_dim,), self.dtype)
-        u_lo_np = check_and_to_numpy(u_lo, (self.u_dim,), self.dtype)
-        u_up_np = check_and_to_numpy(u_up, (self.u_dim,), self.dtype)
+
+        x_lo_np = check_and_to_numpy(x_lo, (self.x_dim, ), self.dtype)
+        x_up_np = check_and_to_numpy(x_up, (self.x_dim, ), self.dtype)
+        u_lo_np = check_and_to_numpy(u_lo, (self.u_dim, ), self.dtype)
+        u_up_np = check_and_to_numpy(u_up, (self.u_dim, ), self.dtype)
         x_lo_all = self.x_lo_all
         x_up_all = self.x_up_all
         u_lo_all = self.u_lo_all
@@ -159,10 +162,10 @@ class HybridLinearSystem:
             u_lo_all = np.maximum(self.u_lo_all, u_lo_np)
         if u_up is not None:
             u_up_all = np.minimum(self.u_up_all, u_up_np)
-        assert(np.all(x_lo_all <= x_up_all))
-        assert(np.all(u_lo_all <= u_up_all))
-        Aeq_slack = torch.cat((torch.cat(self.A, dim=1),
-                               torch.cat(self.B, dim=1)), dim=1)
+        assert (np.all(x_lo_all <= x_up_all))
+        assert (np.all(u_lo_all <= u_up_all))
+        Aeq_slack = torch.cat(
+            (torch.cat(self.A, dim=1), torch.cat(self.B, dim=1)), dim=1)
         Aeq_alpha = torch.cat([c.reshape((-1, 1)) for c in self.c], dim=1)
 
         num_slack = (self.x_dim + self.u_dim) * self.num_modes
@@ -185,6 +188,7 @@ class HybridLinearSystem:
         def t_index(i, j):
             # The index of tᵢ[n][j, 0] in the slack variable.
             return self.num_modes * self.x_dim + i * self.u_dim + j
+
         for i in range(self.num_modes):
             for j in range(self.x_dim):
                 (Ain_x[ineq_count: ineq_count + 4, j],
@@ -213,8 +217,8 @@ class HybridLinearSystem:
                       self.num_modes * self.x_dim + i * self.u_dim:
                       self.num_modes * self.x_dim + (i+1) * self.u_dim] =\
                 self.P[i][:, self.x_dim:self.x_dim + self.u_dim].clone()
-            Ain_alpha[ineq_count: ineq_count +
-                      self.P[i].shape[0], i] = -self.q[i]
+            Ain_alpha[ineq_count:ineq_count + self.P[i].shape[0],
+                      i] = -self.q[i]
             ineq_count += self.P[i].shape[0]
         mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
         mip_cnstr_return.Aout_slack = Aeq_slack
@@ -223,14 +227,13 @@ class HybridLinearSystem:
         mip_cnstr_return.Ain_slack = Ain_slack
         mip_cnstr_return.Ain_binary = Ain_alpha
         mip_cnstr_return.rhs_in = rhs_in
-        mip_cnstr_return.Aeq_binary = torch.ones(
-            (1, self.num_modes), dtype=self.dtype)
+        mip_cnstr_return.Aeq_binary = torch.ones((1, self.num_modes),
+                                                 dtype=self.dtype)
         mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
-    def add_dynamics_constraint(
-        self, mip, x_var, x_next_var, u_var, slack_var_name,
-            binary_var_name):
+    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
+                                slack_var_name, binary_var_name):
         mip_cnstr = self.mixed_integer_constraints()
         slack, binary = mip.add_mixed_integer_linear_constraints(
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
@@ -249,13 +252,13 @@ class HybridLinearSystem:
         @return mode If (x_start, u_start) doesn't belong to any mode, then
         returns None.
         """
-        assert(isinstance(x_start, torch.Tensor))
-        assert(isinstance(u_start, torch.Tensor))
-        assert(x_start.shape == (self.x_dim,))
-        assert(u_start.shape == (self.u_dim,))
+        assert (isinstance(x_start, torch.Tensor))
+        assert (isinstance(u_start, torch.Tensor))
+        assert (x_start.shape == (self.x_dim, ))
+        assert (u_start.shape == (self.u_dim, ))
         for j in range(self.num_modes):
-            if (torch.all(self.P[j] @ torch.cat((x_start, u_start)) <=
-                          self.q[j])):
+            if (torch.all(
+                    self.P[j] @ torch.cat((x_start, u_start)) <= self.q[j])):
                 return j
         return None
 
@@ -271,8 +274,8 @@ class HybridLinearSystem:
         @return mode An integer correspoding to the mode that was active on
         that step, or None if no mode is active
         """
-        assert(isinstance(x_start, torch.Tensor))
-        assert(isinstance(u_start, torch.Tensor))
+        assert (isinstance(x_start, torch.Tensor))
+        assert (isinstance(u_start, torch.Tensor))
         if len(x_start.shape) == 1:
             mode = self.mode(x_start, u_start)
             if mode is None:
@@ -302,10 +305,10 @@ class HybridLinearSystem:
         single next state. If x is not in any hybrid mode, then return an
         empty list.
         """
-        assert(isinstance(x, torch.Tensor))
-        assert(x.shape == (self.x_dim,))
-        assert(isinstance(u, torch.Tensor))
-        assert(u.shape == (self.u_dim,))
+        assert (isinstance(x, torch.Tensor))
+        assert (x.shape == (self.x_dim, ))
+        assert (isinstance(u, torch.Tensor))
+        assert (u.shape == (self.u_dim, ))
         next_states = []
         for i in range(self.num_modes):
             if torch.all(self.P[i] @ torch.cat((x, u)) <= self.q[i]):
@@ -326,7 +329,6 @@ class AutonomousHybridLinearSystem:
     affine.
     Note that the polyhedron Pᵢx ≤ qᵢ has to be bounded.
     """
-
     def __init__(self, x_dim, dtype):
         """
         @param x_dim The dimension of x.
@@ -346,9 +348,9 @@ class AutonomousHybridLinearSystem:
         # Pᵢx ≤ qᵢ)
         self.x_up = []
         # x_lo_all[i] is the lower bound of x across all modes.
-        self.x_lo_all = np.full((x_dim,), np.inf)
+        self.x_lo_all = np.full((x_dim, ), np.inf)
         # x_up_all[i] is the upper bound of x across all modes.
-        self.x_up_all = np.full((x_dim,), -np.inf)
+        self.x_up_all = np.full((x_dim, ), -np.inf)
         self.num_modes = 0
 
         # The lower and upper bounds on Ai * x if Pi * x <= qi.
@@ -356,8 +358,8 @@ class AutonomousHybridLinearSystem:
         self.Ai_times_x_upper = []
 
         # The lower and upper bounds on Ai * x if Pi * x <= qi.
-        self.dx_lower = np.full((x_dim,), np.inf)
-        self.dx_upper = np.full((x_dim,), -np.inf)
+        self.dx_lower = np.full((x_dim, ), np.inf)
+        self.dx_upper = np.full((x_dim, ), -np.inf)
 
     def add_mode(self, Ai, gi, Pi, qi, check_polyhedron_bounded=False):
         """
@@ -373,12 +375,12 @@ class AutonomousHybridLinearSystem:
         @note that the polyhedron Pᵢ * x[n] <= qᵢ has to be bounded.
         """
         check_shape_and_type(Ai, (self.x_dim, self.x_dim), self.dtype)
-        check_shape_and_type(gi, (self.x_dim,), self.dtype)
+        check_shape_and_type(gi, (self.x_dim, ), self.dtype)
         num_constraint = Pi.shape[0]
         check_shape_and_type(Pi, (num_constraint, self.x_dim), self.dtype)
-        check_shape_and_type(qi, (num_constraint,), self.dtype)
+        check_shape_and_type(qi, (num_constraint, ), self.dtype)
         if (check_polyhedron_bounded):
-            assert(is_polyhedron_bounded(Pi))
+            assert (is_polyhedron_bounded(Pi))
         self.A.append(Ai)
         self.g.append(gi)
         self.P.append(Pi)
@@ -430,17 +432,17 @@ class AutonomousHybridLinearSystem:
                  Pᵢ * x[n] <= qᵢ to be mutually exclusive.
         """
         if isinstance(x_lo, torch.Tensor):
-            check_shape_and_type(x_lo, (self.x_dim,), self.dtype)
+            check_shape_and_type(x_lo, (self.x_dim, ), self.dtype)
             x_lo_np = x_lo.detach().numpy()
         elif isinstance(x_lo, np.ndarray):
             x_lo_np = x_lo
         if isinstance(x_up, torch.Tensor):
-            check_shape_and_type(x_up, (self.x_dim,), self.dtype)
+            check_shape_and_type(x_up, (self.x_dim, ), self.dtype)
             x_up_np = x_up.detach().numpy()
         elif isinstance(x_up, np.ndarray):
             x_up_np = x_up
         if x_lo is not None and x_up is not None:
-            assert(np.all(x_lo_np <= x_up_np))
+            assert (np.all(x_lo_np <= x_up_np))
         if x_lo is not None:
             x_lo_all = np.maximum(self.x_lo_all, x_lo_np)
         else:
@@ -453,8 +455,7 @@ class AutonomousHybridLinearSystem:
         Aeq_gamma = torch.cat([g.reshape((-1, 1)) for g in self.g], dim=1)
 
         num_s = self.x_dim * self.num_modes
-        num_ineq = np.sum(np.array([Pi.shape[0]
-                                    for Pi in self.P])) + num_s * 4
+        num_ineq = np.sum(np.array([Pi.shape[0] for Pi in self.P])) + num_s * 4
         Ain_x = torch.zeros(num_ineq, self.x_dim, dtype=self.dtype)
         Ain_s = torch.zeros(num_ineq, num_s, dtype=self.dtype)
         Ain_gamma = torch.zeros(num_ineq, self.num_modes, dtype=self.dtype)
@@ -486,8 +487,8 @@ class AutonomousHybridLinearSystem:
             Ain_s[ineq_count: ineq_count+self.P[i].shape[0],
                   i*self.x_dim: (i+1) * self.x_dim] =\
                 self.P[i][:, :self.x_dim].clone()
-            Ain_gamma[ineq_count: ineq_count +
-                      self.P[i].shape[0], i] = -self.q[i]
+            Ain_gamma[ineq_count:ineq_count + self.P[i].shape[0],
+                      i] = -self.q[i]
             ineq_count += self.P[i].shape[0]
 
         mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
@@ -497,8 +498,11 @@ class AutonomousHybridLinearSystem:
         mip_cnstr_return.Ain_slack = Ain_s
         mip_cnstr_return.Ain_binary = Ain_gamma
         mip_cnstr_return.rhs_in = rhs_in
-        mip_cnstr_return.Aeq_binary = torch.ones(
-            (1, self.num_modes,), dtype=self.dtype)
+        mip_cnstr_return.Aeq_binary = torch.ones((
+            1,
+            self.num_modes,
+        ),
+                                                 dtype=self.dtype)
         mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
@@ -509,8 +513,8 @@ class AutonomousHybridLinearSystem:
         Notice that we choose the first mode that satisfies
         P[mode] * x <= q[mode]
         """
-        assert(isinstance(x, torch.Tensor))
-        assert(x.shape == (self.x_dim,))
+        assert (isinstance(x, torch.Tensor))
+        assert (x.shape == (self.x_dim, ))
         for i in range(self.num_modes):
             if torch.all(self.P[i] @ x <= self.q[i]):
                 return i
@@ -528,9 +532,9 @@ class AutonomousHybridLinearSystem:
         determine the mode of x.
         @return x_next The next continuous state.
         """
-        assert(isinstance(x, torch.Tensor))
+        assert (isinstance(x, torch.Tensor))
         if len(x.shape) == 1:
-            assert(x.shape == (self.x_dim,))
+            assert (x.shape == (self.x_dim, ))
             if mode_x is None:
                 mode_x = self.mode(x)
             if mode_x is None:
@@ -538,9 +542,9 @@ class AutonomousHybridLinearSystem:
                     "step_forward(): x is not in any mode.")
             return self.A[mode_x] @ x + self.g[mode_x]
         else:
-            assert(mode_x is None)
-            return torch.stack([
-                self.step_forward(x[i]) for i in range(x.shape[0])])
+            assert (mode_x is None)
+            return torch.stack(
+                [self.step_forward(x[i]) for i in range(x.shape[0])])
 
     def possible_dx(self, x):
         """
@@ -552,8 +556,8 @@ class AutonomousHybridLinearSystem:
         return multiple possible next states, otherwise return a list of single
         next state. If x is not in any hybrid mode, then return an empty list.
         """
-        assert(isinstance(x, torch.Tensor))
-        assert(x.shape == (self.x_dim,))
+        assert (isinstance(x, torch.Tensor))
+        assert (x.shape == (self.x_dim, ))
         next_states = []
         for i in range(self.num_modes):
             if torch.all(self.P[i] @ x <= self.q[i]):
@@ -566,7 +570,8 @@ class AutonomousHybridLinearSystem:
         for j in range(self.x_dim):
             x = cp.Variable(self.x_dim)
             con = [
-                self.P[mode_index].detach().numpy() @ x <= self.q[mode_index]]
+                self.P[mode_index].detach().numpy() @ x <= self.q[mode_index]
+            ]
             prob = cp.Problem(
                 cp.Maximize(self.A[mode_index][j].detach().numpy() @ x), con)
             prob.solve(solver=cp.GUROBI)
@@ -583,14 +588,17 @@ class AutonomousHybridLinearSystem:
         @param mode_index The mode index i
         @return (lower, upper) The lower and upper bounds on  Aᵢx s.t Pᵢx≤ qᵢ
         """
-        assert(mode_index < self.num_modes and mode_index >= 0)
+        assert (mode_index < self.num_modes and mode_index >= 0)
         lower = self.Ai_times_x_lower[mode_index]
         upper = self.Ai_times_x_upper[mode_index]
         return (lower, upper)
 
 
-def compute_discrete_time_system_cost_to_go(
-        system, x_start, num_steps, instantaneous_cost_fun, x_goal=None):
+def compute_discrete_time_system_cost_to_go(system,
+                                            x_start,
+                                            num_steps,
+                                            instantaneous_cost_fun,
+                                            x_goal=None):
     """
     Compute the cost-to-go ∑ᵢ c(x[i]) starting from x_start for the
     discrete-time system. If the trajectory of x reaches x_goal, or after
@@ -605,11 +613,11 @@ def compute_discrete_time_system_cost_to_go(
     x_steps[:,i] being the simulating of x after i steps.
     costs[i] is the cost-to-go starting from x_steps[:, i]
     """
-    assert(isinstance(x_start, torch.Tensor))
-    assert(x_start.shape == (system.x_dim,))
+    assert (isinstance(x_start, torch.Tensor))
+    assert (x_start.shape == (system.x_dim, ))
     if x_goal is not None:
-        assert(isinstance(x_goal, torch.Tensor))
-        assert(x_goal.shape == (system.x_dim,))
+        assert (isinstance(x_goal, torch.Tensor))
+        assert (x_goal.shape == (system.x_dim, ))
     total_cost = instantaneous_cost_fun(x_start)
     costs_from_start = [None] * (num_steps + 1)
     costs_from_start[0] = total_cost.clone()
@@ -626,21 +634,25 @@ def compute_discrete_time_system_cost_to_go(
         for j in range(system.num_modes):
             if (torch.all(system.P[j] @ x_steps[i] <= system.q[j])):
                 mode = j
-                x_steps[i+1] = system.A[j] @ x_steps[i] + system.g[j]
+                x_steps[i + 1] = system.A[j] @ x_steps[i] + system.g[j]
                 break
-        assert(mode is not None)
+        assert (mode is not None)
         cost_steps[i + 1] = instantaneous_cost_fun(x_steps[i + 1])
-        total_cost += cost_steps[i+1]
-        costs_from_start[i+1] = costs_from_start[i] + cost_steps[i+1]
-    x_steps = torch.stack(x_steps[:terminal_step+1], axis=1)
+        total_cost += cost_steps[i + 1]
+        costs_from_start[i + 1] = costs_from_start[i] + cost_steps[i + 1]
+    x_steps = torch.stack(x_steps[:terminal_step + 1], axis=1)
     costs = torch.stack([
-        total_cost - costs_from_start[i] + cost_steps[i] for i in
-        range(terminal_step + 1)])
+        total_cost - costs_from_start[i] + cost_steps[i]
+        for i in range(terminal_step + 1)
+    ])
     return total_cost, x_steps, costs
 
 
-def compute_continuous_time_system_cost_to_go(
-        system, x0, T, instantaneous_cost, x_goal=None):
+def compute_continuous_time_system_cost_to_go(system,
+                                              x0,
+                                              T,
+                                              instantaneous_cost,
+                                              x_goal=None):
     """
     Compute the cost-to-go for a continuous time piecewise affine system.
     The cost-to-go is defined as
@@ -668,11 +680,11 @@ def compute_continuous_time_system_cost_to_go(
     Check
     https://docs.scipy.org/doc/scipy/reference/generated/scipy.integrate.solve_ivp.html
     """
-    assert(isinstance(system, AutonomousHybridLinearSystem))
-    assert(isinstance(T, float))
-    assert(T >= 0)
-    assert(isinstance(x0, torch.Tensor))
-    assert(x0.shape == (system.x_dim,))
+    assert (isinstance(system, AutonomousHybridLinearSystem))
+    assert (isinstance(T, float))
+    assert (T >= 0)
+    assert (isinstance(x0, torch.Tensor))
+    assert (x0.shape == (system.x_dim, ))
 
     def ivp_fun(t, y):
         x = y[:system.x_dim]
@@ -688,22 +700,29 @@ def compute_continuous_time_system_cost_to_go(
         x_goal_np = x_goal.detach().numpy()
 
         def reach_goal(t, x):
-            return np.linalg.norm(x[:-1]-x_goal_np) - 1e-3
+            return np.linalg.norm(x[:-1] - x_goal_np) - 1e-3
+
         reach_goal.terminal = True
         events = [reach_goal]
 
-    sol = solve_ivp(
-        ivp_fun, (0, T), np.hstack((x0, 0.)), rtol=1e-8, events=events)
+    sol = solve_ivp(ivp_fun, (0, T),
+                    np.hstack((x0, 0.)),
+                    rtol=1e-8,
+                    events=events)
     total_cost = torch.tensor(sol.y[-1, -1], dtype=system.dtype)
     x_traj = torch.tensor(sol.y[:-1, :], dtype=system.dtype)
-    cost_to_go_traj = total_cost - torch.tensor(
-        sol.y[-1, :], dtype=system.dtype)
+    cost_to_go_traj = total_cost - torch.tensor(sol.y[-1, :],
+                                                dtype=system.dtype)
     return (total_cost, x_traj, cost_to_go_traj, sol)
 
 
-def generate_cost_to_go_samples(
-        system, x0_samples, T, instantaneous_cost, discrete_time_flag,
-        x_goal=None, pruner=None):
+def generate_cost_to_go_samples(system,
+                                x0_samples,
+                                T,
+                                instantaneous_cost,
+                                discrete_time_flag,
+                                x_goal=None,
+                                pruner=None):
     """
     Generate the mapping from the initial state to the cost-to-go, by
     simulating the system for a given horizon.
@@ -727,14 +746,14 @@ def generate_cost_to_go_samples(
     a tuple (state, cost). It only includes the states starting from which the
     trajectory always stays within the domain Pᵢ x≤ qᵢ for some mode i.
     """
-    assert(isinstance(system, AutonomousHybridLinearSystem))
-    assert(isinstance(x0_samples, list))
+    assert (isinstance(system, AutonomousHybridLinearSystem))
+    assert (isinstance(x0_samples, list))
     if discrete_time_flag:
-        assert(isinstance(T, int))
+        assert (isinstance(T, int))
     else:
-        assert(isinstance(T, float))
+        assert (isinstance(T, float))
     if pruner is not None:
-        assert(callable(pruner))
+        assert (callable(pruner))
     state_cost_pairs = []
     for x0 in x0_samples:
         try:
@@ -755,9 +774,8 @@ def generate_cost_to_go_samples(
     return state_cost_pairs
 
 
-def partition_state_input_space(x_lo, x_up, u_lo, u_up,
-                                num_breaks_x, num_breaks_u,
-                                x_delta, u_delta):
+def partition_state_input_space(x_lo, x_up, u_lo, u_up, num_breaks_x,
+                                num_breaks_u, x_delta, u_delta):
     """
     Generate a grid over a state and input space. This is useful for
     approximating a nonlinear system with a piecewise affine system, with
@@ -782,16 +800,16 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
     @return states_x_lo, states_x_up, states_u_lo, states_u_up, Tensors with
     the boundaries of each cell
     """
-    assert(isinstance(x_lo, torch.Tensor))
-    assert(isinstance(x_up, torch.Tensor))
-    assert(isinstance(u_lo, torch.Tensor))
-    assert(isinstance(u_up, torch.Tensor))
-    assert(isinstance(num_breaks_x, torch.Tensor))
-    assert(isinstance(num_breaks_u, torch.Tensor))
-    assert(isinstance(x_delta, torch.Tensor))
-    assert(isinstance(u_delta, torch.Tensor))
-    assert(num_breaks_x.dtype == torch.int)
-    assert(num_breaks_u.dtype == torch.int)
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (isinstance(x_up, torch.Tensor))
+    assert (isinstance(u_lo, torch.Tensor))
+    assert (isinstance(u_up, torch.Tensor))
+    assert (isinstance(num_breaks_x, torch.Tensor))
+    assert (isinstance(num_breaks_u, torch.Tensor))
+    assert (isinstance(x_delta, torch.Tensor))
+    assert (isinstance(u_delta, torch.Tensor))
+    assert (num_breaks_x.dtype == torch.int)
+    assert (num_breaks_u.dtype == torch.int)
     dtype = x_lo.dtype
     x_dim = x_lo.shape[0]
     u_dim = u_lo.shape[0]
@@ -802,23 +820,25 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
     u_delta_scaled = u_delta * (u_up - u_lo) / num_breaks_u.type(dtype)
     for i in range(x_dim):
         limits_ = np.linspace(x_lo[i], x_up[i], num_breaks_x[i] + 1)
-        limits = [(limits_[k], limits_[k+1]) for k in range(num_breaks_x[i])]
-        samples = [.5*(limits[k][0] + limits[k][1])
-                   for k in range(num_breaks_x[i])]
+        limits = [(limits_[k], limits_[k + 1]) for k in range(num_breaks_x[i])]
+        samples = [
+            .5 * (limits[k][0] + limits[k][1]) for k in range(num_breaks_x[i])
+        ]
         grid_limits.append(limits)
         grid_samples.append(samples)
         grid_indices.append(np.arange(num_breaks_x[i].item()))
     for i in range(u_dim):
         limits_ = np.linspace(u_lo[i], u_up[i], num_breaks_u[i] + 1)
-        limits = [(limits_[k], limits_[k+1]) for k in range(num_breaks_u[i])]
-        samples = [.5*(limits[k][0] + limits[k][1])
-                   for k in range(num_breaks_u[i])]
+        limits = [(limits_[k], limits_[k + 1]) for k in range(num_breaks_u[i])]
+        samples = [
+            .5 * (limits[k][0] + limits[k][1]) for k in range(num_breaks_u[i])
+        ]
         grid_limits.append(limits)
         grid_samples.append(samples)
         grid_indices.append(np.arange(num_breaks_u[i].item()))
     grid = np.meshgrid(*grid_indices)
-    indices_cart_product = np.concatenate(
-        [g.reshape(-1, 1) for g in grid], axis=1)
+    indices_cart_product = np.concatenate([g.reshape(-1, 1) for g in grid],
+                                          axis=1)
     states_x = torch.Tensor(0, x_dim).type(dtype)
     states_u = torch.Tensor(0, u_dim).type(dtype)
     states_x_lo = torch.Tensor(0, x_dim).type(dtype)
@@ -827,20 +847,20 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
     states_u_up = torch.Tensor(0, u_dim).type(dtype)
     for k in range(indices_cart_product.shape[0]):
         indices = indices_cart_product[k, :]
-        sample = torch.Tensor(
-            [grid_samples[i][indices[i]] for i in range(x_dim+u_dim)]).type(
-            dtype)
+        sample = torch.Tensor([
+            grid_samples[i][indices[i]] for i in range(x_dim + u_dim)
+        ]).type(dtype)
         x_sample = sample[:x_dim]
-        u_sample = sample[x_dim:x_dim+u_dim]
-        sample_limits = torch.Tensor(
-            [grid_limits[i][indices[i]] for i in range(x_dim+u_dim)]).type(
-            dtype)
+        u_sample = sample[x_dim:x_dim + u_dim]
+        sample_limits = torch.Tensor([
+            grid_limits[i][indices[i]] for i in range(x_dim + u_dim)
+        ]).type(dtype)
         sample_lo = sample_limits[:, 0]
         sample_up = sample_limits[:, 1]
         x_sample_lo = sample_lo[:x_dim] - x_delta_scaled
         x_sample_up = sample_up[:x_dim] + x_delta_scaled
-        u_sample_lo = sample_lo[x_dim:x_dim+u_dim] - u_delta_scaled
-        u_sample_up = sample_up[x_dim:x_dim+u_dim] + u_delta_scaled
+        u_sample_lo = sample_lo[x_dim:x_dim + u_dim] - u_delta_scaled
+        u_sample_up = sample_up[x_dim:x_dim + u_dim] + u_delta_scaled
         x_sample_lo = torch.min(torch.max(x_sample_lo, x_lo), x_up)
         x_sample_up = torch.min(torch.max(x_sample_up, x_lo), x_up)
         u_sample_lo = torch.min(torch.max(u_sample_lo, u_lo), u_up)
@@ -855,5 +875,5 @@ def partition_state_input_space(x_lo, x_up, u_lo, u_up,
                                 axis=0)
         states_u_up = torch.cat((states_u_up, u_sample_up.unsqueeze(0)),
                                 axis=0)
-    return(states_x, states_u,
-           states_x_lo, states_x_up, states_u_lo, states_u_up)
+    return (states_x, states_u, states_x_lo, states_x_up, states_u_lo,
+            states_u_up)
