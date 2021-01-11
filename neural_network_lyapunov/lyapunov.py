@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import gurobipy
 import torch
+import numpy as np
 
 from enum import Enum
 
@@ -103,7 +104,7 @@ class LyapunovHybridLinearSystem:
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
-        Add the relu output as mixed-integer linear constraint.
+        Add the Lyapunov relu output as mixed-integer linear constraint.
         @return (z, beta, a_out, b_out) z is the continuous slack variable.
         beta is the binary variable indicating whether a (leaky) ReLU unit is
         active or not. The output of the network can be written as
@@ -701,6 +702,178 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                 torch.tensor(-1.).to(state_samples.device))
         else:
             raise Exception("Unknown eps_type")
+
+    def compute_region_of_attraction(
+        self, V_lambda, R, x_equilibrium, V_upper_bound, x_lo_larger,
+            x_up_larger):
+        """
+        After we have found the Lyapunov function satisfying the positivity and
+        derivative conditions, i.e., V(x) > 0 and dV(x) < 0 for all
+        x_lo <= x <= x_up and V(x) < V_upper_bound, we then want to find the
+        region-of-attraction certified by this Lyapunov function. The region
+        of attraction is the biggest sub-level set contained in the region
+        S = {x | x_lo <= x <= x_up and V(x) < V_upper_bound}. Namely we can
+        solve the following problems to find the biggest sub-level set
+        obj1 = min V(x[n])
+        s.t x[n] ∈ B, x[n+1] ∉ B
+        obj2 = min V(x[n])
+        s.t x[n] ∉ B, x[n+1] ∈ B
+        where B = {x | x_lo <= x <= x_up}.
+
+        And the region-of-attraction is
+        {x | V(x) < min(obj1, obj2, V_upper_bound)}.
+
+        We will write the constraint x∉B as
+        ∃i, s.t x_up(i) < x(i) < x_up_larger(i) or
+                x_lo_larger(i) < x(i) < x_lo(i)
+
+        Note that currently we only support the verification region being an
+        axis-aligned bounding box x_lo <= x <= x_up. The more complicated
+        verification region is not supported yet.
+        Note that our Lyapunov function is V(x) = ϕ(x) − ϕ(x*) + λ |R(x−x*)|₁
+        @param V_lambda λ in our Lyapunov function.
+        @param R R in the Lyapunov function
+        @param x_equilibrium x* in the Lyapunov function.
+        @param V_upper_bound We verified the Lyapunov condition with
+        V(x) < V_upper_bound. Set to None of inf to ignore V_upper_bound.
+        @param x_lo_larger We use x_lo_larger to write a bounded region larger
+        than x_lo <= x <= x_up
+        @param x_up_larger We use x_lo_larger to write a bounded region larger
+        than x_lo <= x <= x_up
+        """
+        milp1, _, _, _, _ = self._construct_milp_for_roa(
+            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, True)
+        milp1.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp1.gurobi_model.optimize()
+        obj1 = milp1.gurobi_model.ObjVal if milp1.gurobi_model.status ==\
+            gurobipy.GRB.Status.OPTIMAL else np.inf
+
+        milp2, _, _, _, _ = self._construct_milp_for_roa(
+            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, False)
+        milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp2.gurobi_model.optimize()
+        obj2 = milp2.gurobi_model.ObjVal if milp2.gurobi_model.status ==\
+            gurobipy.GRB.Status.OPTIMAL else np.inf
+
+        if V_upper_bound is None:
+            V_upper_bound = np.inf
+        return np.min([obj1, obj2, V_upper_bound])
+
+    def _construct_milp_for_roa(
+        self, V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger,
+            x_curr_in_box: bool):
+        """
+        This is the internal function to formulate an MILP for computing the
+        region of attraction (ROA). Refer to compute_region_of_attraction for
+        more information.
+        """
+        dtype = self.system.dtype
+        # I could use the original gurobi interface directly, instead of the
+        # gurobi_torch_mip interface, as we don't need to compute the gradient
+        # of the results.
+        milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x_curr = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x[n]")
+        x_next = milp.addVars(
+            self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.CONTINUOUS, name="x[n+1]")
+
+        # Add the dynamics constraint between x[n+1] and x[n]
+        self.add_system_constraint(milp, x_curr, x_next)
+
+        if x_curr_in_box:
+            out_box_x = x_next
+        else:
+            out_box_x = x_curr
+
+        if not x_curr_in_box:
+            # Add the constraint x_lo <= x[n+1] <= x_up
+            milp.addMConstrs(
+                [torch.eye(self.system.x_dim, dtype=dtype)], [x_next],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=torch.from_numpy(self.system.x_up_all))
+            milp.addMConstrs(
+                [-torch.eye(self.system.x_dim, dtype=dtype)], [x_next],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=torch.from_numpy(-self.system.x_lo_all))
+        (z, beta, a_out, b_out) = self.add_relu_output_constraint(
+            milp, x_curr)
+
+        # Now add the constraint that x is outside of the box
+        # x_lo <= x <= x_up but within the region
+        # x_lo_larger <= x <= x_up_larger.
+        # This region could be written as the union of boxes
+        # box i: x_up(i) <= x(i) <= x_up_larger(i)
+        #        x_lo(j) <= x(j) <= x_up(j) ∀ j≠ i
+        # box x_dim + i: x_lo_larger(i) <= x(i) <= x_lo(i)
+        #                       x_lo(j) <= x(j) <= x_up(j) ∀ j≠ i
+        # If we denote the bounds for the i'th box as
+        # x_box_lo_i <= x <= x_box_up_i
+        # We need to introduce 2 * x_dim binary variables ζ to determine in
+        # which box x lives, with the constraints
+        # x = t₁ + ... tₘ
+        # x_box_lo_i * ζᵢ <= tᵢ <= x_box_up_i * ζᵢ
+        # ζ₁ + ... + ζₘ = 1
+        # where m = 2 * x_dim
+        box_zeta = milp.addVars(
+            2 * self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+            vtype=gurobipy.GRB.BINARY, name="box_zeta")
+        # Add constraint ζ₁ + ... + ζₘ = 1
+        milp.addLConstr(
+            [torch.ones((2 * self.system.x_dim,), dtype=dtype)], [box_zeta],
+            sense=gurobipy.GRB.EQUAL, rhs=1.)
+        t_slack = [None] * 2 * self.system.x_dim
+        for i in range(2 * self.system.x_dim):
+            t_slack[i] = milp.addVars(
+                self.system.x_dim, lb=-gurobipy.GRB.INFINITY,
+                vtype=gurobipy.GRB.CONTINUOUS, name=f"t_slack[{i}]")
+            x_box_lo_i = torch.from_numpy(self.system.x_lo_all).clone()
+            x_box_up_i = torch.from_numpy(self.system.x_up_all).clone()
+            if i < self.system.x_dim:
+                x_box_lo_i[i] = self.system.x_up_all[i]
+                x_box_up_i[i] = x_up_larger[i]
+            else:
+                x_box_lo_i[i - self.system.x_dim] = \
+                    x_lo_larger[i-self.system.x_dim]
+                x_box_up_i[i-self.system.x_dim] = \
+                    self.system.x_lo_all[i-self.system.x_dim]
+            # Now add the constraint
+            # x_box_lo_i * ζᵢ <= tᵢ <= x_box_up_i * ζᵢ
+            milp.addMConstrs([
+                x_box_lo_i.reshape((-1, 1)),
+                -torch.eye(self.system.x_dim, dtype=dtype)],
+                [[box_zeta[i]], t_slack[i]], sense=gurobipy.GRB.LESS_EQUAL,
+                b=torch.zeros((self.system.x_dim,), dtype=dtype))
+            milp.addMConstrs([
+                torch.eye(self.system.x_dim, dtype=dtype),
+                -x_box_up_i.reshape((-1, 1))], [t_slack[i], [box_zeta[i]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=torch.zeros((self.system.x_dim,), dtype=dtype))
+        # Add constraint x = t₁ + ... tₘ
+        milp.addMConstrs(
+            [torch.eye(self.system.x_dim, dtype=dtype)] +
+            [-torch.eye(self.system.x_dim, dtype=dtype)] *
+            (2 * self.system.x_dim), [out_box_x] + t_slack,
+            sense=gurobipy.GRB.EQUAL,
+            b=torch.zeros((self.system.x_dim,), dtype=dtype))
+
+        # compute ϕ(x*)
+        relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
+
+        # Now write the 1-norm |R*(x[n] - x*)|₁ as mixed-integer linear
+        # constraints.
+        (s, gamma) = self.add_state_error_l1_constraint(
+            milp, x_equilibrium, x_curr, R=R, slack_name="s",
+            binary_var_name="gamma", fixed_R=True)
+
+        # Objective is min V(x[n]) = ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁
+        #                          = a_out * z + b_out + λ * s - ϕ(x*)
+        milp.setObjective(
+            [a_out.squeeze(), V_lambda * torch.ones((len(s),), dtype=dtype)],
+            [z, s], constant=b_out - relu_x_equilibrium.squeeze(),
+            sense=gurobipy.GRB.MINIMIZE)
+        return milp, x_curr, x_next, t_slack, box_zeta
 
 
 def _get_R(R, x_dim, device):
