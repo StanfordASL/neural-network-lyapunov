@@ -40,7 +40,8 @@ class LyapunovHybridLinearSystem:
         @param system A AutonomousHybridLinearSystem or AutonomousReLUSystem
         instance.
         @param lyapunov_relu A ReLU network used to represent the Lyapunov
-        function. The Lyapunov function is ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁
+        function. The Lyapunov function is ReLU(x) - ReLU(x*) + λ|R*(x̅-x̅*)|₁
+        where x̅ is usually x (but could be a partial subset of x).
         """
         assert (isinstance(system,
                            hybrid_linear_system.AutonomousHybridLinearSystem)
@@ -92,11 +93,11 @@ class LyapunovHybridLinearSystem:
         else:
             raise (NotImplementedError)
 
-    def add_relu_output_constraint(self,
-                                   milp,
-                                   x,
-                                   slack_name="relu_z",
-                                   binary_var_name="relu_beta"):
+    def add_lyap_relu_output_constraint(self,
+                                        milp,
+                                        x,
+                                        slack_name="relu_z",
+                                        binary_var_name="relu_beta"):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -127,13 +128,16 @@ class LyapunovHybridLinearSystem:
                                       R=None,
                                       slack_name="s",
                                       binary_var_name="alpha",
-                                      fixed_R=True):
+                                      fixed_R=True,
+                                      x_indices=None):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
-        Add the L1 loss |R*(x-x*)|₁ as mixed-integer linear constraints.
+        If we define x̅ as a subset of x we are interested in (x̅ could be x if
+        we car about all entries in x), we then add the L1 loss |R*(x̅-x̅*)|₁
+        as mixed-integer linear constraints.
         return (s, alpha) s is the continuous slack variable,
-        s(i) = |R[i, :] * (x - x*)|, alpha is the binary variable,
+        s(i) = |R[i, :] * (x̅- x̅*)|, alpha is the binary variable,
         alpha(i) = 1 => s(i) >= 0, alpha(i) = 0 => s(i) <= 0
         @param R A matrix. We want this matrix to have full column rank. If
         R=None, then we use identity as R.
@@ -142,16 +146,19 @@ class LyapunovHybridLinearSystem:
         Hence if fixed_R is True, then we compute the range of R*(x-x*)
         by linear programming (LP), otherwise we compute the range by interval
         arithmetic (IA).
+        @param x_indices x̅ = x[x_indices]. If we care about all entries in x,
+        then we could set x_indices=None, then x̅ = x.
         """
-        if not torch.all(torch.from_numpy(self.system.x_lo_all) <=
-                         x_equilibrium) or\
-                not torch.all(torch.from_numpy(self.system.x_up_all) >=
-                              x_equilibrium):
+        x_indices = self._get_x_indices(x_indices)
+        if not torch.all(torch.from_numpy(self.system.x_lo_all[x_indices]) <=
+                         x_equilibrium[x_indices]) or\
+            not torch.all(torch.from_numpy(self.system.x_up_all[x_indices]) >=
+                          x_equilibrium[x_indices]):
             raise Exception("add_state_error_l1_constraint: we currently " +
                             "require that x_lo <= x_equilibrium <= x_up")
-        R = _get_R(R, self.system.x_dim, x_equilibrium.device)
+        R = _get_R(R, len(x_indices), x_equilibrium.device)
         # R should have full column rank, so that s = 0 implies x = x*
-        assert (R.shape[0] >= self.system.x_dim)
+        assert (R.shape[0] >= len(x_indices))
         s_dim = R.shape[0]
         s = milp.addVars(s_dim,
                          lb=-gurobipy.GRB.INFINITY,
@@ -163,49 +170,54 @@ class LyapunovHybridLinearSystem:
 
         if fixed_R:
             s_lb, s_ub = mip_utils.compute_range_by_lp(
-                R.detach().numpy(), (-R @ x_equilibrium).detach().numpy(),
-                self.system.x_lo_all, self.system.x_up_all, None, None)
+                R.detach().numpy(),
+                (-R @ x_equilibrium[x_indices]).detach().numpy(),
+                self.system.x_lo_all[x_indices],
+                self.system.x_up_all[x_indices], None, None)
         else:
             s_lb, s_ub = mip_utils.compute_range_by_IA(
-                R, -R @ x_equilibrium, torch.from_numpy(self.system.x_lo_all),
-                torch.from_numpy(self.system.x_up_all))
+                R, -R @ x_equilibrium[x_indices],
+                torch.from_numpy(self.system.x_lo_all[x_indices]),
+                torch.from_numpy(self.system.x_up_all[x_indices]))
+        xbar = [x[i] for i in x_indices]
         for i in range(s_dim):
             if s_lb[i] < 0 and s_ub[i] > 0:
-                # Add the constraint s[i] = |R[i, :] * (x - x*)|
+                # Add the constraint s[i] = |R[i, :] * ( x̅ - x̅*)|
                 # We first convert the absolute value to mixed-integer linear
                 # constraint, and then add the constraint
-                # Ain_x * (R[i, :] * (x - x*)) + Ain_s * s + Ain_alpha * alpha
-                # <= rhs_in
-                Ain_x, Ain_s, Ain_alpha, rhs_in = utils.\
+                # Ain_xbar * (R[i, :] * (x̅ - x̅*)) + Ain_s * s + Ain_alpha *
+                # alpha <= rhs_in
+                Ain_xbar, Ain_s, Ain_alpha, rhs_in = utils.\
                     replace_absolute_value_with_mixed_integer_constraint(
                         s_lb[i], s_ub[i], dtype=torch.float64)
-                rhs = rhs_in + (Ain_x.reshape((-1, 1)) @ R[i].reshape(
-                    (1, -1)) @ x_equilibrium.reshape((-1, 1))).reshape((-1))
+                rhs = rhs_in + (Ain_xbar.reshape((-1, 1)) @ R[i].reshape(
+                    (1, -1)) @ x_equilibrium[x_indices].reshape(
+                        (-1, 1))).reshape((-1))
                 milp.addMConstrs([
-                    Ain_x.reshape((-1, 1)) @ R[i].reshape((1, -1)),
+                    Ain_xbar.reshape((-1, 1)) @ R[i].reshape((1, -1)),
                     Ain_s.reshape((-1, 1)),
                     Ain_alpha.reshape((-1, 1))
-                ], [x, [s[i]], [alpha[i]]],
+                ], [xbar, [s[i]], [alpha[i]]],
                                  sense=gurobipy.GRB.LESS_EQUAL,
                                  b=rhs)
             elif s_lb[i] >= 0:
-                # Add the constraint s[i] = R[i, :] * (x - x*)
+                # Add the constraint s[i] = R[i, :] * (x̅ - x̅*)
                 milp.addLConstr(
                     [torch.tensor([1], dtype=torch.float64), -R[i]],
-                    [[s[i]], x],
+                    [[s[i]], xbar],
                     sense=gurobipy.GRB.EQUAL,
-                    rhs=-R[i] @ x_equilibrium)
+                    rhs=-R[i] @ x_equilibrium[x_indices])
                 # Add the constraint alpha[i] = 1
                 milp.addLConstr([torch.tensor([1], dtype=torch.float64)],
                                 [[alpha[i]]],
                                 sense=gurobipy.GRB.EQUAL,
                                 rhs=1.)
             else:
-                # Add the constraint s[i] = -R[i, :] * (x - x*)
+                # Add the constraint s[i] = -R[i, :] * (x̅ - x̅*)
                 milp.addLConstr([torch.tensor([1], dtype=torch.float64), R[i]],
-                                [[s[i]], x],
+                                [[s[i]], xbar],
                                 sense=gurobipy.GRB.EQUAL,
-                                rhs=R[i] @ x_equilibrium)
+                                rhs=R[i] @ x_equilibrium[x_indices])
                 # Add the constraint alpha[i] = 0
                 milp.addLConstr([torch.tensor([1], dtype=torch.float64)],
                                 [[alpha[i]]],
@@ -214,17 +226,24 @@ class LyapunovHybridLinearSystem:
 
         return (s, alpha)
 
+    def _get_x_indices(self, x_indices):
+        if x_indices is None:
+            return list(range(self.system.x_dim))
+        return x_indices
+
     def lyapunov_value(self,
                        x,
                        x_equilibrium,
                        V_lambda,
                        *,
                        R=None,
-                       relu_at_equilibrium=None):
+                       relu_at_equilibrium=None,
+                       x_indices=None):
         """
         Compute the value of the Lyapunov function as
-        ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁
-        where |R*(x-x*)|₁ is the 1-norm of R*(x-x*).
+        ReLU(x) - ReLU(x*) + λ|R*(x̅-x̅*)|₁
+        where |R*(x̅-x̅*)|₁ is the 1-norm of R*(x̅-x̅*).
+        x̅ is x[x_indices], namely it could be a partial subset of the state.
         @param x a torch tensor. Evaluate Lyapunov function at this point.
         @param x_equilibrium a torch tensor. The equilibrium state x*.
         @param V_lambda λ in the documentation above.
@@ -232,19 +251,23 @@ class LyapunovHybridLinearSystem:
         matrix. If R=None, then we use identity as R.
         @param relu_at_equilibrium. ReLU(x*). If set to None, then we compute
         ReLU(x*) in this function.
+        @param x_indices x̅ = x[x_indices]
         """
-        R = _get_R(R, self.system.x_dim, x_equilibrium.device)
+        x_indices = self._get_x_indices(x_indices)
+        R = _get_R(R, len(x_indices), x_equilibrium.device)
         if relu_at_equilibrium is None:
             relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
         if x.shape == (self.system.x_dim, ):
             # A single state.
             return self.lyapunov_relu.forward(x) - relu_at_equilibrium +\
-                V_lambda * torch.norm(R @ (x - x_equilibrium), p=1)
+                V_lambda * torch.norm(R @ (
+                    x[x_indices] - x_equilibrium[x_indices]), p=1)
         else:
             # A batch of states.
             assert (x.shape[1] == self.system.x_dim)
             return self.lyapunov_relu(x).squeeze() - relu_at_equilibrium + \
-                V_lambda * torch.norm(R @ (x - x_equilibrium).T, p=1, dim=0)
+                V_lambda * torch.norm(R @ (
+                    x[:, x_indices] - x_equilibrium[x_indices]).T, p=1, dim=0)
 
     def lyapunov_positivity_as_milp(self,
                                     x_equilibrium,
@@ -253,18 +276,19 @@ class LyapunovHybridLinearSystem:
                                     *,
                                     R,
                                     fixed_R,
-                                    x_warmstart=None):
+                                    x_warmstart=None,
+                                    x_indices=None):
         """
         For a ReLU network, in order to determine if the function
-        V(x) = ReLU(x) - ReLU(x*) + λ * |R * (x - x*)|₁
-        where |R*(x - x*)|₁ is the 1-norm of the vector R*(x - x*).
+        V(x) = ReLU(x) - ReLU(x*) + λ * |R * (x̅ - x̅*)|₁
+        where |R*(x̅ - x̅*)|₁ is the 1-norm of the vector R*(x̅ - x̅*).
         satisfies the positivity constraint of Lyapunov condition
         V(x) > 0 ∀ x ≠ x*
         We check a strong condition
-        V(x) ≥ ε |R*(x - x*)|₁ ∀ x
+        V(x) ≥ ε |R*(x̅ - x̅*)|₁ ∀ x
         where ε is a small positive number.To check if the stronger condition
         is satisfied, we can solve the following optimization problem
-        max x  (ε-λ) * |R*(x - x*)|₁ - ReLU(x) + ReLU(x*)
+        max x  (ε-λ) * |R*(x̅ - x̅*)|₁ - ReLU(x) + ReLU(x*)
         We can formulate this optimization problem as a mixed integer linear
         program, solve the for optimal solution of this program. If the optimal
         cost is no larger than 0, then we proved the positivity constraint
@@ -273,9 +297,9 @@ class LyapunovHybridLinearSystem:
         @param V_lambda ρ in the documentation above.
         @param V_epsilon A scalar. ε in the documentation above.
         @param R This matrix must have full column rank, we will use the
-        1-norm of R * (x - x*). If R=None, then we use identity matrix as R.
+        1-norm of R * (x̅ - x̅*). If R=None, then we use identity matrix as R.
         @param fixed_R Whether R is fixed or not. If R is fixed, we compute
-        the range of R * (x-x*) by LP, otherwise we compute it through
+        the range of R * (x̅-x̅*) by LP, otherwise we compute it through
         interval arithmetics.
         @param x_warmstart tensor of size self.system.x_dim. If provided, will
         use x_warmstart as initial guess for the *binary* variables of the
@@ -283,6 +307,8 @@ class LyapunovHybridLinearSystem:
         the previous iteration, we choose to recompute beta using the previous
         adversarial state `x` in the current neural network, so as to make
         sure that this initial guess of beta is always a feasible solution.
+        @param x_indices x̅ = x[x_indices]. Set x_indices to None if you want
+        x̅=x.
         @return (milp, x) milp is a GurobiTorchMILP instance, x is the decision
         variable for state.
         """
@@ -302,7 +328,7 @@ class LyapunovHybridLinearSystem:
                          name="x")
         # z is the slack variable to write the output of ReLU network as mixed
         # integer constraints.
-        (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(milp, x)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -312,7 +338,7 @@ class LyapunovHybridLinearSystem:
         # Now compute ReLU(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
 
-        # Now write the 1-norm |R*(x - x*)|₁ as mixed-integer linear
+        # Now write the 1-norm |R*(x̅ - x̅*)|₁ as mixed-integer linear
         # constraints.
         (s,
          gamma) = self.add_state_error_l1_constraint(milp,
@@ -321,7 +347,8 @@ class LyapunovHybridLinearSystem:
                                                      R=R,
                                                      slack_name="s",
                                                      binary_var_name="gamma",
-                                                     fixed_R=fixed_R)
+                                                     fixed_R=fixed_R,
+                                                     x_indices=x_indices)
 
         milp.setObjective([
             -a_out.squeeze(), (V_epsilon - V_lambda) * torch.ones(
@@ -339,11 +366,12 @@ class LyapunovHybridLinearSystem:
                                             epsilon,
                                             *,
                                             R,
-                                            margin=0.):
+                                            margin=0.,
+                                            x_indices=None):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
-        mean(max(-V(xⁱ) + ε |R * (xⁱ - x*)|₁ + margin, 0))
+        mean(max(-V(xⁱ) + ε |R * (x̅ⁱ - x̅*)|₁ + margin, 0))
         @param relu_at_equilibrium A 0-D tensor. ReLU(x*)
         @param x_equilibrium x* in the documentation above.
         @param state_samples A batch of sampled states, state_samples[i] is
@@ -351,8 +379,9 @@ class LyapunovHybridLinearSystem:
         @param V_lambda λ in the documentation above.
         @param epsilon ε in the documentation above.
         @param R Should be a full column rank matrix. We use the 1-norm of
-        R * (xⁱ - x*)
+        R * (x̅ⁱ - x̅*)
         @param margin The margin used in the hinge loss.
+        @param x_indices x̅ = x[x_indices]
         """
         assert (isinstance(relu_at_equilibrium, torch.Tensor))
         assert (isinstance(state_samples, torch.Tensor))
@@ -361,16 +390,19 @@ class LyapunovHybridLinearSystem:
         assert (x_equilibrium.shape == (self.system.x_dim, ))
         assert (isinstance(V_lambda, float))
         assert (isinstance(margin, float))
-        R = _get_R(R, self.system.x_dim, state_samples.device)
+        x_indices = self._get_x_indices(x_indices)
+        R = _get_R(R, len(x_indices), state_samples.device)
         return torch.nn.HingeEmbeddingLoss(margin=margin)(
             self.lyapunov_value(state_samples,
                                 x_equilibrium,
                                 V_lambda,
                                 R=R,
-                                relu_at_equilibrium=relu_at_equilibrium) -
-            epsilon *
-            torch.norm(R @ (state_samples - x_equilibrium).T, p=1, dim=0),
-            torch.tensor(-1.).to(state_samples.device))
+                                relu_at_equilibrium=relu_at_equilibrium,
+                                x_indices=x_indices) -
+            epsilon * torch.norm(
+                R @ (state_samples[:, x_indices] - x_equilibrium[x_indices]).T,
+                p=1,
+                dim=0), torch.tensor(-1.).to(state_samples.device))
 
     def add_lyapunov_bounds_constraint(self, lyapunov_lower, lyapunov_upper,
                                        milp, a_relu, b_relu, V_lambda,
@@ -380,9 +412,9 @@ class LyapunovHybridLinearSystem:
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         Add constraint lower <= V(x) <= upper to @p milp, where the Lyapunov
-        function V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁.
+        function V(x) = ReLU(x) - ReLU(x*) + λ|R*(x̅-x̅*)|₁.
         Also we have ReLU(x) = a_relu.dot(relu_z) + b_relu.
-        |R(x-x*)|₁ = sum(state_error_s).
+        |R(x̅-x̅*)|₁ = sum(state_error_s).
         @param lyapunov_lower The lower bound of the Lyapunov function. Set to
         None if you don't want to impose a lower bound.
         @param lyapunov_upper The upper bound of the Lyapunov function. Set to
@@ -390,7 +422,7 @@ class LyapunovHybridLinearSystem:
         @parm milp The GurobiTorchMIP instance.
         @param a_relu The ReLU function can be written as
         a_relu.dot(relu_z) + b_relu. a_relu, b_relu, relu_z are returned from
-        add_relu_output_constraint().
+        add_lyap_relu_output_constraint().
         @param V_lambda λ.
         @param relu_x_equilibrium ReLU(x*)
         @param state_error_s The slack variable returned from
@@ -434,21 +466,30 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
     """
     def __init__(self, system, lyapunov_relu):
         """
-        @param system A AutonomousHybridLinearSystem instance.
+        @param system A dynamical system.
         """
         super(LyapunovDiscreteTimeHybridSystem,
               self).__init__(system, lyapunov_relu)
 
-    def lyapunov_derivative(self, x, x_equilibrium, V_lambda, epsilon, *, R):
+    def lyapunov_derivative(self,
+                            x,
+                            x_equilibrium,
+                            V_lambda,
+                            epsilon,
+                            *,
+                            R,
+                            x_indices=None):
         """
         Compute the Lyapunov derivative condition
         V(x[n+1]) - V(x[n]) + εV(x[n])
         where the Lyapunov function is
-        V(x) = ϕ(x) − ϕ(x*) + λ*|R *(x−x*)|₁
+        V(x) = ϕ(x) − ϕ(x*) + λ*|R *(x̅−x̅*)|₁
         Note that there might be multiple posible x[n+1] for a given x[n]
         (when x[n] is on the boundary of two neighbouring modes), so we return
         a list of values as all possible V(x[n+1]) - V(x[n]) + εV(x[n])
         @param x The current state x[n].
+        @param x_equilibrium x* in the documentation above.
+        @param x_inices x̅ = x[x_indices]
         @return V_derivative_possible A list of possible
         V(x[n+1]) - V(x[n]) + εV(x[n])
         """
@@ -461,14 +502,16 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                 x_equilibrium,
                                 V_lambda,
                                 R=R,
-                                relu_at_equilibrium=relu_at_equilibrium)
+                                relu_at_equilibrium=relu_at_equilibrium,
+                                x_indices=x_indices)
             for x_next in x_next_possible
         ]
         V = self.lyapunov_value(x,
                                 x_equilibrium,
                                 V_lambda,
                                 R=R,
-                                relu_at_equilibrium=relu_at_equilibrium)
+                                relu_at_equilibrium=relu_at_equilibrium,
+                                x_indices=x_indices)
         return [V_next - V + epsilon * V for V_next in V_next_possible]
 
     def lyapunov_derivative_as_milp(self,
@@ -481,10 +524,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                     fixed_R,
                                     lyapunov_lower=None,
                                     lyapunov_upper=None,
-                                    x_warmstart=None):
+                                    x_warmstart=None,
+                                    x_indices=None):
         """
         We assume that the Lyapunov function
-        V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁, where x* is the equilibrium
+        V(x) = ReLU(x) - ReLU(x*) + λ|R*(x̅-x̅*)|₁, where x* is the equilibrium
         state.
         In order to prove that the system converges exponentially, with a
         convergence rate between [ε_min, ε_max], we need to show
@@ -501,10 +545,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         In order to prove that the system converges asymptotically (but not
         necessarily exponentially), we only need to prove that dV is strictly
         negative. We choose to prove that
-        V(x[n+1]) - V(x[n]) ≤ −ε |R*(x[n] − x*)|₁, we could check the
+        V(x[n+1]) - V(x[n]) ≤ −ε |R*(x̅[n] − x̅*)|₁, we could check the
         optimality of an MILP to determine the asympotic convergence.
         MILP3
-        max  V(x[n+1]) - V(x[n]) + ε |R*(x[n] − x*)|₁
+        max  V(x[n+1]) - V(x[n]) + ε |R*(x̅[n] − x̅*)|₁
         s.t lower <= V(x[n]) <= upper
         @param V_lambda λ in the documentation above.
         @param eps_type The interpretation of epsilon. If eps_type=ExpLower,
@@ -523,6 +567,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         the previous iteration, we choose to recompute beta using the previous
         adversarial state `x` in the current neural network, so as to make
         sure that this initial guess of beta is always a feasible solution.
+        @param x_indices x̅=x[x_indices]
         @return (milp, x, x_next, s, gamma, z, z_next, beta, beta_next)
         where milp is a GurobiTorchMILP object.
         The decision variables of the MILP are
@@ -537,7 +582,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert (isinstance(V_lambda, float))
         assert (isinstance(epsilon, float))
         assert (isinstance(eps_type, ConvergenceEps))
-        R = _get_R(R, self.system.x_dim, x_equilibrium.device)
+        R = _get_R(R, len(self._get_x_indices(x_indices)),
+                   x_equilibrium.device)
 
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
 
@@ -569,7 +615,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # ReLU(x[n]).
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
-        (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x)
+        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(milp, x)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -580,9 +626,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
 
         # Now add the mixed-integer linear constraint to represent
-        # |R*(x[n] - x)*|₁. To do so, we introduce the slack variable
+        # |R*(x̅[n] - x̅)*|₁. To do so, we introduce the slack variable
         # s_x_norm, beta_x_norm.
-        # s_x_norm(i) = |R[i,:] * (x[n] - x*)|
+        # s_x_norm(i) = |R[i,:] * (x̅[n] - x̅*)|
         (s_x_norm, beta_x_norm) = self.add_state_error_l1_constraint(
             milp,
             x_equilibrium,
@@ -590,11 +636,12 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R=R,
             slack_name="|x[n]-x*|",
             binary_var_name="beta_x_norm",
-            fixed_R=fixed_R)
+            fixed_R=fixed_R,
+            x_indices=x_indices)
         # Now add the mixed-integer linear constraint to represent
-        # |R*(x[n+1] - x*)|₁. To do so, we introduce the slack variable
+        # |R*(x̅[n+1] - x̅*)|₁. To do so, we introduce the slack variable
         # s_x_next_norm, beta_x_next_norm.
-        # s_x_next_norm(i) = |R[i, :] * (x[n+1] - x*)|
+        # s_x_next_norm(i) = |R[i, :] * (x̅[n+1] - x̅*)|
         (s_x_next_norm, beta_x_next_norm) = self.add_state_error_l1_constraint(
             milp,
             x_equilibrium,
@@ -602,10 +649,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R=R,
             slack_name="|R*(x[n+1]-x*)|",
             binary_var_name="beta_x_next_norm",
-            fixed_R=fixed_R)
+            fixed_R=fixed_R,
+            x_indices=x_indices)
 
         # Now add the constraint
-        # lower <= ReLU(x[n]) - ReLU(x*) + λ|R*(x[n]-x*)|₁ <= upper
+        # lower <= ReLU(x[n]) - ReLU(x*) + λ|R*(x̅[n]-x̅*)|₁ <= upper
         self.add_lyapunov_bounds_constraint(lyapunov_lower, lyapunov_upper,
                                             milp, a_out, b_out, V_lambda,
                                             relu_x_equilibrium, z, s_x_norm)
@@ -613,7 +661,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
         (z_next, beta_next, _,
-         _) = self.add_relu_output_constraint(milp, x_next)
+         _) = self.add_lyap_relu_output_constraint(milp, x_next)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -624,8 +672,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         s_dim = R.shape[0]
 
         # For MILP1, the cost function is (ε-1)*V(x[n]) + V(x[n+1]), equals to
-        # max ReLU(x[n+1]) + λ|R*(x[n+1]-x*)|₁ - ReLU(x[n]) - λ|R*(x[n]-x*)|₁
-        #     + ε * (ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁)
+        # max ReLU(x[n+1]) + λ|R*(x̅[n+1]-x̅*)|₁ - ReLU(x[n])
+        #     - λ|R*(x̅[n]-x̅*)|₁ + ε * (ReLU(x[n]) - ReLU(x*)
+        #     + λ|R*(x̅[n]-x̅*)|₁)
         # For MILP2, the cost function is the negation of MILP1.
         if eps_type == ConvergenceEps.ExpLower or \
                 eps_type == ConvergenceEps.ExpUpper:
@@ -645,9 +694,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                   -obj_constant, gurobipy.GRB.MAXIMIZE)
         elif eps_type == ConvergenceEps.Asymp:
             # For asymptotic convergence, the cost is
-            # V(x[n+1]) - V(x[n]) + ε |R*(x[n] − x*)|₁
-            # = ReLU(x[n+1]) + λ|R*(x[n+1]-x*)|₁ - ReLU(x[n]) +
-            #  (ε-λ)|R*(x[n]-x*)|₁
+            # V(x[n+1]) - V(x[n]) + ε |R*(x̅[n] − x̅*)|₁
+            # = ReLU(x[n+1]) + λ|R*(x̅[n+1]-x̅*)|₁ - ReLU(x[n]) +
+            #  (ε-λ)|R*(x̅[n]-x̅*)|₁
             milp.setObjective([
                 a_out, -a_out, V_lambda * torch.ones(
                     (s_dim, ), dtype=self.system.dtype),
@@ -666,7 +715,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                             eps_type,
                                             *,
                                             R,
-                                            margin=0.):
+                                            margin=0.,
+                                            x_indices=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -678,7 +728,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         2. If we want to prove the exponential convergence rate is smaller
            than epsilon, then l(x) = -(V(x_next) - V(x) + ε*V(x))
         3. If we want to prove the asymptotic convergence, then
-           l(x) = V(x_next) - V(x) + ε*|x−x*|₁
+           l(x) = V(x_next) - V(x) + ε*|x̅−x̅*|₁
         @param V_lambda λ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
         @param state_samples The sampled state x̅[n], state_samples[i] is the
@@ -696,7 +746,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert (isinstance(state_samples, torch.Tensor))
         assert (state_samples.shape[1] == self.system.x_dim)
         assert (isinstance(eps_type, ConvergenceEps))
-        R = _get_R(R, self.system.x_dim, state_samples.device)
+        R = _get_R(R, len(self._get_x_indices(x_indices)),
+                   state_samples.device)
         state_next = self.system.step_forward(state_samples)
 
         return self.lyapunov_derivative_loss_at_samples_and_next_states(
@@ -707,7 +758,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             x_equilibrium,
             eps_type,
             R=R,
-            margin=margin)
+            margin=margin,
+            x_indices=x_indices)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -719,7 +771,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             eps_type,
             *,
             R,
-            margin=0.):
+            margin=0.,
+            x_indices=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -731,9 +784,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         2. If we want to prove the exponential convergence rate is smaller
            than epsilon, then l(x) = -(V(x_next) - V(x) + ε*V(x))
         3. If we want to prove the asymptotic convergence, then
-           l(x) = V(x_next) - V(x) + ε*|x−x*|₁
+           l(x) = V(x_next) - V(x) + ε*|x̅−x̅*|₁
         The lyapunov function is
-        ReLU(x) - ReLU(x*) + λ|x-x*|₁
+        ReLU(x) - ReLU(x*) + λ|x̅-x̅*|₁
         @param V_lambda λ in the Lyapunov function.
         @param epsilon ε in the Lyapunov function.
         @param state_samples The sampled state x̅[n], state_samples[i] is the
@@ -757,18 +810,21 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert (state_next.shape[1] == self.system.x_dim)
         assert (state_samples.shape[0] == state_next.shape[0])
         assert (isinstance(eps_type, ConvergenceEps))
-        R = _get_R(R, self.system.x_dim, state_samples.device)
+        R = _get_R(R, len(self._get_x_indices(x_indices)),
+                   state_samples.device)
         relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
         v1 = self.lyapunov_value(state_samples,
                                  x_equilibrium,
                                  V_lambda,
                                  R=R,
-                                 relu_at_equilibrium=relu_at_equilibrium)
+                                 relu_at_equilibrium=relu_at_equilibrium,
+                                 x_indices=x_indices)
         v2 = self.lyapunov_value(state_next,
                                  x_equilibrium,
                                  V_lambda,
                                  R=R,
-                                 relu_at_equilibrium=relu_at_equilibrium)
+                                 relu_at_equilibrium=relu_at_equilibrium,
+                                 x_indices=x_indices)
         if eps_type == ConvergenceEps.ExpLower:
             return torch.nn.HingeEmbeddingLoss(margin=margin)(
                 -(v2 - v1 + epsilon * v1),
@@ -778,15 +834,19 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                 (v2 - v1 + epsilon * v1),
                 torch.tensor(-1.).to(state_samples.device))
         elif eps_type == ConvergenceEps.Asymp:
+            x_indices = self._get_x_indices(x_indices)
             return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                -(v2 - v1 + epsilon * torch.norm(
-                    R @ (state_samples - x_equilibrium).T, p=1, dim=0)),
+                -(v2 - v1 + epsilon * torch.norm(R @ (
+                    state_samples[:, x_indices] - x_equilibrium[x_indices]).T,
+                                                 p=1,
+                                                 dim=0)),
                 torch.tensor(-1.).to(state_samples.device))
         else:
             raise Exception("Unknown eps_type")
 
     def compute_region_of_attraction(self, V_lambda, R, x_equilibrium,
-                                     V_upper_bound, x_lo_larger, x_up_larger):
+                                     V_upper_bound, x_lo_larger, x_up_larger,
+                                     *, x_indices=None):
         """
         After we have found the Lyapunov function satisfying the positivity and
         derivative conditions, i.e., V(x) > 0 and dV(x) < 0 for all
@@ -811,7 +871,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         Note that currently we only support the verification region being an
         axis-aligned bounding box x_lo <= x <= x_up. The more complicated
         verification region is not supported yet.
-        Note that our Lyapunov function is V(x) = ϕ(x) − ϕ(x*) + λ |R(x−x*)|₁
+        Note that our Lyapunov function is V(x) = ϕ(x) − ϕ(x*) + λ |R(x̅−x̅*)|₁
         @param V_lambda λ in our Lyapunov function.
         @param R R in the Lyapunov function
         @param x_equilibrium x* in the Lyapunov function.
@@ -821,16 +881,19 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         than x_lo <= x <= x_up
         @param x_up_larger We use x_lo_larger to write a bounded region larger
         than x_lo <= x <= x_up
+        @param x_indices x̅ = x[x_indices]
         """
         milp1, _, _, _, _ = self._construct_milp_for_roa(
-            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, True)
+            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, True,
+            x_indices)
         milp1.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp1.gurobi_model.optimize()
         obj1 = milp1.gurobi_model.ObjVal if milp1.gurobi_model.status ==\
             gurobipy.GRB.Status.OPTIMAL else np.inf
 
         milp2, _, _, _, _ = self._construct_milp_for_roa(
-            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, False)
+            V_lambda, R, x_equilibrium, x_lo_larger, x_up_larger, False,
+            x_indices)
         milp2.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp2.gurobi_model.optimize()
         obj2 = milp2.gurobi_model.ObjVal if milp2.gurobi_model.status ==\
@@ -841,7 +904,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return np.min([obj1, obj2, V_upper_bound])
 
     def _construct_milp_for_roa(self, V_lambda, R, x_equilibrium, x_lo_larger,
-                                x_up_larger, x_curr_in_box: bool):
+                                x_up_larger, x_curr_in_box: bool,
+                                x_indices=None):
         """
         This is the internal function to formulate an MILP for computing the
         region of attraction (ROA). Refer to compute_region_of_attraction for
@@ -879,7 +943,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                              [x_next],
                              sense=gurobipy.GRB.LESS_EQUAL,
                              b=torch.from_numpy(-self.system.x_lo_all))
-        (z, beta, a_out, b_out) = self.add_relu_output_constraint(milp, x_curr)
+        (z, beta, a_out,
+         b_out) = self.add_lyap_relu_output_constraint(milp, x_curr)
 
         # Now add the constraint that x is outside of the box
         # x_lo <= x <= x_up but within the region
@@ -946,7 +1011,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # compute ϕ(x*)
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
 
-        # Now write the 1-norm |R*(x[n] - x*)|₁ as mixed-integer linear
+        # Now write the 1-norm |R*(x̅[n] - x̅*)|₁ as mixed-integer linear
         # constraints.
         (s,
          gamma) = self.add_state_error_l1_constraint(milp,
@@ -955,9 +1020,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                                      R=R,
                                                      slack_name="s",
                                                      binary_var_name="gamma",
-                                                     fixed_R=True)
+                                                     fixed_R=True,
+                                                     x_indices=x_indices)
 
-        # Objective is min V(x[n]) = ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁
+        # Objective is min V(x[n]) = ϕ(x) − ϕ(x*) + λ|R(x̅−x̅*)|₁
         #                          = a_out * z + b_out + λ * s - ϕ(x*)
         milp.setObjective(
             [a_out.squeeze(), V_lambda * torch.ones(
@@ -967,13 +1033,13 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         return milp, x_curr, x_next, t_slack, box_zeta
 
 
-def _get_R(R, x_dim, device):
+def _get_R(R, xbar_dim, device):
     """
-    Take matrix R used in the 1-norm |R*(x-x*)|₁.
+    Take matrix R used in the 1-norm |R*(x̅-x̅*)|₁.
     """
     assert (isinstance(R, torch.Tensor) or R is None)
     if R is None:
-        return torch.eye(x_dim, dtype=torch.float64).to(device)
+        return torch.eye(xbar_dim, dtype=torch.float64).to(device)
     else:
-        assert (R.shape[1] == x_dim)
+        assert (R.shape[1] == xbar_dim)
         return R.to(device)
