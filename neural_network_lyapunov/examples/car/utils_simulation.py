@@ -26,19 +26,20 @@ def get_parameters():
 
     # precompute vector of sensor's angles control
     params['psi_nominal'] = np.reshape(
-        np.linspace(
-            params['psi_min'],
-            params['psi_max'],
-            params['num_rays_control']),
-        (params['num_rays_control'],
-         1))
+        np.linspace(params['psi_min'], params['psi_max'],
+                    params['num_rays_control']),
+        (params['num_rays_control'], 1))
     # vector of sensor's angles to cover all 360 degrees range
     # for data collection
     params['psi_nominal_full'] = np.reshape(
-        np.linspace(-np.pi / 2, np.pi / 2,  # -np.pi, np.pi,
-                    params['num_rays_data']), (params['num_rays_data'], 1))
+        np.linspace(
+            -np.pi / 2,
+            np.pi / 2,  # -np.pi, np.pi,
+            params['num_rays_data']),
+        (params['num_rays_data'], 1))
 
     return params
+
 
 # Robot dynamics
 
@@ -71,33 +72,21 @@ def generate_goal(p, goal_pos):
 
     posObs = [goal_pos.tolist()]
     orientObs = [[0, 0, 0, 1]]
-    visIdxs = [p.createVisualShape(p.GEOM_BOX, halfExtents=[
-                                   0.06, 0.06, 0], rgbaColor=[.5, .5, .5, 1])]
+    visIdxs = [
+        p.createVisualShape(p.GEOM_BOX,
+                            halfExtents=[0.06, 0.06, 0],
+                            rgbaColor=[.5, .5, .5, 1])
+    ]
 
     goalUid = p.createMultiBody(
         baseCollisionShapeIndex=-1,
         baseVisualShapeIndex=-1,
-        basePosition=[
-            0,
-            0,
-            0],
-        baseOrientation=[
-            0,
-            0,
-            0,
-            1],
-        baseInertialFramePosition=[
-            0,
-            0,
-            0],
-        baseInertialFrameOrientation=[
-            0,
-            0,
-            0,
-            1],
+        basePosition=[0, 0, 0],
+        baseOrientation=[0, 0, 0, 1],
+        baseInertialFramePosition=[0, 0, 0],
+        baseInertialFrameOrientation=[0, 0, 0, 1],
         linkMasses=linkMasses,
-        linkCollisionShapeIndices=[
-            -1],
+        linkCollisionShapeIndices=[-1],
         linkVisualShapeIndices=visIdxs,
         linkPositions=posObs,
         linkOrientations=orientObs,
@@ -170,8 +159,10 @@ def generate_obstacles(p, heightObs, robotRadius):
         posObs_obs[2] = 0  # set z at ground level
         posObs[obs] = posObs_obs  # .tolist()
         orientObs[obs] = [0, 0, 0, 1]
-        colIdxs[obs] = p.createCollisionShape(p.GEOM_CYLINDER, radius=(
-            0.25 - 0.1) * np.random.random_sample(1) + 0.1, height=heightObs)
+        colIdxs[obs] = p.createCollisionShape(
+            p.GEOM_CYLINDER,
+            radius=(0.25 - 0.1) * np.random.random_sample(1) + 0.1,
+            height=heightObs)
 
     # Create bounding objects
     # Left wall
@@ -230,24 +221,10 @@ def generate_obstacles(p, heightObs, robotRadius):
     obsUid = p.createMultiBody(
         baseCollisionShapeIndex=-1,
         baseVisualShapeIndex=-1,
-        basePosition=[
-            0,
-            0,
-            0],
-        baseOrientation=[
-            0,
-            0,
-            0,
-            1],
-        baseInertialFramePosition=[
-            0,
-            0,
-            0],
-        baseInertialFrameOrientation=[
-            0,
-            0,
-            0,
-            1],
+        basePosition=[0, 0, 0],
+        baseOrientation=[0, 0, 0, 1],
+        baseInertialFramePosition=[0, 0, 0],
+        baseInertialFrameOrientation=[0, 0, 0, 1],
         linkMasses=linkMasses,
         linkCollisionShapeIndices=colIdxs,
         linkVisualShapeIndices=visIdxs,
@@ -290,30 +267,16 @@ def generate_wall(p, heightObs, robotRadius):
     posObs[0] = [(x_lim[0] + x_lim[1]) / 2.0, y_lim[1], 0.0]
     orientObs[0] = [0, 0, np.sqrt(2) / 2, np.sqrt(2) / 2]
     colIdxs[0] = p.createCollisionShape(
-        p.GEOM_BOX, halfExtents=[
-            0.1, (x_lim[1] - x_lim[0]) / 2.0, heightObs / 2])
+        p.GEOM_BOX,
+        halfExtents=[0.1, (x_lim[1] - x_lim[0]) / 2.0, heightObs / 2])
 
     obsUid = p.createMultiBody(
         baseCollisionShapeIndex=-1,
         baseVisualShapeIndex=-1,
-        basePosition=[
-            0,
-            0,
-            0],
-        baseOrientation=[
-            0,
-            0,
-            0,
-            1],
-        baseInertialFramePosition=[
-            0,
-            0,
-            0],
-        baseInertialFrameOrientation=[
-            0,
-            0,
-            0,
-            1],
+        basePosition=[0, 0, 0],
+        baseOrientation=[0, 0, 0, 1],
+        baseInertialFramePosition=[0, 0, 0],
+        baseInertialFrameOrientation=[0, 0, 0, 1],
         linkMasses=linkMasses,
         linkCollisionShapeIndices=colIdxs,
         linkVisualShapeIndices=visIdxs,
@@ -329,17 +292,16 @@ def generate_wall(p, heightObs, robotRadius):
 
 
 # Simulate range sensor (get distances along rays)
-def getDistances(
-        p,
-        state,
-        robotHeight,
-        numRays,
-        senseRadius,
-        psi_nominal,
-        data=False,
-        visualize=False,
-        RGB=[1, 0, 0],
-        parentObjectId=None):
+def getDistances(p,
+                 state,
+                 robotHeight,
+                 numRays,
+                 senseRadius,
+                 psi_nominal,
+                 data=False,
+                 visualize=False,
+                 RGB=[1, 0, 0],
+                 parentObjectId=None):
     """
     Get depths rays emanate from the robot
     @param p: pybullet instance
@@ -350,27 +312,18 @@ def getDistances(
     @return:
     """
 
-    raysFrom = np.concatenate((state[0] *
-                               np.ones((numRays, 1)), state[1] *
-                               np.ones((numRays, 1)), robotHeight *
-                               np.ones((numRays, 1))), 1)
+    raysFrom = np.concatenate((state[0] * np.ones(
+        (numRays, 1)), state[1] * np.ones((numRays, 1)), robotHeight * np.ones(
+            (numRays, 1))), 1)
 
     # Note the minus sign: +ve direction for state[2] is anti-clockwise (right
     # hand rule), but sensor rays go clockwise
     thetas = (-state[2]) + psi_nominal
 
     raysTo = np.concatenate(
-        (state[0] +
-         senseRadius *
-         np.cos(thetas),
-         state[1] -
-         senseRadius *
-         np.sin(thetas),
-         robotHeight *
-         np.ones(
-            (numRays,
-             1))),
-        1)
+        (state[0] + senseRadius * np.cos(thetas),
+         state[1] - senseRadius * np.sin(thetas), robotHeight * np.ones(
+             (numRays, 1))), 1)
 
     coll = p.rayTestBatch(raysFrom, raysTo)
 
@@ -379,13 +332,13 @@ def getDistances(
         dists[i] = senseRadius * coll[i][2]
         if visualize:
             if coll[i][3] == (0, 0, 0):
-                p.addUserDebugLine(
-                    (state[0], state[1], robotHeight), raysTo[i],
-                    lineColorRGB=RGB)
+                p.addUserDebugLine((state[0], state[1], robotHeight),
+                                   raysTo[i],
+                                   lineColorRGB=RGB)
             else:
-                p.addUserDebugLine(
-                    (state[0], state[1], robotHeight), coll[i][3],
-                    lineColorRGB=RGB)
+                p.addUserDebugLine((state[0], state[1], robotHeight),
+                                   coll[i][3],
+                                   lineColorRGB=RGB)
 
     if data:
         return dists[:-1]
@@ -397,22 +350,23 @@ def getDistances(
 # Top Down Image
 def getImage(p, state, robotHeight):
     viewMatrix = p.computeViewMatrixFromYawPitchRoll(
-        [state[0], state[1], robotHeight], 10,
-        state[2] * 180 / np.pi - 180, -90, 0, 2)
+        [state[0], state[1], robotHeight], 10, state[2] * 180 / np.pi - 180,
+        -90, 0, 2)
     proj_matrix = p.computeProjectionMatrixFOV(20, 1, 0.01, 100)
-    w, h, rgba, depth, mask = p.getCameraImage(
-        400, 400, viewMatrix=viewMatrix,
-        projectionMatrix=proj_matrix, shadow=0)
+    w, h, rgba, depth, mask = p.getCameraImage(400,
+                                               400,
+                                               viewMatrix=viewMatrix,
+                                               projectionMatrix=proj_matrix,
+                                               shadow=0)
     return depth
 
 
-def save_data(
-        u_data,
-        depth_data,
-        state_data,
-        file_name,
-        next_depth_data=None,
-        next_state_data=None):
+def save_data(u_data,
+              depth_data,
+              state_data,
+              file_name,
+              next_depth_data=None,
+              next_state_data=None):
     np.save('data/u_' + file_name, np.array(u_data))
     np.save('data/depth_' + file_name, np.array(depth_data))
     np.save('data/state_' + file_name, np.array(state_data))

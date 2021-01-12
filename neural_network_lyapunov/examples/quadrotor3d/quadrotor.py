@@ -192,12 +192,10 @@ class QuadrotorWithPixhawkReLUSystem:
             rpy_current = x_start[3:6]
             vel_current = x_start[6:9]
             delta_vel_rpy = self.dynamics_relu(
-                torch.cat(
-                    (rpy_current, u_start),
-                    dim=0)) - self.dynamics_relu(
-                        torch.cat((torch.zeros(
-                            (3, ), dtype=self.dtype), self.u_equilibrium),
-                                  dim=0))
+                torch.cat((rpy_current, u_start), dim=0)) - self.dynamics_relu(
+                    torch.cat((torch.zeros(
+                        (3, ), dtype=self.dtype), self.u_equilibrium),
+                              dim=0))
             vel_next = vel_current + delta_vel_rpy[:3]
             rpy_next = rpy_current + delta_vel_rpy[3:]
             pos_next = pos_current + (vel_next + vel_current) / 2 * self.dt
@@ -210,12 +208,10 @@ class QuadrotorWithPixhawkReLUSystem:
             rpy_current = x_start[:, 3:6]
             vel_current = x_start[:, 6:9]
             delta_vel_rpy = self.dynamics_relu(
-                torch.cat(
-                    (rpy_current, u_start),
-                    dim=1)) - self.dynamics_relu(
-                        torch.cat((torch.zeros(
-                            (3, ), dtype=self.dtype), self.u_equilibrium),
-                                  dim=0))
+                torch.cat((rpy_current, u_start), dim=1)) - self.dynamics_relu(
+                    torch.cat((torch.zeros(
+                        (3, ), dtype=self.dtype), self.u_equilibrium),
+                              dim=0))
             vel_next = vel_current + delta_vel_rpy[:, :3]
             rpy_next = rpy_current + delta_vel_rpy[:, 3:6]
             pos_next = pos_current + (vel_next + vel_current) / 2 * self.dt

@@ -16,23 +16,26 @@ import argparse
 import time
 
 
-def setup_relu(
-        relu_layer_width, params=None, negative_gradient=0.1, bias=True):
-    assert(isinstance(relu_layer_width, tuple))
-    assert(relu_layer_width[0] == 2)
+def setup_relu(relu_layer_width,
+               params=None,
+               negative_gradient=0.1,
+               bias=True):
+    assert (isinstance(relu_layer_width, tuple))
+    assert (relu_layer_width[0] == 2)
     if params is not None:
-        assert(isinstance(params, torch.Tensor))
+        assert (isinstance(params, torch.Tensor))
     dtype = torch.float64
 
     def set_param(linear, param_count):
-        linear.weight.data = params[
-            param_count: param_count +
-            linear.in_features * linear.out_features].clone().reshape((
-                linear.out_features, linear.in_features))
+        linear.weight.data = params[param_count:param_count +
+                                    linear.in_features *
+                                    linear.out_features].clone().reshape(
+                                        (linear.out_features,
+                                         linear.in_features))
         param_count += linear.in_features * linear.out_features
         if bias:
-            linear.bias.data = params[
-                param_count: param_count + linear.out_features].clone()
+            linear.bias.data = params[param_count:param_count +
+                                      linear.out_features].clone()
             param_count += linear.out_features
         return param_count
 
@@ -41,8 +44,9 @@ def setup_relu(
     for i in range(len(relu_layer_width)):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
-        linear_layers[i] = nn.Linear(
-            relu_layer_width[i], next_layer_width, bias=bias).type(dtype)
+        linear_layers[i] = nn.Linear(relu_layer_width[i],
+                                     next_layer_width,
+                                     bias=bias).type(dtype)
         if params is None:
             pass
         else:
@@ -59,66 +63,85 @@ def setup_relu(
 def setup_relu1():
     # Construct a simple ReLU model with 2 hidden layers
     dtype = torch.float64
-    relu_param = torch.tensor(
-        [-1, 0.5, -0.3, 0.74, -2, 1.5, -0.5, 0.2, -1,
-         -0.5, 1.5, 1.2, 2, -1.5, 2.6, 0.3, -2, -0.3, -.4, -0.1, 0.2, -0.5,
-         1.2, 1.3, -.4, .5, -.6, 0.3], dtype=dtype)
+    relu_param = torch.tensor([
+        -1, 0.5, -0.3, 0.74, -2, 1.5, -0.5, 0.2, -1, -0.5, 1.5, 1.2, 2, -1.5,
+        2.6, 0.3, -2, -0.3, -.4, -0.1, 0.2, -0.5, 1.2, 1.3, -.4, .5, -.6, 0.3
+    ],
+                              dtype=dtype)
     return setup_relu((2, 4, 4), relu_param, negative_gradient=0.1, bias=False)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='learning lyapunov for Trecate system parameters')
+    parser.add_argument('--system',
+                        type=int,
+                        default=1,
+                        help="1 for Trecate system, 2 for Xu system.")
     parser.add_argument(
-        '--system', type=int, default=1,
-        help="1 for Trecate system, 2 for Xu system.")
-    parser.add_argument(
-        '--theta', type=float, default=0.,
+        '--theta',
+        type=float,
+        default=0.,
         help='rotation angle of the Trecate system transformation')
+    parser.add_argument('--equilibrium_state_x',
+                        type=float,
+                        default=0.,
+                        help='x location of the equilibrium state')
+    parser.add_argument('--equilibrium_state_y',
+                        type=float,
+                        default=0.,
+                        help='y location of the equilibrium state')
+    parser.add_argument('--learning_rate',
+                        type=float,
+                        default=1e-3,
+                        help='learning rate for the Lyapunov function.')
+    parser.add_argument('--max_iterations',
+                        type=int,
+                        default=2000,
+                        help='max iteration for learning Lyapunov function.')
     parser.add_argument(
-        '--equilibrium_state_x', type=float, default=0.,
-        help='x location of the equilibrium state')
-    parser.add_argument(
-        '--equilibrium_state_y', type=float, default=0.,
-        help='y location of the equilibrium state')
-    parser.add_argument(
-        '--learning_rate', type=float, default=1e-3,
-        help='learning rate for the Lyapunov function.')
-    parser.add_argument(
-        '--max_iterations', type=int, default=2000,
-        help='max iteration for learning Lyapunov function.')
-    parser.add_argument(
-        '--approximator_iterations', type=int, default=1000,
+        '--approximator_iterations',
+        type=int,
+        default=1000,
         help="number of iterations to train the value function approximator")
-    parser.add_argument(
-        "--load_cost_to_go_data", type=str, default=None,
-        help="saved pickle file on the cost-to-go samples.")
-    parser.add_argument(
-        "--load_relu", type=str, default=None,
-        help="saved pickle file on the relu model.")
-    parser.add_argument(
-        '--save_model', type=str, default=None,
-        help='save the Lyapunov function to a pickle file.')
-    parser.add_argument(
-        '--visualize', action='store_true', help='visualization flag')
-    parser.add_argument(
-        '--summary_writer_folder', type=str, default=None,
-        help="folder for the tensorboard summary")
-    parser.add_argument(
-        "--lyapunov_positivity_sample_cost_weight", type=float, default=0.)
-    parser.add_argument(
-        "--lyapunov_derivative_sample_cost_weight", type=float, default=0.)
-    parser.add_argument(
-        "--lyapunov_positivity_mip_cost_weight", type=float, default=1.)
-    parser.add_argument(
-        "--lyapunov_derivative_mip_cost_weight", type=float, default=1.)
-    parser.add_argument(
-        '--add_adversarial_state_to_training', action="store_true")
+    parser.add_argument("--load_cost_to_go_data",
+                        type=str,
+                        default=None,
+                        help="saved pickle file on the cost-to-go samples.")
+    parser.add_argument("--load_relu",
+                        type=str,
+                        default=None,
+                        help="saved pickle file on the relu model.")
+    parser.add_argument('--save_model',
+                        type=str,
+                        default=None,
+                        help='save the Lyapunov function to a pickle file.')
+    parser.add_argument('--visualize',
+                        action='store_true',
+                        help='visualization flag')
+    parser.add_argument('--summary_writer_folder',
+                        type=str,
+                        default=None,
+                        help="folder for the tensorboard summary")
+    parser.add_argument("--lyapunov_positivity_sample_cost_weight",
+                        type=float,
+                        default=0.)
+    parser.add_argument("--lyapunov_derivative_sample_cost_weight",
+                        type=float,
+                        default=0.)
+    parser.add_argument("--lyapunov_positivity_mip_cost_weight",
+                        type=float,
+                        default=1.)
+    parser.add_argument("--lyapunov_derivative_mip_cost_weight",
+                        type=float,
+                        default=1.)
+    parser.add_argument('--add_adversarial_state_to_training',
+                        action="store_true")
     args = parser.parse_args()
 
     theta = args.theta
-    x_equilibrium = torch.tensor([
-        args.equilibrium_state_x, args.equilibrium_state_y],
+    x_equilibrium = torch.tensor(
+        [args.equilibrium_state_x, args.equilibrium_state_y],
         dtype=torch.float64)
 
     if args.system == 1:
@@ -151,9 +174,15 @@ if __name__ == "__main__":
     approximator.convergence_tolerance = 0.003
     if args.system == 1:
         result1 = approximator.train(
-            system_simulate, relu, V_lambda, x_equilibrium,
+            system_simulate,
+            relu,
+            V_lambda,
+            x_equilibrium,
             lambda x: torch.norm(x - x_equilibrium, p=1),
-            state_samples_all1, 100, True, R=None)
+            state_samples_all1,
+            100,
+            True,
+            R=None)
         print(f"value function approximation error {result1[1]}")
     elif args.system == 2 or args.system == 3:
         if args.load_relu is None:
@@ -165,9 +194,9 @@ if __name__ == "__main__":
                     system_simulate, relu, V_lambda, x_equilibrium,
                     lambda x: 0.02 * torch.norm(x - x_equilibrium, p=1),
                     state_samples_all1, 3000, True, x_equilibrium,
-                    lambda x: torch.norm(x - x_equilibrium, 1) < 0.01 and
-                    torch.any(x - x_equilibrium <= x_lower) and
-                    torch.any(x - x_equilibrium >= x_upper))
+                    lambda x: torch.norm(x - x_equilibrium, 1) < 0.01 and torch
+                    .any(x - x_equilibrium <= x_lower) and torch.any(
+                        x - x_equilibrium >= x_upper))
             else:
                 x0_value_samples = torch.load(args.load_cost_to_go_data)
                 result1 = approximator.train_with_cost_to_go(
@@ -220,7 +249,8 @@ if __name__ == "__main__":
             "x_equilibrium": x_equilibrium,
             "theta": theta,
             "lyapunov_positivity_epsilon": dut.lyapunov_positivity_epsilon,
-            "lyapunov_derivative_epsilon": dut.lyapunov_derivative_epsilon}
+            "lyapunov_derivative_epsilon": dut.lyapunov_derivative_epsilon
+        }
         torch.save(lyapunov, args.save_model)
     # Should converge to a valid Lyapunov function.
-    assert(result[0])
+    assert (result[0])

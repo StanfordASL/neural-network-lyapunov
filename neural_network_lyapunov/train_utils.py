@@ -42,16 +42,14 @@ def project_gradient(network, loss1, loss2, mode, retain_graph=False):
     @return (needs_projection, n1, n2) If n₁ᵀn₂ >= 0, we do not need
     projection return False;otherwise return True.
     """
-    assert(isinstance(mode, ProjectGradientMode))
+    assert (isinstance(mode, ProjectGradientMode))
     loss1.backward(retain_graph=True)
-    n1 = torch.cat([
-        p.grad.reshape((-1,)) for p in network.parameters()])
+    n1 = torch.cat([p.grad.reshape((-1, )) for p in network.parameters()])
     for p in network.parameters():
         if p.grad is not None:
             p.grad.data.zero_()
     loss2.backward(retain_graph=retain_graph)
-    n2 = torch.cat([
-        p.grad.reshape((-1,)) for p in network.parameters()])
+    n2 = torch.cat([p.grad.reshape((-1, )) for p in network.parameters()])
     with torch.no_grad():
         if n1 @ n2 > 0:
             grad = n1 + n2

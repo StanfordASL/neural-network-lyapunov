@@ -40,10 +40,8 @@ class SimplePWLLyapunov:
     The parameter "weight" in the cost function adjust the relative weight
     between the penalty on violation constraint (1) and (2).
     """
-
-    def __init__(
-        self, x_dim, num_modes, lyapunov_positivity_epsilon,
-            lyapunov_derivative_epsilon, x_equilibrium, equilibrium_mode):
+    def __init__(self, x_dim, num_modes, lyapunov_positivity_epsilon,
+                 lyapunov_derivative_epsilon, x_equilibrium, equilibrium_mode):
         """
         @param x_dim The dimension of x.
         @param num_modes The number of hybrid modes.
@@ -52,12 +50,12 @@ class SimplePWLLyapunov:
         @param x_equilibrium x* in the documentation above.
         @param equilibrium_mode The mode in which x* is in.
         """
-        assert(isinstance(x_dim, int))
-        assert(isinstance(num_modes, int))
-        assert(isinstance(lyapunov_positivity_epsilon, float))
-        assert(isinstance(lyapunov_derivative_epsilon, float))
-        assert(isinstance(x_equilibrium, np.ndarray))
-        assert(isinstance(equilibrium_mode, int))
+        assert (isinstance(x_dim, int))
+        assert (isinstance(num_modes, int))
+        assert (isinstance(lyapunov_positivity_epsilon, float))
+        assert (isinstance(lyapunov_derivative_epsilon, float))
+        assert (isinstance(x_equilibrium, np.ndarray))
+        assert (isinstance(equilibrium_mode, int))
         self.x_dim = x_dim
         self.num_modes = num_modes
         self.lyapunov_positivity_epsilon = lyapunov_positivity_epsilon
@@ -71,10 +69,11 @@ class SimplePWLLyapunov:
         self.constraints = [
             self.s1[0] >= 0, self.s2[0] >= 0,
             self.c[:, equilibrium_mode] @ self.x_equilibrium +
-            self.d[equilibrium_mode] == 0]
+            self.d[equilibrium_mode] == 0
+        ]
 
-    def add_lyapunov_derivative_in_mode(
-            self, mode_index,  mode_vertices, Ai, gi):
+    def add_lyapunov_derivative_in_mode(self, mode_index, mode_vertices, Ai,
+                                        gi):
         """
         Add the constraint (6) in the documentation above.
         s1 >= (cᵢᵀAᵢ+ε₂cᵢᵀ)vᵢʲ+cᵢᵀgᵢ+ε₂dᵢ
@@ -82,22 +81,23 @@ class SimplePWLLyapunov:
         @param Ai The dynamics in mode i in Ai*x+gi
         @param gi The dynamics in mode i in Ai*x+gi
         """
-        assert(isinstance(mode_index, int))
-        assert(isinstance(mode_vertices, np.ndarray))
-        assert(mode_vertices.shape[1] == self.x_dim)
-        assert(isinstance(Ai, np.ndarray))
-        assert(Ai.shape == (self.x_dim, self.x_dim))
-        assert(isinstance(gi, np.ndarray))
-        assert(gi.shape == (self.x_dim,))
-        self.constraints.extend(
-            [self.s1 >= self.c[:, mode_index] @
-             ((Ai + self.lyapunov_derivative_epsilon * np.eye(self.x_dim)) @
-              mode_vertices[j] + gi)
-             + self.lyapunov_derivative_epsilon * self.d[mode_index] for j in
-             range(mode_vertices.shape[0])])
+        assert (isinstance(mode_index, int))
+        assert (isinstance(mode_vertices, np.ndarray))
+        assert (mode_vertices.shape[1] == self.x_dim)
+        assert (isinstance(Ai, np.ndarray))
+        assert (Ai.shape == (self.x_dim, self.x_dim))
+        assert (isinstance(gi, np.ndarray))
+        assert (gi.shape == (self.x_dim, ))
+        self.constraints.extend([
+            self.s1 >= self.c[:, mode_index] @ (
+                (Ai + self.lyapunov_derivative_epsilon * np.eye(self.x_dim))
+                @ mode_vertices[j] + gi) +
+            self.lyapunov_derivative_epsilon * self.d[mode_index]
+            for j in range(mode_vertices.shape[0])
+        ])
 
-    def add_lyapunov_positivity_in_mode(
-            self, mode_index, mode_vertices, sign_v_minus_xstar):
+    def add_lyapunov_positivity_in_mode(self, mode_index, mode_vertices,
+                                        sign_v_minus_xstar):
         """
         Add constraint (7) in the documentation above.
         s2 >= -(cᵢᵀ-ε₁*sign(v̅ᵢʲ-x*))v̅ᵢʲ - dᵢ - ε₁*sign(v̅ᵢʲ-x*)x*
@@ -108,26 +108,28 @@ class SimplePWLLyapunov:
         @param sign_v_minus_xstar An array defining the sign of the box,
         sign(v̅ᵢʲ-x*).
         """
-        assert(isinstance(mode_index, int))
-        assert(isinstance(mode_vertices, np.ndarray))
-        assert(mode_vertices.shape[1] == self.x_dim)
-        assert(isinstance(sign_v_minus_xstar, np.ndarray))
-        assert(sign_v_minus_xstar.shape == (self.x_dim,))
+        assert (isinstance(mode_index, int))
+        assert (isinstance(mode_vertices, np.ndarray))
+        assert (mode_vertices.shape[1] == self.x_dim)
+        assert (isinstance(sign_v_minus_xstar, np.ndarray))
+        assert (sign_v_minus_xstar.shape == (self.x_dim, ))
         for j in range(self.x_dim):
             if sign_v_minus_xstar[j] == 1:
-                assert(np.all(mode_vertices[:, j] >= self.x_equilibrium[j]))
+                assert (np.all(mode_vertices[:, j] >= self.x_equilibrium[j]))
             elif sign_v_minus_xstar[j] == -1:
-                assert(np.all(mode_vertices[:, j] <= self.x_equilibrium[j]))
+                assert (np.all(mode_vertices[:, j] <= self.x_equilibrium[j]))
             else:
                 raise Exception(
                     f"add_lyapunov_positivity_in_mode: sign_v_minus_xstar[{j}]"
                     + "has to be either 1 or -1")
-        self.constraints.extend(
-            [self.s2[0] >= -(self.c[:, mode_index] -
-             self.lyapunov_positivity_epsilon * sign_v_minus_xstar) @
-             mode_vertices[j] - self.d[mode_index] -
-             self.lyapunov_positivity_epsilon * sign_v_minus_xstar @
-             self.x_equilibrium for j in range(mode_vertices.shape[0])])
+        self.constraints.extend([
+            self.s2[0] >=
+            -(self.c[:, mode_index] - self.lyapunov_positivity_epsilon *
+              sign_v_minus_xstar) @ mode_vertices[j] - self.d[mode_index] -
+            self.lyapunov_positivity_epsilon *
+            sign_v_minus_xstar @ self.x_equilibrium
+            for j in range(mode_vertices.shape[0])
+        ])
 
     def add_continuity_constraint(self, mode_i, mode_j, common_vertices):
         """
@@ -138,13 +140,13 @@ class SimplePWLLyapunov:
         @param common_vertices The vertices define the intersection of mode i
         and j. common_vertices[k] is the k'th vertex.
         """
-        assert(isinstance(mode_i, int))
-        assert(isinstance(mode_j, int))
-        assert(isinstance(common_vertices, np.ndarray))
-        assert(common_vertices.shape[1] == self.x_dim)
+        assert (isinstance(mode_i, int))
+        assert (isinstance(mode_j, int))
+        assert (isinstance(common_vertices, np.ndarray))
+        assert (common_vertices.shape[1] == self.x_dim)
         self.constraints.append(
-            common_vertices @ (self.c[:, mode_i] - self.c[:, mode_j])
-            + (self.d[mode_i] - self.d[mode_j]) *
+            common_vertices @ (self.c[:, mode_i] - self.c[:, mode_j]) +
+            (self.d[mode_i] - self.d[mode_j]) *
             np.ones(common_vertices.shape[1]) == 0)
 
     def solve(self, weight):
@@ -155,11 +157,11 @@ class SimplePWLLyapunov:
         @param weight The cost is (1-weight) * s1 + weight * s2.
         @return c_val, d_val, s1_val, s2_val.
         """
-        assert(isinstance(weight, float))
-        assert(weight > 0)
-        assert(weight < 1)
+        assert (isinstance(weight, float))
+        assert (weight > 0)
+        assert (weight < 1)
         prob = cp.Problem(
-            cp.Minimize((1-weight) * self.s1 + weight * self.s2),
+            cp.Minimize((1 - weight) * self.s1 + weight * self.s2),
             self.constraints)
         prob.solve(solver="GUROBI")
         return self.c.value, self.d.value, self.s1[0].value, self.s2[0].value

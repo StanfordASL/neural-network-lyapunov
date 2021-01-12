@@ -22,7 +22,6 @@ class ControlLyapunovFixedActivationPattern:
     max gᵀAx + min_i gᵀBuᵢ + gᵀd
     s.t Px ≤ q
     """
-
     def __init__(self, g, P, q, A, B, d, u_vertices):
         """
         @param g The gradient of the ReLU output along this pattern.
@@ -37,23 +36,23 @@ class ControlLyapunovFixedActivationPattern:
         xdim = g.size
         self.x = cp.Variable((xdim, 1))
         self.dtype = g.dtype
-        assert(P.dtype == self.dtype)
-        assert(q.dtype == self.dtype)
-        assert(A.dtype == self.dtype)
-        assert(B.dtype == self.dtype)
-        assert(d.dtype == self.dtype)
-        assert(u_vertices.dtype == self.dtype)
-        assert(g.shape[0] == xdim)
-        assert(g.shape[1] == 1)
-        assert(P.shape[1] == xdim)
-        assert(P.shape[0] == q.shape[0])
-        assert(q.shape[1] == 1)
-        assert(A.shape[0] == A.shape[1])
-        assert(A.shape[0] == xdim)
-        assert(B.shape[0] == A.shape[0])
-        assert(B.shape[1] == u_vertices.shape[0])
-        assert(d.shape[0] == xdim)
-        assert(d.shape[1] == 1)
+        assert (P.dtype == self.dtype)
+        assert (q.dtype == self.dtype)
+        assert (A.dtype == self.dtype)
+        assert (B.dtype == self.dtype)
+        assert (d.dtype == self.dtype)
+        assert (u_vertices.dtype == self.dtype)
+        assert (g.shape[0] == xdim)
+        assert (g.shape[1] == 1)
+        assert (P.shape[1] == xdim)
+        assert (P.shape[0] == q.shape[0])
+        assert (q.shape[1] == 1)
+        assert (A.shape[0] == A.shape[1])
+        assert (A.shape[0] == xdim)
+        assert (B.shape[0] == A.shape[0])
+        assert (B.shape[1] == u_vertices.shape[0])
+        assert (d.shape[0] == xdim)
+        assert (d.shape[1] == 1)
         cost_constant = np.min(g.T.dot(B * u_vertices)) + g.T.dot(d)
 
         self.objective = g.T * (self.x) + cost_constant
@@ -73,7 +72,6 @@ class ControlLyapunovFreeActivationPattern:
     ∀ x, ∃ u ∈ U, s.t ∂η/∂x * f(x,u) ≤ 0 (continuous time system)
     where f(x, u) is the state dynamics.
     """
-
     def __init__(self, model, dtype):
         """
         @param model A ReLU network.
@@ -85,9 +83,8 @@ class ControlLyapunovFreeActivationPattern:
         self.relu_free_pattern = relu_to_optimization.\
             ReLUFreePattern(self.model, self.dtype)
 
-    def generate_program_verify_continuous_affine_system(self, A_dyn, B_dyn,
-                                                         d_dyn, u_vertices,
-                                                         x_lo, x_up):
+    def generate_program_verify_continuous_affine_system(
+            self, A_dyn, B_dyn, d_dyn, u_vertices, x_lo, x_up):
         """
         For a continuous affine system
         ẋ = Ax + Bu + d
@@ -141,22 +138,22 @@ class ControlLyapunovFreeActivationPattern:
         column vectors. Ain1, Ain2, Ain3, Ain4, Ain5 are matrices.
         """
         x_size = self.relu_free_pattern.x_size
-        assert(A_dyn.dtype == self.dtype)
-        assert(B_dyn.dtype == self.dtype)
-        assert(d_dyn.dtype == self.dtype)
-        assert(u_vertices.dtype == self.dtype)
-        assert(x_lo.dtype == self.dtype)
-        assert(x_up.dtype == self.dtype)
-        assert(A_dyn.shape[0] == x_size)
-        assert(A_dyn.shape[1] == x_size)
+        assert (A_dyn.dtype == self.dtype)
+        assert (B_dyn.dtype == self.dtype)
+        assert (d_dyn.dtype == self.dtype)
+        assert (u_vertices.dtype == self.dtype)
+        assert (x_lo.dtype == self.dtype)
+        assert (x_up.dtype == self.dtype)
+        assert (A_dyn.shape[0] == x_size)
+        assert (A_dyn.shape[1] == x_size)
         num_u = B_dyn.shape[1]
-        assert(d_dyn.shape[0] == x_size)
-        assert(d_dyn.shape[1] == 1)
-        assert(u_vertices.shape[0] == num_u)
+        assert (d_dyn.shape[0] == x_size)
+        assert (d_dyn.shape[1] == 1)
+        assert (u_vertices.shape[0] == num_u)
         num_u_vertices = u_vertices.shape[1]
-        assert(x_lo.shape == (x_size,))
-        assert(x_up.shape == (x_size,))
-        assert(torch.all(torch.le(x_lo, x_up)))
+        assert (x_lo.shape == (x_size, ))
+        assert (x_up.shape == (x_size, ))
+        assert (torch.all(torch.le(x_lo, x_up)))
 
         (M, B1, B2, e) = self.relu_free_pattern.output_gradient()
         num_alpha = M.shape[0]
@@ -172,8 +169,9 @@ class ControlLyapunovFreeActivationPattern:
         Ain2_val = torch.empty(Ain2_indices.shape[1], dtype=self.dtype)
         Ain3_indices = torch.empty((2, num_u_vertices), dtype=torch.int64)
         Ain3_val = torch.empty(Ain3_indices.shape[1], dtype=self.dtype)
-        Ain4_indices = torch.empty((2, 4 * num_s + num_alpha * num_u_vertices
-                                    + B1.numel()), dtype=torch.int64)
+        Ain4_indices = torch.empty(
+            (2, 4 * num_s + num_alpha * num_u_vertices + B1.numel()),
+            dtype=torch.int64)
         Ain4_val = torch.empty(Ain4_indices.shape[1], dtype=self.dtype)
         Ain5_indices = torch.empty((2, B2.numel()), dtype=torch.int64)
         Ain5_val = torch.empty(Ain5_indices.shape[1], dtype=self.dtype)

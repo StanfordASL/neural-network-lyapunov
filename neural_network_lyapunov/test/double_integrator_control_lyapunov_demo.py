@@ -6,8 +6,7 @@ import torch
 import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D # noqa
-
+from mpl_toolkits.mplot3d import Axes3D  # noqa
 """
 This file exercise whole control lyapunov workflow on a toy double integrator
 system:
@@ -30,33 +29,36 @@ def generate_cost_to_go_mesh(num_samples, x_lo, x_up):
     N is the number of samples, cost_samples is a 1 x N numpy vector.
     cost_samples[:, i] is the cost-to-go for x_samples[:, i]
     """
-    assert(len(num_samples) == 2)
-    assert(x_lo.numel() == 2)
-    assert(x_up.numel() == 2)
-    assert(torch.all(x_lo <= x_up))
-    (pos_mesh, vel_mesh) = np.meshgrid(np.linspace(
-        x_lo[0], x_up[0], num_samples[0]),
-        np.linspace(x_lo[1], x_up[1], num_samples[1]))
+    assert (len(num_samples) == 2)
+    assert (x_lo.numel() == 2)
+    assert (x_up.numel() == 2)
+    assert (torch.all(x_lo <= x_up))
+    (pos_mesh,
+     vel_mesh) = np.meshgrid(np.linspace(x_lo[0], x_up[0], num_samples[0]),
+                             np.linspace(x_lo[1], x_up[1], num_samples[1]))
     x_samples = np.vstack((np.reshape(pos_mesh, -1), np.reshape(vel_mesh, -1)))
     Q = torch.tensor([[1, 0], [0, 10]], dtype=torch.float64)
     R = torch.tensor(2, dtype=torch.float64)
     (K, P) = double_integrator.double_integrator_lqr(Q, R)
 
-    cost_samples = (np.sum((P.numpy().dot(x_samples))
-                           * x_samples, axis=0)).reshape(1, -1)
+    cost_samples = (np.sum((P.numpy().dot(x_samples)) * x_samples,
+                           axis=0)).reshape(1, -1)
 
     return (x_samples, cost_samples)
 
 
 def draw_cost_to_go(ax, x_lo, x_up):
     (x_samples, cost_samples) = generate_cost_to_go_mesh([10, 20], x_lo, x_up)
-    ax.plot_surface(x_samples[0].reshape(20, 10), x_samples[1].reshape(
-        20, 10), cost_samples.reshape(20, 10), rstride=1, cstride=1)
+    ax.plot_surface(x_samples[0].reshape(20, 10),
+                    x_samples[1].reshape(20, 10),
+                    cost_samples.reshape(20, 10),
+                    rstride=1,
+                    cstride=1)
 
 
 def relu_training(num_samples, x_lo, x_up):
-    model = nn.Sequential(nn.Linear(2, 12), nn.ReLU(),
-                          nn.Linear(12, 12), nn.ReLU(), nn.Linear(12, 1))
+    model = nn.Sequential(nn.Linear(2, 12), nn.ReLU(), nn.Linear(12, 12),
+                          nn.ReLU(), nn.Linear(12, 1))
     model.double()
     loss_fn = nn.MSELoss(reduction="sum")
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -69,7 +71,7 @@ def relu_training(num_samples, x_lo, x_up):
     num_epoch = 1000
     for epoch in range(num_epoch):
         cost_pred = model(x_tensor)
-        loss = loss_fn(cost_pred, cost_tensor)/cost_samples.size
+        loss = loss_fn(cost_pred, cost_tensor) / cost_samples.size
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -105,16 +107,18 @@ def verify_control_lyapunov(model, x_lo, x_up):
             x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
     z = cp.Variable(mip_constr_return.Ain_slack.shape[1])
     constraints = [
-        constraint1, mip_constr_return.Ain_input.detach().numpy() * x +
-        mip_constr_return.Ain_slack.detach().numpy() * z
-        + mip_constr_return.Ain_binary.detach().numpy() * beta <=
+        constraint1,
+        mip_constr_return.Ain_input.detach().numpy() * x +
+        mip_constr_return.Ain_slack.detach().numpy() * z +
+        mip_constr_return.Ain_binary.detach().numpy() * beta <=
         mip_constr_return.rhs_in.squeeze().detach().numpy(),
         mip_constr_return.Aeq_input.detach().numpy() * x +
         mip_constr_return.Aeq_slack.detach().numpy() * z +
-        mip_constr_return.Aeq_binary.detach().numpy() * beta ==
-        mip_constr_return.rhs_eq.squeeze().detach().numpy()]
-    objective = cp.Maximize(
-        c1.detach().numpy().T * s + t + c2.detach().numpy().T * alpha)
+        mip_constr_return.Aeq_binary.detach().numpy() *
+        beta == mip_constr_return.rhs_eq.squeeze().detach().numpy()
+    ]
+    objective = cp.Maximize(c1.detach().numpy().T * s + t +
+                            c2.detach().numpy().T * alpha)
     cp_prob = cp.Problem(objective, constraints)
     cp_prob.solve(solver=cp.GUROBI, verbose=True)
     if (cp_prob.value <= 0):

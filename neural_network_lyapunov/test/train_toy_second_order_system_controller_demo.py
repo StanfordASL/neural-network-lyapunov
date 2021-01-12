@@ -17,12 +17,15 @@ if __name__ == "__main__":
     x_up = torch.tensor([5, 5], dtype=dtype)
     u_lo = torch.tensor([-10], dtype=dtype)
     u_up = torch.tensor([10], dtype=dtype)
-    forward_network = utils.setup_relu(
-        (3, 2, 1), params=None, negative_slope=0.1, bias=True, dtype=dtype)
+    forward_network = utils.setup_relu((3, 2, 1),
+                                       params=None,
+                                       negative_slope=0.1,
+                                       bias=True,
+                                       dtype=dtype)
     dt = 0.01
     q_shift = 20  # q_shift + q_lo should be larger than 0.
-    forward_network[0].weight.data = torch.tensor(
-        [[0, 1, 0], [0, 0, dt]], dtype=dtype)
+    forward_network[0].weight.data = torch.tensor([[0, 1, 0], [0, 0, dt]],
+                                                  dtype=dtype)
     forward_network[0].bias.data = torch.tensor([q_shift, 0], dtype=dtype)
     forward_network[2].weight.data = torch.tensor([[1, 1]], dtype=dtype)
     forward_network[2].bias.data = torch.tensor([-q_shift], dtype=dtype)
@@ -37,23 +40,28 @@ if __name__ == "__main__":
     controller_network.weight.data = torch.tensor(K, dtype=dtype).reshape(
         (1, -1))
     controller_network.bias.data = -K[0] * q_equilibrium
-    lyapunov_relu = utils.setup_relu(
-        (2, 4, 1), params=None, negative_slope=0.01, bias=True,
-        dtype=torch.float64)
+    lyapunov_relu = utils.setup_relu((2, 4, 1),
+                                     params=None,
+                                     negative_slope=0.01,
+                                     bias=True,
+                                     dtype=torch.float64)
 
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_network, forward_system.x_equilibrium,
-        u_equilibrium, u_lo.detach().numpy(), u_up.detach().numpy())
+        u_equilibrium,
+        u_lo.detach().numpy(),
+        u_up.detach().numpy())
 
-    lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(
-        closed_loop_system, lyapunov_relu)
+    lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
+                                                     lyapunov_relu)
 
     V_lambda = 1.
     R = torch.tensor([[1, 1], [-1, 1]], dtype=torch.float64)
     R_options = train_lyapunov.SearchROptions((3, 2), 0.01)
     R_options.set_variable_value(np.array([[1, 0.1], [0.1, 1], [1, -1]]))
-    dut = train_lyapunov.TrainLyapunovReLU(
-        lyap, V_lambda, forward_system.x_equilibrium, R_options)
+    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
+                                           forward_system.x_equilibrium,
+                                           R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5

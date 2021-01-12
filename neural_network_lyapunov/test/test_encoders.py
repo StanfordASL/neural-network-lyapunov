@@ -5,7 +5,6 @@ import neural_network_lyapunov.encoders as encoders
 
 
 class TestEncoders(unittest.TestCase):
-
     def setUp(self):
         z_dim = 5
         image_width = 48
@@ -27,8 +26,8 @@ class TestEncoders(unittest.TestCase):
 
     def test_encoder_decoder_pairs(self):
         def check_pair(enc, dec):
-            x_in = torch.rand((3, enc.num_channels_in,
-                              enc.image_width, enc.image_height))
+            x_in = torch.rand(
+                (3, enc.num_channels_in, enc.image_width, enc.image_height))
             # latent dim is OK
             z = enc(x_in)
             self.assertEqual(len(z), 2)
@@ -41,6 +40,7 @@ class TestEncoders(unittest.TestCase):
             # all output 0 < x < 1
             self.assertTrue(torch.all(x_out >= 0))
             self.assertTrue(torch.all(x_out <= 1))
+
         for pair in self.pairs:
             check_pair(pair[0], pair[1])
 

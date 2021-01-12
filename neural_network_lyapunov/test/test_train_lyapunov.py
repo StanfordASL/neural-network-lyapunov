@@ -19,22 +19,20 @@ def setup_relu():
     linear1.bias.data = torch.tensor([-0.1, 1.0, 0.5], dtype=dtype)
     linear2 = nn.Linear(3, 4)
     linear2.weight.data = torch.tensor(
-            [[-1, -0.5, 1.5], [2, -1.5, 2.6], [-2, -0.3, -.4],
-             [0.2, -0.5, 1.2]],
-            dtype=dtype)
+        [[-1, -0.5, 1.5], [2, -1.5, 2.6], [-2, -0.3, -.4], [0.2, -0.5, 1.2]],
+        dtype=dtype)
     linear2.bias.data = torch.tensor([-0.3, 0.2, 0.7, 0.4], dtype=dtype)
     linear3 = nn.Linear(4, 1)
     linear3.weight.data = torch.tensor([[-.4, .5, -.6, 0.3]], dtype=dtype)
     linear3.bias.data = torch.tensor([-0.9], dtype=dtype)
-    relu1 = nn.Sequential(
-        linear1, nn.LeakyReLU(0.1), linear2, nn.LeakyReLU(0.1), linear3,
-        nn.LeakyReLU(0.1))
+    relu1 = nn.Sequential(linear1, nn.LeakyReLU(0.1), linear2,
+                          nn.LeakyReLU(0.1), linear3, nn.LeakyReLU(0.1))
     return relu1
 
 
 def setup_state_samples_all(mesh_size):
-    assert(isinstance(mesh_size, tuple))
-    assert(len(mesh_size) == 2)
+    assert (isinstance(mesh_size, tuple))
+    assert (len(mesh_size) == 2)
     dtype = torch.float64
     (samples_x, samples_y) = torch.meshgrid(
         torch.linspace(-1., 1., mesh_size[0], dtype=dtype),
@@ -50,41 +48,41 @@ def setup_state_samples_all(mesh_size):
 class TestSearchROptions(unittest.TestCase):
     def test_constructor(self):
         dut = train_lyapunov.SearchROptions((3, 2), 0.01)
-        self.assertEqual(dut._variables.shape, (5,))
+        self.assertEqual(dut._variables.shape, (5, ))
         self.assertTrue(dut._variables.requires_grad)
         self.assertEqual(dut.epsilon, 0.01)
         self.assertFalse(dut.fixed_R)
 
         # Test a square R.
         dut = train_lyapunov.SearchROptions((2, 2), 0.01)
-        self.assertEqual(dut._variables.shape, (3,))
+        self.assertEqual(dut._variables.shape, (3, ))
 
     def test_R(self):
         dut = train_lyapunov.SearchROptions((3, 2), 0.01)
-        dut._variables = torch.tensor(
-            [0.2, 0.3, 0.5, 1.2, 1.5], dtype=torch.float64, requires_grad=True)
+        dut._variables = torch.tensor([0.2, 0.3, 0.5, 1.2, 1.5],
+                                      dtype=torch.float64,
+                                      requires_grad=True)
         self.assertTrue(dut._variables.requires_grad)
         R = dut.R()
         L_expected = np.array([[0.2, 0], [0.3, 0.5]])
-        R_expected = np.vstack((
-            L_expected @ L_expected.T + dut.epsilon * np.eye(2),
-            np.array([[1.2, 1.5]])))
+        R_expected = np.vstack(
+            (L_expected @ L_expected.T + dut.epsilon * np.eye(2),
+             np.array([[1.2, 1.5]])))
         np.testing.assert_allclose(R_expected, R.detach().numpy())
 
         # Now check the gradient
         (R.trace() + R[2:, :].sum()).backward()
-        np.testing.assert_allclose(
-            dut._variables.grad[:3].detach().numpy(),
-            2 * dut._variables[:3].detach().numpy())
-        np.testing.assert_allclose(
-            dut._variables.grad[3:].detach().numpy(), np.ones((2,)))
+        np.testing.assert_allclose(dut._variables.grad[:3].detach().numpy(),
+                                   2 * dut._variables[:3].detach().numpy())
+        np.testing.assert_allclose(dut._variables.grad[3:].detach().numpy(),
+                                   np.ones((2, )))
 
     def test_variables(self):
         dut = train_lyapunov.SearchROptions((3, 2), 0.01)
         variables = dut.variables()
         self.assertIsInstance(variables, list)
         self.assertEqual(len(variables), 1)
-        self.assertEqual(variables[0].shape, (5,))
+        self.assertEqual(variables[0].shape, (5, ))
 
     def test_set_variable_value(self):
         dut = train_lyapunov.SearchROptions((4, 2), 0.01)
@@ -99,12 +97,12 @@ class TestSearchROptions(unittest.TestCase):
 
 class TestFixedROptions(unittest.TestCase):
     def test(self):
-        R_val = torch.tensor(
-            [[1., 0.], [0., 1.], [1., 1.]], dtype=torch.float64)
+        R_val = torch.tensor([[1., 0.], [0., 1.], [1., 1.]],
+                             dtype=torch.float64)
         dut = train_lyapunov.FixedROptions(R_val)
         self.assertTrue(dut.fixed_R)
-        np.testing.assert_allclose(
-            dut.R().detach().numpy(), R_val.detach().numpy())
+        np.testing.assert_allclose(dut.R().detach().numpy(),
+                                   R_val.detach().numpy())
         variables = dut.variables()
         self.assertIsInstance(variables, list)
         self.assertEqual(len(variables), 0)
@@ -118,10 +116,11 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         relu = setup_relu()
         lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
             system, relu)
-        R_options = train_lyapunov.FixedROptions(torch.tensor(
-            [[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
-        dut = train_lyapunov.TrainLyapunovReLU(
-            lyapunov_hybrid_system, V_lambda, x_equilibrium, R_options)
+        R_options = train_lyapunov.FixedROptions(
+            torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
+        dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system,
+                                               V_lambda, x_equilibrium,
+                                               R_options)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.add_positivity_adversarial_state = True
@@ -129,8 +128,9 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         dut.max_sample_pool_size = 400
         state_samples_all = setup_state_samples_all((21, 21))
         state_samples_next = torch.stack([
-            system.step_forward(state_samples_all[i]) for i in
-            range(state_samples_all.shape[0])])
+            system.step_forward(state_samples_all[i])
+            for i in range(state_samples_all.shape[0])
+        ])
         torch.manual_seed(0)
         positivity_state_samples = state_samples_all.clone()
         derivative_state_samples = state_samples_all.clone()
@@ -146,19 +146,15 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                 dut.lyapunov_positivity_mip_cost_weight,
                 dut.lyapunov_derivative_mip_cost_weight)
 
-        self.assertEqual(
-            positivity_state_samples.shape[0] + 1,
-            positivity_state_samples_new.shape[0])
-        self.assertEqual(
-            derivative_state_samples.shape[0] + 1,
-            derivative_state_samples_new.shape[0])
-        self.assertEqual(
-            derivative_state_samples_next.shape[0] + 1,
-            derivative_state_samples_next_new.shape[0])
+        self.assertEqual(positivity_state_samples.shape[0] + 1,
+                         positivity_state_samples_new.shape[0])
+        self.assertEqual(derivative_state_samples.shape[0] + 1,
+                         derivative_state_samples_new.shape[0])
+        self.assertEqual(derivative_state_samples_next.shape[0] + 1,
+                         derivative_state_samples_next_new.shape[0])
         self.assertAlmostEqual(
-            loss.item(),
-            (positivity_sample_loss + derivative_sample_loss +
-             positivity_mip_loss + derivative_mip_loss).item())
+            loss.item(), (positivity_sample_loss + derivative_sample_loss +
+                          positivity_mip_loss + derivative_mip_loss).item())
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
         relu_at_equilibrium = relu.forward(x_equilibrium)
@@ -253,10 +249,16 @@ class TestTrainLyapunov(unittest.TestCase):
 
         def instantaneous_cost(x):
             return x @ x
-        result = dut.train(
-            self.system, self.relu, V_lambda, x_equilibrium,
-            instantaneous_cost, state_samples_all, N, True,
-            R=torch.eye(2, dtype=torch.float64))
+
+        result = dut.train(self.system,
+                           self.relu,
+                           V_lambda,
+                           x_equilibrium,
+                           instantaneous_cost,
+                           state_samples_all,
+                           N,
+                           True,
+                           R=torch.eye(2, dtype=torch.float64))
         self.assertTrue(result[0])
         relu_at_equilibrium = self.relu.forward(x_equilibrium)
         # Now check the total loss.
@@ -267,10 +269,10 @@ class TestTrainLyapunov(unittest.TestCase):
                     [state_samples_all[i] for i in
                      range(state_samples_all.shape[0])], N, instantaneous_cost,
                     True)
-            x0_samples = torch.stack([
-                pair[0] for pair in state_cost_samples], dim=0)
-            cost_samples = torch.stack([
-                pair[1] for pair in state_cost_samples])
+            x0_samples = torch.stack([pair[0] for pair in state_cost_samples],
+                                     dim=0)
+            cost_samples = torch.stack(
+                [pair[1] for pair in state_cost_samples])
             relu_output = self.relu(x0_samples).squeeze()
             error = relu_output.squeeze() - relu_at_equilibrium + \
                 V_lambda * torch.norm(

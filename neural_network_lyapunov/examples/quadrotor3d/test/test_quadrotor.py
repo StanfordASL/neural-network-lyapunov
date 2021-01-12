@@ -124,11 +124,9 @@ class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
             rpy_current = x_val[3:6]
             vel_current = x_val[6:9]
             delta_vel_rpy = self.dut.dynamics_relu(
-                torch.cat((rpy_current,
-                           u_val))) - self.dut.dynamics_relu(
-                               torch.cat((torch.zeros(
-                                   (3, ),
-                                   dtype=self.dtype), self.dut.u_equilibrium)))
+                torch.cat((rpy_current, u_val))) - self.dut.dynamics_relu(
+                    torch.cat((torch.zeros(
+                        (3, ), dtype=self.dtype), self.dut.u_equilibrium)))
             vel_next = vel_current + delta_vel_rpy[:3]
             pos_next = pos_current + (vel_current + vel_next) * self.dut.dt / 2
             rpy_next = rpy_current + delta_vel_rpy[3:6]

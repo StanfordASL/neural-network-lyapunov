@@ -7,17 +7,18 @@ import numpy as np
 
 
 def setup_relu(relu_layer_width, params):
-    assert(isinstance(relu_layer_width, tuple))
+    assert (isinstance(relu_layer_width, tuple))
     dtype = torch.float64
 
     def set_param(linear, param_count):
-        linear.weight.data = params[
-            param_count: param_count +
-            linear.in_features * linear.out_features].clone().reshape((
-                linear.out_features, linear.in_features))
+        linear.weight.data = params[param_count:param_count +
+                                    linear.in_features *
+                                    linear.out_features].clone().reshape(
+                                        (linear.out_features,
+                                         linear.in_features))
         param_count += linear.in_features * linear.out_features
-        linear.bias.data = params[
-            param_count: param_count + linear.out_features].clone()
+        linear.bias.data = params[param_count:param_count +
+                                  linear.out_features].clone()
         param_count += linear.out_features
         return param_count
 
@@ -26,8 +27,8 @@ def setup_relu(relu_layer_width, params):
     for i in range(len(relu_layer_width)):
         next_layer_width = relu_layer_width[i+1] if \
             i < len(relu_layer_width)-1 else 1
-        linear_layers[i] = torch.nn.Linear(
-            relu_layer_width[i], next_layer_width).type(dtype)
+        linear_layers[i] = torch.nn.Linear(relu_layer_width[i],
+                                           next_layer_width).type(dtype)
         if params is None:
             pass
         else:
@@ -46,34 +47,33 @@ def test_project_gradient(relu, loss1, loss2, mode):
         if p.grad is not None:
             p.grad.data.zero_()
     loss1.backward(retain_graph=True)
-    n1 = torch.cat([
-        p.grad.clone().reshape((-1,)) for p in relu.parameters()])
+    n1 = torch.cat([p.grad.clone().reshape((-1, )) for p in relu.parameters()])
     for p in relu.parameters():
         if p.grad is not None:
             p.grad.data.zero_()
     loss2.backward(retain_graph=True)
-    n2 = torch.cat([
-        p.grad.clone().reshape((-1,)) for p in relu.parameters()])
+    n2 = torch.cat([p.grad.clone().reshape((-1, )) for p in relu.parameters()])
     for p in relu.parameters():
         if p.grad is not None:
             p.grad.data.zero_()
-    need_projection, n1, n2 = train_utils.project_gradient(
-        relu, loss1, loss2, mode, retain_graph=True)
-    grad = torch.cat([
-        p.grad.clone().reshape((-1,)) for p in relu.parameters()])
+    need_projection, n1, n2 = train_utils.project_gradient(relu,
+                                                           loss1,
+                                                           loss2,
+                                                           mode,
+                                                           retain_graph=True)
+    grad = torch.cat(
+        [p.grad.clone().reshape((-1, )) for p in relu.parameters()])
     if n1 @ n2 < 0:
         np.testing.assert_equal(need_projection, True)
         n1_perp = n1 - n1 @ n2 / (n2 @ n2) * n2
         n2_perp = n2 - n1 @ n2 / (n1 @ n1) * n1
         if mode == train_utils.ProjectGradientMode.LOSS1:
             np.testing.assert_almost_equal((grad @ n2).item(), 0)
-            np.testing.assert_allclose(
-                (n1-grad), n1 @ n2/(n2 @ n2) * n2)
+            np.testing.assert_allclose((n1 - grad), n1 @ n2 / (n2 @ n2) * n2)
             np.testing.assert_allclose(grad, n1_perp)
         elif mode == train_utils.ProjectGradientMode.LOSS2:
             np.testing.assert_almost_equal((grad @ n1).item(), 0)
-            np.testing.assert_allclose(
-                (n2-grad), n1 @ n2/(n1 @ n1) * n1)
+            np.testing.assert_allclose((n2 - grad), n1 @ n2 / (n1 @ n1) * n1)
             np.testing.assert_allclose(grad, n2_perp)
         elif mode == train_utils.ProjectGradientMode.BOTH:
             np.testing.assert_almost_equal(grad @ n1, n1_perp @ n1_perp)
@@ -93,14 +93,18 @@ def test_project_gradient(relu, loss1, loss2, mode):
 class TestProjectGradient(unittest.TestCase):
     def test1(self):
         dtype = torch.float64
-        relu1 = setup_relu(
-            (2, 3), torch.tensor([
-                0.1, 0.2, 0.3, -0.1, 2.1, 3.2, 0.5, -0.2, 4.5, 1.4, 0.5, 2.5,
-                -2.3], dtype=dtype))
-        relu2 = setup_relu(
-            (2, 4), torch.tensor([
-                0.1, 0.2, 0.3, -0.1, 2.1, 3.2, 0.5, -0.2, 4.5, 1.4, 0.5, 2.5,
-                -2.3, 4.2, 0.3, 1.5, -0.3], dtype=dtype))
+        relu1 = setup_relu((2, 3),
+                           torch.tensor([
+                               0.1, 0.2, 0.3, -0.1, 2.1, 3.2, 0.5, -0.2, 4.5,
+                               1.4, 0.5, 2.5, -2.3
+                           ],
+                                        dtype=dtype))
+        relu2 = setup_relu((2, 4),
+                           torch.tensor([
+                               0.1, 0.2, 0.3, -0.1, 2.1, 3.2, 0.5, -0.2, 4.5,
+                               1.4, 0.5, 2.5, -2.3, 4.2, 0.3, 1.5, -0.3
+                           ],
+                                        dtype=dtype))
         x = torch.tensor([2.0, 1.5], dtype=dtype)
         for relu in (relu1, relu2):
             y = relu(x)
@@ -121,12 +125,16 @@ class TestProjectGradient(unittest.TestCase):
                          train_utils.ProjectGradientMode.LOSS2):
                 # Now project the gradient of loss1 and -loss1, they have
                 # exact opposite gradient, so the projected gradient is 0.
-                train_utils.project_gradient(
-                    relu, loss1, -loss1, mode, retain_graph=True)
-                grad = torch.cat([
-                    p.grad.reshape((-1,)) for p in relu.parameters()])
-                np.testing.assert_allclose(
-                    grad.detach().numpy(), np.zeros(grad.shape), atol=3e-13)
+                train_utils.project_gradient(relu,
+                                             loss1,
+                                             -loss1,
+                                             mode,
+                                             retain_graph=True)
+                grad = torch.cat(
+                    [p.grad.reshape((-1, )) for p in relu.parameters()])
+                np.testing.assert_allclose(grad.detach().numpy(),
+                                           np.zeros(grad.shape),
+                                           atol=3e-13)
 
 
 if __name__ == "__main__":

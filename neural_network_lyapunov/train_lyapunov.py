@@ -17,7 +17,6 @@ class SearchROptions:
     When search for the Lyapunov function, we use the 1-norm of |R*(x-x*)|₁.
     This class specificies the options to search for R.
     """
-
     def __init__(self, R_size, epsilon):
         """
         We want R to be a full column rank matrix, with size m x n and m >= n.
@@ -27,46 +26,50 @@ class SearchROptions:
         @param R_size the size of R, with R_size[0] >= R_size[1]
         @param epsilon eps in the documentation above.
         """
-        assert(len(R_size) == 2)
-        assert(R_size[0] >= R_size[1])
+        assert (len(R_size) == 2)
+        assert (R_size[0] >= R_size[1])
         self.R_size = R_size
-        self._variables = torch.empty((
-            int(R_size[1] * (R_size[1]+1)/2) + (R_size[0] - R_size[1]) *
-            R_size[1],), dtype=torch.float64, requires_grad=True)
-        assert(epsilon > 0)
+        self._variables = torch.empty((int(R_size[1] * (R_size[1] + 1) / 2) +
+                                       (R_size[0] - R_size[1]) * R_size[1], ),
+                                      dtype=torch.float64,
+                                      requires_grad=True)
+        assert (epsilon > 0)
         self.epsilon = epsilon
 
     def set_variable_value(self, R_val: np.ndarray):
-        assert(isinstance(R_val, np.ndarray))
-        assert(R_val.shape == self.R_size)
+        assert (isinstance(R_val, np.ndarray))
+        assert (R_val.shape == self.R_size)
         R_top = R_val[:R_val.shape[1], :]
         R_top = (R_top + R_top.T) / 2
         L = np.linalg.cholesky(R_top - self.epsilon * np.eye(R_val.shape[1]))
         L_entry_count = 0
-        variable_val = np.empty((self._variables.shape[0],))
+        variable_val = np.empty((self._variables.shape[0], ))
         for i in range(self.R_size[1]):
             variable_val[L_entry_count:L_entry_count+self.R_size[1]-i] =\
                 L[i:, i]
             L_entry_count += self.R_size[1] - i
-        variable_val[L_entry_count:] = R_val[self.R_size[1]:, :].reshape((-1,))
+        variable_val[L_entry_count:] = R_val[self.R_size[1]:, :].reshape(
+            (-1, ))
         self._variables = torch.from_numpy(variable_val)
         self._variables.requires_grad = True
 
     def R(self):
         L_entry_count = int(self.R_size[1] * (self.R_size[1] + 1) / 2)
         L_lower_list = torch.split(
-            self._variables[:L_entry_count], np.arange(
-                1, self.R_size[1]+1, 1, dtype=int)[::-1].tolist())
+            self._variables[:L_entry_count],
+            np.arange(1, self.R_size[1] + 1, 1, dtype=int)[::-1].tolist())
         L_list = []
         for i in range(self.R_size[1]):
-            L_list.append(torch.zeros((i,), dtype=torch.float64))
+            L_list.append(torch.zeros((i, ), dtype=torch.float64))
             L_list.append(L_lower_list[i])
         L = torch.cat(L_list).reshape((self.R_size[1], self.R_size[1])).T
-        R_bottom = self._variables[L_entry_count:].reshape((
-            self.R_size[0]-self.R_size[1], self.R_size[1]))
-        R = torch.cat((
-            L @ L.T + self.epsilon * torch.eye(
-                self.R_size[1], dtype=torch.float64), R_bottom), dim=0)
+        R_bottom = self._variables[L_entry_count:].reshape(
+            (self.R_size[0] - self.R_size[1], self.R_size[1]))
+        R = torch.cat(
+            (L @ L.T +
+             self.epsilon * torch.eye(self.R_size[1], dtype=torch.float64),
+             R_bottom),
+            dim=0)
         return R
 
     def variables(self):
@@ -87,9 +90,8 @@ class FixedROptions:
     This class specificies that R is fixed.
     R should be fixed to a full column rank matrix.
     """
-
     def __init__(self, R: torch.Tensor):
-        assert(isinstance(R, torch.Tensor))
+        assert (isinstance(R, torch.Tensor))
         self._R = R
 
     def R(self):
@@ -127,9 +129,8 @@ class TrainLyapunovReLU:
     R*(x - x*).
     hinge(z) = max(z + margin, 0) where margin is a given scalar.
     """
-
-    def __init__(
-            self, lyapunov_hybrid_system, V_lambda, x_equilibrium, R_options):
+    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium,
+                 R_options):
         """
         @param lyapunov_hybrid_system This input should define a common
         interface
@@ -146,13 +147,13 @@ class TrainLyapunovReLU:
         @param R_options Either SearchROptions or FixedROptions.
         """
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
-        assert(isinstance(V_lambda, float))
+        assert (isinstance(V_lambda, float))
         self.V_lambda = V_lambda
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim,))
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim, ))
         self.x_equilibrium = x_equilibrium
-        assert(isinstance(R_options, SearchROptions) or
-               isinstance(R_options, FixedROptions))
+        assert (isinstance(R_options, SearchROptions)
+                or isinstance(R_options, FixedROptions))
         self.R_options = R_options
         # The learning rate of the optimizer
         self.learning_rate = 0.003
@@ -237,7 +238,8 @@ class TrainLyapunovReLU:
 
         # All the Lyapunov derivative MIP params (except pool solutions).
         self.lyapunov_derivative_mip_params = {
-            gurobipy.GRB.Param.OutputFlag: False}
+            gurobipy.GRB.Param.OutputFlag: False
+        }
 
         # Early termination: if None, will
         # find the most adversarial state, otherwise will terminate the search
@@ -254,13 +256,12 @@ class TrainLyapunovReLU:
         self.lyapunov_positivity_last_x_adv = None
         self.lyapunov_derivative_last_x_adv = None
 
-    def total_loss(
-            self, positivity_state_samples, derivative_state_samples,
-            derivative_state_samples_next,
-            lyapunov_positivity_sample_cost_weight,
-            lyapunov_derivative_sample_cost_weight,
-            lyapunov_positivity_mip_cost_weight,
-            lyapunov_derivative_mip_cost_weight):
+    def total_loss(self, positivity_state_samples, derivative_state_samples,
+                   derivative_state_samples_next,
+                   lyapunov_positivity_sample_cost_weight,
+                   lyapunov_derivative_sample_cost_weight,
+                   lyapunov_positivity_mip_cost_weight,
+                   lyapunov_derivative_mip_cost_weight):
         """
         Compute the total loss as the summation of
         1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
@@ -286,19 +287,16 @@ class TrainLyapunovReLU:
         positivity_mip_loss is weight * cost3
         derivative_mip_loss is weight * cost4
         """
-        assert(isinstance(positivity_state_samples, torch.Tensor))
-        assert(isinstance(derivative_state_samples, torch.Tensor))
-        assert(isinstance(derivative_state_samples_next, torch.Tensor))
-        assert(
-            positivity_state_samples.shape[1] ==
-            self.lyapunov_hybrid_system.system.x_dim)
-        assert(
-            derivative_state_samples.shape[1] ==
-            self.lyapunov_hybrid_system.system.x_dim)
-        assert(
-            derivative_state_samples_next.shape ==
-            (derivative_state_samples.shape[0],
-             self.lyapunov_hybrid_system.system.x_dim))
+        assert (isinstance(positivity_state_samples, torch.Tensor))
+        assert (isinstance(derivative_state_samples, torch.Tensor))
+        assert (isinstance(derivative_state_samples_next, torch.Tensor))
+        assert (positivity_state_samples.shape[1] ==
+                self.lyapunov_hybrid_system.system.x_dim)
+        assert (derivative_state_samples.shape[1] ==
+                self.lyapunov_hybrid_system.system.x_dim)
+        assert (derivative_state_samples_next.shape == (
+            derivative_state_samples.shape[0],
+            self.lyapunov_hybrid_system.system.x_dim))
         dtype = self.lyapunov_hybrid_system.system.dtype
         if lyapunov_positivity_mip_cost_weight is not None:
             lyapunov_positivity_as_milp_return = self.lyapunov_hybrid_system.\
@@ -325,8 +323,8 @@ class TrainLyapunovReLU:
             lyapunov_positivity_mip_obj = \
                 lyapunov_positivity_mip.gurobi_model.ObjVal
             if self.lyapunov_positivity_mip_warmstart:
-                self.lyapunov_positivity_last_x_adv = torch.tensor([
-                    v.x for v in lyapunov_positivity_as_milp_return[1]],
+                self.lyapunov_positivity_last_x_adv = torch.tensor(
+                    [v.x for v in lyapunov_positivity_as_milp_return[1]],
                     dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_positivity_mip_obj = np.nan
@@ -357,8 +355,8 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip_obj = \
                 lyapunov_derivative_mip.gurobi_model.ObjVal
 
-            relu_zeta_val = np.array([
-                np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
+            relu_zeta_val = np.array(
+                [np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
             if self.output_flag:
                 print("lyapunov derivative MIP Relu activation: "
                       f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
@@ -366,8 +364,8 @@ class TrainLyapunovReLU:
                     "adversarial x " +
                     f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
             if self.lyapunov_derivative_mip_warmstart:
-                self.lyapunov_derivative_last_x_adv = torch.tensor([
-                    v.x for v in lyapunov_derivative_as_milp_return[1]],
+                self.lyapunov_derivative_last_x_adv = torch.tensor(
+                    [v.x for v in lyapunov_derivative_as_milp_return[1]],
                     dtype=self.lyapunov_hybrid_system.system.dtype)
         else:
             lyapunov_derivative_mip_obj = np.nan
@@ -416,22 +414,25 @@ class TrainLyapunovReLU:
         # state of the total loss.
         if self.add_positivity_adversarial_state and \
                 lyapunov_positivity_mip_cost_weight is not None:
-            positivity_mip_adversarial = torch.tensor([
-                v.x for v in lyapunov_positivity_as_milp_return[1]],
+            positivity_mip_adversarial = torch.tensor(
+                [v.x for v in lyapunov_positivity_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
-            positivity_state_samples = torch.cat(
-                [positivity_state_samples,
-                 positivity_mip_adversarial.unsqueeze(0)], dim=0)
+            positivity_state_samples = torch.cat([
+                positivity_state_samples,
+                positivity_mip_adversarial.unsqueeze(0)
+            ],
+                                                 dim=0)
         if self.add_derivative_adversarial_state and \
                 lyapunov_derivative_mip_cost_weight is not None:
-            derivative_mip_adversarial = torch.tensor([
-                v.x for v in lyapunov_derivative_as_milp_return[1]],
+            derivative_mip_adversarial = torch.tensor(
+                [v.x for v in lyapunov_derivative_as_milp_return[1]],
                 dtype=self.lyapunov_hybrid_system.system.dtype)
             if isinstance(self.lyapunov_hybrid_system.system,
                           hybrid_linear_system.AutonomousHybridLinearSystem):
-                derivative_mip_adversarial_mode = np.argwhere(np.array(
-                    [v.x for v in lyapunov_derivative_as_milp_return[3]])
-                    > 0.99)[0][0]
+                derivative_mip_adversarial_mode = np.argwhere(
+                    np.array([
+                        v.x for v in lyapunov_derivative_as_milp_return[3]
+                    ]) > 0.99)[0][0]
                 derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
                     system.step_forward(
                         derivative_mip_adversarial,
@@ -439,12 +440,16 @@ class TrainLyapunovReLU:
             else:
                 derivative_mip_adversarial_next = self.lyapunov_hybrid_system.\
                     system.step_forward(derivative_mip_adversarial)
-            derivative_state_samples = torch.cat(
-                [derivative_state_samples,
-                 derivative_mip_adversarial.unsqueeze(0)], dim=0)
-            derivative_state_samples_next = torch.cat(
-                [derivative_state_samples_next,
-                 derivative_mip_adversarial_next.unsqueeze(0)], dim=0)
+            derivative_state_samples = torch.cat([
+                derivative_state_samples,
+                derivative_mip_adversarial.unsqueeze(0)
+            ],
+                                                 dim=0)
+            derivative_state_samples_next = torch.cat([
+                derivative_state_samples_next,
+                derivative_mip_adversarial_next.unsqueeze(0)
+            ],
+                                                      dim=0)
 
         if lyapunov_positivity_sample_cost_weight != 0 and\
                 positivity_state_samples.shape[0] > 0:
@@ -496,9 +501,8 @@ class TrainLyapunovReLU:
     def _save_network(self, iter_count):
         if self.save_network_path:
             if iter_count % self.save_network_iterations == 0:
-                torch.save(
-                    self.lyapunov_hybrid_system.lyapunov_relu,
-                    self.save_network_path + f'{"/lyapunov.pt"}')
+                torch.save(self.lyapunov_hybrid_system.lyapunov_relu,
+                           self.save_network_path + f'{"/lyapunov.pt"}')
                 torch.save(self.R_options.R(),
                            self.save_network_path + f'{"/R.pt"}')
                 if isinstance(self.lyapunov_hybrid_system.system,
@@ -523,22 +527,23 @@ class TrainLyapunovReLU:
         train_start_time = time.time()
         if self.output_flag:
             self.print()
-        assert(isinstance(state_samples_all, torch.Tensor))
-        assert(
-            state_samples_all.shape[1] ==
-            self.lyapunov_hybrid_system.system.x_dim)
+        assert (isinstance(state_samples_all, torch.Tensor))
+        assert (state_samples_all.shape[1] ==
+                self.lyapunov_hybrid_system.system.x_dim)
         positivity_state_samples = state_samples_all.clone()
         derivative_state_samples = state_samples_all.clone()
         if (state_samples_all.shape[0] > 0):
             derivative_state_samples_next = torch.stack([
                 self.lyapunov_hybrid_system.system.step_forward(
-                    derivative_state_samples[i]) for i in
-                range(derivative_state_samples.shape[0])], dim=0)
+                    derivative_state_samples[i])
+                for i in range(derivative_state_samples.shape[0])
+            ],
+                                                        dim=0)
         else:
             derivative_state_samples_next = torch.empty_like(state_samples_all)
         iter_count = 0
         if isinstance(
-            self.lyapunov_hybrid_system.system,
+                self.lyapunov_hybrid_system.system,
                 feedback_system.FeedbackSystem) and self.search_controller:
             # For a feedback system, we train both the Lyapunov network
             # parameters and the controller network parameters.
@@ -552,11 +557,12 @@ class TrainLyapunovReLU:
                 self.R_options.variables()
 
         if self.optimizer == "Adam":
-            optimizer = torch.optim.Adam(
-                training_params, lr=self.learning_rate)
+            optimizer = torch.optim.Adam(training_params,
+                                         lr=self.learning_rate)
         elif self.optimizer == "SGD":
-            optimizer = torch.optim.SGD(
-                training_params, lr=self.learning_rate, momentum=self.momentum)
+            optimizer = torch.optim.SGD(training_params,
+                                        lr=self.learning_rate,
+                                        momentum=self.momentum)
         else:
             raise Exception(
                 "train: unknown optimizer, only support Adam or SGD.")
@@ -596,29 +602,25 @@ class TrainLyapunovReLU:
                 wandb.log({
                     "loss": loss.item(),
                     "positivity MIP cost": lyapunov_positivity_mip_cost,
-                    "derivative MIP cost":
-                    lyapunov_derivative_mip_cost,
-                    "time": time.time() - train_start_time})
+                    "derivative MIP cost": lyapunov_derivative_mip_cost,
+                    "time": time.time() - train_start_time
+                })
             if self.summary_writer_folder is not None:
                 writer.add_scalar("loss", loss.item(), iter_count)
-                writer.add_scalar(
-                    "positivity MIP cost",
-                    lyapunov_positivity_mip_cost, iter_count)
-                writer.add_scalar(
-                    "derivative MIP cost",
-                    lyapunov_derivative_mip_cost, iter_count)
+                writer.add_scalar("positivity MIP cost",
+                                  lyapunov_positivity_mip_cost, iter_count)
+                writer.add_scalar("derivative MIP cost",
+                                  lyapunov_derivative_mip_cost, iter_count)
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
                       "positivity cost " +
                       f"{lyapunov_positivity_mip_cost}, " +
-                      "derivative_cost " +
-                      f"{lyapunov_derivative_mip_cost}")
+                      "derivative_cost " + f"{lyapunov_derivative_mip_cost}")
             if lyapunov_positivity_mip_cost <=\
                 self.lyapunov_positivity_convergence_tol and\
                 lyapunov_derivative_mip_cost <= \
                     self.lyapunov_derivative_convergence_tol:
-                return (True, loss.item(),
-                        lyapunov_positivity_mip_cost,
+                return (True, loss.item(), lyapunov_positivity_mip_cost,
                         lyapunov_derivative_mip_cost)
             loss.backward()
             optimizer.step()
@@ -626,8 +628,8 @@ class TrainLyapunovReLU:
         return (False, loss.item(), lyapunov_positivity_mip_cost,
                 lyapunov_derivative_mip_cost)
 
-    def train_lyapunov_on_samples(
-            self, state_samples_all, num_epochs, batch_size):
+    def train_lyapunov_on_samples(self, state_samples_all, num_epochs,
+                                  batch_size):
         """
         Train a ReLU network on given state samples (not the adversarial states
         found by MIP). The loss function is the weighted sum of the lyapunov
@@ -643,12 +645,12 @@ class TrainLyapunovReLU:
         @param max_increasing_iterations If the MIP loss keeps increasing for
         this number of iterations, stop the training.
         """
-        assert(isinstance(state_samples_all, torch.Tensor))
-        assert(state_samples_all.shape[1] ==
-               self.lyapunov_hybrid_system.system.x_dim)
+        assert (isinstance(state_samples_all, torch.Tensor))
+        assert (state_samples_all.shape[1] ==
+                self.lyapunov_hybrid_system.system.x_dim)
         best_loss = np.inf
         if isinstance(
-            self.lyapunov_hybrid_system.system,
+                self.lyapunov_hybrid_system.system,
                 feedback_system.FeedbackSystem) and self.search_controller:
             training_params = list(
                 self.lyapunov_hybrid_system.lyapunov_relu.parameters()) + list(
@@ -663,9 +665,10 @@ class TrainLyapunovReLU:
         train_set_size = int(len(dataset) * 0.8)
         test_set_size = len(dataset) - train_set_size
         train_dataset, test_dataset = torch.utils.data.random_split(
-                dataset, [train_set_size, test_set_size])
-        data_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True)
+            dataset, [train_set_size, test_set_size])
+        data_loader = torch.utils.data.DataLoader(train_dataset,
+                                                  batch_size=batch_size,
+                                                  shuffle=True)
         test_state_samples = test_dataset[:][0]
         for epoch in range(num_epochs):
             running_loss = 0.
@@ -674,8 +677,10 @@ class TrainLyapunovReLU:
                 optimizer.zero_grad()
                 state_samples_next = torch.stack([
                     self.lyapunov_hybrid_system.system.step_forward(
-                        state_samples_batch[i]) for i in
-                    range(state_samples_batch.shape[0])], dim=0)
+                        state_samples_batch[i])
+                    for i in range(state_samples_batch.shape[0])
+                ],
+                                                 dim=0)
                 loss, lyapunov_positivity_mip_cost,\
                     lyapunov_derivative_mip_cost,  _, _, _, _, _, _, _\
                     = self.total_loss(
@@ -692,10 +697,13 @@ class TrainLyapunovReLU:
             # Compute the test loss
             test_state_samples_next = torch.stack([
                 self.lyapunov_hybrid_system.system.step_forward(
-                    test_state_samples[i]) for i in
-                range(test_state_samples.shape[0])], dim=0)
+                    test_state_samples[i])
+                for i in range(test_state_samples.shape[0])
+            ],
+                                                  dim=0)
             test_loss, _, _, _, _, _, _, _, _, _ = self.total_loss(
-                test_state_samples, test_state_samples,
+                test_state_samples,
+                test_state_samples,
                 test_state_samples_next,
                 self.lyapunov_positivity_sample_cost_weight,
                 self.lyapunov_derivative_sample_cost_weight,
@@ -734,8 +742,8 @@ class TrainValueApproximator:
         self.convergence_tolerance = 1e-3
         self.learning_rate = 0.02
 
-    def train_with_cost_to_go(
-            self, network, x0_value_samples, V_lambda, x_equilibrium, R):
+    def train_with_cost_to_go(self, network, x0_value_samples, V_lambda,
+                              x_equilibrium, R):
         """
         Similar to train() function, but with given samples on initial_state
         and cost-to-go.
@@ -743,11 +751,11 @@ class TrainValueApproximator:
         if R is None:
             x_dim = x_equilibrium.numel()
             R = torch.eye(x_dim, dtype=torch.float64)
-        state_samples_all = torch.stack([
-            pair[0] for pair in x0_value_samples], dim=0)
+        state_samples_all = torch.stack([pair[0] for pair in x0_value_samples],
+                                        dim=0)
         value_samples_all = torch.stack([pair[1] for pair in x0_value_samples])
-        optimizer = torch.optim.Adam(
-            network.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(network.parameters(),
+                                     lr=self.learning_rate)
         for epoch in range(self.max_epochs):
             optimizer.zero_grad()
             relu_output = network(state_samples_all)
@@ -762,9 +770,18 @@ class TrainValueApproximator:
             optimizer.step()
         return False, loss.item()
 
-    def train(
-        self, system, network, V_lambda, x_equilibrium, instantaneous_cost_fun,
-            x0_samples, T, discrete_time_flag, R, x_goal=None, pruner=None):
+    def train(self,
+              system,
+              network,
+              V_lambda,
+              x_equilibrium,
+              instantaneous_cost_fun,
+              x0_samples,
+              T,
+              discrete_time_flag,
+              R,
+              x_goal=None,
+              pruner=None):
         """
         Train a network such that
         network(x) - network(x*) + λ*|x-x*|₁ ≈ cost_to_go(x)
@@ -788,14 +805,14 @@ class TrainValueApproximator:
         training set or not. Check generate_cost_to_go_samples() for more
         details.
         """
-        assert(isinstance(
-            system, hybrid_linear_system.AutonomousHybridLinearSystem))
-        assert(isinstance(x_equilibrium, torch.Tensor))
-        assert(x_equilibrium.shape == (system.x_dim,))
-        assert(isinstance(V_lambda, float))
-        assert(isinstance(x0_samples, torch.Tensor))
+        assert (isinstance(system,
+                           hybrid_linear_system.AutonomousHybridLinearSystem))
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (system.x_dim, ))
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(x0_samples, torch.Tensor))
         x0_value_samples = hybrid_linear_system.generate_cost_to_go_samples(
             system, [x0_samples[i] for i in range(x0_samples.shape[0])], T,
             instantaneous_cost_fun, discrete_time_flag, x_goal, pruner)
-        return self.train_with_cost_to_go(
-            network, x0_value_samples, V_lambda, x_equilibrium, R)
+        return self.train_with_cost_to_go(network, x0_value_samples, V_lambda,
+                                          x_equilibrium, R)

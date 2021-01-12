@@ -12,18 +12,23 @@ import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="parse grad check")
-    parser.add_argument(
-        "--forward_network", type=str, help="path of the forward relu.")
-    parser.add_argument(
-        "--controller_network", type=str, help="controller model path")
-    parser.add_argument(
-        "--lyapunov_network", type=str, help="lyapunov model path")
+    parser.add_argument("--forward_network",
+                        type=str,
+                        help="path of the forward relu.")
+    parser.add_argument("--controller_network",
+                        type=str,
+                        help="controller model path")
+    parser.add_argument("--lyapunov_network",
+                        type=str,
+                        help="lyapunov model path")
     args = parser.parse_args()
     # First load the forward system, the controller, and the Lyapunov
     forward_network = torch.load(args.forward_network)
     forward_relu = utils.setup_relu(
-        forward_network["linear_layer_width"], params=None,
-        negative_slope=forward_network["negative_slope"], bias=True,
+        forward_network["linear_layer_width"],
+        params=None,
+        negative_slope=forward_network["negative_slope"],
+        bias=True,
         dtype=torch.float64)
     forward_relu.load_state_dict(forward_network["state_dict"])
     q_equilibrium = forward_network["q_equilibrium"]
@@ -32,8 +37,10 @@ if __name__ == "__main__":
 
     controller_network = torch.load(args.controller_network)
     controller_relu = utils.setup_relu(
-        controller_network["linear_layer_width"], params=None,
-        negative_slope=controller_network["negative_slope"], bias=True,
+        controller_network["linear_layer_width"],
+        params=None,
+        negative_slope=controller_network["negative_slope"],
+        bias=True,
         dtype=torch.float64)
     controller_relu.load_state_dict(controller_network["state_dict"])
     x_lo = controller_network["x_lo"]
@@ -43,8 +50,10 @@ if __name__ == "__main__":
 
     lyapunov_network = torch.load(args.lyapunov_network)
     lyapunov_relu = utils.setup_relu(
-        lyapunov_network["linear_layer_width"], params=None,
-        negative_slope=lyapunov_network["negative_slope"], bias=True,
+        lyapunov_network["linear_layer_width"],
+        params=None,
+        negative_slope=lyapunov_network["negative_slope"],
+        bias=True,
         dtype=torch.float64)
     lyapunov_relu.load_state_dict(lyapunov_network["state_dict"])
     V_lambda = lyapunov_network["V_lambda"]
@@ -59,7 +68,8 @@ if __name__ == "__main__":
         u_equilibrium, dt)
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
-        forward_system.u_equilibrium, u_lo.detach().numpy(),
+        forward_system.u_equilibrium,
+        u_lo.detach().numpy(),
         u_up.detach().numpy())
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
@@ -68,22 +78,45 @@ if __name__ == "__main__":
 
     # Check sample loss.
     feedback_gradient_check.check_sample_loss_grad(
-        lyapunov_hybrid_system, V_lambda, forward_system.x_equilibrium, R,
-        x_samples, atol=1E-5, rtol=1E-5)
+        lyapunov_hybrid_system,
+        V_lambda,
+        forward_system.x_equilibrium,
+        R,
+        x_samples,
+        atol=1E-5,
+        rtol=1E-5)
     # Check gradient of positivity MIP cost.
     feedback_gradient_check.check_lyapunov_mip_loss_grad(
-        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
-        lyapunov_positivity_epsilon, True, atol=1E-5, rtol=1E-5)
+        lyapunov_hybrid_system,
+        forward_system.x_equilibrium,
+        V_lambda,
+        lyapunov_positivity_epsilon,
+        True,
+        atol=1E-5,
+        rtol=1E-5)
     # Check gradient of derivative MIP cost.
     feedback_gradient_check.check_lyapunov_mip_loss_grad(
-        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
-        lyapunov_derivative_epsilon, False, atol=1E-5, rtol=1E-5)
+        lyapunov_hybrid_system,
+        forward_system.x_equilibrium,
+        V_lambda,
+        lyapunov_derivative_epsilon,
+        False,
+        atol=1E-5,
+        rtol=1E-5)
     feedback_gradient_check.check_lyapunov_mip_grad(
-        lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
-        lyapunov_derivative_epsilon, False, eps_type, atol=1E-6, rtol=1E-6)
+        lyapunov_hybrid_system,
+        forward_system.x_equilibrium,
+        V_lambda,
+        lyapunov_derivative_epsilon,
+        False,
+        eps_type,
+        atol=1E-6,
+        rtol=1E-6)
     feedback_gradient_check.check_lyapunov_grad(
         lyapunov_hybrid_system,
         lambda p1, p2: feedback_gradient_check.compute_mip_loss(
             lyapunov_hybrid_system, forward_system.x_equilibrium, V_lambda,
-            lyapunov_derivative_epsilon, False, eps_type, p1, p2), atol=1E-6,
-        rtol=1E-6, dx=1e-7)
+            lyapunov_derivative_epsilon, False, eps_type, p1, p2),
+        atol=1E-6,
+        rtol=1E-6,
+        dx=1e-7)

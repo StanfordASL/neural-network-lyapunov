@@ -26,8 +26,8 @@ class SlipSimulationTest(unittest.TestCase):
         for step in range(len(theta_step)):
             for i in range(sol[2 * step].y.shape[1]):
                 self.assertAlmostEqual(
-                        self.dut.flight_phase_energy(sol[2 * step].y[:, i]),
-                        total_energy, 2)
+                    self.dut.flight_phase_energy(sol[2 * step].y[:, i]),
+                    total_energy, 2)
             slip_x.extend(sol[2 * step].y[0])
             slip_y.extend(sol[2 * step].y[1])
             # The accuracy of RK45 is not high for the stance phase.

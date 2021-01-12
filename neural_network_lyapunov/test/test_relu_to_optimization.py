@@ -14,10 +14,9 @@ class TestReLU(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.linear1 = nn.Linear(2, 3)
-        self.linear1.weight.data = torch.tensor(
-            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
-        self.linear1.bias.data = torch.tensor(
-            [-11, 13, 4], dtype=self.dtype)
+        self.linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                                dtype=self.dtype)
+        self.linear1.bias.data = torch.tensor([-11, 13, 4], dtype=self.dtype)
         self.linear1_no_bias = nn.Linear(2, 3, bias=False)
         self.linear1_no_bias.weight.data = self.linear1.weight.data.clone()
 
@@ -25,14 +24,14 @@ class TestReLU(unittest.TestCase):
         self.linear2.weight.data = torch.tensor(
             [[-1, 0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1, 4, 6]],
             dtype=self.dtype)
-        self.linear2.bias.data = torch.tensor(
-            [4, -1, -2, -20], dtype=self.dtype)
+        self.linear2.bias.data = torch.tensor([4, -1, -2, -20],
+                                              dtype=self.dtype)
         self.linear2_no_bias = nn.Linear(3, 4, bias=False)
         self.linear2_no_bias.weight.data = self.linear2.weight.data.clone()
 
         self.linear3 = nn.Linear(4, 1)
-        self.linear3.weight.data = torch.tensor(
-            [[4, 5, 6, 7]], dtype=self.dtype)
+        self.linear3.weight.data = torch.tensor([[4, 5, 6, 7]],
+                                                dtype=self.dtype)
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
         self.linear3_no_bias = nn.Linear(4, 1, bias=False)
         self.linear3_no_bias.weight.data = self.linear3.weight.data.clone()
@@ -46,25 +45,24 @@ class TestReLU(unittest.TestCase):
         # Model with leaky ReLU with a leaky ReLU unit in the output layer.
         self.leaky_relus =\
             [nn.LeakyReLU(0.1), nn.LeakyReLU(-0.2), nn.LeakyReLU(0.01)]
-        self.model3 = nn.Sequential(
-            self.linear1, self.leaky_relus[0], self.linear2,
-            self.leaky_relus[1], self.linear3, self.leaky_relus[2])
+        self.model3 = nn.Sequential(self.linear1, self.leaky_relus[0],
+                                    self.linear2, self.leaky_relus[1],
+                                    self.linear3, self.leaky_relus[2])
         # Model with leaky ReLU with no ReLU unit in the output layer.
-        self.model4 = nn.Sequential(
-            self.linear1, self.leaky_relus[0], self.linear2,
-            self.leaky_relus[1], self.linear3)
+        self.model4 = nn.Sequential(self.linear1, self.leaky_relus[0],
+                                    self.linear2, self.leaky_relus[1],
+                                    self.linear3)
 
         # Model with leaky ReLU but no bias term
-        self.model5 = nn.Sequential(
-            self.linear1_no_bias, self.leaky_relus[0], self.linear2_no_bias,
-            self.leaky_relus[1], self.linear3_no_bias)
+        self.model5 = nn.Sequential(self.linear1_no_bias, self.leaky_relus[0],
+                                    self.linear2_no_bias, self.leaky_relus[1],
+                                    self.linear3_no_bias)
 
         # Model with multiple outputs, normal relu
-        self.model6 = nn.Sequential(
-            self.linear1, nn.ReLU(), self.linear2)
+        self.model6 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2)
         # Model with multiple outputs, leaky relu
-        self.model7 = nn.Sequential(
-            self.linear1, self.leaky_relus[0], self.linear2)
+        self.model7 = nn.Sequential(self.linear1, self.leaky_relus[0],
+                                    self.linear2)
 
     def test_compute_relu_activation_pattern1(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
@@ -128,23 +126,21 @@ class TestReLU(unittest.TestCase):
 
     def test_compute_all_relu_activation_patterns(self):
         linear1 = nn.Linear(2, 3)
-        linear1.weight.data = torch.tensor(
-            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
-        linear1.bias.data = torch.tensor(
-            [-11, 13, 4], dtype=self.dtype)
+        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
+                                           dtype=self.dtype)
+        linear1.bias.data = torch.tensor([-11, 13, 4], dtype=self.dtype)
         linear2 = nn.Linear(3, 3)
         linear2.weight.data = torch.tensor(
             [[3, -2, -1], [1, -4, 0], [0, 1, -2]], dtype=self.dtype)
-        linear2.bias.data = torch.tensor(
-            [-11, 13, 48], dtype=self.dtype)
+        linear2.bias.data = torch.tensor([-11, 13, 48], dtype=self.dtype)
         relu = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU())
 
         # For this input, all ReLU unit inputs are either > 0 or < 0
         patterns = relu_to_optimization.compute_all_relu_activation_patterns(
             relu, torch.tensor([1, 2], dtype=self.dtype))
         self.assertEqual(len(patterns), 1)
-        self.assertEqual(
-            patterns[0], [[False, True, True], [False, False, True]])
+        self.assertEqual(patterns[0],
+                         [[False, True, True], [False, False, True]])
 
         # For this input, the input to first layer relu are [0, 36, 39], and
         # the input to the second layer relu are [-122, -131, 6]. Note that
@@ -152,10 +148,10 @@ class TestReLU(unittest.TestCase):
         patterns = relu_to_optimization.compute_all_relu_activation_patterns(
             relu, torch.tensor([1, 5], dtype=self.dtype))
         self.assertEqual(len(patterns), 2)
-        self.assertEqual(
-            patterns[0], [[True, True, True], [False, False, True]])
-        self.assertEqual(
-            patterns[1], [[False, True, True], [False, False, True]])
+        self.assertEqual(patterns[0],
+                         [[True, True, True], [False, False, True]])
+        self.assertEqual(patterns[1],
+                         [[False, True, True], [False, False, True]])
 
         # For this input, the input to first layer relu are [0, 0, -33], and
         # the input to the second layer relu are [-11, 13, 38]. Note that
@@ -163,14 +159,14 @@ class TestReLU(unittest.TestCase):
         patterns = relu_to_optimization.compute_all_relu_activation_patterns(
             relu, torch.tensor([-35, 23], dtype=self.dtype))
         self.assertEqual(len(patterns), 4)
-        self.assertEqual(
-            patterns[0], [[True, True, False], [False, True, True]])
-        self.assertEqual(
-            patterns[1], [[True, False, False], [False, True, True]])
-        self.assertEqual(
-            patterns[2], [[False, True, False], [False, True, True]])
-        self.assertEqual(
-            patterns[3], [[False, False, False], [False, True, True]])
+        self.assertEqual(patterns[0],
+                         [[True, True, False], [False, True, True]])
+        self.assertEqual(patterns[1],
+                         [[True, False, False], [False, True, True]])
+        self.assertEqual(patterns[2],
+                         [[False, True, False], [False, True, True]])
+        self.assertEqual(patterns[3],
+                         [[False, False, False], [False, True, True]])
 
         # For this input, the input to first layer relu are [0, 38, 43], and
         # the input to the second layer relu are [-130, -139, 0]. Note that
@@ -178,14 +174,14 @@ class TestReLU(unittest.TestCase):
         patterns = relu_to_optimization.compute_all_relu_activation_patterns(
             relu, torch.tensor([3, 4], dtype=self.dtype))
         self.assertEqual(len(patterns), 4)
-        self.assertEqual(
-            patterns[0], [[True, True, True], [False, False, True]])
-        self.assertEqual(
-            patterns[1], [[True, True, True], [False, False, False]])
-        self.assertEqual(
-            patterns[2], [[False, True, True], [False, False, True]])
-        self.assertEqual(
-            patterns[3], [[False, True, True], [False, False, False]])
+        self.assertEqual(patterns[0],
+                         [[True, True, True], [False, False, True]])
+        self.assertEqual(patterns[1],
+                         [[True, True, True], [False, False, False]])
+        self.assertEqual(patterns[2],
+                         [[False, True, True], [False, False, True]])
+        self.assertEqual(patterns[3],
+                         [[False, True, True], [False, False, False]])
 
     def test_relu_activation_binary_to_pattern(self):
         for model in (self.model1, self.model3):
@@ -213,37 +209,38 @@ class TestReLU(unittest.TestCase):
             x.requires_grad = True
             output_expected = model.forward(x)
             output_expected.backward()
-            np.testing.assert_allclose(
-                x.grad.detach().numpy(), g.squeeze().detach().numpy())
+            np.testing.assert_allclose(x.grad.detach().numpy(),
+                                       g.squeeze().detach().numpy())
             with torch.no_grad():
                 output = (g.T @ x.reshape((2, 1)) + h).item()
                 self.assertAlmostEqual(output, output_expected.item(), 10)
-                self.assertTrue(torch.all(torch.le(
-                    P @ (x.reshape((-1, 1))), q)))
+                self.assertTrue(
+                    torch.all(torch.le(P @ (x.reshape((-1, 1))), q)))
                 # Randomly take 100 sample of inputs. If the sample shares the
                 # same activation path as x, then it should satisfy P * x <= q
                 # constraint. Otherwise it should violate the constraint.
                 for _ in range(100):
-                    x_sample = torch.tensor(
-                        [np.random.uniform(-10, 10),
-                         np.random.uniform(-10, 10)],
-                        dtype=self.dtype)
+                    x_sample = torch.tensor([
+                        np.random.uniform(-10, 10),
+                        np.random.uniform(-10, 10)
+                    ],
+                                            dtype=self.dtype)
                     activation_pattern_sample =\
                         relu_to_optimization.ComputeReLUActivationPattern(
                             model, x_sample)
                     output_sample_expected = model.forward(x_sample)
                     if (activation_pattern_sample == activation_pattern):
                         output_sample = g.T @ x_sample.reshape((2, 1)) + h
-                        self.assertAlmostEqual(
-                            output_sample.item(),
-                            output_sample_expected.item(), 10)
+                        self.assertAlmostEqual(output_sample.item(),
+                                               output_sample_expected.item(),
+                                               10)
                         self.assertTrue(
-                            torch.all(torch.le(
-                                P @ (x_sample.reshape((-1, 1))), q)))
+                            torch.all(
+                                torch.le(P @ (x_sample.reshape((-1, 1))), q)))
                     else:
                         self.assertFalse(
-                            torch.all(torch.le(
-                                P @ (x_sample.reshape((-1, 1))), q)))
+                            torch.all(
+                                torch.le(P @ (x_sample.reshape((-1, 1))), q)))
 
         for model in (self.model1, self.model2, self.model3, self.model4,
                       self.model5):
@@ -259,25 +256,24 @@ class TestReLU(unittest.TestCase):
                 self, model, torch.tensor([-10, -20], dtype=self.dtype))
 
     def test_relu_free_pattern_constructor1(self):
-        relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model1,
-                                                                 self.dtype)
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            self.model1, self.dtype)
         self.assertTrue(relu_free_pattern.last_layer_is_relu)
         self.assertEqual(len(relu_free_pattern.relu_unit_index), 3)
         self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
-        self.assertListEqual(
-            relu_free_pattern.relu_unit_index[1], [3, 4, 5, 6])
-        self.assertListEqual(
-            relu_free_pattern.relu_unit_index[2], [7])
+        self.assertListEqual(relu_free_pattern.relu_unit_index[1],
+                             [3, 4, 5, 6])
+        self.assertListEqual(relu_free_pattern.relu_unit_index[2], [7])
         self.assertEqual(relu_free_pattern.num_relu_units, 8)
 
     def test_relu_free_pattern_constructor2(self):
-        relu_free_pattern = relu_to_optimization.ReLUFreePattern(self.model2,
-                                                                 self.dtype)
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            self.model2, self.dtype)
         self.assertFalse(relu_free_pattern.last_layer_is_relu)
         self.assertEqual(len(relu_free_pattern.relu_unit_index), 2)
         self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
-        self.assertListEqual(
-            relu_free_pattern.relu_unit_index[1], [3, 4, 5, 6])
+        self.assertListEqual(relu_free_pattern.relu_unit_index[1],
+                             [3, 4, 5, 6])
         self.assertEqual(relu_free_pattern.num_relu_units, 7)
 
     def test_relu_free_pattern_output_constraint(self):
@@ -293,31 +289,27 @@ class TestReLU(unittest.TestCase):
             self.assertIsNone(mip_constr_return.Aout_binary)
             # print("z_pre_relu_lo:{}\nz_pre_relu_up:{}".format(
             #    z_pre_relu_lo, z_pre_relu_up))
-            num_z_pre_relu_lo_positive = np.sum([
-                z_pre_relu_lo_i >= 0 for z_pre_relu_lo_i in z_pre_relu_lo])
-            num_z_pre_relu_up_negative = np.sum([
-                z_pre_relu_up_i <= 0 for z_pre_relu_up_i in z_pre_relu_up])
-            num_ineq = (
-                relu_free_pattern.num_relu_units - num_z_pre_relu_lo_positive
-                - num_z_pre_relu_up_negative) * 4 + 4
+            num_z_pre_relu_lo_positive = np.sum(
+                [z_pre_relu_lo_i >= 0 for z_pre_relu_lo_i in z_pre_relu_lo])
+            num_z_pre_relu_up_negative = np.sum(
+                [z_pre_relu_up_i <= 0 for z_pre_relu_up_i in z_pre_relu_up])
+            num_ineq = (relu_free_pattern.num_relu_units -
+                        num_z_pre_relu_lo_positive -
+                        num_z_pre_relu_up_negative) * 4 + 4
             num_eq = (num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative)\
                 * 2
-            self.assertEqual(
-                mip_constr_return.Ain_input.shape, (num_ineq, 2))
+            self.assertEqual(mip_constr_return.Ain_input.shape, (num_ineq, 2))
             self.assertEqual(mip_constr_return.Ain_slack.shape,
                              (num_ineq, relu_free_pattern.num_relu_units))
             self.assertEqual(mip_constr_return.Ain_binary.shape,
                              (num_ineq, relu_free_pattern.num_relu_units))
-            self.assertEqual(
-                mip_constr_return.rhs_in.shape, (num_ineq,))
-            self.assertEqual(
-                mip_constr_return.Aeq_input.shape, (num_eq, 2))
+            self.assertEqual(mip_constr_return.rhs_in.shape, (num_ineq, ))
+            self.assertEqual(mip_constr_return.Aeq_input.shape, (num_eq, 2))
             self.assertEqual(mip_constr_return.Aeq_slack.shape,
                              (num_eq, relu_free_pattern.num_relu_units))
             self.assertEqual(mip_constr_return.Aeq_binary.shape,
                              (num_eq, relu_free_pattern.num_relu_units))
-            self.assertEqual(
-                mip_constr_return.rhs_eq.shape, (num_eq))
+            self.assertEqual(mip_constr_return.rhs_eq.shape, (num_eq))
 
             def test_input_output(x):
                 (z, beta, output) = \
@@ -335,15 +327,15 @@ class TestReLU(unittest.TestCase):
                         mip_constr_return.Ain_input.detach().numpy() @ x_np +
                         mip_constr_return.Ain_slack.detach().numpy() @ z_var +
                         mip_constr_return.Ain_binary.detach().numpy() @
-                        beta_var <=
-                        mip_constr_return.rhs_in.squeeze().detach().numpy())
+                        beta_var
+                        <= mip_constr_return.rhs_in.squeeze().detach().numpy())
                 if mip_constr_return.rhs_eq.shape[0] != 0:
                     con.append(
                         mip_constr_return.Aeq_input.detach().numpy() @ x_np +
                         mip_constr_return.Aeq_slack.detach().numpy() @ z_var +
                         mip_constr_return.Aeq_binary.detach().numpy() @
-                        beta_var ==
-                        mip_constr_return.rhs_eq.squeeze().detach().numpy())
+                        beta_var
+                        == mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
                 prob.solve(solver=cp.GUROBI)
@@ -352,16 +344,18 @@ class TestReLU(unittest.TestCase):
                     z_opt_var = z_var.value
                     beta_opt_var = beta_var.value
                     np.testing.assert_array_almost_equal(
-                        z_opt_var, z.squeeze().detach().numpy())
+                        z_opt_var,
+                        z.squeeze().detach().numpy())
                     np.testing.assert_array_almost_equal(
-                        beta_opt_var, beta.squeeze().detach().numpy())
+                        beta_opt_var,
+                        beta.squeeze().detach().numpy())
                     if len(mip_constr_return.Aout_slack.shape) > 1:
                         out_opt = mip_constr_return.Aout_slack @ z.squeeze()\
                             + mip_constr_return.Cout
                         output = model.forward(x)
                         for k in range(len(output)):
-                            self.assertAlmostEqual(
-                                output[k].item(), out_opt[k].item())
+                            self.assertAlmostEqual(output[k].item(),
+                                                   out_opt[k].item())
                     else:
                         self.assertAlmostEqual(
                             (mip_constr_return.Aout_slack @ z.squeeze() +
@@ -376,8 +370,8 @@ class TestReLU(unittest.TestCase):
                 # constraint
                 # Ain1*x+Ain2*z+Ain3*β <= rhs_in
                 # Aeq1*x+Aeq2*z+Aeq3*β <= rhs_eq
-                assert(torch.all(torch.ge(x, x_lo.squeeze())))
-                assert(torch.all(torch.le(x, x_up.squeeze())))
+                assert (torch.all(torch.ge(x, x_lo.squeeze())))
+                assert (torch.all(torch.le(x, x_up.squeeze())))
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
                     x)
@@ -385,10 +379,10 @@ class TestReLU(unittest.TestCase):
                     np.array([zi.detach().numpy() for zi in z_post_relu_up])
                 z_post_relu_lo_numpy =\
                     np.array([zi.detach().numpy() for zi in z_post_relu_lo])
-                np.testing.assert_array_less(
-                    z.squeeze().detach().numpy(), z_post_relu_up_numpy + 1E-10)
-                np.testing.assert_array_less(
-                    z_post_relu_lo_numpy - 1E-10, z.squeeze().detach().numpy())
+                np.testing.assert_array_less(z.squeeze().detach().numpy(),
+                                             z_post_relu_up_numpy + 1E-10)
+                np.testing.assert_array_less(z_post_relu_lo_numpy - 1E-10,
+                                             z.squeeze().detach().numpy())
                 # Check the output
                 if isinstance(output, torch.Tensor):
                     out_opt = mip_constr_return.Aout_slack @ z.squeeze() +\
@@ -396,9 +390,9 @@ class TestReLU(unittest.TestCase):
                     for k in range(len(output)):
                         self.assertAlmostEqual(output[k], out_opt[k], 3)
                 else:
-                    self.assertAlmostEqual(
-                        output, (mip_constr_return.Aout_slack @ z +
-                                 mip_constr_return.Cout).item(), 3)
+                    self.assertAlmostEqual(output,
+                                           (mip_constr_return.Aout_slack @ z +
+                                            mip_constr_return.Cout).item(), 3)
                 x_vec = x.reshape((-1, 1))
                 lhs_in = mip_constr_return.Ain_input @ x_vec +\
                     mip_constr_return.Ain_slack @ z +\
@@ -426,14 +420,16 @@ class TestReLU(unittest.TestCase):
                 lhs_eq_perturbed = mip_constr_return.Aeq_input @ x_vec +\
                     mip_constr_return.Aeq_slack @ z +\
                     mip_constr_return.Aeq_binary @ beta_perturbed
-                self.assertFalse(torch.all(
-                    torch.le(
-                        lhs_in_perturbed.squeeze(),
-                        mip_constr_return.rhs_in.squeeze() +
-                        torch.tensor(precision))) and
-                    torch.all(torch.le(torch.abs(
-                        lhs_eq_perturbed - mip_constr_return.rhs_eq),
-                        precision)))
+                self.assertFalse(
+                    torch.all(
+                        torch.le(
+                            lhs_in_perturbed.squeeze(),
+                            mip_constr_return.rhs_in.squeeze() +
+                            torch.tensor(precision)))
+                    and torch.all(
+                        torch.le(
+                            torch.abs(lhs_eq_perturbed -
+                                      mip_constr_return.rhs_eq), precision)))
                 test_input_output(x)
 
             # Test with different input x.
@@ -455,8 +451,8 @@ class TestReLU(unittest.TestCase):
                     x_random = torch.tensor(
                         [np.random.normal(0, 1), np.random.normal(0, 1)]).\
                         type(self.dtype)
-                    if (torch.all(x_random >= x_lo) and
-                            torch.all(x_random <= x_up)):
+                    if (torch.all(x_random >= x_lo)
+                            and torch.all(x_random <= x_up)):
                         found_x = True
                 test_input_x(x_random)
 
@@ -586,8 +582,7 @@ class TestReLU(unittest.TestCase):
             # ReLUGivenActivationPattern(), and compare the result aginst M.
             if relu_free_pattern.last_layer_is_relu:
                 activation_pattern = [[False, False, False],
-                                      [False, False, False, False],
-                                      [True]]
+                                      [False, False, False, False], [True]]
             else:
                 activation_pattern = [[False, False, False],
                                       [False, False, False, False]]
@@ -610,22 +605,23 @@ class TestReLU(unittest.TestCase):
                             (i0, i1))
                     self.assertTrue(
                         torch.all(
-                            torch.abs(M[alpha_index] - g.reshape((1, -1)))
-                            < precision))
+                            torch.abs(M[alpha_index] -
+                                      g.reshape((1, -1))) < precision))
                     alpha_value = torch.zeros((num_alpha, 1), dtype=self.dtype)
                     alpha_value[alpha_index][0] = 1.
-                    beta_value = torch.zeros((relu_free_pattern.num_relu_units,
-                                              1), dtype=self.dtype)
+                    beta_value = torch.zeros(
+                        (relu_free_pattern.num_relu_units, 1),
+                        dtype=self.dtype)
                     beta_value[relu_free_pattern.relu_unit_index[0][i0]][0] =\
                         1.
                     beta_value[relu_free_pattern.relu_unit_index[1][i1]][0] =\
                         1.
                     if (relu_free_pattern.last_layer_is_relu):
-                        beta_value[relu_free_pattern.relu_unit_index[2][0]
-                                   ][0] = 1.
+                        beta_value[relu_free_pattern.relu_unit_index[2]
+                                   [0]][0] = 1.
                     self.assertTrue(
-                        torch.all(B1 @ alpha_value + B2 @ beta_value - d <
-                                  precision))
+                        torch.all(B1 @ alpha_value + B2 @ beta_value -
+                                  d < precision))
                     # Now perturb alpha value a bit, by negating a value from 1
                     # to 0 or vice versa, the perturbed alpha and beta should
                     # violate the constraint.
@@ -634,24 +630,24 @@ class TestReLU(unittest.TestCase):
                     alpha_value[perturbed_alpha_entry] = 1. - \
                         alpha_value[perturbed_alpha_entry]
                     self.assertFalse(
-                        torch.all(B1 @ alpha_value + B2 @ beta_value - d <
-                                  precision))
+                        torch.all(B1 @ alpha_value + B2 @ beta_value -
+                                  d < precision))
 
         test_model(self.model1)
         test_model(self.model2)
 
     def test_output_gradient_times_vector(self):
         def test_model(model, x, y, y_lo, y_up):
-            assert(x.shape == (2, ))
-            assert(y.shape == (2, ))
-            assert(y_lo.shape == (2, ))
-            assert(y_up.shape == (2, ))
-            assert(torch.all(y <= y_up) and torch.all(y >= y_lo))
+            assert (x.shape == (2, ))
+            assert (y.shape == (2, ))
+            assert (y_lo.shape == (2, ))
+            assert (y_up.shape == (2, ))
+            assert (torch.all(y <= y_up) and torch.all(y >= y_lo))
             activation_pattern =\
                 relu_to_optimization.ComputeReLUActivationPattern(model, x)
             relu_free_pattern = relu_to_optimization.ReLUFreePattern(
                 model, self.dtype)
-            beta = torch.empty((relu_free_pattern.num_relu_units,),
+            beta = torch.empty((relu_free_pattern.num_relu_units, ),
                                dtype=self.dtype)
             for layer in range(len(relu_free_pattern.relu_unit_index)):
                 for index, beta_index in enumerate(
@@ -676,11 +672,12 @@ class TestReLU(unittest.TestCase):
                 elif isinstance(layer, nn.ReLU) or \
                         isinstance(layer, nn.LeakyReLU):
                     if isinstance(layer, nn.ReLU):
-                        z_cur = beta[relu_free_pattern.relu_unit_index[
-                            layer_count]] * z_cur
+                        z_cur = beta[relu_free_pattern.
+                                     relu_unit_index[layer_count]] * z_cur
                     else:
-                        for i in range(len(relu_free_pattern.relu_unit_index[
-                                layer_count])):
+                        for i in range(
+                                len(relu_free_pattern.
+                                    relu_unit_index[layer_count])):
                             if activation_pattern[layer_count][i]:
                                 z_cur[i] = z_cur[i]
                             else:
@@ -708,12 +705,14 @@ class TestReLU(unittest.TestCase):
             # be z_expected.
             z_var = cp.Variable(relu_free_pattern.num_relu_units)
             objective = cp.Minimize(0.)
-            con = [A_z.detach().numpy() @ z_var <=
-                   (rhs - A_y @ y - A_beta @ beta).detach().numpy()]
+            con = [
+                A_z.detach().numpy() @ z_var <=
+                (rhs - A_y @ y - A_beta @ beta).detach().numpy()
+            ]
             prob = cp.Problem(objective, con)
             prob.solve(solver=cp.GUROBI)
-            np.testing.assert_array_almost_equal(
-                z_var.value, z_expected.detach().numpy())
+            np.testing.assert_array_almost_equal(z_var.value,
+                                                 z_expected.detach().numpy())
 
         # Check for different models and inputs.
         for model in (self.model1, self.model2, self.model3, self.model4,
@@ -726,19 +725,19 @@ class TestReLU(unittest.TestCase):
                        torch.tensor([1., 2.], dtype=self.dtype),
                        torch.tensor([-1., 0.], dtype=self.dtype),
                        torch.tensor([2., 3.], dtype=self.dtype))
-            test_model(model, torch.tensor([2.,  -1.], dtype=self.dtype),
+            test_model(model, torch.tensor([2., -1.], dtype=self.dtype),
                        torch.tensor([1., 2.], dtype=self.dtype),
                        torch.tensor([-1., 0.], dtype=self.dtype),
                        torch.tensor([2., 3.], dtype=self.dtype))
-            test_model(model, torch.tensor([-2.,  -1.], dtype=self.dtype),
+            test_model(model, torch.tensor([-2., -1.], dtype=self.dtype),
                        torch.tensor([1., 2.], dtype=self.dtype),
                        torch.tensor([-1., 1.], dtype=self.dtype),
                        torch.tensor([2., 3.], dtype=self.dtype))
-            test_model(model, torch.tensor([-4.,  -2.], dtype=self.dtype),
+            test_model(model, torch.tensor([-4., -2.], dtype=self.dtype),
                        torch.tensor([1.5, -2.], dtype=self.dtype),
                        torch.tensor([-1., -4.], dtype=self.dtype),
                        torch.tensor([2., 3.], dtype=self.dtype))
-            test_model(model, torch.tensor([-4.,  2.5], dtype=self.dtype),
+            test_model(model, torch.tensor([-4., 2.5], dtype=self.dtype),
                        torch.tensor([2.5, -2.], dtype=self.dtype),
                        torch.tensor([-1., -4.], dtype=self.dtype),
                        torch.tensor([4., 3.], dtype=self.dtype))
@@ -748,18 +747,21 @@ class TestReLU(unittest.TestCase):
         for _ in range(30):
             found_y_bound = False
             while (not found_y_bound):
-                y_lo = torch.tensor([-1 + np.random.normal(0, 1),
-                                     1. + np.random.normal(0, 1)],
-                                    dtype=self.dtype)
-                y_up = torch.tensor([2 + np.random.normal(0, 1),
-                                     3. + np.random.normal(0, 1)],
-                                    dtype=self.dtype)
+                y_lo = torch.tensor(
+                    [-1 + np.random.normal(0, 1), 1. + np.random.normal(0, 1)],
+                    dtype=self.dtype)
+                y_up = torch.tensor(
+                    [2 + np.random.normal(0, 1), 3. + np.random.normal(0, 1)],
+                    dtype=self.dtype)
                 if torch.all(y_up > y_lo):
                     found_y_bound = True
-            y = torch.tensor([np.random.uniform(y_lo[0], y_up[0]),
-                              np.random.uniform(y_lo[1], y_up[1])],
+            y = torch.tensor([
+                np.random.uniform(y_lo[0], y_up[0]),
+                np.random.uniform(y_lo[1], y_up[1])
+            ],
                              dtype=self.dtype)
-            x = torch.from_numpy(np.random.normal(0, 1, (2,))).type(self.dtype)
+            x = torch.from_numpy(np.random.normal(0, 1,
+                                                  (2, ))).type(self.dtype)
             test_model(self.model1, x, y, y_lo, y_up)
             test_model(self.model2, x, y, y_lo, y_up)
 
@@ -773,9 +775,10 @@ class TestReLU(unittest.TestCase):
                 for b in a:
                     pattern_flat.append(b.item())
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
-            z = milp.addVars(
-                    len(pattern_flat), lb=-gurobipy.GRB.INFINITY,
-                    vtype=gurobipy.GRB.BINARY, name="z")
+            z = milp.addVars(len(pattern_flat),
+                             lb=-gurobipy.GRB.INFINITY,
+                             vtype=gurobipy.GRB.BINARY,
+                             name="z")
             relu_to_optimization.set_activation_warmstart(model, z, x)
             milp.gurobi_model.update()
             for i in range(len(z)):
@@ -788,11 +791,8 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
     ReLUFreePattern.output_constraint() function is correct, by comparing the
     automatic differentiation result versus numerical gradient.
     """
-
-    def entry_gradient_tester(
-        self, network, network_param, x_lo, x_up, mip_entry_name,
-            mip_entry_size, atol, rtol):
-
+    def entry_gradient_tester(self, network, network_param, x_lo, x_up,
+                              mip_entry_name, mip_entry_size, atol, rtol):
         def get_entry(params, entry_index):
             if isinstance(params, np.ndarray):
                 params_torch = torch.from_numpy(params)
@@ -800,8 +800,8 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
                 params_torch = params
             utils.update_relu_params(network, params_torch)
             utils.network_zero_grad(network)
-            dut = relu_to_optimization.ReLUFreePattern(
-                network, params_torch.dtype)
+            dut = relu_to_optimization.ReLUFreePattern(network,
+                                                       params_torch.dtype)
             mip_return, _, _, _, _ = dut.output_constraint(
                 x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
             entry = getattr(mip_return, mip_entry_name)
@@ -811,6 +811,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
             else:
                 entry_flat = entry.reshape((-1))
                 return entry_flat[entry_index]
+
         for entry_index in range(mip_entry_size):
             # First compute the gradient of that entry w.r.t network
             # weights/biases using autodiff.
@@ -826,14 +827,16 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
             grad_numerical = utils.compute_numerical_gradient(
                 lambda param: get_entry(param, entry_index).item(),
                 network_param.detach().numpy())
-            np.testing.assert_allclose(
-                grad.detach().numpy(), grad_numerical, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(grad.detach().numpy(),
+                                       grad_numerical,
+                                       atol=atol,
+                                       rtol=rtol)
 
-    def mip_return_gradient_tester(
-            self, network, network_param, x_lo, x_up, atol, rtol):
+    def mip_return_gradient_tester(self, network, network_param, x_lo, x_up,
+                                   atol, rtol):
         utils.update_relu_params(network, network_param)
-        dut = relu_to_optimization.ReLUFreePattern(
-            network, network_param.dtype)
+        dut = relu_to_optimization.ReLUFreePattern(network,
+                                                   network_param.dtype)
         mip_return, _, _, _, _ = dut.output_constraint(
             x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
 
@@ -841,9 +844,8 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
             entry = getattr(mip_return, entry_name)
             if entry is None:
                 return
-            self.entry_gradient_tester(
-                network, network_param, x_lo, x_up, entry_name, entry.numel(),
-                atol, rtol)
+            self.entry_gradient_tester(network, network_param, x_lo, x_up,
+                                       entry_name, entry.numel(), atol, rtol)
 
         test_entry("Aout_input")
         test_entry("Aout_slack")
@@ -863,15 +865,17 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
         This is a network I found in the while when synthesizing controller for
         the pendulum.
         """
-        network = utils.setup_relu(
-            (2, 2, 1), params=None, negative_slope=0.1, bias=True,
-            dtype=torch.float64)
+        network = utils.setup_relu((2, 2, 1),
+                                   params=None,
+                                   negative_slope=0.1,
+                                   bias=True,
+                                   dtype=torch.float64)
         network[0].weight.data = torch.tensor(
             [[1.6396, 2.7298], [-6.5492, -5.0761]], dtype=torch.float64)
-        network[0].bias.data = torch.tensor(
-            [0.1370, -0.3323], dtype=torch.float64)
-        network[2].weight.data = torch.tensor(
-            [-2.9836, 5.6627], dtype=torch.float64)
+        network[0].bias.data = torch.tensor([0.1370, -0.3323],
+                                            dtype=torch.float64)
+        network[2].weight.data = torch.tensor([-2.9836, 5.6627],
+                                              dtype=torch.float64)
         network[2].bias.data = torch.tensor([-0.0927], dtype=torch.float64)
 
         network_param = utils.extract_relu_parameters(network)
@@ -879,8 +883,12 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
         x_lo = torch.tensor([np.pi - 0.1, -0.2], dtype=torch.float64)
         x_up = torch.tensor([np.pi + 0.1, 0.2], dtype=torch.float64)
 
-        self.mip_return_gradient_tester(
-            network, network_param, x_lo, x_up, atol=1E-5, rtol=1E-5)
+        self.mip_return_gradient_tester(network,
+                                        network_param,
+                                        x_lo,
+                                        x_up,
+                                        atol=1E-5,
+                                        rtol=1E-5)
 
 
 class TestAddConstraintByLayer(unittest.TestCase):
@@ -889,15 +897,15 @@ class TestAddConstraintByLayer(unittest.TestCase):
         self.linear_with_bias = nn.Linear(2, 4, bias=True)
         self.linear_with_bias.weight.data = torch.tensor(
             [[1., 2.], [-2., 1.], [-1., 4], [4., -5.]], dtype=self.dtype)
-        self.linear_with_bias.bias.data = torch.tensor(
-            [0.5, -1., 1.5, -3], dtype=self.dtype)
+        self.linear_with_bias.bias.data = torch.tensor([0.5, -1., 1.5, -3],
+                                                       dtype=self.dtype)
         self.linear_no_bias = nn.Linear(2, 4, bias=False)
         self.linear_no_bias.weight = self.linear_with_bias.weight
         self.relu = nn.ReLU()
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
 
-    def constraint_test(
-            self, linear_layer, relu_layer, z_curr_lo, z_curr_up, method):
+    def constraint_test(self, linear_layer, relu_layer, z_curr_lo, z_curr_up,
+                        method):
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
             Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
             z_next_up = relu_to_optimization._add_constraint_by_layer(
@@ -905,18 +913,16 @@ class TestAddConstraintByLayer(unittest.TestCase):
         linear_output_lo_expected, linear_output_up_expected =\
             mip_utils.propagate_bounds(
                 linear_layer, z_curr_lo, z_curr_up, method)
-        np.testing.assert_allclose(
-            linear_output_lo.detach().numpy(),
-            linear_output_lo_expected.detach().numpy())
-        np.testing.assert_allclose(
-            linear_output_up.detach().numpy(),
-            linear_output_up_expected.detach().numpy())
+        np.testing.assert_allclose(linear_output_lo.detach().numpy(),
+                                   linear_output_lo_expected.detach().numpy())
+        np.testing.assert_allclose(linear_output_up.detach().numpy(),
+                                   linear_output_up_expected.detach().numpy())
         z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
             relu_layer, linear_output_lo, linear_output_up, method)
-        np.testing.assert_allclose(
-            z_next_lo.detach().numpy(), z_next_lo_expected.detach().numpy())
-        np.testing.assert_allclose(
-            z_next_up.detach().numpy(), z_next_up_expected.detach().numpy())
+        np.testing.assert_allclose(z_next_lo.detach().numpy(),
+                                   z_next_lo_expected.detach().numpy())
+        np.testing.assert_allclose(z_next_up.detach().numpy(),
+                                   z_next_up_expected.detach().numpy())
         # Maker sure we tested all cases, that the relu can be
         # 1. Both active or inactive.
         # 2. Only inactive.
@@ -926,36 +932,42 @@ class TestAddConstraintByLayer(unittest.TestCase):
         z_curr_val = utils.uniform_sample_in_box(z_curr_lo, z_curr_up, 20)
         for i in range(z_curr_val.shape[0]):
             model = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
-            z_curr = model.addVars(
-                linear_layer.in_features, lb=-gurobipy.GRB.INFINITY)
-            z_next = model.addVars(
-                linear_layer.out_features, lb=-gurobipy.GRB.INFINITY)
-            beta = model.addVars(
-                linear_layer.out_features, vtype=gurobipy.GRB.BINARY)
+            z_curr = model.addVars(linear_layer.in_features,
+                                   lb=-gurobipy.GRB.INFINITY)
+            z_next = model.addVars(linear_layer.out_features,
+                                   lb=-gurobipy.GRB.INFINITY)
+            beta = model.addVars(linear_layer.out_features,
+                                 vtype=gurobipy.GRB.BINARY)
             model.addMConstrs(
                 [torch.eye(linear_layer.in_features, dtype=self.dtype)],
-                [z_curr], b=z_curr_val[i], sense=gurobipy.GRB.EQUAL)
-            model.addMConstrs(
-                [Ain_z_curr, Ain_z_next, Ain_binary], [z_curr, z_next, beta],
-                b=rhs_in, sense=gurobipy.GRB.LESS_EQUAL)
-            model.addMConstrs(
-                [Aeq_z_curr, Aeq_z_next, Aeq_binary], [z_curr, z_next, beta],
-                b=rhs_eq, sense=gurobipy.GRB.EQUAL)
+                [z_curr],
+                b=z_curr_val[i],
+                sense=gurobipy.GRB.EQUAL)
+            model.addMConstrs([Ain_z_curr, Ain_z_next, Ain_binary],
+                              [z_curr, z_next, beta],
+                              b=rhs_in,
+                              sense=gurobipy.GRB.LESS_EQUAL)
+            model.addMConstrs([Aeq_z_curr, Aeq_z_next, Aeq_binary],
+                              [z_curr, z_next, beta],
+                              b=rhs_eq,
+                              sense=gurobipy.GRB.EQUAL)
             model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             model.gurobi_model.optimize()
             with torch.no_grad():
-                self.assertEqual(
-                    model.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+                self.assertEqual(model.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
                 linear_output = linear_layer(z_curr_val[i])
                 z_next_val_expected = relu_layer(linear_output)
-                beta_val_expected = np.array(
-                    [1 if linear_output[j] > 0 else 0 for j in
-                     range(linear_layer.out_features)])
+                beta_val_expected = np.array([
+                    1 if linear_output[j] > 0 else 0
+                    for j in range(linear_layer.out_features)
+                ])
                 z_next_val = np.array(
                     [z_next[j].x for j in range(len(z_next))])
                 beta_val = np.array([beta[j].x for j in range(len(beta))])
                 np.testing.assert_allclose(
-                    z_next_val, z_next_val_expected.detach().numpy())
+                    z_next_val,
+                    z_next_val_expected.detach().numpy())
                 np.testing.assert_allclose(beta_val, beta_val_expected)
 
         # Sample many z_curr within the limits, make sure they all satisfy the
@@ -965,25 +977,28 @@ class TestAddConstraintByLayer(unittest.TestCase):
             for i in range(z_curr_val.shape[0]):
                 linear_output = linear_layer(z_curr_val[i])
                 beta_val = torch.tensor([
-                    1 if linear_output[j] > 0 else 0 for j in
-                    range(linear_output.shape[0])], dtype=self.dtype)
+                    1 if linear_output[j] > 0 else 0
+                    for j in range(linear_output.shape[0])
+                ],
+                                        dtype=self.dtype)
                 z_next_val = relu_layer(linear_output)
                 np.testing.assert_array_less(
                     (Ain_z_curr @ z_curr_val[i] + Ain_z_next @ z_next_val +
                      Ain_binary @ beta_val).detach().numpy().squeeze(),
                     rhs_in.detach().numpy().squeeze() + 1E-6)
 
-    def constraint_gradient_test(
-            self, linear_layer, relu_layer, z_curr_lo, z_curr_up, method):
+    def constraint_gradient_test(self, linear_layer, relu_layer, z_curr_lo,
+                                 z_curr_up, method):
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
             Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
             z_next_up = relu_to_optimization._add_constraint_by_layer(
                 linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
 
-        (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() + rhs_in.sum()
-         + Aeq_z_curr.sum() + Aeq_z_next.sum() + Aeq_binary.sum() +
-         rhs_eq.sum() + linear_output_lo.sum() + linear_output_up.sum() +
-         z_next_lo.sum() + z_next_up.sum()).backward()
+        (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
+         rhs_in.sum() + Aeq_z_curr.sum() + Aeq_z_next.sum() +
+         Aeq_binary.sum() + rhs_eq.sum() + linear_output_lo.sum() +
+         linear_output_up.sum() + z_next_lo.sum() +
+         z_next_up.sum()).backward()
 
         linear_layer_weight_grad = linear_layer.weight.grad.clone()
         if linear_layer.bias is not None:
@@ -1006,68 +1021,74 @@ class TestAddConstraintByLayer(unittest.TestCase):
                             input_lo_np), torch.from_numpy(input_up_np),
                         method)
 
-                return np.array([(
-                    Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
-                    rhs_in.sum() + Aeq_z_curr.sum() + Aeq_z_next.sum() +
-                    Aeq_binary.sum() + rhs_eq.sum() + linear_output_lo.sum() +
-                    linear_output_up.sum() + z_next_lo.sum() +
-                    z_next_up.sum()).detach()])
+                return np.array([
+                    (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
+                     rhs_in.sum() + Aeq_z_curr.sum() + Aeq_z_next.sum() +
+                     Aeq_binary.sum() + rhs_eq.sum() + linear_output_lo.sum() +
+                     linear_output_up.sum() + z_next_lo.sum() +
+                     z_next_up.sum()).detach()
+                ])
 
         bias_val = linear_layer.bias.data.detach().numpy() if\
             linear_layer.bias is not None else np.zeros((2,))
 
         numerical_grads = utils.compute_numerical_gradient(
-            eval_fun, linear_layer.weight.data.detach().numpy().reshape((-1,)),
-            bias_val, z_curr_lo.detach().numpy(), z_curr_up.detach().numpy())
+            eval_fun,
+            linear_layer.weight.data.detach().numpy().reshape((-1, )),
+            bias_val,
+            z_curr_lo.detach().numpy(),
+            z_curr_up.detach().numpy())
         np.testing.assert_allclose(numerical_grads[0],
                                    linear_layer_weight_grad.reshape((1, -1)))
         if linear_layer.bias is not None:
-            np.testing.assert_allclose(
-                numerical_grads[1].reshape((-1,)), linear_layer_bias_grad)
+            np.testing.assert_allclose(numerical_grads[1].reshape((-1, )),
+                                       linear_layer_bias_grad)
         np.testing.assert_allclose(numerical_grads[2].squeeze(), input_lo_grad)
         np.testing.assert_allclose(numerical_grads[3].squeeze(), input_up_grad)
 
     def test_with_bias_relu_IA(self):
-        z_curr_lo = torch.tensor(
-            [-1., 2.], dtype=self.dtype, requires_grad=True)
-        z_curr_up = torch.tensor(
-            [2., 4.], dtype=self.dtype, requires_grad=True)
+        z_curr_lo = torch.tensor([-1., 2.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
+        z_curr_up = torch.tensor([2., 4.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
         method = mip_utils.PropagateBoundsMethod.IA
-        self.constraint_test(
-            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
-        self.constraint_gradient_test(
-            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_test(self.linear_with_bias, self.relu, z_curr_lo,
+                             z_curr_up, method)
+        self.constraint_gradient_test(self.linear_with_bias, self.relu,
+                                      z_curr_lo, z_curr_up, method)
 
     def test_with_bias_relu_LP(self):
         z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
         z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
         method = mip_utils.PropagateBoundsMethod.LP
-        self.constraint_test(
-            self.linear_with_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_test(self.linear_with_bias, self.relu, z_curr_lo,
+                             z_curr_up, method)
 
     def test_with_bias_leaky_relu_IA1(self):
         # The input bounds allow the output to be
         # 1. Either active or inactive.
         # 2. Only active.
         # 3. Only inactive.
-        z_curr_lo = torch.tensor(
-            [-1., 2.], dtype=self.dtype, requires_grad=True)
-        z_curr_up = torch.tensor(
-            [2., 4.], dtype=self.dtype, requires_grad=True)
+        z_curr_lo = torch.tensor([-1., 2.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
+        z_curr_up = torch.tensor([2., 4.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
         method = mip_utils.PropagateBoundsMethod.IA
-        self.constraint_test(
-            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
-        self.constraint_gradient_test(
-            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
+        self.constraint_test(self.linear_with_bias, self.leaky_relu, z_curr_lo,
+                             z_curr_up, method)
+        self.constraint_gradient_test(self.linear_with_bias, self.leaky_relu,
+                                      z_curr_lo, z_curr_up, method)
 
     def test_with_bias_leaky_relu_IA2(self):
         # Only a single output
-        z_curr_lo = torch.tensor(
-            [-1., 2.], dtype=self.dtype, requires_grad=True)
-        z_curr_up = torch.tensor(
-            [3., 5], dtype=self.dtype, requires_grad=True)
+        z_curr_lo = torch.tensor([-1., 2.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
+        z_curr_up = torch.tensor([3., 5], dtype=self.dtype, requires_grad=True)
         linear_layer = nn.Linear(2, 1, bias=True)
         linear_layer.weight.data = torch.tensor([[1, 3]], dtype=self.dtype)
         # Three different cases
@@ -1075,13 +1096,12 @@ class TestAddConstraintByLayer(unittest.TestCase):
         # 2. The ReLU is always inactive.
         # 3. The ReLU could be either active or inactive.
         for bias_val in [5, -20, -4]:
-            linear_layer.bias.data = torch.tensor(
-                [bias_val], dtype=self.dtype)
+            linear_layer.bias.data = torch.tensor([bias_val], dtype=self.dtype)
             method = mip_utils.PropagateBoundsMethod.IA
-            self.constraint_test(
-                linear_layer, self.leaky_relu, z_curr_lo, z_curr_up, method)
-            self.constraint_gradient_test(
-                linear_layer, self.leaky_relu, z_curr_lo, z_curr_up, method)
+            self.constraint_test(linear_layer, self.leaky_relu, z_curr_lo,
+                                 z_curr_up, method)
+            self.constraint_gradient_test(linear_layer, self.leaky_relu,
+                                          z_curr_lo, z_curr_up, method)
             linear_layer.weight.grad.zero_()
             linear_layer.bias.grad.zero_()
             z_curr_lo.grad.zero_()
@@ -1091,48 +1111,48 @@ class TestAddConstraintByLayer(unittest.TestCase):
         z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
         z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
         method = mip_utils.PropagateBoundsMethod.LP
-        self.constraint_test(
-            self.linear_with_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
+        self.constraint_test(self.linear_with_bias, self.leaky_relu, z_curr_lo,
+                             z_curr_up, method)
 
     def test_no_bias_relu_IA(self):
-        z_curr_lo = torch.tensor(
-            [-1., 2.], dtype=self.dtype, requires_grad=True)
-        z_curr_up = torch.tensor(
-            [2., 4.], dtype=self.dtype, requires_grad=True)
+        z_curr_lo = torch.tensor([-1., 2.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
+        z_curr_up = torch.tensor([2., 4.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
         method = mip_utils.PropagateBoundsMethod.IA
-        self.constraint_test(
-            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
-        self.constraint_gradient_test(
-            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_test(self.linear_no_bias, self.relu, z_curr_lo,
+                             z_curr_up, method)
+        self.constraint_gradient_test(self.linear_no_bias, self.relu,
+                                      z_curr_lo, z_curr_up, method)
 
     def test_no_bias_relu_LP(self):
         z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
         z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
         method = mip_utils.PropagateBoundsMethod.LP
-        self.constraint_test(
-            self.linear_no_bias, self.relu, z_curr_lo, z_curr_up, method)
+        self.constraint_test(self.linear_no_bias, self.relu, z_curr_lo,
+                             z_curr_up, method)
 
     def test_no_bias_leaky_relu_IA(self):
-        z_curr_lo = torch.tensor(
-            [-1., 2.], dtype=self.dtype, requires_grad=True)
-        z_curr_up = torch.tensor(
-            [2., 4.], dtype=self.dtype, requires_grad=True)
+        z_curr_lo = torch.tensor([-1., 2.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
+        z_curr_up = torch.tensor([2., 4.],
+                                 dtype=self.dtype,
+                                 requires_grad=True)
         method = mip_utils.PropagateBoundsMethod.IA
-        self.constraint_test(
-            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
-        self.constraint_gradient_test(
-            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
+        self.constraint_test(self.linear_no_bias, self.leaky_relu, z_curr_lo,
+                             z_curr_up, method)
+        self.constraint_gradient_test(self.linear_no_bias, self.leaky_relu,
+                                      z_curr_lo, z_curr_up, method)
 
     def test_no_bias_leaky_relu_LP(self):
         z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
         z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
         method = mip_utils.PropagateBoundsMethod.LP
-        self.constraint_test(
-            self.linear_no_bias, self.leaky_relu, z_curr_lo, z_curr_up,
-            method)
+        self.constraint_test(self.linear_no_bias, self.leaky_relu, z_curr_lo,
+                             z_curr_up, method)
 
 
 if __name__ == "__main__":

@@ -29,10 +29,10 @@ class Quadrotor2D:
             ])
             return np.concatenate((qdot, qddot))
         elif isinstance(x, torch.Tensor):
-            qddot = torch.stack((
-                -torch.sin(q[2]) / self.mass * (u[0] + u[1]),
-                torch.cos(x[2]) / self.mass * (u[0] + u[1]) - self.gravity,
-                self.length / self.inertia * (u[0] - u[1])))
+            qddot = torch.stack(
+                (-torch.sin(q[2]) / self.mass * (u[0] + u[1]),
+                 torch.cos(x[2]) / self.mass * (u[0] + u[1]) - self.gravity,
+                 self.length / self.inertia * (u[0] - u[1])))
             return torch.cat((qdot, qddot))
 
     def linearized_dynamics(self, x, u):
@@ -71,8 +71,8 @@ class Quadrotor2D:
 
     @property
     def u_equilibrium(self):
-        return torch.full(
-            (2,), (self.mass * self.gravity) / 2, dtype=self.dtype)
+        return torch.full((2, ), (self.mass * self.gravity) / 2,
+                          dtype=self.dtype)
 
     def lqr_control(self, Q, R, x, u):
         """
@@ -91,7 +91,6 @@ class Quadrotor2DVisualizer:
     Copied from
     https://github.com/RussTedrake/underactuated/blob/master/underactuated/quadrotor2d.py
     """
-
     def __init__(self, ax, x_lim, y_lim):
         self.ax = ax
         self.ax.set_aspect("equal")
@@ -143,13 +142,13 @@ class Quadrotor2DVisualizer:
         self.right_pin_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
         self.right_pin_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
 
-        p = np.dot(R, np.vstack((
-            -self.length + self.prop[0, :], self.prop[1, :])))
+        p = np.dot(
+            R, np.vstack((-self.length + self.prop[0, :], self.prop[1, :])))
         self.left_prop_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
         self.left_prop_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
 
-        p = np.dot(R, np.vstack(
-            (self.length + self.prop[0, :], self.prop[1, :])))
+        p = np.dot(R,
+                   np.vstack((self.length + self.prop[0, :], self.prop[1, :])))
         self.right_prop_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
         self.right_prop_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
 

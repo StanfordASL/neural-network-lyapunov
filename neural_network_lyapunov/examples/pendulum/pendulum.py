@@ -58,9 +58,12 @@ class Pendulum:
         """
         Returns the gradient of the dynamics
         """
-        A = torch.tensor([[0, 1], [
-            -self.gravity / self.length * torch.cos(x[0]),
-            -self.damping / (self.mass * self.length * self.length)]],
+        A = torch.tensor(
+            [[0, 1],
+             [
+                 -self.gravity / self.length * torch.cos(x[0]), -self.damping /
+                 (self.mass * self.length * self.length)
+             ]],
             dtype=self.dtype)
         B = torch.tensor([[0], [1 / (self.mass * self.length * self.length)]],
                          dtype=self.dtype)
@@ -75,10 +78,10 @@ class Pendulum:
         # First linearize the dynamics
         # The dynamics is
         # thetaddot = (u - mgl * sin(theta) - b*thetadot) / (ml^2)
-        A, B = self.dynamics_gradient(torch.tensor(
-            [np.pi, 0], dtype=self.dtype))
-        S = scipy.linalg.solve_continuous_are(
-            A.detach().numpy(), B.detach().numpy(), Q, R)
+        A, B = self.dynamics_gradient(
+            torch.tensor([np.pi, 0], dtype=self.dtype))
+        S = scipy.linalg.solve_continuous_are(A.detach().numpy(),
+                                              B.detach().numpy(), Q, R)
         K = -np.linalg.solve(R, B.T @ S)
         return K
 
@@ -97,11 +100,14 @@ class PendulumVisualizer:
         l_ = self._plant.length
         self._pendulum_arm, = self._pendulum_ax.plot(
             np.array([0, l_ * np.sin(theta0)]),
-            np.array([0, -l_ * np.cos(theta0)]), linewidth=5)
-        self._pendulum_sphere, = self._pendulum_ax.plot(
-            l_ * np.sin(theta0), -l_*np.cos(theta0), marker='o', markersize=15)
-        self._pendulum_ax.set_xlim(-l_*1.1, l_*1.1)
-        self._pendulum_ax.set_ylim(-1.1*l_, 1.1*l_)
+            np.array([0, -l_ * np.cos(theta0)]),
+            linewidth=5)
+        self._pendulum_sphere, = self._pendulum_ax.plot(l_ * np.sin(theta0),
+                                                        -l_ * np.cos(theta0),
+                                                        marker='o',
+                                                        markersize=15)
+        self._pendulum_ax.set_xlim(-l_ * 1.1, l_ * 1.1)
+        self._pendulum_ax.set_ylim(-1.1 * l_, 1.1 * l_)
         self._pendulum_ax.set_axis_off()
         self._pendulum_title = self._pendulum_ax.set_title("t=0s")
         self._fig.canvas.draw()

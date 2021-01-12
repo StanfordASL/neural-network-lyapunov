@@ -33,31 +33,44 @@ def show_sample(X_sample, X_next_sample=None, clamp=False):
         num_channels = 1
         cmap = 'gray'
     else:
-        raise(NotImplementedError)
+        raise (NotImplementedError)
     fig = plt.figure(figsize=(10, 10))
     if X_next_sample is not None:
         fig.add_subplot(1, 3, 1)
-        plt.imshow(X_sample[:num_channels, :, :].to(
-            'cpu').detach().numpy().transpose(1, 2, 0),
-            cmap=cmap, vmin=0, vmax=1)
+        plt.imshow(
+            X_sample[:num_channels, :, :].to('cpu').detach().numpy().transpose(
+                1, 2, 0),
+            cmap=cmap,
+            vmin=0,
+            vmax=1)
         fig.add_subplot(1, 3, 2)
-        plt.imshow(X_sample[num_channels:, :, :].to(
-            'cpu').detach().numpy().transpose(1, 2, 0),
-            cmap=cmap, vmin=0, vmax=1)
+        plt.imshow(
+            X_sample[num_channels:, :, :].to('cpu').detach().numpy().transpose(
+                1, 2, 0),
+            cmap=cmap,
+            vmin=0,
+            vmax=1)
         fig.add_subplot(1, 3, 3)
         plt.imshow(X_next_sample[:num_channels, :, :].to(
             'cpu').detach().numpy().transpose(1, 2, 0),
-            cmap=cmap, vmin=0, vmax=1)
+                   cmap=cmap,
+                   vmin=0,
+                   vmax=1)
     else:
         fig.add_subplot(1, 2, 1)
-        plt.imshow(X_sample[:num_channels, :, :].to(
-            'cpu').detach().numpy().transpose(1, 2, 0),
-            cmap=cmap, vmin=0, vmax=1)
+        plt.imshow(
+            X_sample[:num_channels, :, :].to('cpu').detach().numpy().transpose(
+                1, 2, 0),
+            cmap=cmap,
+            vmin=0,
+            vmax=1)
         if X_sample.shape[0] == 2 or X_sample.shape[0] == 6:
             fig.add_subplot(1, 2, 2)
             plt.imshow(X_sample[num_channels:, :, :].to(
                 'cpu').detach().numpy().transpose(1, 2, 0),
-                cmap=cmap, vmin=0, vmax=1)
+                       cmap=cmap,
+                       vmin=0,
+                       vmax=1)
     plt.show()
 
 
@@ -68,7 +81,7 @@ def add_noise(x_data, noise_std_percent):
     as percent of the mean of the magnitude for that dimension
     @return x_data_, same as x_data but with noise added to it
     """
-    assert(isinstance(x_data, torch.Tensor))
+    assert (isinstance(x_data, torch.Tensor))
     x_data_ = torch.clone(x_data)
     noise_std = noise_std_percent * torch.mean(torch.abs(x_data), dim=0)
     eps = torch.randn(x_data.shape, dtype=x_data.dtype)
@@ -87,17 +100,17 @@ def get_dataloader(x_data, x_next_data, batch_size):
     @return torch DataLoaders, training dataloader and validation one
     """
     x_dataset = TensorDataset(x_data, x_next_data)
-    dataloader = DataLoader(
-        x_dataset,
-        batch_size=batch_size,
-        shuffle=True
-    )
+    dataloader = DataLoader(x_dataset, batch_size=batch_size, shuffle=True)
     return dataloader
 
 
 class PybulletSampleGenerator:
-    def __init__(self, load_world_cb, joint_space,
-                 image_width=80, image_height=80, grayscale=False,
+    def __init__(self,
+                 load_world_cb,
+                 joint_space,
+                 image_width=80,
+                 image_height=80,
+                 grayscale=False,
                  camera_eye_position=[0, -3, 0],
                  camera_target_position=[0, 0, 0],
                  camera_up_vector=[0, 0, 1],
@@ -124,7 +137,7 @@ class PybulletSampleGenerator:
         else:
             self.physics_client = pb.connect(pb.DIRECT)
         pb.setGravity(0, 0, -9.8)
-        self.timestep = 1./240.
+        self.timestep = 1. / 240.
         pb.setTimeStep(self.timestep)
         pb.setPhysicsEngineParameter(enableFileCaching=0)
         self.grayscale = grayscale
@@ -139,23 +152,24 @@ class PybulletSampleGenerator:
             cameraEyePosition=camera_eye_position,
             cameraTargetPosition=camera_target_position,
             cameraUpVector=camera_up_vector)
-        self.projection_matrix = pb.computeProjectionMatrixFOV(
-            fov=45.0,
-            aspect=1.0,
-            nearVal=0.1,
-            farVal=3.1)
+        self.projection_matrix = pb.computeProjectionMatrixFOV(fov=45.0,
+                                                               aspect=1.0,
+                                                               nearVal=0.1,
+                                                               farVal=3.1)
         self.robot_id = load_world_cb(pb)
         self.joint_space = joint_space
         if self.joint_space:
             self.num_joints = pb.getNumJoints(self.robot_id)
             self.x_dim = 2 * self.num_joints
             for i in range(self.num_joints):
-                pb.setJointMotorControl2(self.robot_id, i, pb.VELOCITY_CONTROL,
+                pb.setJointMotorControl2(self.robot_id,
+                                         i,
+                                         pb.VELOCITY_CONTROL,
                                          force=0)
         else:
             self.x_dim = 12
         # runs the sim for .5 seconds to resolve self collisions
-        for i in range(int(.5/self.timestep)):
+        for i in range(int(.5 / self.timestep)):
             pb.stepSimulation()
         self.state_id = pb.saveState()
 
@@ -176,10 +190,10 @@ class PybulletSampleGenerator:
         @return X_next, tensor corresponding to x0 after dt in image space
         @return x_next, tensor corresponding to x0 after dt in state space
         """
-        assert(isinstance(x0, torch.Tensor))
-        assert(len(x0) == self.x_dim)
+        assert (isinstance(x0, torch.Tensor))
+        assert (len(x0) == self.x_dim)
         pb.restoreState(self.state_id)
-        num_step = int(dt*(.5/self.timestep))
+        num_step = int(dt * (.5 / self.timestep))
         X = np.zeros((6, self.image_width, self.image_height), dtype=np.uint8)
         X_next = np.zeros((3, self.image_width, self.image_height),
                           dtype=np.uint8)
@@ -212,7 +226,7 @@ class PybulletSampleGenerator:
         if self.joint_space:
             state = pb.getJointStates(self.robot_id, list(range(len(q0))))
             q1 = state[0][:len(q0)]
-            v1 = state[0][len(q0):len(q0)+len(v0)]
+            v1 = state[0][len(q0):len(q0) + len(v0)]
             q1 = torch.tensor(q1, dtype=self.dtype)
             v1 = torch.tensor(v1, dtype=self.dtype)
             x1 = torch.cat((q1, v1))
@@ -236,7 +250,9 @@ class PybulletSampleGenerator:
         X = torch.tensor(X, dtype=torch.float64)
         X_next = torch.tensor(X_next, dtype=torch.float64)
         if self.grayscale:
-            X_gray = torch.zeros(2, X.shape[1], X.shape[2],
+            X_gray = torch.zeros(2,
+                                 X.shape[1],
+                                 X.shape[2],
                                  dtype=torch.float64)
             X_gray[0, :] = self.grayscale_weight[0] * X[0, :, :] +\
                 self.grayscale_weight[1] * X[1, :, :] +\
@@ -244,7 +260,9 @@ class PybulletSampleGenerator:
             X_gray[1, :] = self.grayscale_weight[0] * X[3, :, :] +\
                 self.grayscale_weight[1] * X[4, :, :] +\
                 self.grayscale_weight[2] * X[5, :, :]
-            X_next_gray = torch.zeros(1, X_next.shape[1], X_next.shape[2],
+            X_next_gray = torch.zeros(1,
+                                      X_next.shape[1],
+                                      X_next.shape[2],
                                       dtype=torch.float64)
             X_next_gray[0, :, :] = \
                 self.grayscale_weight[0] * X_next[0, :, :] +\
@@ -266,22 +284,28 @@ class PybulletSampleGenerator:
         @return X_data, tensor [N+2,num_channels,width,height]
         @return x_data, tensor [N+1,state dim]
         """
-        X_data = torch.empty((N+2, self.num_channels,
-                             self.image_width, self.image_height),
-                             dtype=self.dtype)
-        x_data = torch.empty((N+1, self.x_dim), dtype=self.dtype)
+        X_data = torch.empty(
+            (N + 2, self.num_channels, self.image_width, self.image_height),
+            dtype=self.dtype)
+        x_data = torch.empty((N + 1, self.x_dim), dtype=self.dtype)
         _, X, _ = self.generate_sample(x0, dt)
         X_data[0, :] = X[:self.num_channels, :]
         X_data[1, :] = X[self.num_channels:, :]
         x_data[0, :] = x0
         for n in range(N):
             x_next, _, X_next = self.generate_sample(x_data[n], dt)
-            X_data[n+2] = X_next
-            x_data[n+1] = x_next
+            X_data[n + 2] = X_next
+            x_data[n + 1] = x_next
         return x_data, X_data
 
-    def generate_dataset(self, x_lo, x_up, dt, N, num_rollouts,
-                         x_mean=None, x_std=None):
+    def generate_dataset(self,
+                         x_lo,
+                         x_up,
+                         dt,
+                         N,
+                         num_rollouts,
+                         x_mean=None,
+                         x_std=None):
         """
         generates a dataset using pybullet
         @param x_lo, x_up, bounding box on the initial states of the system
@@ -293,19 +317,19 @@ class PybulletSampleGenerator:
         variation equal to x_std. The samples are still limited between
         x_lo and x_up
         """
-        assert(N >= 1)
+        assert (N >= 1)
         X_data = torch.empty((num_rollouts * N, 2 * self.num_channels,
-                             self.image_width, self.image_height),
+                              self.image_width, self.image_height),
                              dtype=self.dtype)
         X_next_data = torch.empty((num_rollouts * N, self.num_channels,
-                                  self.image_width, self.image_height),
+                                   self.image_width, self.image_height),
                                   dtype=self.dtype)
         x_data = torch.empty((num_rollouts * N, self.x_dim), dtype=self.dtype)
         x_next_data = torch.empty((num_rollouts * N, self.x_dim),
                                   dtype=self.dtype)
         for i in range(num_rollouts):
             if x_mean is not None:
-                assert(x_std is not None)
+                assert (x_std is not None)
                 x0 = torch.randn(self.x_dim) * x_std + x_mean
                 x0 = torch.min(x0, x_up)
                 x0 = torch.max(x0, x_lo)
@@ -314,11 +338,11 @@ class PybulletSampleGenerator:
             x_data_rollout, X_data_rollout = self.generate_rollout(x0, dt, N)
             for n in range(N):
                 X_data[i * N + n, :self.num_channels, :] = X_data_rollout[n, :]
-                X_data[i * N + n, self.num_channels:, :] = X_data_rollout[
-                    n+1, :]
-                X_next_data[i * N + n, :] = X_data_rollout[n+2, :]
+                X_data[i * N + n,
+                       self.num_channels:, :] = X_data_rollout[n + 1, :]
+                X_next_data[i * N + n, :] = X_data_rollout[n + 2, :]
                 x_data[i * N + n, :] = x_data_rollout[n, :]
-                x_next_data[i * N + n, :] = x_data_rollout[n+1, :]
+                x_next_data[i * N + n, :] = x_data_rollout[n + 1, :]
         return x_data, x_next_data, X_data, X_next_data
 
     def data_to_rollouts(self, x_data, dt, N):

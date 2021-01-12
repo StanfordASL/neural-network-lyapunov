@@ -29,10 +29,9 @@ class FeedbackSystem:
     The feedback controller is u[n] = ϕᵤ(x[n]) - ϕᵤ(x*), where ϕᵤ is another
     neural network with (leaky) ReLU activations.
     """
-    def __init__(
-        self, forward_system, controller_network, x_equilibrium: torch.Tensor,
-        u_equilibrium: torch.Tensor, u_lower_limit: np.ndarray,
-            u_upper_limit: np.ndarray):
+    def __init__(self, forward_system, controller_network,
+                 x_equilibrium: torch.Tensor, u_equilibrium: torch.Tensor,
+                 u_lower_limit: np.ndarray, u_upper_limit: np.ndarray):
         """
         @param forward_system. The forward dynamical system representing
         x[n+1] = f(x[n], u[n]). This system must implements functions like
@@ -59,37 +58,38 @@ class FeedbackSystem:
         self.x_up_all = self.forward_system.x_up_all
         self.dtype = self.forward_system.dtype
         if isinstance(controller_network, torch.nn.Sequential):
-            assert(controller_network[0].in_features ==
-                   self.forward_system.x_dim)
-            assert(controller_network[-1].out_features ==
-                   self.forward_system.u_dim)
+            assert (
+                controller_network[0].in_features == self.forward_system.x_dim)
+            assert (controller_network[-1].out_features ==
+                    self.forward_system.u_dim)
         elif isinstance(controller_network, torch.nn.Linear):
-            assert(controller_network.in_features == self.forward_system.x_dim)
-            assert(controller_network.out_features ==
-                   self.forward_system.u_dim)
+            assert (
+                controller_network.in_features == self.forward_system.x_dim)
+            assert (
+                controller_network.out_features == self.forward_system.u_dim)
         else:
             raise Exception("Unknown controller type.")
         self.controller_network = controller_network
-        assert(x_equilibrium.shape == (self.forward_system.x_dim,))
-        assert(x_equilibrium.dtype == self.dtype)
+        assert (x_equilibrium.shape == (self.forward_system.x_dim, ))
+        assert (x_equilibrium.dtype == self.dtype)
         self.x_equilibrium = x_equilibrium
-        assert(u_equilibrium.shape == (self.forward_system.u_dim,))
-        assert(u_equilibrium.dtype == self.dtype)
+        assert (u_equilibrium.shape == (self.forward_system.u_dim, ))
+        assert (u_equilibrium.dtype == self.dtype)
         self.u_equilibrium = u_equilibrium
         if isinstance(self.controller_network, torch.nn.Sequential):
             self.controller_relu_free_pattern = \
                 relu_to_optimization.ReLUFreePattern(
                     self.controller_network, self.dtype)
-        assert(isinstance(u_lower_limit, np.ndarray))
-        assert(u_lower_limit.shape == (self.forward_system.u_dim,))
-        assert(isinstance(u_upper_limit, np.ndarray))
-        assert(u_upper_limit.shape == (self.forward_system.u_dim,))
+        assert (isinstance(u_lower_limit, np.ndarray))
+        assert (u_lower_limit.shape == (self.forward_system.u_dim, ))
+        assert (isinstance(u_upper_limit, np.ndarray))
+        assert (u_upper_limit.shape == (self.forward_system.u_dim, ))
         self.u_lower_limit = u_lower_limit
         self.u_upper_limit = u_upper_limit
 
-    def _add_controller_mip_constraint(
-        self, mip, x_var, u_var, controller_slack_var_name,
-            controller_binary_var_name):
+    def _add_controller_mip_constraint(self, mip, x_var, u_var,
+                                       controller_slack_var_name,
+                                       controller_binary_var_name):
         # Add the constraint on the controller between x and u.
         if isinstance(self.controller_network, torch.nn.Sequential):
             controller_mip_cnstr, _, _, controller_z_post_relu_lo,\
@@ -98,8 +98,8 @@ class FeedbackSystem:
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all),
                     mip_utils.PropagateBoundsMethod.IA)
-            assert(controller_mip_cnstr.Aout_input is None)
-            assert(controller_mip_cnstr.Aout_binary is None)
+            assert (controller_mip_cnstr.Aout_input is None)
+            assert (controller_mip_cnstr.Aout_binary is None)
             controller_slack, controller_binary = \
                 mip.add_mixed_integer_linear_constraints(
                     controller_mip_cnstr, x_var, None,
@@ -113,27 +113,33 @@ class FeedbackSystem:
         # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         # and u[n] = saturation(u_pre_sat)
         # Namely Aout_slack * controller_slack -u_pre_sat = ϕᵤ(x*) - u* -Cout
-        u_pre_sat = mip.addVars(
-            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name="u_pre_sat")
+        u_pre_sat = mip.addVars(self.forward_system.u_dim,
+                                lb=-gurobipy.GRB.INFINITY,
+                                vtype=gurobipy.GRB.CONTINUOUS,
+                                name="u_pre_sat")
         controller_relu_at_x_equilibrium = self.controller_network(
             self.x_equilibrium)
         if isinstance(self.controller_network, torch.nn.Sequential):
             mip.addMConstrs([
                 controller_mip_cnstr.Aout_slack.reshape(
                     (self.forward_system.u_dim, len(controller_slack))),
-                -torch.eye(
-                    self.forward_system.u_dim, dtype=self.forward_system.dtype)
-                ], [controller_slack, u_pre_sat], sense=gurobipy.GRB.EQUAL,
-                b=controller_relu_at_x_equilibrium - self.u_equilibrium
-                - controller_mip_cnstr.Cout, name="controller_output")
+                -torch.eye(self.forward_system.u_dim,
+                           dtype=self.forward_system.dtype)
+            ], [controller_slack, u_pre_sat],
+                            sense=gurobipy.GRB.EQUAL,
+                            b=controller_relu_at_x_equilibrium -
+                            self.u_equilibrium - controller_mip_cnstr.Cout,
+                            name="controller_output")
         elif isinstance(self.controller_network, torch.nn.Linear):
-            mip.addMConstrs([torch.eye(
-                self.forward_system.u_dim, dtype=self.dtype),
-                -self.controller_network.weight], [u_pre_sat, x_var],
-                b=self.u_equilibrium-controller_relu_at_x_equilibrium +
-                self.controller_network.bias, sense=gurobipy.GRB.EQUAL,
-                name="controller")
+            mip.addMConstrs([
+                torch.eye(self.forward_system.u_dim, dtype=self.dtype),
+                -self.controller_network.weight
+            ], [u_pre_sat, x_var],
+                            b=self.u_equilibrium -
+                            controller_relu_at_x_equilibrium +
+                            self.controller_network.bias,
+                            sense=gurobipy.GRB.EQUAL,
+                            name="controller")
         else:
             raise Exception("Unknown controller network type.")
 
@@ -152,13 +158,13 @@ class FeedbackSystem:
         for i in range(self.forward_system.u_dim):
             if np.isinf(self.u_lower_limit[i]) and\
                     np.isinf(self.u_upper_limit[i]):
-                mip.addLConstr(
-                    [torch.tensor([1, -1], dtype=self.dtype)],
-                    [[u_var[i], u_pre_sat[i]]], rhs=0.,
-                    sense=gurobipy.GRB.EQUAL)
+                mip.addLConstr([torch.tensor([1, -1], dtype=self.dtype)],
+                               [[u_var[i], u_pre_sat[i]]],
+                               rhs=0.,
+                               sense=gurobipy.GRB.EQUAL)
             else:
-                assert(not np.isinf(self.u_lower_limit[i]) and
-                       not np.isinf(self.u_upper_limit[i]))
+                assert (not np.isinf(self.u_lower_limit[i])
+                        and not np.isinf(self.u_upper_limit[i]))
                 u_lower_bound = controller_network_output_lo[i] -\
                     controller_relu_at_x_equilibrium[i] + self.u_equilibrium[i]
                 u_upper_bound = controller_network_output_up[i] -\
@@ -168,14 +174,16 @@ class FeedbackSystem:
                     self.u_upper_limit[i], u_lower_bound, u_upper_bound)
         return controller_slack, controller_binary
 
-    def add_dynamics_mip_constraint(
-        self, mip, x_var, x_next_var, u_var_name, forward_slack_var_name,
-        forward_binary_var_name, controller_slack_var_name,
-            controller_binary_var_name):
-        assert(isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
-        u = mip.addVars(
-            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY,
-            vtype=gurobipy.GRB.CONTINUOUS, name=u_var_name)
+    def add_dynamics_mip_constraint(self, mip, x_var, x_next_var, u_var_name,
+                                    forward_slack_var_name,
+                                    forward_binary_var_name,
+                                    controller_slack_var_name,
+                                    controller_binary_var_name):
+        assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+        u = mip.addVars(self.forward_system.u_dim,
+                        lb=-gurobipy.GRB.INFINITY,
+                        vtype=gurobipy.GRB.CONTINUOUS,
+                        name=u_var_name)
         # Now add the forward dynamics constraint
         forward_slack, forward_binary = \
             self.forward_system.add_dynamics_constraint(
@@ -198,13 +206,15 @@ class FeedbackSystem:
         u_pre_sat = self.controller_network(x) - \
             self.controller_network(self.x_equilibrium) + self.u_equilibrium
         if len(x.shape) == 1:
-            u = torch.max(torch.min(
-                u_pre_sat, torch.from_numpy(self.u_upper_limit)),
+            u = torch.max(
+                torch.min(u_pre_sat, torch.from_numpy(self.u_upper_limit)),
                 torch.from_numpy(self.u_lower_limit))
         else:
             # batch of x
-            u = torch.max(torch.min(u_pre_sat, torch.from_numpy(
-                self.u_upper_limit).reshape((1, -1))),
+            u = torch.max(
+                torch.min(
+                    u_pre_sat,
+                    torch.from_numpy(self.u_upper_limit).reshape((1, -1))),
                 torch.from_numpy(self.u_lower_limit).reshape((1, -1)))
         return u
 

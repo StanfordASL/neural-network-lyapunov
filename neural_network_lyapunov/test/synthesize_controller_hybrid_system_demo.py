@@ -19,14 +19,13 @@ def create_system(dtype):
     P = torch.zeros(8, 4, dtype=dtype)
     P[:4, :] = torch.eye(4, dtype=dtype)
     P[4:, :] = -torch.eye(4, dtype=dtype)
-    system.add_mode(
-        torch.eye(2, dtype=dtype), torch.eye(2, dtype=dtype),
-        torch.tensor([0, 0], dtype=dtype), P,
-        torch.tensor([10, 10, 10, 10, 0, 10, 10, 10], dtype=dtype))
-    system.add_mode(
-        0.5*torch.eye(2, dtype=dtype), 1.5*torch.eye(2, dtype=dtype),
-        torch.tensor([0, 0], dtype=dtype), P,
-        torch.tensor([0, 10, 10, 10, 10, 10, 10, 10], dtype=dtype))
+    system.add_mode(torch.eye(2, dtype=dtype), torch.eye(2, dtype=dtype),
+                    torch.tensor([0, 0], dtype=dtype), P,
+                    torch.tensor([10, 10, 10, 10, 0, 10, 10, 10], dtype=dtype))
+    system.add_mode(0.5 * torch.eye(2, dtype=dtype),
+                    1.5 * torch.eye(2, dtype=dtype),
+                    torch.tensor([0, 0], dtype=dtype), P,
+                    torch.tensor([0, 10, 10, 10, 10, 10, 10, 10], dtype=dtype))
     return system
 
 
@@ -34,8 +33,11 @@ if __name__ == "__main__":
     dtype = torch.float64
     forward_system = create_system(dtype)
 
-    controller_network = utils.setup_relu(
-        (2, 4, 2), None, negative_slope=0.01, bias=False, dtype=dtype)
+    controller_network = utils.setup_relu((2, 4, 2),
+                                          None,
+                                          negative_slope=0.01,
+                                          bias=False,
+                                          dtype=dtype)
 
     x_equilibrium = torch.tensor([0, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0, 0], dtype=dtype)
@@ -46,8 +48,11 @@ if __name__ == "__main__":
         forward_system, controller_network, x_equilibrium, u_equilibrium,
         u_lower_limit, u_upper_limit)
 
-    lyapunov_relu = utils.setup_relu(
-        (2, 4, 4, 1), None, negative_slope=0.01, bias=False, dtype=dtype)
+    lyapunov_relu = utils.setup_relu((2, 4, 4, 1),
+                                     None,
+                                     negative_slope=0.01,
+                                     bias=False,
+                                     dtype=dtype)
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
 

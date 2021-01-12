@@ -36,10 +36,16 @@ class AdversarialWithBaselineTrainingOptions:
 
 
 class AdversarialWithBaseline:
-    def __init__(self, vf, x0_lo, x0_up,
-                 nn_width=16, nn_depth=1,
-                 x_samples_validation=None, v_samples_validation=None,
-                 x_samples_init=None, v_samples_init=None):
+    def __init__(self,
+                 vf,
+                 x0_lo,
+                 x0_up,
+                 nn_width=16,
+                 nn_depth=1,
+                 x_samples_validation=None,
+                 v_samples_validation=None,
+                 x_samples_init=None,
+                 v_samples_init=None):
         """
         Trains a neural network to approximate a value function using
         adversarial training. Also trains a baseline for comparison, that
@@ -67,14 +73,14 @@ class AdversarialWithBaseline:
         self.x_samples_validation = x_samples_validation
         self.v_samples_validation = v_samples_validation
         if x_samples_init is not None or v_samples_init is not None:
-            assert(x_samples_init is not None)
-            assert(v_samples_init is not None)
-            assert(isinstance(x_samples_init, torch.Tensor))
-            assert(isinstance(v_samples_init, torch.Tensor))
-            assert(x_samples_init.dtype == self.dtype)
-            assert(v_samples_init.dtype == self.dtype)
-            assert(x_samples_init.shape[1] == self.x_dim)
-            assert(v_samples_init.shape[1] == 1)
+            assert (x_samples_init is not None)
+            assert (v_samples_init is not None)
+            assert (isinstance(x_samples_init, torch.Tensor))
+            assert (isinstance(v_samples_init, torch.Tensor))
+            assert (x_samples_init.dtype == self.dtype)
+            assert (v_samples_init.dtype == self.dtype)
+            assert (x_samples_init.shape[1] == self.x_dim)
+            assert (v_samples_init.shape[1] == 1)
             self.adv_data_buffer = x_samples_init.clone()
             self.adv_label_buffer = v_samples_init.clone()
             self.rand_data_buffer = x_samples_init.clone()
@@ -82,8 +88,8 @@ class AdversarialWithBaseline:
         else:
             self.adv_data_buffer = torch.Tensor(0, self.x_dim).type(self.dtype)
             self.adv_label_buffer = torch.Tensor(0, 1).type(self.dtype)
-            self.rand_data_buffer = torch.Tensor(0, self.x_dim).type(
-                self.dtype)
+            self.rand_data_buffer = torch.Tensor(0,
+                                                 self.x_dim).type(self.dtype)
             self.rand_label_buffer = torch.Tensor(0, 1).type(self.dtype)
         nn_layers = [torch.nn.Linear(self.x_dim, nn_width), torch.nn.ReLU()]
         for i in range(nn_depth):
@@ -140,7 +146,7 @@ class AdversarialWithBaseline:
             if rand_v is not None:
                 rand_label[k, 0] = rand_v
                 k += 1
-        return(rand_data, rand_label)
+        return (rand_data, rand_label)
 
     def get_limit_samples(self, n):
         rand_data = torch.zeros(n, self.x_dim, dtype=self.dtype)
@@ -152,13 +158,13 @@ class AdversarialWithBaseline:
             if rand_v is not None:
                 rand_label[k, 0] = rand_v
                 k += 1
-        return(rand_data, rand_label)
+        return (rand_data, rand_label)
 
     def get_adversarial_samples(self, opt):
         """
         @param TODO
         """
-        assert(isinstance(opt, AdversarialWithBaselineTrainingOptions))
+        assert (isinstance(opt, AdversarialWithBaselineTrainingOptions))
         adv_data_ = torch.Tensor(0, self.x_dim).type(self.dtype)
         adv_label_ = torch.Tensor(0, 1).type(self.dtype)
         self.x_adv_opt_log = []
@@ -185,18 +191,18 @@ class AdversarialWithBaseline:
             with torch.no_grad():
                 self.x_adv_opt_log.append(
                     (adv_data_k.clone(), adv_label_k.clone()))
-        return(adv_data_, adv_label_)
+        return (adv_data_, adv_label_)
 
     def train(self, opt, logging=True):
         """
         @param opt instance of AdversarialWithBaselineTrainingOptions
         @param logging Boolean whether or not to log with tensorboard
         """
-        assert(isinstance(opt, AdversarialWithBaselineTrainingOptions))
+        assert (isinstance(opt, AdversarialWithBaselineTrainingOptions))
         if self.adv_data_buffer.shape[0] < opt.init_buffer_size:
-            (rand_data_, rand_label_) = self.get_random_samples(
-                opt.init_buffer_size -
-                self.adv_data_buffer.shape[0])
+            (rand_data_, rand_label_
+             ) = self.get_random_samples(opt.init_buffer_size -
+                                         self.adv_data_buffer.shape[0])
             self.adv_data_buffer = torch.cat(
                 (self.adv_data_buffer, rand_data_), axis=0)
             self.adv_label_buffer = torch.cat(
@@ -207,11 +213,11 @@ class AdversarialWithBaseline:
                 (self.rand_label_buffer, rand_label_), axis=0)
         if self.num_total_iter_done == 0:
             if opt.init_num_train_steps > 0:
-                assert(self.adv_data_buffer.shape[0] > 0)
-                assert(self.adv_data_buffer.shape[0]
-                       == self.rand_data_buffer.shape[0])
-                assert(self.adv_label_buffer.shape[0]
-                       == self.rand_label_buffer.shape[0])
+                assert (self.adv_data_buffer.shape[0] > 0)
+                assert (self.adv_data_buffer.shape[0] ==
+                        self.rand_data_buffer.shape[0])
+                assert (self.adv_label_buffer.shape[0] ==
+                        self.rand_label_buffer.shape[0])
                 for init_iter_num in range(opt.init_num_train_steps):
                     data_i = np.random.choice(
                         self.adv_data_buffer.shape[0],
@@ -232,10 +238,11 @@ class AdversarialWithBaseline:
                     self.baseline_optimizer.zero_grad()
                     baseline_loss.backward()
                     self.baseline_optimizer.step()
-                    self.writer.add_scalars('InitialTrain',
-                                            {'baseline': baseline_loss.item(),
-                                             'robust': robust_loss.item()},
-                                            init_iter_num)
+                    self.writer.add_scalars(
+                        'InitialTrain', {
+                            'baseline': baseline_loss.item(),
+                            'robust': robust_loss.item()
+                        }, init_iter_num)
                     with torch.no_grad():
                         baseline_validation_loss = self.baseline_mse(
                             self.baseline_model(self.x_samples_validation),
@@ -245,33 +252,34 @@ class AdversarialWithBaseline:
                             self.v_samples_validation)
                     bvl = baseline_validation_loss.item()
                     rvl = robust_validation_loss.item()
-                    self.writer.add_scalars('InitialValidation',
-                                            {'baseline': bvl,
-                                             'robust': rvl},
-                                            init_iter_num)
+                    self.writer.add_scalars('InitialValidation', {
+                        'baseline': bvl,
+                        'robust': rvl
+                    }, init_iter_num)
                     self.writer.flush()
         iter_num = 0
         while iter_num < opt.num_iter_desired:
-            assert(self.adv_data_buffer.shape[0]
-                   == self.rand_data_buffer.shape[0])
-            assert(self.adv_label_buffer.shape[0]
-                   == self.rand_label_buffer.shape[0])
+            assert (self.adv_data_buffer.shape[0] ==
+                    self.rand_data_buffer.shape[0])
+            assert (self.adv_label_buffer.shape[0] ==
+                    self.rand_label_buffer.shape[0])
             (adv_data_, adv_label_) = self.get_adversarial_samples(opt)
             num_new_adv_samples = adv_data_.shape[0]
             if opt.baseline_use_limits and num_new_adv_samples > 1:
                 (rand_data_, rand_label_) = self.get_random_samples(1)
-                (rand_data_lim, rand_label_lim) = self.get_limit_samples(
-                    num_new_adv_samples-1)
+                (rand_data_lim,
+                 rand_label_lim) = self.get_limit_samples(num_new_adv_samples -
+                                                          1)
                 # (rand_data_, rand_label_) = self.get_random_samples(
                 #     num_new_adv_samples-1)
                 # (rand_data_lim, rand_label_lim) = self.get_limit_samples(1)
                 rand_data_ = torch.cat((rand_data_, rand_data_lim), axis=0)
                 rand_label_ = torch.cat((rand_label_, rand_label_lim), axis=0)
             else:
-                (rand_data_, rand_label_) = self.get_random_samples(
-                    num_new_adv_samples)
-            if (num_new_adv_samples +
-                    self.adv_data_buffer.shape[0] > opt.max_buffer_size):
+                (rand_data_,
+                 rand_label_) = self.get_random_samples(num_new_adv_samples)
+            if (num_new_adv_samples + self.adv_data_buffer.shape[0] >
+                    opt.max_buffer_size):
                 self.adv_data_buffer = self.adv_data_buffer[
                     num_new_adv_samples:, :]
                 self.adv_label_buffer = self.adv_label_buffer[
@@ -280,8 +288,8 @@ class AdversarialWithBaseline:
                     num_new_adv_samples:, :]
                 self.rand_label_buffer = self.rand_label_buffer[
                     num_new_adv_samples:, :]
-            self.adv_data_buffer = torch.cat(
-                (self.adv_data_buffer, adv_data_), axis=0)
+            self.adv_data_buffer = torch.cat((self.adv_data_buffer, adv_data_),
+                                             axis=0)
             self.adv_label_buffer = torch.cat(
                 (self.adv_label_buffer, adv_label_), axis=0)
             self.rand_data_buffer = torch.cat(
@@ -289,10 +297,10 @@ class AdversarialWithBaseline:
             self.rand_label_buffer = torch.cat(
                 (self.rand_label_buffer, rand_label_), axis=0)
             # adding additional random samples to both
-            (rand_data_, rand_label_) = self.get_random_samples(
-                opt.num_rand_extra)
-            if (opt.num_rand_extra +
-                    self.adv_data_buffer.shape[0] > opt.max_buffer_size):
+            (rand_data_,
+             rand_label_) = self.get_random_samples(opt.num_rand_extra)
+            if (opt.num_rand_extra + self.adv_data_buffer.shape[0] >
+                    opt.max_buffer_size):
                 self.adv_data_buffer = self.adv_data_buffer[
                     opt.num_rand_extra:, :]
                 self.adv_label_buffer = self.adv_label_buffer[
@@ -310,14 +318,14 @@ class AdversarialWithBaseline:
             self.rand_label_buffer = torch.cat(
                 (self.rand_label_buffer, rand_label_), axis=0)
             for learning_iter_num in range(opt.num_steps_between_sampling):
-                assert(self.adv_data_buffer.shape[0]
-                       == self.rand_data_buffer.shape[0])
-                assert(self.adv_label_buffer.shape[0]
-                       == self.rand_label_buffer.shape[0])
-                data_i = np.random.choice(
-                    self.adv_data_buffer.shape[0],
-                    min(self.adv_data_buffer.shape[0], opt.batch_size),
-                    replace=False)
+                assert (self.adv_data_buffer.shape[0] ==
+                        self.rand_data_buffer.shape[0])
+                assert (self.adv_label_buffer.shape[0] ==
+                        self.rand_label_buffer.shape[0])
+                data_i = np.random.choice(self.adv_data_buffer.shape[0],
+                                          min(self.adv_data_buffer.shape[0],
+                                              opt.batch_size),
+                                          replace=False)
                 adv_data = self.adv_data_buffer[data_i, :]
                 adv_label = self.adv_label_buffer[data_i, :]
                 y_pred_adv = self.robust_model(adv_data)
@@ -334,10 +342,11 @@ class AdversarialWithBaseline:
                 baseline_loss.backward()
                 self.baseline_optimizer.step()
                 if logging:
-                    self.writer.add_scalars('Train',
-                                            {'baseline': baseline_loss.item(),
-                                             'robust': robust_loss.item()},
-                                            self.num_total_iter_done)
+                    self.writer.add_scalars(
+                        'Train', {
+                            'baseline': baseline_loss.item(),
+                            'robust': robust_loss.item()
+                        }, self.num_total_iter_done)
                     with torch.no_grad():
                         baseline_validation_loss = self.baseline_mse(
                             self.baseline_model(self.x_samples_validation),
@@ -347,10 +356,10 @@ class AdversarialWithBaseline:
                             self.v_samples_validation)
                     bvl = baseline_validation_loss.item()
                     rvl = robust_validation_loss.item()
-                    self.writer.add_scalars('Validation',
-                                            {'baseline': bvl,
-                                             'robust': rvl},
-                                            self.num_total_iter_done)
+                    self.writer.add_scalars('Validation', {
+                        'baseline': bvl,
+                        'robust': rvl
+                    }, self.num_total_iter_done)
                     self.writer.flush()
                     self.robust_loss_log.append(robust_loss.item())
                     self.baseline_loss_log.append(baseline_loss.item())
@@ -380,25 +389,26 @@ class AdversarialWithBaseline:
                 self.robust_model(self.adv_data_buffer).squeeze(), 2).clone()
             state["robust_val_loss"] = torch.pow(
                 self.v_samples_validation.squeeze() -
-                self.robust_model(
-                    self.x_samples_validation).squeeze(), 2).clone()
+                self.robust_model(self.x_samples_validation).squeeze(),
+                2).clone()
             state["baseline_loss_log"] = copy.deepcopy(self.baseline_loss_log)
             state["baseline_val_loss_log"] = copy.deepcopy(
                 self.baseline_val_loss_log)
             state["baseline_buffer_loss"] = torch.pow(
                 self.rand_label_buffer.squeeze() -
-                self.baseline_model(
-                    self.rand_data_buffer).squeeze(), 2).clone()
+                self.baseline_model(self.rand_data_buffer).squeeze(),
+                2).clone()
             state["baseline_val_loss"] = torch.pow(
                 self.v_samples_validation.squeeze() -
-                self.baseline_model(
-                    self.x_samples_validation).squeeze(), 2).clone()
+                self.baseline_model(self.x_samples_validation).squeeze(),
+                2).clone()
             x_adv_opt_loss_log = []
             for (x, label) in self.x_adv_opt_log:
                 x_adv_opt_loss_log.append(
                     (x.clone(),
-                     torch.pow(label.squeeze() -
-                               self.robust_model(x).squeeze(), 2).clone()))
+                     torch.pow(
+                         label.squeeze() - self.robust_model(x).squeeze(),
+                         2).clone()))
             state["x_adv_opt_loss_log"] = x_adv_opt_loss_log
         return state
 
@@ -407,11 +417,11 @@ class AdversarialWithBaseline:
         @param opt instance of AdversarialWithBaselineTrainingOptions
         @param logging Boolean whether or not to log with tensorboard
         """
-        assert(isinstance(opt, AdversarialWithBaselineTrainingOptions))
+        assert (isinstance(opt, AdversarialWithBaselineTrainingOptions))
         if self.adv_data_buffer.shape[0] < opt.init_buffer_size:
-            (rand_data_, rand_label_) = self.get_random_samples(
-                opt.init_buffer_size -
-                self.adv_data_buffer.shape[0])
+            (rand_data_, rand_label_
+             ) = self.get_random_samples(opt.init_buffer_size -
+                                         self.adv_data_buffer.shape[0])
             self.adv_data_buffer = torch.cat(
                 (self.adv_data_buffer, rand_data_), axis=0)
             self.adv_label_buffer = torch.cat(
@@ -439,28 +449,27 @@ class AdversarialWithBaseline:
                             self.v_samples_validation)
                     rvl = robust_validation_loss.item()
                     self.writer.add_scalars('InitialValidation',
-                                            {'robust': rvl},
-                                            init_iter_num)
+                                            {'robust': rvl}, init_iter_num)
                     self.writer.flush()
         iter_num = 0
         while iter_num < opt.num_iter_desired:
             (adv_data_, adv_label_) = self.get_adversarial_samples(opt)
             num_new_adv_samples = adv_data_.shape[0]
-            if (num_new_adv_samples +
-                    self.adv_data_buffer.shape[0] > opt.max_buffer_size):
+            if (num_new_adv_samples + self.adv_data_buffer.shape[0] >
+                    opt.max_buffer_size):
                 self.adv_data_buffer = self.adv_data_buffer[
                     num_new_adv_samples:, :]
                 self.adv_label_buffer = self.adv_label_buffer[
                     num_new_adv_samples:, :]
-            self.adv_data_buffer = torch.cat(
-                (self.adv_data_buffer, adv_data_), axis=0)
+            self.adv_data_buffer = torch.cat((self.adv_data_buffer, adv_data_),
+                                             axis=0)
             self.adv_label_buffer = torch.cat(
                 (self.adv_label_buffer, adv_label_), axis=0)
             # adding additional random samples to both
-            (rand_data_, rand_label_) = self.get_random_samples(
-                opt.num_rand_extra)
-            if (opt.num_rand_extra +
-                    self.adv_data_buffer.shape[0] > opt.max_buffer_size):
+            (rand_data_,
+             rand_label_) = self.get_random_samples(opt.num_rand_extra)
+            if (opt.num_rand_extra + self.adv_data_buffer.shape[0] >
+                    opt.max_buffer_size):
                 self.adv_data_buffer = self.adv_data_buffer[
                     opt.num_rand_extra:, :]
                 self.adv_label_buffer = self.adv_label_buffer[
@@ -470,10 +479,10 @@ class AdversarialWithBaseline:
             self.adv_label_buffer = torch.cat(
                 (self.adv_label_buffer, rand_label_), axis=0)
             for learning_iter_num in range(opt.num_steps_between_sampling):
-                data_i = np.random.choice(
-                    self.adv_data_buffer.shape[0],
-                    min(self.adv_data_buffer.shape[0], opt.batch_size),
-                    replace=False)
+                data_i = np.random.choice(self.adv_data_buffer.shape[0],
+                                          min(self.adv_data_buffer.shape[0],
+                                              opt.batch_size),
+                                          replace=False)
                 adv_data = self.adv_data_buffer[data_i, :]
                 adv_label = self.adv_label_buffer[data_i, :]
                 y_pred_adv = self.robust_model(adv_data)
@@ -490,8 +499,7 @@ class AdversarialWithBaseline:
                             self.robust_model(self.x_samples_validation),
                             self.v_samples_validation)
                     rvl = robust_validation_loss.item()
-                    self.writer.add_scalars('Validation',
-                                            {'robust': rvl},
+                    self.writer.add_scalars('Validation', {'robust': rvl},
                                             self.num_total_iter_done)
                     self.writer.flush()
                     self.robust_loss_log.append(robust_loss.item())

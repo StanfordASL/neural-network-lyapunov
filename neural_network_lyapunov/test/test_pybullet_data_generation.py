@@ -8,13 +8,12 @@ import neural_network_lyapunov.worlds as worlds
 
 
 class TestPybulletSampleGeneratorJointSpace(unittest.TestCase):
-
     def setUp(self):
         cb = worlds.get_load_urdf_callback(worlds.urdf_path("pendulum.urdf"))
         self.pbsg = pybullet_data_generation.PybulletSampleGenerator(cb, True)
 
     def test_generate_sample(self):
-        x0 = torch.tensor([np.pi/2, 1.], dtype=self.pbsg.dtype)
+        x0 = torch.tensor([np.pi / 2, 1.], dtype=self.pbsg.dtype)
         x_next, X, X_next = self.pbsg.generate_sample(x0, .1)
         self.assertEqual(len(X.shape), 3)
         self.assertEqual(X.shape[0], 6)
@@ -22,27 +21,27 @@ class TestPybulletSampleGeneratorJointSpace(unittest.TestCase):
         self.assertEqual(x_next.shape[0], 2)
 
     def test_generate_rollout(self):
-        x0 = torch.tensor([np.pi/2, 1.], dtype=self.pbsg.dtype)
+        x0 = torch.tensor([np.pi / 2, 1.], dtype=self.pbsg.dtype)
         x, X = self.pbsg.generate_rollout(x0, .1, 10)
         self.assertEqual(len(X.shape), 4)
-        self.assertEqual(X.shape, (12, 3,
-                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(
+            X.shape, (12, 3, self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x.shape, (11, 2))
 
     def test_generate_dataset(self):
         x_lo = torch.tensor([0., -1.], dtype=self.pbsg.dtype)
-        x_up = torch.tensor([2*np.pi, 1.], dtype=self.pbsg.dtype)
+        x_up = torch.tensor([2 * np.pi, 1.], dtype=self.pbsg.dtype)
         x_data, x_next_data, X_data, X_next_data = self.pbsg.generate_dataset(
             x_lo, x_up, .1, 10, 5)
         self.assertEqual(len(X_data.shape), 4)
         self.assertEqual(len(X_next_data.shape), 4)
-        self.assertEqual(X_data.shape, (10 * 5, 6,
-                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(
+            X_data.shape,
+            (10 * 5, 6, self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x_data.shape, (10 * 5, 2))
 
 
 class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
-
     def setUp(self):
         cb = worlds.get_load_falling_cubes_callback()
         self.pbsg = pybullet_data_generation.PybulletSampleGenerator(cb, False)
@@ -61,8 +60,8 @@ class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
                           dtype=self.pbsg.dtype)
         x, X = self.pbsg.generate_rollout(x0, .1, 10)
         self.assertEqual(len(X.shape), 4)
-        self.assertEqual(X.shape, (12, 3,
-                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(
+            X.shape, (12, 3, self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x.shape, (11, 12))
 
     def test_generate_dataset(self):
@@ -74,25 +73,27 @@ class TestPybulletSampleGeneratorRigidBody(unittest.TestCase):
             x_lo, x_up, .1, 10, 5)
         self.assertEqual(len(X_data.shape), 4)
         self.assertEqual(len(X_next_data.shape), 4)
-        self.assertEqual(X_data.shape, (10 * 5, 6,
-                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(
+            X_data.shape,
+            (10 * 5, 6, self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x_data.shape, (10 * 5, 12))
 
     def test_generate_dataset_normal(self):
         x_lo = -torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
         x_up = torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
-        x_mean = .2*torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
+        x_mean = .2 * torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
         x_std = torch.tensor(list(range(12)), dtype=self.pbsg.dtype)
         x_data, x_next_data, X_data, X_next_data = self.pbsg.generate_dataset(
             x_lo, x_up, .1, 10, 5, x_mean=x_mean, x_std=x_std)
         self.assertEqual(len(X_data.shape), 4)
         self.assertEqual(len(X_next_data.shape), 4)
-        self.assertEqual(X_data.shape, (10 * 5, 6,
-                         self.pbsg.image_width, self.pbsg.image_height))
+        self.assertEqual(
+            X_data.shape,
+            (10 * 5, 6, self.pbsg.image_width, self.pbsg.image_height))
         self.assertEqual(x_data.shape, (10 * 5, 12))
         for i in range(5):
-            self.assertTrue(torch.all(x_data[10*i, :] <= x_up))
-            self.assertTrue(torch.all(x_data[10*i, :] >= x_lo))
+            self.assertTrue(torch.all(x_data[10 * i, :] <= x_up))
+            self.assertTrue(torch.all(x_data[10 * i, :] >= x_lo))
 
 
 if __name__ == "__main__":
