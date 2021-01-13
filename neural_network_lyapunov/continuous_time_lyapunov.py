@@ -158,7 +158,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         mixed-integer linear constraint. Returned from add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
-        add_relu_output_constraint()
+        add_lyap_relu_output_constraint()
         @param Aisi_lower Aisi_lower[i] is the lower bound of Aᵢsᵢ
         @param Aisi_upper Aisi_upper[i] is the lower bound of Aᵢsᵢ
         @return (z, a_out) z and a_out are both lists. z[i] are the slack
@@ -209,7 +209,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         @param xdot The variable representing xdot
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
-        add_relu_output_constraint()
+        add_lyap_relu_output_constraint()
         @param xdot_lower xdot_lower[i] is the lower bound of ẋ
         @param xdot_upper xdot_upper[i] is the lower bound of ẋ
         @return (z, a_out) z and a_out are both lists. z[i] are the slack
@@ -253,7 +253,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         hybrid dynamical system. Returned from add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
-        add_relu_output_constraint()
+        add_lyap_relu_output_constraint()
         @param gigammai_lower gigammai_lower[i] is the lower bound of gᵢγᵢ
         @param gigammai_upper gigammai_upper[i] is the upper bound of gᵢγᵢ
         @return (z, a_out) z and a_out are both lists. z[i] are the slack
@@ -544,7 +544,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # We first get the mixed-integer linear constraint, which encode the
         # activation of beta and the network input.
         (relu_z, relu_beta, a_relu_out, b_relu_out) = \
-            self.add_relu_output_constraint(milp, x)
+            self.add_lyap_relu_output_constraint(milp, x)
 
         # for each mode, we want to compute ∂V/∂x*Aᵢsᵢ, ∂V/∂x*gᵢγᵢ.
         # where ∂V/∂x=∂ReLU(x)/∂x + λ*sign(x-x*)
@@ -730,7 +730,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # We first get the mixed-integer linear constraint, which encode the
         # activation of beta and the network input.
         (relu_z, relu_beta, a_relu_out, b_relu_out) = \
-            self.add_relu_output_constraint(milp, x)
+            self.add_lyap_relu_output_constraint(milp, x)
 
         # warmstart the binary variables
         if x_warmstart is not None:
