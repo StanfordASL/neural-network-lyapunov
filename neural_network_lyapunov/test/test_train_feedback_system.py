@@ -210,15 +210,13 @@ class TestLyapunov(unittest.TestCase):
         state_samples = torch.tensor(
             [[0.5, 0.5], [-0.5, -0.5], [1, 1], [1, -1], [-1, 1], [-1, -1]],
             dtype=self.dtype)
-        relu_at_equilibrium = self.lyapunov_relu1(
-            self.closed_loop_system1.x_equilibrium)
         V_lambda = 0.1
         epsilon = 0.3
         margin = 0.2
         R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=torch.float64)
         positivity_sample_loss = \
             self.lyapunov_hybrid_system1.lyapunov_positivity_loss_at_samples(
-                relu_at_equilibrium, self.closed_loop_system1.x_equilibrium,
+                self.closed_loop_system1.x_equilibrium,
                 state_samples, V_lambda, epsilon, R=R, margin=margin)
         self.assertAlmostEqual(
             positivity_sample_loss.item(),
@@ -232,11 +230,8 @@ class TestLyapunov(unittest.TestCase):
         optimizer = torch.optim.Adam(self.lyapunov_relu1.parameters())
         for iter_count in range(2):
             optimizer.zero_grad()
-            relu_at_equilibrium = self.lyapunov_relu1(
-                self.closed_loop_system1.x_equilibrium)
             loss = self.lyapunov_hybrid_system1.\
                 lyapunov_positivity_loss_at_samples(
-                    relu_at_equilibrium,
                     self.closed_loop_system1.x_equilibrium, state_samples,
                     V_lambda, epsilon, R=R, margin=margin)
             loss.backward()

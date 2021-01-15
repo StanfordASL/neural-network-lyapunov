@@ -136,7 +136,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 15, 15, 2),
+    controller_relu = utils.setup_relu((3, 15, 5, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -151,13 +151,13 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 15, 15, 8, 1),
+    lyapunov_relu = utils.setup_relu((3, 15, 10, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
                                      dtype=torch.float64)
-    R = torch.cat((torch.eye(3, dtype=torch.float64),
-                   torch.tensor([[1, -1, 1], [-1, -1, 1], [1, 0, 1], [0.5, -1, 1]],
+    R = torch.cat((torch.eye(2, dtype=torch.float64),
+                   torch.tensor([[1, -1], [-1, -1]],
                                 dtype=torch.float64)),
                   dim=0)
 
@@ -204,6 +204,9 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_epsilon = 0.4
     dut.lyapunov_derivative_epsilon = 0.001
     dut.learning_rate = 0.001
+    # Only want to stabilize the horizontal position of the car, not the
+    # orientation.
+    dut.xbar_indices = [0, 1]
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (31, 31, 31),
                                                    dtype=torch.float64)
@@ -213,7 +216,5 @@ if __name__ == "__main__":
                                       num_epochs=args.pretrain_num_epochs,
                                       batch_size=50)
     dut.enable_wandb = args.enable_wandb
-    dut.add_derivative_adversarial_state = True
-    dut.lyapunov_derivative_sample_cost_weight = 5.
     dut.train(torch.empty((0, 3), dtype=torch.float64))
     pass

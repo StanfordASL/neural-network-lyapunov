@@ -157,10 +157,9 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                           positivity_mip_loss + derivative_mip_loss).item())
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
-        relu_at_equilibrium = relu.forward(x_equilibrium)
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
-                relu_at_equilibrium, x_equilibrium,
+                x_equilibrium,
                 positivity_state_samples_new[-dut.max_sample_pool_size:],
                 V_lambda, dut.lyapunov_positivity_epsilon,
                 R=R_options.R(), margin=dut.lyapunov_positivity_sample_margin)
