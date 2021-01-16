@@ -180,11 +180,13 @@ if __name__ == "__main__":
     forward_system = dubins_car.DubinsCarReLUModel(torch.float64, x_lo, x_up,
                                                    u_lo, u_up, dynamics_relu,
                                                    dt, thetadot_as_input)
+    # We only stabilize the horizontal position, not the orientation of the car
+    xhat_indices = [0, 1]
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
         u_lo.detach().numpy(),
-        u_up.detach().numpy())
+        u_up.detach().numpy(), xhat_indices=xhat_indices)
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
 
@@ -206,7 +208,8 @@ if __name__ == "__main__":
     dut.learning_rate = 0.001
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
-    dut.xbar_indices = [0, 1]
+    dut.xbar_indices = xhat_indices
+    dut.xhat_indices = xhat_indices
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (31, 31, 31),
                                                    dtype=torch.float64)

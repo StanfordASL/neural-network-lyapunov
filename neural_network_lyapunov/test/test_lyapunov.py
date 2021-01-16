@@ -14,6 +14,7 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
+import neural_network_lyapunov.compute_xhat as compute_xhat
 
 
 def setup_relu(dtype, params=None):
@@ -548,9 +549,9 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                                       xhat_indices=xhat_indices)
 
         def eval_lyap(x):
-            xbar_indices_tmp = lyapunov._get_xbar_indices(
+            xbar_indices_tmp = compute_xhat._get_xbar_indices(
                 dut.system.x_dim, xbar_indices)
-            xhat = lyapunov._get_xhat_val(x, x_equilibrium, xhat_indices)
+            xhat = compute_xhat._get_xhat_val(x, x_equilibrium, xhat_indices)
             return lyap_relu(x) - lyap_relu(xhat) + V_lambda * torch.norm(
                 R @ (x[xbar_indices_tmp] - x_equilibrium[xbar_indices_tmp]),
                 p=1)
@@ -918,9 +919,10 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.optimize()
         self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
-        xbar_indices = lyapunov._get_xbar_indices(dut.system.x_dim,
-                                                  xbar_indices)
-        xhat_val = lyapunov._get_xhat_val(x_val, x_equilibrium, xhat_indices)
+        xbar_indices = compute_xhat._get_xbar_indices(dut.system.x_dim,
+                                                      xbar_indices)
+        xhat_val = compute_xhat._get_xhat_val(x_val, x_equilibrium,
+                                              xhat_indices)
         self.assertAlmostEqual(
             milp.gurobi_model.ObjVal, -relu(x_val).item() +
             relu(xhat_val).item() + (V_epsilon - V_lambda) *
@@ -1185,8 +1187,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
             objVal_expected = -(v_next - v + dV_epsilon * v).item()
         elif eps_type == lyapunov.ConvergenceEps.Asymp:
-            xbar_indices = lyapunov._get_xbar_indices(dut.system.x_dim,
-                                                      xbar_indices)
+            xbar_indices = compute_xhat._get_xbar_indices(
+                dut.system.x_dim, xbar_indices)
             objVal_expected = (
                 v_next - v + dV_epsilon * torch.norm(R @ (torch.from_numpy(
                     x_sol[xbar_indices]) - x_equilibrium[xbar_indices]),
@@ -1249,8 +1251,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
             cost_expected = -(v_next - v + dV_epsilon * v).item()
         elif eps_type == lyapunov.ConvergenceEps.Asymp:
-            xbar_indices = lyapunov._get_xbar_indices(dut.system.x_dim,
-                                                      xbar_indices)
+            xbar_indices = compute_xhat._get_xbar_indices(
+                dut.system.x_dim, xbar_indices)
             cost_expected = (v_next - v + dV_epsilon * torch.norm(
                 R @ (x_val[xbar_indices] - x_equilibrium[xbar_indices]), p=1)
                              ).item()
@@ -1460,7 +1462,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                                      lb=-gurobipy.GRB.INFINITY,
                                      vtype=gurobipy.GRB.CONTINUOUS)
         beta_x_norm = milp_relu.addVars(s_dim, vtype=gurobipy.GRB.BINARY)
-        xbar_indices = lyapunov._get_xbar_indices(system.x_dim, xbar_indices)
+        xbar_indices = compute_xhat._get_xbar_indices(system.x_dim,
+                                                      xbar_indices)
         s_lb, s_ub = mip_utils.compute_range_by_lp(
             R.detach().numpy(),
             (-R @ x_equilibrium[xbar_indices]).detach().numpy(),
@@ -1489,8 +1492,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             relu_xhat_coeff = []
             relu_xhat_constant = lyapunov_relu(x_equilibrium).squeeze()
         else:
-            relu_xhat_slack, _, relu_xhat_a_out, relu_xhat_c_out, _ = \
-                lyapunov._compute_network_at_xhat(
+            relu_xhat_slack, _, relu_xhat_a_out, relu_xhat_c_out, _, _, _ = \
+                compute_xhat._compute_network_at_xhat(
                     milp_relu, x, x_equilibrium, relu1_free_pattern,
                     xhat_indices,
                     torch.from_numpy(system.x_lo_all),
@@ -2035,102 +2038,6 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             x_sol4 = torch.tensor([var.X for var in x], dtype=self.dtype)
             np.testing.assert_allclose(x_sol3.detach().numpy(),
                                        x_sol4.detach().numpy())
-
-
-class TestGetXbar(unittest.TestCase):
-    def setUp(self):
-        self.dtype = torch.float64
-
-    def test_get_xbar_indices(self):
-        # test _get_xbar_indices(), _get_xhat_indices(), _get_xhat_value()
-
-        self.assertEqual(lyapunov._get_xbar_indices(3, None), [0, 1, 2])
-        self.assertEqual(lyapunov._get_xbar_indices(3, [0, 1]), [0, 1])
-
-    def test_get_xhat_indices(self):
-        self.assertEqual(lyapunov._get_xhat_indices(3, None), ([0, 1, 2], []))
-        self.assertEqual(lyapunov._get_xhat_indices(3, [0, 1]), ([0, 1], [2]))
-        self.assertEqual(lyapunov._get_xhat_indices(3, [1]), ([1], [0, 2]))
-
-    def test_get_xhat_val(self):
-        np.testing.assert_allclose(
-            lyapunov._get_xhat_val(
-                torch.tensor([1., 2., 3.], dtype=self.dtype),
-                torch.tensor([-1, -2, -3], dtype=self.dtype),
-                None).detach().numpy(), np.array([-1, -2., -3.]))
-        np.testing.assert_allclose(
-            lyapunov._get_xhat_val(
-                torch.tensor([1., 2., 3.], dtype=self.dtype),
-                torch.tensor([-1, -2, -3], dtype=self.dtype),
-                [1]).detach().numpy(), np.array([1, -2., 3.]))
-        np.testing.assert_allclose(
-            lyapunov._get_xhat_val(
-                torch.tensor([[1., 2., 3.], [4, 5, 6]], dtype=self.dtype),
-                torch.tensor([-1, -2, -3], dtype=self.dtype),
-                None).detach().numpy(), np.array([-1, -2., -3.]))
-        np.testing.assert_allclose(
-            lyapunov._get_xhat_val(
-                torch.tensor([[1., 2., 3.], [4, 5, 6]], dtype=self.dtype),
-                torch.tensor([-1, -2, -3], dtype=self.dtype),
-                [1]).detach().numpy(), np.array([[1, -2., 3.], [4, -2, 6]]))
-        np.testing.assert_allclose(
-            lyapunov._get_xhat_val(
-                torch.tensor([[1., 2., 3.], [4, 5, 6]], dtype=self.dtype),
-                torch.tensor([-1, -2, -3],
-                             dtype=self.dtype), [1, 2]).detach().numpy(),
-            np.array([[1, -2., -3.], [4, -2, -3]]))
-
-
-class TestComputeNetworkAtXhat(unittest.TestCase):
-    def test(self):
-        dtype = torch.float64
-
-        def tester(xhat_indices):
-            mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
-            x_var = mip.addVars(3, lb=-gurobipy.GRB.INFINITY)
-            torch.manual_seed(0)
-            relu = utils.setup_relu((3, 5, 4, 2),
-                                    params=None,
-                                    negative_slope=0.1,
-                                    bias=True,
-                                    dtype=dtype)
-            relu_free_pattern = relu_to_optimization.ReLUFreePattern(
-                relu, dtype)
-            x_lb = torch.tensor([-2, -3, -1], dtype=dtype)
-            x_ub = torch.tensor([1, 2, 0], dtype=dtype)
-            x_equilibrium = torch.tensor([0.5, -1.5, -0.2], dtype=dtype)
-            relu_z, relu_beta, Aout, Cout, xhat = \
-                lyapunov._compute_network_at_xhat(
-                    mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
-                    x_lb, x_ub)
-
-            # Now fix x_var to x_val, and check the solution ϕ(x̂)
-            x_val = torch.tensor([-1.2, 0.5, -0.8], dtype=dtype)
-            mip.addMConstrs([torch.eye(3, dtype=dtype)], [x_var],
-                            b=x_val,
-                            sense=gurobipy.GRB.EQUAL)
-            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
-            mip.gurobi_model.optimize()
-            self.assertEqual(mip.gurobi_model.status,
-                             gurobipy.GRB.Status.OPTIMAL)
-            xhat_val = lyapunov._get_xhat_val(x_val, x_equilibrium,
-                                              xhat_indices)
-            np.testing.assert_allclose(np.array([var.x for var in xhat]),
-                                       xhat_val)
-            relu_z_sol = torch.tensor([var.x for var in relu_z], dtype=dtype)
-            phi_xhat = Aout @ relu_z_sol + Cout
-            phi_xhat_expected = relu(xhat_val)
-            np.testing.assert_allclose(phi_xhat.detach().numpy(),
-                                       phi_xhat_expected.detach().numpy())
-            # Make sure x_lb and x_ub are unchanged
-            np.testing.assert_allclose(x_lb.detach().numpy(),
-                                       np.array([-2., -3., -1.]))
-            np.testing.assert_allclose(x_ub.detach().numpy(),
-                                       np.array([1., 2., 0.]))
-
-        tester(xhat_indices=[1, 2])
-        tester(xhat_indices=[0, 2])
-        tester(xhat_indices=[0])
 
 
 if __name__ == "__main__":

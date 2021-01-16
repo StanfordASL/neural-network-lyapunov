@@ -259,7 +259,10 @@ class TrainLyapunovReLU:
         # If you require only a subset of the states to converge, then set
         # xbar_indices to the indices of these converging states. By default
         # xbar_indices=None means all the states are required to converge.
+        # This will set x̂ in the Lyapunov function.
+        # The Lyapunov function is V(x) = ϕ(x) − ϕ(x̂) + λ |R*(x̅−x̅*|₁
         self.xbar_indices = None
+        self.xhat_indices = None
 
     def total_loss(self, positivity_state_samples, derivative_state_samples,
                    derivative_state_samples_next,
@@ -310,7 +313,8 @@ class TrainLyapunovReLU:
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     fixed_R=self.R_options.fixed_R,
                     x_warmstart=self.lyapunov_positivity_last_x_adv,
-                    xbar_indices=self.xbar_indices)
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
             lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
@@ -343,7 +347,8 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     fixed_R=self.R_options.fixed_R,
                     x_warmstart=self.lyapunov_derivative_last_x_adv,
-                    xbar_indices=self.xbar_indices)
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
             lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
             for param, val in self.lyapunov_derivative_mip_params.items():
                 lyapunov_derivative_mip.gurobi_model.setParam(param, val)
@@ -469,7 +474,8 @@ class TrainLyapunovReLU:
                     positivity_state_samples_in_pool, self.V_lambda,
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     margin=self.lyapunov_positivity_sample_margin,
-                    xbar_indices=self.xbar_indices)
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
         else:
             positivity_sample_loss = 0.
         if lyapunov_derivative_sample_cost_weight != 0 and\
@@ -491,7 +497,8 @@ class TrainLyapunovReLU:
                     derivative_state_samples_next_in_pool, self.x_equilibrium,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     margin=self.lyapunov_derivative_sample_margin,
-                    xbar_indices=self.xbar_indices)
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
         else:
             derivative_sample_loss = 0.
 

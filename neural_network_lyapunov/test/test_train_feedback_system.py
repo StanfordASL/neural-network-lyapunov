@@ -191,15 +191,13 @@ class TestLyapunov(unittest.TestCase):
         assert (isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         num_samples = state_samples.shape[0]
         losses = torch.empty((num_samples, ), dtype=self.dtype)
-        relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(num_samples):
             losses[i] = torch.min(
                 torch.tensor([
                     dut.lyapunov_value(state_samples[i],
                                        dut.system.x_equilibrium,
                                        V_lambda,
-                                       R=R,
-                                       relu_at_equilibrium=relu_at_equilibrium)
+                                       R=R)
                     - epsilon * torch.norm(
                         R @ (state_samples[i] - dut.system.x_equilibrium), p=1)
                     - margin, 0.
@@ -247,13 +245,11 @@ class TestLyapunov(unittest.TestCase):
         ],
                                          dim=0)
         losses = torch.empty((state_samples.shape[0]), dtype=self.dtype)
-        relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(state_samples.shape[0]):
             V = dut.lyapunov_value(state_samples[i],
                                    dut.system.x_equilibrium,
                                    V_lambda,
-                                   R=R,
-                                   relu_at_equilibrium=relu_at_equilibrium)
+                                   R=R)
             # Note, by using torch.tensor([]), we cannot do auto grad on
             # `losses[i]`. In order to do automatic differentiation, change
             # torch.max to torch.nn.HingeEmbeddingLoss
@@ -261,8 +257,7 @@ class TestLyapunov(unittest.TestCase):
                 state_samples_next[i],
                 dut.system.x_equilibrium,
                 V_lambda,
-                R=R,
-                relu_at_equilibrium=relu_at_equilibrium)
+                R=R)
             if eps_type == lyapunov.ConvergenceEps.ExpLower:
                 losses[i] = torch.max(
                     torch.tensor([V_next - V + epsilon * V + margin, 0]))
