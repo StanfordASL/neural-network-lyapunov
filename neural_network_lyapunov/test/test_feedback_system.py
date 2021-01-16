@@ -8,6 +8,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.compute_xhat as compute_xhat
 
 import unittest
 
@@ -330,6 +331,22 @@ class TestFeedbackSystem(unittest.TestCase):
                                                                        0.]),
             np.array([10., 10.]))
 
+    def eval_u(self, dut, x_val):
+        """
+        Compute u for a single state.
+        """
+        xhat = compute_xhat._get_xhat_val(x_val, dut.x_equilibrium,
+                                          dut.xhat_indices)
+        u_pre_sat = dut.controller_network(x_val) - dut.controller_network(
+            xhat) + dut.u_equilibrium
+        u = u_pre_sat.clone()
+        for i in range(u_pre_sat.shape[0]):
+            if u_pre_sat[i] < dut.u_lower_limit[i]:
+                u[i] = dut.u_lower_limit[i]
+            if u_pre_sat[i] > dut.u_upper_limit[i]:
+                u[i] = dut.u_upper_limit[i]
+        return u
+
     def test_compute_u(self):
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
@@ -348,11 +365,7 @@ class TestFeedbackSystem(unittest.TestCase):
         with torch.no_grad():
             for x in x_all:
                 u = closed_loop_system.compute_u(x)
-                u_expected = self.controller_network1(x) - \
-                    self.controller_network1(x_equilibrium) + u_equilibrium
-                u_expected = torch.min(
-                    torch.max(u_expected, torch.from_numpy(u_lower_limit)),
-                    torch.from_numpy(u_upper_limit))
+                u_expected = self.eval_u(closed_loop_system, x)
                 np.testing.assert_allclose(u.detach().numpy(),
                                            u_expected.detach().numpy())
 
@@ -370,6 +383,24 @@ class TestFeedbackSystem(unittest.TestCase):
         u = closed_loop_system.compute_u(x)
         self.assertEqual(u.shape, (3, 2))
         for i in range(3):
+            np.testing.assert_allclose(
+                u[i].detach().numpy(),
+                closed_loop_system.compute_u(x[i]).detach().numpy())
+
+        # set xhat_indices
+        closed_loop_system.xhat_indices = [0, 2]
+        with torch.no_grad():
+            for x in x_all:
+                u = closed_loop_system.compute_u(x)
+                u_expected = self.eval_u(closed_loop_system, x)
+                np.testing.assert_allclose(u.detach().numpy(),
+                                           u_expected.detach().numpy())
+
+        # Test a batch of x.
+        x = torch.tensor([[0.2, 0.4, 0.9], [0.5, 0.1, 1.2]], dtype=self.dtype)
+        u = closed_loop_system.compute_u(x)
+        self.assertEqual(u.shape, (2, 2))
+        for i in range(2):
             np.testing.assert_allclose(
                 u[i].detach().numpy(),
                 closed_loop_system.compute_u(x[i]).detach().numpy())
@@ -553,7 +584,7 @@ class TestFeedbackSystem(unittest.TestCase):
                          dtype=self.dtype), forward_system.x_equilibrium,
             forward_system.u_equilibrium, np.array([-10.]), np.array([0.2]))
 
-    def add_controller_mip_constraint_controller(self, dut, x_val):
+    def add_controller_mip_constraint_tester(self, dut, x_val):
         mip = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
         x_var = mip.addVars(dut.x_dim,
                             lb=-gurobipy.GRB.INFINITY,
@@ -599,9 +630,14 @@ class TestFeedbackSystem(unittest.TestCase):
                     forward_system, controller_network,
                     forward_system.x_equilibrium,
                     torch.tensor([2.], dtype=self.dtype), u_lo, u_up)
-                self.add_controller_mip_constraint_controller(
+                self.add_controller_mip_constraint_tester(
                     dut, torch.tensor([2., 0.5, 0.6, 3.1], dtype=self.dtype))
-                self.add_controller_mip_constraint_controller(
+                self.add_controller_mip_constraint_tester(
+                    dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
+                dut.xhat_indices = [0, 2]
+                self.add_controller_mip_constraint_tester(
+                    dut, torch.tensor([2., 0.5, 0.6, 3.1], dtype=self.dtype))
+                self.add_controller_mip_constraint_tester(
                     dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
 
 

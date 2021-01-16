@@ -215,7 +215,8 @@ def plot_lyapunov_dot_colormap(fig, ax, relu, system, V_lambda,
                     torch.cat(
                         dut.lyapunov_derivative(state_sample, x_equilibrium,
                                                 V_lambda,
-                                                lyapunov_derivative_epsilon)))
+                                                lyapunov_derivative_epsilon,
+                                                x_indices=dut.x_indices)))
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
         dV_np = dV.detach().numpy()

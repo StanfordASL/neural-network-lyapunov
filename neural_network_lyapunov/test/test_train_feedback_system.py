@@ -191,15 +191,13 @@ class TestLyapunov(unittest.TestCase):
         assert (isinstance(dut, lyapunov.LyapunovHybridLinearSystem))
         num_samples = state_samples.shape[0]
         losses = torch.empty((num_samples, ), dtype=self.dtype)
-        relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(num_samples):
             losses[i] = torch.min(
                 torch.tensor([
                     dut.lyapunov_value(state_samples[i],
                                        dut.system.x_equilibrium,
                                        V_lambda,
-                                       R=R,
-                                       relu_at_equilibrium=relu_at_equilibrium)
+                                       R=R)
                     - epsilon * torch.norm(
                         R @ (state_samples[i] - dut.system.x_equilibrium), p=1)
                     - margin, 0.
@@ -210,15 +208,13 @@ class TestLyapunov(unittest.TestCase):
         state_samples = torch.tensor(
             [[0.5, 0.5], [-0.5, -0.5], [1, 1], [1, -1], [-1, 1], [-1, -1]],
             dtype=self.dtype)
-        relu_at_equilibrium = self.lyapunov_relu1(
-            self.closed_loop_system1.x_equilibrium)
         V_lambda = 0.1
         epsilon = 0.3
         margin = 0.2
         R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=torch.float64)
         positivity_sample_loss = \
             self.lyapunov_hybrid_system1.lyapunov_positivity_loss_at_samples(
-                relu_at_equilibrium, self.closed_loop_system1.x_equilibrium,
+                self.closed_loop_system1.x_equilibrium,
                 state_samples, V_lambda, epsilon, R=R, margin=margin)
         self.assertAlmostEqual(
             positivity_sample_loss.item(),
@@ -232,11 +228,8 @@ class TestLyapunov(unittest.TestCase):
         optimizer = torch.optim.Adam(self.lyapunov_relu1.parameters())
         for iter_count in range(2):
             optimizer.zero_grad()
-            relu_at_equilibrium = self.lyapunov_relu1(
-                self.closed_loop_system1.x_equilibrium)
             loss = self.lyapunov_hybrid_system1.\
                 lyapunov_positivity_loss_at_samples(
-                    relu_at_equilibrium,
                     self.closed_loop_system1.x_equilibrium, state_samples,
                     V_lambda, epsilon, R=R, margin=margin)
             loss.backward()
@@ -252,13 +245,11 @@ class TestLyapunov(unittest.TestCase):
         ],
                                          dim=0)
         losses = torch.empty((state_samples.shape[0]), dtype=self.dtype)
-        relu_at_equilibrium = dut.lyapunov_relu(dut.system.x_equilibrium)
         for i in range(state_samples.shape[0]):
             V = dut.lyapunov_value(state_samples[i],
                                    dut.system.x_equilibrium,
                                    V_lambda,
-                                   R=R,
-                                   relu_at_equilibrium=relu_at_equilibrium)
+                                   R=R)
             # Note, by using torch.tensor([]), we cannot do auto grad on
             # `losses[i]`. In order to do automatic differentiation, change
             # torch.max to torch.nn.HingeEmbeddingLoss
@@ -266,8 +257,7 @@ class TestLyapunov(unittest.TestCase):
                 state_samples_next[i],
                 dut.system.x_equilibrium,
                 V_lambda,
-                R=R,
-                relu_at_equilibrium=relu_at_equilibrium)
+                R=R)
             if eps_type == lyapunov.ConvergenceEps.ExpLower:
                 losses[i] = torch.max(
                     torch.tensor([V_next - V + epsilon * V + margin, 0]))

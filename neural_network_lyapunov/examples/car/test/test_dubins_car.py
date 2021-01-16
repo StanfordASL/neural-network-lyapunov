@@ -103,7 +103,13 @@ class TestDubinsCarReLUModel(unittest.TestCase):
             thetadot_as_input=True)
 
     def step_forward_tester(self, dut):
-        # Test dut with thetadot_as_input=False
+        # First make sure that if vel = 0, then pos[n+1] = pos[n]
+        x_start = torch.tensor([0.5, 0.3, -1.2], dtype=self.dtype)
+        u_start = torch.tensor([0, 0.5], dtype=self.dtype)
+        np.testing.assert_allclose(
+            dut.step_forward(x_start, u_start)[:2].detach().numpy(),
+            x_start[:2].detach().numpy())
+
         # First test a single x_start and u_start
         x_start = torch.tensor([0.2, 0.5, -0.1], dtype=self.dtype)
         u_start = torch.tensor([2.1, 0.3], dtype=self.dtype)
@@ -113,12 +119,16 @@ class TestDubinsCarReLUModel(unittest.TestCase):
             if dut.thetadot_as_input:
                 network_input = torch.tensor([x_val[2], u_val[0], u_val[1]],
                                              dtype=self.dtype)
+                network_input_zero_vel = torch.tensor([x_val[2], 0, u_val[1]],
+                                                      dtype=self.dtype)
             else:
                 network_input = torch.tensor([x_val[2], u_val[0]],
                                              dtype=self.dtype)
+                network_input_zero_vel = torch.tensor([x_val[2], 0],
+                                                      dtype=self.dtype)
             position_next = x_val[:2] + \
                 dut.dynamics_relu(network_input) - dut.dynamics_relu(
-                    torch.zeros_like(network_input))
+                    network_input_zero_vel)
             theta_next = x_val[2] + u_val[1] * dut.dt
             return np.array([
                 position_next[0].item(), position_next[1].item(),

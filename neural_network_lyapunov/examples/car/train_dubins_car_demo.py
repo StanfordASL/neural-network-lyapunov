@@ -56,10 +56,18 @@ def train_forward_model(dynamics_relu, dataset, num_epochs, thetadot_as_input):
         # the action (vel, thetadot).
         if thetadot_as_input:
             network_input = state_action[:, [2, 3, 4]]
-            network_input_zero = torch.zeros((3, ), dtype=state_action.dtype)
+            network_input_zero = torch.cat(
+                (state_action[:, 2].reshape((-1, 1)),
+                 torch.zeros((state_action.shape[0], 1),
+                             dtype=torch.float64), state_action[:, 4].reshape(
+                                 (-1, 1))),
+                dim=1)
         else:
             network_input = state_action[:, [2, 3]]
-            network_input_zero = torch.zeros((2, ), dtype=state_action.dtype)
+            network_input_zero = torch.cat(
+                (state_action[:, 2].reshape((-1, 1)),
+                 torch.zeros((state_action.shape[0], 1), dtype=torch.float64)),
+                dim=1)
         return model(network_input) - model(network_input_zero)
 
     utils.train_approximator(training_dataset,
@@ -118,7 +126,7 @@ if __name__ == "__main__":
                             thetadot_as_input=thetadot_as_input)
     else:
         dynamics_model_data = torch.load(dir_path +
-                                         "/data/dubins_car_forward_relu6.pt")
+                                         "/data/dubins_car_forward_relu8.pt")
         dynamics_relu = utils.setup_relu(
             dynamics_model_data["linear_layer_width"],
             params=None,
@@ -127,8 +135,8 @@ if __name__ == "__main__":
             dtype=torch.float64)
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
-    V_lambda = 0.8
-    controller_relu = utils.setup_relu((3, 9, 9, 2),
+    V_lambda = 0.5
+    controller_relu = utils.setup_relu((3, 15, 5, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -143,13 +151,13 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 8, 8, 8, 1),
+    lyapunov_relu = utils.setup_relu((3, 15, 10, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
                                      dtype=torch.float64)
-    R = torch.cat((torch.eye(3, dtype=torch.float64),
-                   torch.tensor([[1, -1, 1], [-1, -1, 1], [1, 0, 1]],
+    R = torch.cat((torch.eye(2, dtype=torch.float64),
+                   torch.tensor([[1, -1], [-1, -1]],
                                 dtype=torch.float64)),
                   dim=0)
 
@@ -172,11 +180,13 @@ if __name__ == "__main__":
     forward_system = dubins_car.DubinsCarReLUModel(torch.float64, x_lo, x_up,
                                                    u_lo, u_up, dynamics_relu,
                                                    dt, thetadot_as_input)
+    # We only stabilize the horizontal position, not the orientation of the car
+    xhat_indices = [0, 1]
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
         u_lo.detach().numpy(),
-        u_up.detach().numpy())
+        u_up.detach().numpy(), xhat_indices=xhat_indices)
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
 
@@ -191,11 +201,15 @@ if __name__ == "__main__":
                                            R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
-    dut.lyapunov_derivative_convergence_tol = 1E-5
+    dut.lyapunov_derivative_convergence_tol = 1E-6
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.4
-    dut.lyapunov_derivative_epsilon = 0.02
-    dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
+    dut.lyapunov_derivative_epsilon = 0.001
+    dut.learning_rate = 0.001
+    # Only want to stabilize the horizontal position of the car, not the
+    # orientation.
+    dut.xbar_indices = xhat_indices
+    dut.xhat_indices = xhat_indices
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (31, 31, 31),
                                                    dtype=torch.float64)

@@ -353,11 +353,9 @@ class DynamicsLearning:
                 x_all.device)
             return sample_pos_loss, sample_der_lo_loss, sample_der_up_loss
         x_next = self.lyap.system.step_forward(x)
-        relu_at_equilibrium = self.lyap.lyapunov_relu.forward(
-            self.lyap.system.x_equilibrium)
         sample_pos_loss = \
             self.lyap.lyapunov_positivity_loss_at_samples(
-                relu_at_equilibrium, self.lyap.system.x_equilibrium, x,
+                self.lyap.system.x_equilibrium, x,
                 self.opt.V_lambda, self.opt.V_eps_pos, R=self.opt.R)
         sample_der_lo_loss = \
             self.lyap.lyapunov_derivative_loss_at_samples_and_next_states(

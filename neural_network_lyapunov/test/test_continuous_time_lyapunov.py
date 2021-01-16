@@ -737,8 +737,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
         V = dut.lyapunov_value(x_val,
                                x_equilibrium,
                                V_lambda,
-                               R=R,
-                               relu_at_equilibrium=relu.forward(x_equilibrium))
+                               R=R)
         if eps_type == lyapunov.ConvergenceEps.ExpLower:
             loss_expected = torch.max(Vdot + epsilon * V + margin,
                                       torch.tensor(0., dtype=system.dtype))
