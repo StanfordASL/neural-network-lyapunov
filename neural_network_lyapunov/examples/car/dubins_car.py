@@ -30,9 +30,32 @@ class DubinsCar:
             return np.array(
                 [vel * np.cos(theta), vel * np.sin(theta), thetadot])
         elif isinstance(x, torch.Tensor):
-            return torch.tensor(
-                [vel * torch.cos(theta), vel * torch.sin(theta), thetadot],
-                dtype=self.dtype)
+            return torch.stack(
+                (vel * torch.cos(theta), vel * torch.sin(theta), thetadot))
+
+    def dynamics_gradient(self, x, u):
+        """
+        Compute the gradient A = ∂f/∂x, B = ∂f/∂u
+        """
+        theta = x[2]
+        vel = u[0]
+        if isinstance(x, np.ndarray):
+            sin_theta = np.sin(theta)
+            cos_theta = np.cos(theta)
+            return np.array([[0, 0, -vel * sin_theta], [0, 0, vel * cos_theta],
+                             [0, 0, 0]]), np.array([[cos_theta, 0],
+                                                    [sin_theta, 0], [0., 1]])
+        elif isinstance(x, torch.Tensor):
+            sin_theta = torch.sin(theta)
+            cos_theta = torch.cos(theta)
+            A = torch.zeros((3, 3), dtype=x.dtype)
+            B = torch.zeros((3, 2), dtype=x.dtype)
+            A[0, 2] = -vel * sin_theta
+            A[1, 2] = vel * cos_theta
+            B[0, 0] = cos_theta
+            B[1, 0] = sin_theta
+            B[2, 1] = 1
+            return A, B
 
     def next_pose(self, x, u, dt):
         """
