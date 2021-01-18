@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 import torch
 import scipy.integrate
+import scipy.linalg
 
 import gurobipy
 
@@ -23,6 +24,38 @@ class TestDubinsCar(unittest.TestCase):
             np.array([u[0] * torch.cos(x[2]), u[0] * torch.sin(x[2]), u[1]]))
         xdot_np = plant.dynamics(x.detach().numpy(), u.detach().numpy())
         np.testing.assert_allclose(xdot_torch.detach().numpy(), xdot_np)
+
+    def test_dynamics_gradient(self):
+        plant = dubins_car.DubinsCar(torch.float64)
+
+        def tester(x_val: np.ndarray, u_val: np.ndarray):
+            A, B = plant.dynamics_gradient(x_val, u_val)
+            A_torch, B_torch = plant.dynamics_gradient(torch.from_numpy(x_val),
+                                                       torch.from_numpy(u_val))
+            np.testing.assert_allclose(A, A_torch.detach().numpy())
+            np.testing.assert_allclose(B, B_torch.detach().numpy())
+            """
+            Compute gradint through pytorch autograd.
+            """
+            x_torch = torch.from_numpy(x_val)
+            x_torch.requires_grad = True
+            u_torch = torch.from_numpy(u_val)
+            u_torch.requires_grad = True
+            for i in range(3):
+                if x_torch.grad is not None:
+                    x_torch.grad.zero_()
+                if u_torch.grad is not None:
+                    u_torch.grad.zero_()
+                xdot = plant.dynamics(x_torch, u_torch)
+                xdot[i].backward()
+                np.testing.assert_allclose(A_torch[i].detach().numpy(),
+                                           x_torch.grad.detach().numpy())
+                np.testing.assert_allclose(B_torch[i].detach().numpy(),
+                                           u_torch.grad.detach().numpy())
+
+        tester(np.array([0.5, 0.4, 0.2]), np.array([-0.3, 0.8]))
+        tester(np.array([-0.5, 0.7, -2.2]), np.array([-1.3, -.8]))
+        tester(np.array([-2.5, 0.7, -1.5]), np.array([-1.9, -.8]))
 
     def test_next_pose(self):
         plant = dubins_car.DubinsCar(torch.float64)

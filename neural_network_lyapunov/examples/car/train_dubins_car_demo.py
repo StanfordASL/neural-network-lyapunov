@@ -4,6 +4,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import argparse
+import wandb
 import torch
 import numpy as np
 import os
@@ -102,8 +103,14 @@ if __name__ == "__main__":
         help="max number of iterations in training the controller.")
     parser.add_argument("--enable_wandb", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
-    parser.add_argument("--pretrain_num_epochs", type=int, default=100)
+    parser.add_argument("--pretrain_num_epochs", type=int, default=20)
+    parser.add_argument(
+        "--adversarial_training",
+        action="store_true",
+        help="only do adversarial training, not bilevel optimization")
     args = parser.parse_args()
+    if args.enable_wandb:
+        wandb.config.update(args)
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
     dt = 0.01
@@ -136,7 +143,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 15, 5, 2),
+    controller_relu = utils.setup_relu((3, 5, 5, 5, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -151,14 +158,13 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 15, 10, 1),
+    lyapunov_relu = utils.setup_relu((3, 10, 10, 5, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
                                      dtype=torch.float64)
     R = torch.cat((torch.eye(2, dtype=torch.float64),
-                   torch.tensor([[1, -1], [-1, -1]],
-                                dtype=torch.float64)),
+                   torch.tensor([[1, -1], [-1, -1]], dtype=torch.float64)),
                   dim=0)
 
     if args.load_lyapunov_relu:
@@ -183,10 +189,13 @@ if __name__ == "__main__":
     # We only stabilize the horizontal position, not the orientation of the car
     xhat_indices = [0, 1]
     closed_loop_system = feedback_system.FeedbackSystem(
-        forward_system, controller_relu, forward_system.x_equilibrium,
+        forward_system,
+        controller_relu,
+        forward_system.x_equilibrium,
         forward_system.u_equilibrium,
         u_lo.detach().numpy(),
-        u_up.detach().numpy(), xhat_indices=xhat_indices)
+        u_up.detach().numpy(),
+        xhat_indices=xhat_indices)
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
 
@@ -204,7 +213,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-6
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.4
-    dut.lyapunov_derivative_epsilon = 0.001
+    dut.lyapunov_derivative_epsilon = 0.005
     dut.learning_rate = 0.001
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
@@ -219,5 +228,12 @@ if __name__ == "__main__":
                                       num_epochs=args.pretrain_num_epochs,
                                       batch_size=50)
     dut.enable_wandb = args.enable_wandb
+    if args.adversarial_training:
+        dut.lyapunov_positivity_mip_cost_weight = 0.
+        dut.lyapunov_derivative_mip_cost_weight = 0.
+        dut.add_positivity_adversarial_state = True
+        dut.add_derivative_adversarial_state = True
+        dut.lyapunov_derivative_sample_cost_weight = 100
+        dut.lyapunov_positivity_sample_cost_weight = 1
     dut.train(torch.empty((0, 3), dtype=torch.float64))
     pass
