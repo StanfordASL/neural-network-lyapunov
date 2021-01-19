@@ -1,7 +1,9 @@
 import torch
 import numpy as np
+import wandb
 
 from enum import Enum
+import neural_network_lyapunov.utils as utils
 
 
 class ProjectGradientMode(Enum):
@@ -79,3 +81,24 @@ def project_gradient(network, loss1, loss2, mode, retain_graph=False):
                 grad[param_count:param_count+p_size].reshape(p.shape).clone()
             param_count += p_size
         return (need_projection, n1, n2)
+
+
+def wandb_config_update(args, lyapunov_relu, controller_relu, x_lo, x_up, u_lo,
+                        u_up):
+    wandb.config.update(args)
+    lyapunov_linear_layer_width, _, _ = utils.extract_relu_structure(
+        lyapunov_relu)
+    controller_linear_layer_width, _, _ = utils.extract_relu_structure(
+        controller_relu)
+    wandb.config.update({
+        "lyapunov_linear_layer_width":
+        lyapunov_linear_layer_width,
+        "controller_linear_layer_width":
+        controller_linear_layer_width
+    })
+    wandb.config.update({
+        "x_lo": x_lo,
+        "x_up": x_up,
+        "u_lo": u_lo,
+        "u_up": u_up
+    })

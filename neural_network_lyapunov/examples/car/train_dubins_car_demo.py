@@ -3,8 +3,8 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_utils as train_utils
 import argparse
-import wandb
 import torch
 import numpy as np
 import os
@@ -109,8 +109,6 @@ if __name__ == "__main__":
         action="store_true",
         help="only do adversarial training, not bilevel optimization")
     args = parser.parse_args()
-    if args.enable_wandb:
-        wandb.config.update(args)
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
     dt = 0.01
@@ -204,6 +202,10 @@ if __name__ == "__main__":
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = train_lyapunov.FixedROptions(R)
+
+    if args.enable_wandb:
+        train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
+                                        x_lo, x_up, u_lo, u_up)
 
     dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
                                            closed_loop_system.x_equilibrium,
