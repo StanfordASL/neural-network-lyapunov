@@ -5,6 +5,7 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.train_utils as train_utils
 
 import torch
 import numpy as np
@@ -177,6 +178,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_lqr_approximator", action="store_true")
     parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
+    parser.add_argument("--enable_wandb", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -262,6 +264,9 @@ if __name__ == "__main__":
     x_up = -x_lo
     u_lo = torch.tensor([-9, -9], dtype=dtype)
     u_up = torch.tensor([17, 17], dtype=dtype)
+    if args.enable_wandb:
+        train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
+                                        x_lo, x_up, u_lo, u_up)
     if args.train_lqr_approximator:
         x_equilibrium = torch.cat(
             (q_equilibrium, torch.zeros((3, ), dtype=dtype)))
@@ -313,6 +318,6 @@ if __name__ == "__main__":
         dut.train_lyapunov_on_samples(state_samples_all,
                                       num_epochs=10,
                                       batch_size=50)
-    dut.enable_wandb = True
+    dut.enable_wandb = args.enable_wandb
     dut.train(torch.empty((0, 6), dtype=dtype))
     pass
