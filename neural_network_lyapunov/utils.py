@@ -905,21 +905,27 @@ def save_second_order_forward_model(forward_relu, q_equilibrium, u_equilibrium,
 
 
 def save_lyapunov_model(lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
-                        lyapunov_derivative_epsilon, eps_type, R, file_path):
+                        lyapunov_derivative_epsilon, eps_type, R_options,
+                        file_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         lyapunov_relu)
-    torch.save(
-        {
-            "linear_layer_width": linear_layer_width,
-            "state_dict": lyapunov_relu.state_dict(),
-            "negative_slope": negative_slope,
-            "V_lambda": V_lambda,
-            "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
-            "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
-            "eps_type": eps_type,
-            "bias": bias,
-            "R": R
-        }, file_path)
+    saved_params = {
+        "linear_layer_width": linear_layer_width,
+        "state_dict": lyapunov_relu.state_dict(),
+        "negative_slope": negative_slope,
+        "V_lambda": V_lambda,
+        "lyapunov_positivity_epsilon": lyapunov_positivity_epsilon,
+        "lyapunov_derivative_epsilon": lyapunov_derivative_epsilon,
+        "eps_type": eps_type,
+        "bias": bias,
+        "R": R_options.R(),
+        "fixed_R": R_options.fixed_R
+    }
+    if not R_options.fixed_R:
+        saved_params["R_size"] = R_options.R_size
+        saved_params["R_epsilon"] = R_options.epsilon
+        saved_params["R_variables"] = R_options.variables()
+    torch.save(saved_params, file_path)
 
 
 def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
