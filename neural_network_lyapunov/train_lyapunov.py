@@ -53,6 +53,12 @@ class SearchROptions:
         self._variables = torch.from_numpy(variable_val)
         self._variables.requires_grad = True
 
+    def set_variable_value_directly(self, variable_val: np.ndarray):
+        assert (isinstance(variable_val, np.ndarray))
+        assert (variable_val.shape == self._variables.shape)
+        self._variables = torch.from_numpy(variable_val)
+        self._variables.requires_grad = True
+
     def R(self):
         L_entry_count = int(self.R_size[1] * (self.R_size[1] + 1) / 2)
         L_lower_list = torch.split(

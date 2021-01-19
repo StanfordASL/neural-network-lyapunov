@@ -7,6 +7,8 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.test.feedback_gradient_check as\
+    feedback_gradient_check
 import unittest
 import torch
 import numpy as np
@@ -197,8 +199,8 @@ class TestLyapunov(unittest.TestCase):
                     dut.lyapunov_value(state_samples[i],
                                        dut.system.x_equilibrium,
                                        V_lambda,
-                                       R=R)
-                    - epsilon * torch.norm(
+                                       R=R) -
+                    epsilon * torch.norm(
                         R @ (state_samples[i] - dut.system.x_equilibrium), p=1)
                     - margin, 0.
                 ]))
@@ -253,11 +255,10 @@ class TestLyapunov(unittest.TestCase):
             # Note, by using torch.tensor([]), we cannot do auto grad on
             # `losses[i]`. In order to do automatic differentiation, change
             # torch.max to torch.nn.HingeEmbeddingLoss
-            V_next = dut.lyapunov_value(
-                state_samples_next[i],
-                dut.system.x_equilibrium,
-                V_lambda,
-                R=R)
+            V_next = dut.lyapunov_value(state_samples_next[i],
+                                        dut.system.x_equilibrium,
+                                        V_lambda,
+                                        R=R)
             if eps_type == lyapunov.ConvergenceEps.ExpLower:
                 losses[i] = torch.max(
                     torch.tensor([V_next - V + epsilon * V + margin, 0]))
@@ -395,6 +396,147 @@ class TestLyapunov(unittest.TestCase):
                          dtype=torch.float64)
         self.total_loss_tester(self.lyapunov_hybrid_system3, R,
                                training_params, state_samples)
+
+
+class TestGradient(unittest.TestCase):
+    # Tests the gradient of the loss in train_lyapunov.py
+    def construct_lyap1(self):
+        torch.manual_seed(0)
+        dtype = torch.float64
+        x_lo = torch.tensor([-2, -4], dtype=dtype)
+        x_up = torch.tensor([3, 5], dtype=dtype)
+        u_lo = torch.tensor([-5, -4], dtype=dtype)
+        u_up = torch.tensor([3, 6], dtype=dtype)
+        forward_network = utils.setup_relu((4, 4, 3, 2),
+                                           params=None,
+                                           negative_slope=0.1,
+                                           bias=True,
+                                           dtype=dtype)
+        x_equilibrium = torch.tensor([0.5, 1.2], dtype=dtype)
+        u_equilibrium = torch.tensor([0.4, 1.5], dtype=dtype)
+        forward_system = relu_system.ReLUSystemGivenEquilibrium(
+            dtype, x_lo, x_up, u_lo, u_up, forward_network, x_equilibrium,
+            u_equilibrium)
+        lyapunov_relu = utils.setup_relu((2, 3, 1),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=dtype)
+        controller_relu = utils.setup_relu((2, 4, 2),
+                                           params=None,
+                                           negative_slope=0.1,
+                                           bias=True,
+                                           dtype=dtype)
+        closed_loop_system = feedback_system.FeedbackSystem(
+            forward_system, controller_relu, x_equilibrium, u_equilibrium,
+            u_lo.detach().numpy(),
+            u_up.detach().numpy())
+        lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(
+            closed_loop_system, lyapunov_relu)
+        return lyap
+
+    def test_sample_loss_grad(self):
+        # Test with sample loss gradient
+        lyap1 = self.construct_lyap1()
+        R_val = torch.tensor([[1.5, 0.3], [-0.2, 3.1]],
+                             dtype=lyap1.system.dtype)
+        fixed_R_options = train_lyapunov.FixedROptions(R_val)
+        V_lambda = 0.5
+        x_samples = utils.uniform_sample_in_box(
+            torch.from_numpy(lyap1.system.forward_system.x_lo_all),
+            torch.from_numpy(lyap1.system.forward_system.x_up_all), 100)
+        # Test with fixed R
+        feedback_gradient_check.check_sample_loss_grad(
+            lyap1,
+            V_lambda,
+            lyap1.system.x_equilibrium,
+            fixed_R_options,
+            x_samples,
+            atol=1E-5,
+            rtol=1E-5)
+        # Test with free R.
+        torch.manual_seed(0)
+        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.1)
+        search_R_options.set_variable_value_directly(
+            np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
+        feedback_gradient_check.check_sample_loss_grad(
+            lyap1,
+            V_lambda,
+            lyap1.system.x_equilibrium,
+            search_R_options,
+            x_samples,
+            atol=1E-5,
+            rtol=1E-5)
+
+    def test_positivity_mip_loss_fixed_R(self):
+        lyap1 = self.construct_lyap1()
+        V_lambda = 0.5
+        V_epsilon = 0.3
+        fixed_R_options = train_lyapunov.FixedROptions(
+            torch.tensor([[0.4, 0.2], [1.3, 2.1], [-0.5, -1.4]],
+                         dtype=lyap1.system.dtype))
+        feedback_gradient_check.check_lyapunov_mip_loss_grad(
+            lyap1,
+            lyap1.system.x_equilibrium,
+            V_lambda,
+            V_epsilon,
+            fixed_R_options,
+            True,
+            atol=1E-5,
+            rtol=1E-5)
+
+    def test_positivity_mip_loss_search_R(self):
+        lyap1 = self.construct_lyap1()
+        V_lambda = 0.5
+        V_epsilon = 0.3
+        torch.manual_seed(0)
+        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.2)
+        search_R_options.set_variable_value_directly(
+            np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
+        feedback_gradient_check.check_lyapunov_mip_loss_grad(
+            lyap1,
+            lyap1.system.x_equilibrium,
+            V_lambda,
+            V_epsilon,
+            search_R_options,
+            True,
+            atol=1E-5,
+            rtol=1E-5)
+
+    def test_derivative_mip_loss_fixed_R(self):
+        lyap1 = self.construct_lyap1()
+        V_lambda = 0.5
+        V_epsilon = 0.3
+        fixed_R_options = train_lyapunov.FixedROptions(
+            torch.tensor([[0.4, 0.2], [1.3, 2.1], [-0.5, -1.4]],
+                         dtype=lyap1.system.dtype))
+        feedback_gradient_check.check_lyapunov_mip_loss_grad(
+            lyap1,
+            lyap1.system.x_equilibrium,
+            V_lambda,
+            V_epsilon,
+            fixed_R_options,
+            False,
+            atol=1E-5,
+            rtol=1E-5)
+
+    def test_derivative_mip_loss_search_R(self):
+        lyap1 = self.construct_lyap1()
+        V_lambda = 0.5
+        V_epsilon = 0.3
+        torch.manual_seed(0)
+        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.2)
+        search_R_options.set_variable_value_directly(
+            np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
+        feedback_gradient_check.check_lyapunov_mip_loss_grad(
+            lyap1,
+            lyap1.system.x_equilibrium,
+            V_lambda,
+            V_epsilon,
+            search_R_options,
+            False,
+            atol=1E-5,
+            rtol=1E-5)
 
 
 if __name__ == "__main__":
