@@ -7,7 +7,7 @@ import time
 import utils_simulation
 import argparse
 from pynput import keyboard
-import dubins_car
+import unicycle
 
 ##########################################################################
 # Functions
@@ -127,7 +127,7 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
     u_data = []
     depth_data = []
     state_data = []
-    plant = dubins_car.DubinsCar(None)
+    plant = unicycle.Unicycle(None)
     for env in range(0, numEnvs):
         # Sample environment
         heightObs = 20 * robotHeight
@@ -269,7 +269,7 @@ def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
     next_depth_data = []
     state_data = []
     next_state_data = []
-    plant = dubins_car.DubinsCar(None)
+    plant = unicycle.Unicycle(None)
     for env in range(0, numEnvs):
         visualize_ray = False
         # Sample environment

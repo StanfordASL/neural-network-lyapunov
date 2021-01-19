@@ -158,7 +158,7 @@ def train_depth_model(u,
 
 
 def car_dynamics_training(u, x, xn, nf):
-    # TODO(lu): combine with train_dubins_car_demo.train_forward_model
+    # TODO(lu): combine with train_unicycle_demo.train_forward_model
     # Input to NN:  [theta, velocity, turning_rate]
     # Output of NN: [delta_position_x, delta_position_y]
     input_dim = u.shape[1] + 1
