@@ -1,4 +1,4 @@
-import neural_network_lyapunov.examples.car.dubins_car as dubins_car
+import neural_network_lyapunov.examples.car.unicycle as unicycle
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
@@ -17,7 +17,7 @@ def generate_dynamics_data(dt):
     include the car position.
     """
     dtype = torch.float64
-    plant = dubins_car.DubinsCar(dtype)
+    plant = unicycle.Unicycle(dtype)
     theta_grid = torch.linspace(-2. * np.pi, 2. * np.pi, 301, dtype=dtype)
     vel_grid = torch.linspace(-3, 6, 201, dtype=dtype)
     thetadot_grid = torch.linspace(-0.25 * np.pi,
@@ -80,7 +80,7 @@ def train_forward_model(dynamics_relu, dataset, num_epochs, thetadot_as_input):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Dubin's car training demo")
+    parser = argparse.ArgumentParser(description="Unicycle training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
     parser.add_argument("--load_dynamics_data",
                         type=str,
@@ -131,7 +131,7 @@ if __name__ == "__main__":
                             thetadot_as_input=thetadot_as_input)
     else:
         dynamics_model_data = torch.load(dir_path +
-                                         "/data/dubins_car_forward_relu8.pt")
+                                         "/data/unicycle_forward_relu8.pt")
         dynamics_relu = utils.setup_relu(
             dynamics_model_data["linear_layer_width"],
             params=None,
@@ -181,9 +181,9 @@ if __name__ == "__main__":
     x_up = torch.tensor([0.1, 0.1, np.pi / 6], dtype=torch.float64)
     u_lo = torch.tensor([-2, -0.2 * np.pi], dtype=torch.float64)
     u_up = torch.tensor([5, 0.2 * np.pi], dtype=torch.float64)
-    forward_system = dubins_car.DubinsCarReLUModel(torch.float64, x_lo, x_up,
-                                                   u_lo, u_up, dynamics_relu,
-                                                   dt, thetadot_as_input)
+    forward_system = unicycle.UnicycleReLUModel(torch.float64, x_lo, x_up,
+                                                u_lo, u_up, dynamics_relu, dt,
+                                                thetadot_as_input)
     # We only stabilize the horizontal position, not the orientation of the car
     xhat_indices = [0, 1]
     closed_loop_system = feedback_system.FeedbackSystem(

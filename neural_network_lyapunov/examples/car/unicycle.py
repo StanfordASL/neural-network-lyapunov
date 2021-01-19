@@ -9,7 +9,7 @@ import neural_network_lyapunov.mip_utils as mip_utils
 import gurobipy
 
 
-class DubinsCar:
+class Unicycle:
     """
     A simple Dubin's car model, that the state is [pos_x, pos_y, theta], and
     the control is [vel, thetadot], where vel is the velocity along the heading
@@ -21,7 +21,7 @@ class DubinsCar:
 
     def dynamics(self, x, u):
         """
-        Compute xdot of the Dubins car.
+        Compute xdot of the unicycle.
         """
         theta = x[2]
         vel = u[0]
@@ -68,11 +68,11 @@ class DubinsCar:
         return result.y[:, -1]
 
 
-class DubinsCarReLUModel:
+class UnicycleReLUModel:
     """
-    We model the discrete-time dynamics of Dubins car using a multi-layer
+    We model the discrete-time dynamics of a unicycle using a multi-layer
     perceptron with (leaky) ReLU units.
-    We consider the origin being the equilibrium state of the Dubins car. The
+    We consider the origin being the equilibrium state of the unicycle. The
     neural network predicts the next state as the following
     [delta_pos_x, delta_pos_y] = ϕ(θ, vel, θ_dot) - ϕ(θ, 0, θ_dot)
     where vel is the velocity along the car heading direction.
@@ -262,14 +262,14 @@ class DubinsCarReLUModel:
         forward_slack, forward_binary = \
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
-                binary_var_name, "dubins_car_forward_dynamics_ineq",
-                "dubins_car_forward_dyamics_eq", None)
+                binary_var_name, "unicycle_forward_dynamics_ineq",
+                "unicycle_forward_dyamics_eq", None)
         forward_slack_zero_vel, forward_binary_zero_vel = \
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result_zero_vel, input_vars_zero_vel, None,
                 slack_var_name + "zero_vel", binary_var_name + "zero_vel",
-                "dubins_car_forward_dynamics_zero_vel_ineq",
-                "dubins_car_forward_dynamics_zero_vel_eq", None)
+                "unicycle_forward_dynamics_zero_vel_ineq",
+                "unicycle_forward_dynamics_zero_vel_eq", None)
         # Now add the constraint on the output of the network, that
         # [delta_pos_x, delta_pos_y] =
         # ϕ(θ[n], vel[n], θ_dot[n])−ϕ(θ[n], 0, θ_dot[n])
@@ -286,18 +286,18 @@ class DubinsCarReLUModel:
                         b=mip_cnstr_result.Cout -
                         mip_cnstr_result_zero_vel.Cout,
                         sense=gurobipy.GRB.EQUAL,
-                        name="dubins_car_forward_dynamics_output")
+                        name="unicycle_forward_dynamics_output")
 
         # Now add the constraint θ[n+1] = θ[n] + θ_dot[n] * dt
         mip.addLConstr([torch.tensor([1., -1., -self.dt], dtype=self.dtype)],
                        [[x_next_var[2], x_var[2], u_var[1]]],
                        sense=gurobipy.GRB.EQUAL,
                        rhs=0.,
-                       name="dubins_car_theta_dynamics")
+                       name="unicycle_theta_dynamics")
         return forward_slack, forward_binary
 
 
-class DubinsCarVisualizer:
+class UnicycleVisualizer:
     def __init__(self, ax, x_lim, y_lim):
         self.ax = ax
         self.ax.set_aspect("equal")

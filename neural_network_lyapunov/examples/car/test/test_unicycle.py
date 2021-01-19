@@ -1,4 +1,4 @@
-import neural_network_lyapunov.examples.car.dubins_car as dubins_car
+import neural_network_lyapunov.examples.car.unicycle as unicycle
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
@@ -12,9 +12,9 @@ import scipy.linalg
 import gurobipy
 
 
-class TestDubinsCar(unittest.TestCase):
+class TestUnicycle(unittest.TestCase):
     def test_dynamics(self):
-        plant = dubins_car.DubinsCar(torch.float64)
+        plant = unicycle.Unicycle(torch.float64)
         # Test with pytorch tensor.
         x = torch.tensor([2., 3., 0.5], dtype=torch.float64)
         u = torch.tensor([0.5, -0.2], dtype=torch.float64)
@@ -26,7 +26,7 @@ class TestDubinsCar(unittest.TestCase):
         np.testing.assert_allclose(xdot_torch.detach().numpy(), xdot_np)
 
     def test_dynamics_gradient(self):
-        plant = dubins_car.DubinsCar(torch.float64)
+        plant = unicycle.Unicycle(torch.float64)
 
         def tester(x_val: np.ndarray, u_val: np.ndarray):
             A, B = plant.dynamics_gradient(x_val, u_val)
@@ -58,7 +58,7 @@ class TestDubinsCar(unittest.TestCase):
         tester(np.array([-2.5, 0.7, -1.5]), np.array([-1.9, -.8]))
 
     def test_next_pose(self):
-        plant = dubins_car.DubinsCar(torch.float64)
+        plant = unicycle.Unicycle(torch.float64)
         x = torch.tensor([2., 3., 0.5], dtype=torch.float64)
         u = torch.tensor([0.5, -0.2], dtype=torch.float64)
 
@@ -70,7 +70,7 @@ class TestDubinsCar(unittest.TestCase):
         np.testing.assert_allclose(x_next, result.y[:, -1])
 
 
-class TestDubinsCarReLUModel(unittest.TestCase):
+class TestUnicycleReLUModel(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         # Arbitrarily initialize the relu network. All the tests should pass
@@ -95,7 +95,7 @@ class TestDubinsCarReLUModel(unittest.TestCase):
             [[0.1, -0.3, 0.5], [0.3, -0.2, 2.1]], dtype=self.dtype)
         dynamics_relu_no_thetadot[4].bias.data = torch.tensor([0.4, -1.2],
                                                               dtype=self.dtype)
-        self.dut_thetadot_not_input = dubins_car.DubinsCarReLUModel(
+        self.dut_thetadot_not_input = unicycle.UnicycleReLUModel(
             self.dtype,
             x_lo=torch.tensor([-3, -3, -np.pi], dtype=self.dtype),
             x_up=torch.tensor([3, 3, np.pi], dtype=self.dtype),
@@ -125,7 +125,7 @@ class TestDubinsCarReLUModel(unittest.TestCase):
         dynamics_relu_thetadot[4].bias.data = dynamics_relu_thetadot[
             4].bias.data
 
-        self.dut_thetadot_input = dubins_car.DubinsCarReLUModel(
+        self.dut_thetadot_input = unicycle.UnicycleReLUModel(
             self.dtype,
             x_lo=torch.tensor([-3, -3, -np.pi], dtype=self.dtype),
             x_up=torch.tensor([3, 3, np.pi], dtype=self.dtype),
