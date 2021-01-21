@@ -8,6 +8,7 @@ import neural_network_lyapunov.test.feedback_gradient_check as\
     feedback_gradient_check
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
+import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import argparse
 
 if __name__ == "__main__":
@@ -63,9 +64,25 @@ if __name__ == "__main__":
     lyapunov_positivity_epsilon = lyapunov_network[
         "lyapunov_positivity_epsilon"]
     eps_type = lyapunov_network["eps_type"]
-    forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
-        torch.float64, x_lo, x_up, u_lo, u_up, forward_relu, q_equilibrium,
-        u_equilibrium, dt)
+    if lyapunov_network["fixed_R"]:
+        R_options = train_lyapunov.FixedROptions(lyapunov_network["R"])
+    else:
+        R_options = train_lyapunov.SearchROptions(
+            lyapunov_network["R_size"], lyapunov_network["R_epsilon"])
+        R_options._variables = lyapunov_network["R_variables"][0].detach()
+        R_options._variables.requires_grad = True
+
+    forward_system = relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium(
+        torch.float64,
+        x_lo,
+        x_up,
+        u_lo,
+        u_up,
+        forward_relu,
+        q_equilibrium,
+        u_equilibrium,
+        dt,
+        network_input_x_indices=[2])
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
@@ -74,14 +91,15 @@ if __name__ == "__main__":
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         closed_loop_system, lyapunov_relu)
 
-    x_samples = utils.get_meshgrid_samples(x_lo, x_up, (5, 5), torch.float64)
+    torch.manual_seed(0)
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, 1000)
 
     # Check sample loss.
     feedback_gradient_check.check_sample_loss_grad(
         lyapunov_hybrid_system,
         V_lambda,
         forward_system.x_equilibrium,
-        R,
+        R_options,
         x_samples,
         atol=1E-5,
         rtol=1E-5)
@@ -91,6 +109,7 @@ if __name__ == "__main__":
         forward_system.x_equilibrium,
         V_lambda,
         lyapunov_positivity_epsilon,
+        R_options,
         True,
         atol=1E-5,
         rtol=1E-5)
@@ -100,6 +119,7 @@ if __name__ == "__main__":
         forward_system.x_equilibrium,
         V_lambda,
         lyapunov_derivative_epsilon,
+        R_options,
         False,
         atol=1E-5,
         rtol=1E-5)
@@ -108,6 +128,7 @@ if __name__ == "__main__":
         forward_system.x_equilibrium,
         V_lambda,
         lyapunov_derivative_epsilon,
+        R_options,
         False,
         eps_type,
         atol=1E-6,
