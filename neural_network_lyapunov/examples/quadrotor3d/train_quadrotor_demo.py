@@ -82,6 +82,52 @@ def train_forward_model(forward_model, model_dataset, num_epochs, lr):
                              lr=lr)
 
 
+def train_lqr_value_approximator(lyapunov_relu, V_lambda, R, x_equilibrium,
+                                 x_lo, x_up, num_samples, lqr_S: torch.Tensor):
+    """
+    We train both lyapunov_relu and R such that ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁
+    approximates the lqr cost-to-go.
+    """
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    V_samples = torch.sum((x_samples - x_equilibrium) *
+                          (lqr_S @ (x_samples - x_equilibrium).T).T,
+                          dim=1).reshape((-1, 1))
+    state_value_dataset = torch.utils.data.TensorDataset(x_samples, V_samples)
+    R.requires_grad_(True)
+
+    def compute_v(model, x):
+        return model(x) - model(x_equilibrium) + V_lambda * torch.norm(
+            R @ (x - x_equilibrium).T, p=1, dim=0).reshape((-1, 1))
+
+    utils.train_approximator(state_value_dataset,
+                             lyapunov_relu,
+                             compute_v,
+                             batch_size=50,
+                             num_epochs=100,
+                             lr=0.001,
+                             additional_variable=[R])
+    R.requires_grad_(False)
+
+
+def train_lqr_control_approximator(controller_relu, x_equilibrium,
+                                   u_equilibrium, x_lo, x_up, num_samples,
+                                   lqr_K: torch.Tensor):
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    u_samples = (lqr_K @ (x_samples - x_equilibrium).T).T + u_equilibrium
+    state_control_dataset = torch.utils.data.TensorDataset(
+        x_samples, u_samples)
+
+    def compute_u(model, x):
+        return model(x) - model(x_equilibrium) + u_equilibrium
+
+    utils.train_approximator(state_control_dataset,
+                             controller_relu,
+                             compute_u,
+                             batch_size=50,
+                             num_epochs=50,
+                             lr=0.001)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="quadrotor training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -106,6 +152,7 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="path to controller relu")
+    parser.add_argument("--train_lqr_approximator", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--max_iterations", type=int, default=10000)
@@ -149,7 +196,15 @@ if __name__ == "__main__":
                                      negative_slope=0.1,
                                      bias=True,
                                      dtype=dtype)
-    V_lambda = 1.
+    V_lambda = 0.6
+    R = torch.zeros((15, 12), dtype=dtype)
+    R[:12, :] = torch.eye(12, dtype=dtype)
+    R[12, 0] = 1.
+    R[12, 1] = -1.
+    R[13, 2] = 1.
+    R[13, 3] = -1.
+    R[14, 4] = 1.
+    R[14, 5] = -1.
     if args.load_lyapunov_relu:
         lyapunov_data = torch.load(args.load_lyapunov_relu)
         lyapunov_relu = utils.setup_relu(
@@ -189,6 +244,21 @@ if __name__ == "__main__":
     u_lo = torch.zeros((4, ), dtype=dtype)
     u_up = 3 * u_equilibrium
 
+    plant_A, plant_B = plant.dynamics_gradient(x_equilibrium.detach().numpy(),
+                                               u_equilibrium.detach().numpy())
+    lqr_Q = np.diag([10, 10, 10, 10, 10, 10, 1, 1, 1, 1, 1, 1.])
+    lqr_R = np.eye(4)
+    lqr_S = scipy.linalg.solve_continuous_are(plant_A, plant_B, lqr_Q, lqr_R)
+    lqr_K = np.linalg.solve(lqr_R, plant_B.T @ lqr_S)
+
+    if args.train_lqr_approximator:
+        train_lqr_control_approximator(controller_relu, x_equilibrium,
+                                       u_equilibrium, x_lo, x_up, 100000,
+                                       torch.from_numpy(lqr_K))
+        train_lqr_value_approximator(lyapunov_relu, V_lambda, R,
+                                     x_equilibrium, x_lo, x_up, 100000,
+                                     torch.from_numpy(lqr_S))
+
     forward_system = quadrotor.QuadrotorReLUSystem(dtype, x_lo, x_up, u_lo,
                                                    u_up, forward_model,
                                                    plant.hover_thrust, dt)
@@ -200,14 +270,6 @@ if __name__ == "__main__":
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
 
-    R = torch.zeros((15, 12), dtype=dtype)
-    R[:12, :] = torch.eye(12, dtype=dtype)
-    R[12, 0] = 1.
-    R[12, 1] = -1.
-    R[13, 2] = 1.
-    R[13, 3] = -1.
-    R[14, 4] = 1.
-    R[14, 5] = -1.
     if args.search_R:
         R_options = train_lyapunov.SearchROptions(R.shape, 0.1)
         R_options.set_variable_value(R.detach().numpy())
