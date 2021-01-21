@@ -114,6 +114,77 @@ class Quadrotor:
             rpy_dot = T @ omega
             return torch.cat((pos_dot, rpy_dot, pos_ddot, omega_dot))
 
+    def dynamics_gradient(self, x: np.ndarray, u: np.ndarray):
+        """
+        Compute the dynamics gradient A = ∂f/∂x, B = ∂f/∂u
+        """
+        assert (isinstance(x, np.ndarray))
+        assert (isinstance(u, np.ndarray))
+        rpy = x[3:6]
+        omega = x[9:12]
+        A = np.zeros((12, 12))
+        B = np.zeros((12, 4))
+        # ∂position_dot / ∂vel
+        A[0:3, 6:9] = np.eye(3)
+        sin_roll = np.sin(rpy[0])
+        cos_roll = np.cos(rpy[0])
+        tan_pitch = np.tan(rpy[1])
+        cos_pitch = np.cos(rpy[1])
+        sec_pitch = 1 / cos_pitch
+        drpy_dot_droll = np.array(
+            [[0, cos_roll * tan_pitch, -sin_roll * tan_pitch],
+             [0, -sin_roll, -cos_roll],
+             [0, cos_roll / cos_pitch, -sin_roll / cos_pitch]]) @ omega
+        drpy_dot_dpitch = np.array(
+            [[0, sin_roll * (sec_pitch**2), cos_roll *
+              (sec_pitch**2)], [0, 0, 0],
+             [
+                 0, sin_roll * tan_pitch * sec_pitch,
+                 cos_roll * tan_pitch * sec_pitch
+             ]]) @ omega
+        A[3:6, 3] = drpy_dot_droll
+        A[3:6, 4] = drpy_dot_dpitch
+        drpy_dot_domega = np.array(
+            [[1., sin_roll * tan_pitch, cos_roll * tan_pitch],
+             [0., cos_roll, -sin_roll],
+             [0, sin_roll / cos_pitch, cos_roll / cos_pitch]])
+        A[3:6, 9:12] = drpy_dot_domega
+        dR_droll, dR_dpitch, dR_dyaw = geometry_transform.rpy2rotmat_gradient(
+            rpy)
+        dpos_ddot_droll = dR_droll @ np.array([0, 0, u.sum()]) / self.mass
+        dpos_ddot_dpitch = dR_dpitch @ np.array([0, 0, u.sum()]) / self.mass
+        dpos_ddot_dyaw = dR_dyaw @ np.array([0, 0, u.sum()]) / self.mass
+        A[6:9, 3] = dpos_ddot_droll
+        A[6:9, 4] = dpos_ddot_dpitch
+        A[6:9, 5] = dpos_ddot_dyaw
+        R = geometry_transform.rpy2rotmat(rpy)
+        for i in range(4):
+            B[6:9, i] = R @ np.array([0, 0, 1]) / self.mass
+
+        domegadot_domega = np.array([
+            [
+                0, (self.inertia[1] - self.inertia[2]) / self.inertia[0] *
+                omega[2], (self.inertia[1] - self.inertia[2]) /
+                self.inertia[0] * omega[1]
+            ],
+            [(self.inertia[2] - self.inertia[0]) / self.inertia[1] * omega[2],
+             0,
+             (self.inertia[2] - self.inertia[0]) / self.inertia[1] * omega[0]],
+            [(self.inertia[0] - self.inertia[1]) / self.inertia[2] * omega[1],
+             (self.inertia[0] - self.inertia[1]) / self.inertia[2] * omega[0],
+             0]
+        ])
+        A[9:12, 9:12] = domegadot_domega
+        B[9, :] = np.array([0, self.arm_length, 0, -self.arm_length
+                            ]) / self.inertia[0]
+        B[10, :] = np.array([-self.arm_length, 0, self.arm_length, 0
+                             ]) / self.inertia[1]
+        B[11, :] = np.array([
+            self.z_torque_to_force_factor, -self.z_torque_to_force_factor,
+            self.z_torque_to_force_factor, -self.z_torque_to_force_factor
+        ]) / self.inertia[2]
+        return A, B
+
 
 class QuadrotorWithPixhawkReLUSystem:
     """

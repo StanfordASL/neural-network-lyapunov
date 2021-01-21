@@ -90,6 +90,34 @@ class TestQuadrotor(unittest.TestCase):
                 1., 1.5, 0.2, -0.5, 1.4
             ]), np.array([1., 3., 2.5, 3.]))
 
+    def test_dynamics_gradient(self):
+        plant = quadrotor.Quadrotor(torch.float64)
+
+        def tester(x, u):
+            x.requires_grad = True
+            u.requires_grad = True
+            A, B = plant.dynamics_gradient(x.detach().numpy(),
+                                           u.detach().numpy())
+            for i in range(12):
+                if x.grad is not None:
+                    x.grad.zero_()
+                if u.grad is not None:
+                    u.grad.zero_()
+                xdot = plant.dynamics(x, u)
+                xdot[i].backward()
+                np.testing.assert_allclose(A[i], x.grad.detach().numpy())
+                np.testing.assert_allclose(B[i], u.grad.detach().numpy())
+
+        tester(torch.zeros((12, ), dtype=torch.float64),
+               torch.zeros((4, ), dtype=torch.float64))
+        tester(torch.zeros((12, ), dtype=torch.float64),
+               plant.hover_thrust * torch.ones((4, ), dtype=torch.float64))
+        tester(
+            torch.tensor(
+                [0.1, 0.2, 0.5, -1.2, 0.3, 0.4, 1.5, 0.3, 2.1, -0.5, 0.3, 0.2],
+                dtype=torch.float64),
+            plant.hover_thrust * torch.ones((4, ), dtype=torch.float64))
+
 
 class TestQuadrotorWithPixhawkReLUSystem(unittest.TestCase):
     def setUp(self):
