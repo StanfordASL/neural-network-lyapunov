@@ -79,6 +79,44 @@ def train_forward_model(dynamics_relu, dataset, num_epochs, thetadot_as_input):
                              lr=0.001)
 
 
+def train_controller_approximator(controller_relu, states, controls,
+                                  num_epochs, lr):
+    dataset = torch.utils.data.TensorDataset(states, controls)
+    x_equilibrium = torch.zeros((3, ), dtype=torch.float64)
+    u_equilibrium = torch.zeros((2, ), dtype=torch.float64)
+
+    def compute_u(model, x):
+        return model(x) - model(x_equilibrium) + u_equilibrium
+
+    utils.train_approximator(dataset,
+                             controller_relu,
+                             compute_u,
+                             batch_size=30,
+                             num_epochs=num_epochs,
+                             lr=lr)
+
+
+def train_cost_approximator(lyapunov_relu, V_lambda, R, states, costs,
+                            num_epochs, lr):
+    dataset = torch.utils.data.TensorDataset(states, costs)
+    x_equilibrium = torch.zeros((3, ), dtype=torch.float64)
+
+    R.requires_grad_(True)
+
+    def compute_v(model, x):
+        return model(x) - model(x_equilibrium) + V_lambda * torch.norm(
+            R @ (x - x_equilibrium).T, p=1, dim=0).reshape((-1, 1))
+
+    utils.train_approximator(dataset,
+                             lyapunov_relu,
+                             compute_v,
+                             batch_size=50,
+                             num_epochs=num_epochs,
+                             lr=lr,
+                             additional_variable=[R])
+    R.requires_grad_(False)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Unicycle training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
@@ -87,6 +125,10 @@ if __name__ == "__main__":
                         default=None,
                         help="path to load the dynamics data.")
     parser.add_argument("--train_forward_model", action="store_true")
+    parser.add_argument("--load_forward_model",
+                        type=str,
+                        default=None,
+                        help="path to the forward model network.")
     parser.add_argument("--load_controller_relu",
                         type=str,
                         default=None,
@@ -108,6 +150,13 @@ if __name__ == "__main__":
         "--adversarial_training",
         action="store_true",
         help="only do adversarial training, not bilevel optimization")
+    parser.add_argument(
+        "--traj_opt_data",
+        type=str,
+        default=None,
+        help="path to the trajectory optimization data from many different" +
+        " initial states. Will train the controller/Lyapunov to" +
+        " approximate these data.")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -119,19 +168,18 @@ if __name__ == "__main__":
         dynamics_dataset = torch.load(args.load_dynamics_data)
 
     thetadot_as_input = True
-    dynamics_relu = utils.setup_relu((3, 8, 8, 2),
-                                     params=None,
-                                     negative_slope=0.1,
-                                     bias=True,
-                                     dtype=torch.float64)
     if args.train_forward_model:
+        dynamics_relu = utils.setup_relu((3, 8, 8, 2),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=torch.float64)
         train_forward_model(dynamics_relu,
                             dynamics_dataset,
                             num_epochs=100,
                             thetadot_as_input=thetadot_as_input)
-    else:
-        dynamics_model_data = torch.load(dir_path +
-                                         "/data/unicycle_forward_relu8.pt")
+    elif args.load_forward_model:
+        dynamics_model_data = torch.load(args.load_forward_model)
         dynamics_relu = utils.setup_relu(
             dynamics_model_data["linear_layer_width"],
             params=None,
@@ -141,7 +189,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 5, 5, 5, 2),
+    controller_relu = utils.setup_relu((3, 12, 8, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -156,13 +204,14 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 10, 10, 5, 1),
+    lyapunov_relu = utils.setup_relu((3, 15, 15, 5, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
                                      dtype=torch.float64)
-    R = torch.cat((torch.eye(2, dtype=torch.float64),
-                   torch.tensor([[1, -1], [-1, -1]], dtype=torch.float64)),
+    R = torch.cat((torch.eye(3, dtype=torch.float64),
+                   torch.tensor([[1, -1, 0], [-1, -1, 1], [0, 1, 1]],
+                                dtype=torch.float64)),
                   dim=0)
 
     if args.load_lyapunov_relu:
@@ -177,15 +226,34 @@ if __name__ == "__main__":
         V_lambda = lyapunov_data["V_lambda"]
         R = lyapunov_data["R"]
 
-    x_lo = torch.tensor([-0.1, -0.1, -np.pi / 6], dtype=torch.float64)
-    x_up = torch.tensor([0.1, 0.1, np.pi / 6], dtype=torch.float64)
-    u_lo = torch.tensor([-2, -0.2 * np.pi], dtype=torch.float64)
-    u_up = torch.tensor([5, 0.2 * np.pi], dtype=torch.float64)
-    forward_system = unicycle.UnicycleReLUModel(torch.float64, x_lo, x_up,
-                                                u_lo, u_up, dynamics_relu, dt,
-                                                thetadot_as_input)
+    x_lo = torch.tensor([-0.1, -0.1, -np.pi / 10], dtype=torch.float64)
+    x_up = torch.tensor([0.1, 0.1, np.pi / 10], dtype=torch.float64)
+    u_lo = torch.tensor([-3, -0.25 * np.pi], dtype=torch.float64)
+    u_up = torch.tensor([6, 0.25 * np.pi], dtype=torch.float64)
+
+    if args.traj_opt_data:
+        traj_opt_data = torch.load(args.traj_opt_data)
+        traj_opt_states = torch.cat(traj_opt_data["states"], dim=0)
+        traj_opt_controls = torch.cat(traj_opt_data["controls"], dim=0)
+        traj_opt_costs = torch.cat(traj_opt_data["costs"], dim=0)
+        train_controller_approximator(controller_relu,
+                                      traj_opt_states,
+                                      traj_opt_controls,
+                                      num_epochs=50,
+                                      lr=0.001)
+        train_cost_approximator(lyapunov_relu,
+                                V_lambda,
+                                R,
+                                traj_opt_states,
+                                traj_opt_costs,
+                                num_epochs=100,
+                                lr=0.001)
+    forward_system = unicycle.UnicycleReLUZeroVelModel(torch.float64, x_lo,
+                                                       x_up, u_lo, u_up,
+                                                       dynamics_relu, dt,
+                                                       thetadot_as_input)
     # We only stabilize the horizontal position, not the orientation of the car
-    xhat_indices = [0, 1]
+    xhat_indices = None
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system,
         controller_relu,
@@ -215,8 +283,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-6
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.4
-    dut.lyapunov_derivative_epsilon = 0.005
-    dut.learning_rate = 0.001
+    dut.lyapunov_derivative_epsilon = 0.001
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
     dut.xbar_indices = xhat_indices
