@@ -3,6 +3,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
+import neural_network_lyapunov.r_options as r_options
 
 import torch
 import numpy as np
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         u_up.detach().numpy())
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
-    R_options = train_lyapunov.SearchROptions(R.shape, 0.01)
+    R_options = r_options.SearchRwithSPDOptions(R.shape, 0.01)
     R_options.set_variable_value(R.detach().numpy())
     dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
                                            closed_loop_system.x_equilibrium,

@@ -9,6 +9,7 @@ import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.test.feedback_gradient_check as\
     feedback_gradient_check
+import neural_network_lyapunov.r_options as r_options
 import unittest
 import torch
 import numpy as np
@@ -359,9 +360,9 @@ class TestLyapunov(unittest.TestCase):
         ],
                                          dim=0)
         V_lambda = 0.1
-        trainer = train_lyapunov.TrainLyapunovReLU(
-            lyap, V_lambda, lyap.system.x_equilibrium,
-            train_lyapunov.FixedROptions(R))
+        trainer = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
+                                                   lyap.system.x_equilibrium,
+                                                   r_options.FixedROptions(R))
         optimizer = torch.optim.Adam(training_params)
         for iter_count in range(2):
             optimizer.zero_grad()
@@ -440,7 +441,7 @@ class TestGradient(unittest.TestCase):
         lyap1 = self.construct_lyap1()
         R_val = torch.tensor([[1.5, 0.3], [-0.2, 3.1]],
                              dtype=lyap1.system.dtype)
-        fixed_R_options = train_lyapunov.FixedROptions(R_val)
+        fixed_R_options = r_options.FixedROptions(R_val)
         V_lambda = 0.5
         x_samples = utils.uniform_sample_in_box(
             torch.from_numpy(lyap1.system.forward_system.x_lo_all),
@@ -456,7 +457,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
         # Test with free R.
         torch.manual_seed(0)
-        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.1)
+        search_R_options = r_options.SearchRwithSPDOptions((4, 2), 0.1)
         search_R_options.set_variable_value_directly(
             np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
         feedback_gradient_check.check_sample_loss_grad(
@@ -472,7 +473,7 @@ class TestGradient(unittest.TestCase):
         lyap1 = self.construct_lyap1()
         V_lambda = 0.5
         V_epsilon = 0.3
-        fixed_R_options = train_lyapunov.FixedROptions(
+        fixed_R_options = r_options.FixedROptions(
             torch.tensor([[0.4, 0.2], [1.3, 2.1], [-0.5, -1.4]],
                          dtype=lyap1.system.dtype))
         feedback_gradient_check.check_lyapunov_mip_loss_grad(
@@ -490,7 +491,7 @@ class TestGradient(unittest.TestCase):
         V_lambda = 0.5
         V_epsilon = 0.3
         torch.manual_seed(0)
-        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.2)
+        search_R_options = r_options.SearchRwithSPDOptions((4, 2), 0.2)
         search_R_options.set_variable_value_directly(
             np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
         feedback_gradient_check.check_lyapunov_mip_loss_grad(
@@ -507,7 +508,7 @@ class TestGradient(unittest.TestCase):
         lyap1 = self.construct_lyap1()
         V_lambda = 0.5
         V_epsilon = 0.3
-        fixed_R_options = train_lyapunov.FixedROptions(
+        fixed_R_options = r_options.FixedROptions(
             torch.tensor([[0.4, 0.2], [1.3, 2.1], [-0.5, -1.4]],
                          dtype=lyap1.system.dtype))
         feedback_gradient_check.check_lyapunov_mip_loss_grad(
@@ -520,14 +521,34 @@ class TestGradient(unittest.TestCase):
             atol=1E-5,
             rtol=1E-5)
 
-    def test_derivative_mip_loss_search_R(self):
+    def test_derivative_mip_loss_search_R_spd(self):
         lyap1 = self.construct_lyap1()
         V_lambda = 0.5
         V_epsilon = 0.3
         torch.manual_seed(0)
-        search_R_options = train_lyapunov.SearchROptions((4, 2), 0.2)
+        search_R_options = r_options.SearchRwithSPDOptions((4, 2), 0.2)
         search_R_options.set_variable_value_directly(
             np.array([0.1, 0.5, 0.3, 0.2, -0.4, -2.1, -3.2]))
+        feedback_gradient_check.check_lyapunov_mip_loss_grad(
+            lyap1,
+            lyap1.system.x_equilibrium,
+            V_lambda,
+            V_epsilon,
+            search_R_options,
+            False,
+            atol=1E-5,
+            rtol=1E-5)
+
+    def test_derivative_mip_loss_search_R_svd(self):
+        lyap1 = self.construct_lyap1()
+        V_lambda = 0.5
+        V_epsilon = 0.3
+        torch.manual_seed(0)
+        R_val = np.array([[0.5, 0.3], [0.2, 0.1], [-0.5, 0.4], [0.3, 0.2]])
+        _, Sigma_val, _ = np.linalg.svd(R_val)
+        search_R_options = r_options.SearchRwithSVDOptions((4, 2),
+                                                           Sigma_val * 0.9)
+        search_R_options.set_variable_value(R_val)
         feedback_gradient_check.check_lyapunov_mip_loss_grad(
             lyap1,
             lyap1.system.x_equilibrium,

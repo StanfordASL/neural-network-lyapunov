@@ -5,6 +5,7 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.train_utils as train_utils
+import neural_network_lyapunov.r_options as r_options
 import torch
 import scipy.integrate
 import numpy as np
@@ -362,10 +363,10 @@ if __name__ == "__main__":
         closed_loop_system, lyapunov_relu)
 
     if args.search_R:
-        R_options = train_lyapunov.SearchROptions(R.shape, epsilon=0.01)
+        R_options = r_options.SearchRwithSPDOptions(R.shape, epsilon=0.01)
         R_options.set_variable_value(R.detach().numpy())
     else:
-        R_options = train_lyapunov.FixedROptions(R)
+        R_options = r_options.FixedROptions(R)
 
     if args.enable_wandb:
         train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
