@@ -8,7 +8,7 @@ import neural_network_lyapunov.test.feedback_gradient_check as\
     feedback_gradient_check
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.r_options as r_options
 import argparse
 
 if __name__ == "__main__":
@@ -65,9 +65,9 @@ if __name__ == "__main__":
         "lyapunov_positivity_epsilon"]
     eps_type = lyapunov_network["eps_type"]
     if lyapunov_network["fixed_R"]:
-        R_options = train_lyapunov.FixedROptions(lyapunov_network["R"])
+        R_options = r_options.FixedROptions(lyapunov_network["R"])
     else:
-        R_options = train_lyapunov.SearchROptions(
+        R_options = r_options.SearchRwithSPDOptions(
             lyapunov_network["R_size"], lyapunov_network["R_epsilon"])
         R_options._variables = lyapunov_network["R_variables"][0].detach()
         R_options._variables.requires_grad = True

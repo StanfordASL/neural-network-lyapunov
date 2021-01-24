@@ -3,6 +3,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.r_options as r_options
 import torch
 import argparse
 
@@ -80,7 +81,7 @@ if __name__ == "__main__":
 
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
-        train_lyapunov.FixedROptions(torch.eye(2, dtype=torch.float64)))
+        r_options.FixedROptions(torch.eye(2, dtype=torch.float64)))
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5

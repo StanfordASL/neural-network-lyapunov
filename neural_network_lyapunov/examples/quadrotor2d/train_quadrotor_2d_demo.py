@@ -6,6 +6,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.train_utils as train_utils
+import neural_network_lyapunov.r_options as r_options
 
 import torch
 import numpy as np
@@ -295,10 +296,10 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
 
     if args.search_R:
-        R_options = train_lyapunov.SearchROptions(R.shape, 0.01)
+        R_options = r_options.SearchRwithSPDOptions(R.shape, 0.01)
         R_options.set_variable_value(R.detach().numpy())
     else:
-        R_options = train_lyapunov.FixedROptions(R)
+        R_options = r_options.FixedROptions(R)
     dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
                                            closed_loop_system.x_equilibrium,
                                            R_options)

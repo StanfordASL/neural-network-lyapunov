@@ -5,6 +5,7 @@ import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import neural_network_lyapunov.test.train_2d_lyapunov_utils as\
     train_2d_lyapunov_utils
+import neural_network_lyapunov.r_options as r_options
 
 import torch
 import torch.nn as nn
@@ -232,7 +233,7 @@ if __name__ == "__main__":
     R = None
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
-        train_lyapunov.FixedROptions(
+        r_options.FixedROptions(
             torch.eye(x_equilibrium.shape[0], dtype=torch.float64)))
     dut.output_flag = True
     dut.max_iterations = args.max_iterations

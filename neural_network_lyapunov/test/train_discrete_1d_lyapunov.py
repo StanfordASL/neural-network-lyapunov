@@ -1,6 +1,7 @@
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
+import neural_network_lyapunov.r_options as r_options
 import torch
 import torch.nn as nn
 
@@ -91,7 +92,7 @@ if __name__ == "__main__":
         system, relu)
     dut = train_lyapunov.TrainLyapunovReLU(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
-        train_lyapunov.FixedROptions(torch.eye(1, dtype=torch.float64)))
+        r_options.FixedROptions(torch.eye(1, dtype=torch.float64)))
     dut.output_flag = True
     dut.max_iterations = 3000
     dut.learning_rate = 1e-4
