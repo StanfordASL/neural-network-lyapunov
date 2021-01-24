@@ -50,10 +50,11 @@ def construct_traj_opt(nT, u_lo, u_up, dt_min, dt_max):
     prog.AddCost(lambda ut: cost(nT, ut), np.hstack((u.reshape((-1, )), dt)))
     prog.AddBoundingBoxConstraint(u_lo[0], u_up[0], u[0, :])
     prog.AddBoundingBoxConstraint(u_lo[1], u_up[1], u[1, :])
-    prog.AddBoundingBoxConstraint(np.zeros((3, )), np.zeros((3, )), x[:, -1])
+    final_val_constraint = prog.AddBoundingBoxConstraint(
+        np.zeros((3, )), np.zeros((3, )), x[:, -1])
     initial_val_constraint = prog.AddBoundingBoxConstraint(
         np.zeros((3, )), np.zeros((3, )), x[:, 0])
-    return prog, initial_val_constraint, x, u, dt
+    return prog, initial_val_constraint, final_val_constraint, x, u, dt
 
 
 def construct_training_set():
@@ -62,8 +63,8 @@ def construct_training_set():
     dt_min = 0.001
     dt_max = 0.1
     nT = 30
-    prog, initial_val_constraint, x, u, dt = construct_traj_opt(
-        nT, u_lo, u_up, dt_min, dt_max)
+    prog, initial_val_constraint, final_val_constraint, x, u, dt =\
+        construct_traj_opt(nT, u_lo, u_up, dt_min, dt_max)
     # We sample many initial states in the box x_lo <= x <= x_up
     x_lo = torch.tensor([-3, -3, -1.2 * np.pi], dtype=torch.float64)
     x_up = torch.tensor([3, 3, 1.2 * np.pi], dtype=torch.float64)

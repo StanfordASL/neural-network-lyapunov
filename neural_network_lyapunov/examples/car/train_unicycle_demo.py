@@ -157,6 +157,13 @@ if __name__ == "__main__":
         help="path to the trajectory optimization data from many different" +
         " initial states. Will train the controller/Lyapunov to" +
         " approximate these data.")
+    parser.add_argument(
+        "--rrt_star_data",
+        type=str,
+        default=None,
+        help="path to the rrt* data. Will train the controller/Lyapunov"
+        + " for approximation"
+    )
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -189,7 +196,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 12, 8, 2),
+    controller_relu = utils.setup_relu((3, 15, 10, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -204,9 +211,9 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 15, 15, 5, 1),
+    lyapunov_relu = utils.setup_relu((3, 25, 15, 5, 1),
                                      params=None,
-                                     negative_slope=0.1,
+                                     negative_slope=0.01,
                                      bias=True,
                                      dtype=torch.float64)
     R = torch.cat((torch.eye(3, dtype=torch.float64),
@@ -248,6 +255,28 @@ if __name__ == "__main__":
                                 traj_opt_costs,
                                 num_epochs=100,
                                 lr=0.001)
+    if args.rrt_star_data:
+        rrt_star_data = torch.load(args.rrt_star_data)
+        rrt_star_states = torch.from_numpy(rrt_star_data["node_state"])
+        # The root state has control 0.
+        rrt_star_controls = [np.zeros((2, ))]
+        for i in range(1, len(rrt_star_data["node_to_parent_u"])):
+            rrt_star_controls.append(rrt_star_data["node_to_parent_u"][i][:,
+                                                                          0])
+        rrt_star_controls = torch.from_numpy(np.vstack(rrt_star_controls))
+        rrt_star_costs = torch.from_numpy(rrt_star_data["node_cost_to_root"])
+        train_controller_approximator(controller_relu,
+                                      rrt_star_states,
+                                      rrt_star_controls,
+                                      num_epochs=50,
+                                      lr=0.001)
+        train_cost_approximator(lyapunov_relu,
+                                V_lambda,
+                                R,
+                                rrt_star_states,
+                                rrt_star_costs,
+                                num_epochs=100,
+                                lr=0.001)
     forward_system = unicycle.UnicycleReLUZeroVelModel(torch.float64, x_lo,
                                                        x_up, u_lo, u_up,
                                                        dynamics_relu, dt,
@@ -282,7 +311,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-6
     dut.max_iterations = args.max_iterations
-    dut.lyapunov_positivity_epsilon = 0.4
+    dut.lyapunov_positivity_epsilon = 0.2
     dut.lyapunov_derivative_epsilon = 0.001
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
