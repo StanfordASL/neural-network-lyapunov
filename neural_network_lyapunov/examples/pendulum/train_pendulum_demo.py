@@ -261,6 +261,7 @@ if __name__ == "__main__":
                         action="store_true",
                         help="pretrain Lyapunov controller on samples.")
     parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--train_adversarial", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -347,8 +348,8 @@ if __name__ == "__main__":
     # Now train the controller and Lyapunov function together
     q_equilibrium = torch.tensor([np.pi], dtype=torch.float64)
     u_equilibrium = torch.tensor([0], dtype=torch.float64)
-    x_lo = torch.tensor([np.pi - 0.7 * np.pi, -3.], dtype=torch.float64)
-    x_up = torch.tensor([np.pi + 0.7 * np.pi, 3.], dtype=torch.float64)
+    x_lo = torch.tensor([np.pi - 0.1 * np.pi, -0.5], dtype=torch.float64)
+    x_up = torch.tensor([np.pi + 0.1 * np.pi, 0.5], dtype=torch.float64)
     u_lo = torch.tensor([-20], dtype=torch.float64)
     u_up = torch.tensor([20], dtype=torch.float64)
     forward_system = relu_system.ReLUSecondOrderSystemGivenEquilibrium(
@@ -391,9 +392,17 @@ if __name__ == "__main__":
                                       batch_size=50)
 
     dut.enable_wandb = args.enable_wandb
-    dut.add_derivative_adversarial_state = True
-    dut.lyapunov_derivative_mip_cost_weight = 0.
-    dut.add_positivity_adversarial_state = True
-    dut.lyapunov_positivity_mip_cost_weight = 0.
-    dut.train(torch.empty((0, 2), dtype=torch.float64))
+    if args.train_adversarial:
+        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options.positivity_samples_pool_size = 1000
+        options.derivative_samples_pool_size = 1000
+        dut.add_derivative_adversarial_state = True
+        dut.add_positivity_adversarial_state = True
+        dut.lyapunov_positivity_mip_pool_solutions = 50
+        dut.lyapunov_derivative_mip_pool_solutions = 50
+        state_samples_init = utils.get_meshgrid_samples(
+            x_lo, x_up, (21, 21), torch.float64)
+        result = dut.train_adversarial(state_samples_init, options)
+    else:
+        dut.train(torch.empty((0, 2), dtype=torch.float64))
     pass
