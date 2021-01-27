@@ -83,10 +83,6 @@ class TrainLyapunovReLU:
         self.lyapunov_derivative_mip_pool_solutions = 1
         # If set to true, we will print some messages during training.
         self.output_flag = False
-        # The MIP objective loss is ∑ⱼ rʲ * j_th_objective. r is the decay
-        # rate.
-        self.lyapunov_positivity_mip_cost_decay_rate = 0.9
-        self.lyapunov_derivative_mip_cost_decay_rate = 0.9
         # This is ε₂ in  V(x) >=  ε₂ |x - x*|₁
         self.lyapunov_positivity_epsilon = 0.01
         # This is ε in dV(x) ≤ -ε V(x) or dV(x) ≤ -ε |x-x*|₁
@@ -396,35 +392,19 @@ class TrainLyapunovReLU:
         positivity_mip_loss = 0.
         if lyapunov_positivity_mip_cost_weight != 0 and\
                 lyapunov_positivity_mip_cost_weight is not None:
-            for mip_sol_number in range(
-                    self.lyapunov_positivity_mip_pool_solutions):
-                if mip_sol_number < \
-                        lyapunov_positivity_mip.gurobi_model.solCount:
-                    positivity_mip_loss += \
-                        lyapunov_positivity_mip_cost_weight * \
-                        torch.pow(torch.tensor(
-                            self.lyapunov_positivity_mip_cost_decay_rate,
-                            dtype=dtype), mip_sol_number) *\
-                        lyapunov_positivity_mip.\
-                        compute_objective_from_mip_data_and_solution(
-                            solution_number=mip_sol_number, penalty=1e-13)
+            positivity_mip_loss = \
+                lyapunov_positivity_mip_cost_weight * \
+                lyapunov_positivity_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    solution_number=0, penalty=1e-13)
         derivative_mip_loss = 0
         if lyapunov_derivative_mip_cost_weight != 0\
                 and lyapunov_derivative_mip_cost_weight is not None:
-            for mip_sol_number in range(
-                    self.lyapunov_derivative_mip_pool_solutions):
-                if (mip_sol_number <
-                        lyapunov_derivative_mip.gurobi_model.solCount):
-                    mip_cost = lyapunov_derivative_mip.\
-                        compute_objective_from_mip_data_and_solution(
-                            solution_number=mip_sol_number, penalty=1e-13)
-                    derivative_mip_loss += \
-                        lyapunov_derivative_mip_cost_weight *\
-                        torch.pow(torch.tensor(
-                            self.lyapunov_derivative_mip_cost_decay_rate,
-                            dtype=dtype), mip_sol_number) * mip_cost
-                    lyapunov_derivative_mip.gurobi_model.setParam(
-                        gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
+            mip_cost = lyapunov_derivative_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    solution_number=0, penalty=1e-13)
+            derivative_mip_loss = \
+                lyapunov_derivative_mip_cost_weight * mip_cost
 
         # We add the most adverisal states of the positivity MIP and derivative
         # MIP to the training set. Note we solve positivity MIP and derivative

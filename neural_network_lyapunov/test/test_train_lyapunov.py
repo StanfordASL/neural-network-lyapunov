@@ -248,28 +248,16 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             dut.lyapunov_derivative_mip_pool_solutions)
         lyapunov_derivative_mip.gurobi_model.optimize()
 
-        for mip_sol_number in\
-                range(dut.lyapunov_positivity_mip_pool_solutions):
-            if mip_sol_number < lyapunov_positivity_mip.gurobi_model.solCount:
-                lyapunov_positivity_mip.gurobi_model.setParam(
-                    gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
-                loss_expected += dut.lyapunov_positivity_mip_cost_weight * \
-                    torch.pow(torch.tensor(
-                        dut.lyapunov_positivity_mip_cost_decay_rate,
-                        dtype=system.dtype), mip_sol_number) * \
-                    lyapunov_positivity_mip.gurobi_model.getAttr(
-                        gurobipy.GRB.Attr.PoolObjVal)
-        for mip_sol_number in\
-                range(dut.lyapunov_derivative_mip_pool_solutions):
-            if mip_sol_number < lyapunov_derivative_mip.gurobi_model.solCount:
-                lyapunov_derivative_mip.gurobi_model.setParam(
-                    gurobipy.GRB.Param.SolutionNumber, mip_sol_number)
-                loss_expected += dut.lyapunov_derivative_mip_cost_weight *\
-                    torch.pow(torch.tensor(
-                        dut.lyapunov_derivative_mip_cost_decay_rate,
-                        dtype=system.dtype), mip_sol_number) *\
-                    lyapunov_derivative_mip.gurobi_model.getAttr(
-                        gurobipy.GRB.Attr.PoolObjVal)
+        lyapunov_positivity_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.SolutionNumber, 0)
+        loss_expected += dut.lyapunov_positivity_mip_cost_weight * \
+            lyapunov_positivity_mip.gurobi_model.getAttr(
+                gurobipy.GRB.Attr.PoolObjVal)
+        lyapunov_derivative_mip.gurobi_model.setParam(
+            gurobipy.GRB.Param.SolutionNumber, 0)
+        loss_expected += dut.lyapunov_derivative_mip_cost_weight *\
+            lyapunov_derivative_mip.gurobi_model.getAttr(
+                gurobipy.GRB.Attr.PoolObjVal)
 
         self.assertAlmostEqual(loss.item(), loss_expected.item(), places=4)
         self.assertAlmostEqual(lyapunov_positivity_mip_cost,
