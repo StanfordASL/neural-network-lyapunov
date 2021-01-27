@@ -180,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--train_adversarial", action="store_true")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -190,12 +191,12 @@ if __name__ == "__main__":
     if args.load_dynamics_data is not None:
         model_dataset = torch.load(args.load_dynamics_data)
 
-    forward_model = utils.setup_relu((3, 5, 5, 3),
-                                     params=None,
-                                     bias=True,
-                                     negative_slope=0.01,
-                                     dtype=dtype)
     if args.train_forward_model:
+        forward_model = utils.setup_relu((3, 5, 5, 3),
+                                         params=None,
+                                         bias=True,
+                                         negative_slope=0.01,
+                                         dtype=dtype)
         train_forward_model(forward_model, model_dataset, num_epochs=100)
 
     if args.load_forward_model:
@@ -260,10 +261,10 @@ if __name__ == "__main__":
 
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
-    x_lo = torch.tensor([-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9],
+    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
                         dtype=dtype)
     x_up = -x_lo
-    u_lo = torch.tensor([-9, -9], dtype=dtype)
+    u_lo = torch.tensor([0, 0], dtype=dtype)
     u_up = torch.tensor([17, 17], dtype=dtype)
     if args.enable_wandb:
         train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
@@ -296,7 +297,7 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
 
     if args.search_R:
-        R_options = r_options.SearchRwithSPDOptions(R.shape, 0.01)
+        R_options = r_options.SearchROptions(R.shape, 0.01)
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
@@ -309,7 +310,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_convergence_tol = 5e-6
     dut.max_iterations = 5000
     dut.lyapunov_positivity_epsilon = 0.1
-    dut.lyapunov_derivative_epsilon = 0.003
+    dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (7, 7, 7, 7, 7, 7),
@@ -320,5 +321,16 @@ if __name__ == "__main__":
                                       num_epochs=10,
                                       batch_size=50)
     dut.enable_wandb = args.enable_wandb
-    dut.train(torch.empty((0, 6), dtype=dtype))
+    if args.train_adversarial:
+        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options.num_batchs = 40
+        options.num_epochs_per_mip = 50
+        options.positivity_samples_pool_size = 10000
+        options.derivative_samples_pool_size = 30000
+        dut.lyapunov_positivity_mip_pool_solutions = 100
+        dut.lyapunov_derivative_mip_pool_solutions = 500
+        state_samples_init = utils.uniform_sample_in_box(x_lo, x_up, 10000)
+        result = dut.train_adversarial(state_samples_init, options)
+    else:
+        dut.train(torch.empty((0, 6), dtype=dtype))
     pass

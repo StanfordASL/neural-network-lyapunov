@@ -4,13 +4,16 @@ import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import neural_network_lyapunov.r_options as r_options
+import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.relu_system as relu_system
 import torch
 import torch.nn as nn
 import unittest
 import gurobipy
+import numpy as np
 
 
-def setup_relu():
+def setup_lyapunov_relu():
     # Construct a simple ReLU model with 2 hidden layers
     dtype = torch.float64
     linear1 = nn.Linear(2, 3)
@@ -45,12 +48,119 @@ def setup_state_samples_all(mesh_size):
     return torch.stack(state_samples, dim=0)
 
 
+class TestTrainLyapunovReLUMIP(unittest.TestCase):
+    """
+    Test solve_positivity_mip() and solve_derivative_mip() function in
+    TrainLyapunovReLU
+    """
+    def setUp(self):
+        dtype = torch.float64
+        forward_relu = utils.setup_relu((2, 4, 2),
+                                        params=None,
+                                        negative_slope=0.1,
+                                        bias=True,
+                                        dtype=dtype)
+        forward_relu[0].weight.data = torch.tensor(
+            [[4.1, 2.0], [0.5, 2.1], [-2.3, 0.5], [0.8, 0.9]], dtype=dtype)
+        forward_relu[0].bias.data = torch.tensor([0.3, -2.1, 0.5, -0.8],
+                                                 dtype=dtype)
+        forward_relu[2].weight.data = torch.tensor(
+            [[0.2, 3.1, 0.4, 0.5], [-0.5, -2.1, 0.4, -1.3]], dtype=dtype)
+        forward_relu[2].bias.data = torch.tensor([0.4, -1.2], dtype=dtype)
+        x_lo = torch.tensor([-3, -2], dtype=dtype)
+        x_up = torch.tensor([1.5, 2.5], dtype=dtype)
+        x_equilibrium = torch.tensor([-0.5, 1.], dtype=dtype)
+        system = relu_system.AutonomousReLUSystemGivenEquilibrium(
+            dtype, x_lo, x_up, forward_relu, x_equilibrium)
+        V_lambda = 0.1
+        lyapunov_relu = setup_lyapunov_relu()
+        self.lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(
+            system, lyapunov_relu)
+        self.R_options = r_options.FixedROptions(
+            torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=dtype))
+        self.dut = train_lyapunov.TrainLyapunovReLU(self.lyap, V_lambda,
+                                                    x_equilibrium,
+                                                    self.R_options)
+
+    def test_solve_positivity_mip(self):
+        for num_solutions in (1, 10):
+            self.dut.lyapunov_positivity_mip_pool_solutions = num_solutions
+            positivity_mip, positivity_mip_obj, positivity_mip_adversarial =\
+                self.dut.solve_positivity_mip()
+            self.assertEqual(positivity_mip_adversarial.shape[0],
+                             num_solutions)
+            # Check the positivity_mip_obj is correct.
+            self.assertEqual(positivity_mip.gurobi_model.ObjVal,
+                             positivity_mip_obj)
+            x_optimal = positivity_mip_adversarial[0]
+            self.assertAlmostEqual(
+                (self.dut.lyapunov_positivity_epsilon * torch.norm(
+                    self.R_options.R() @ (x_optimal - self.dut.x_equilibrium),
+                    p=1) -
+                 self.lyap.lyapunov_value(x_optimal,
+                                          self.dut.x_equilibrium,
+                                          self.dut.V_lambda,
+                                          R=self.R_options.R())).item(),
+                positivity_mip_obj)
+            positivity_return = self.lyap.lyapunov_positivity_as_milp(
+                self.dut.x_equilibrium,
+                self.dut.V_lambda,
+                self.dut.lyapunov_positivity_epsilon,
+                R=self.R_options.R(),
+                fixed_R=True)
+            mip = positivity_return[0]
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
+                                      num_solutions)
+            mip.gurobi_model.optimize()
+            for i in range(num_solutions):
+                mip.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber, i)
+                np.testing.assert_allclose(
+                    np.array([v.xn for v in positivity_return[1]]),
+                    positivity_mip_adversarial[i].detach().numpy())
+
+    def test_solve_derivative_mip(self):
+        for num_solutions in (1, 10):
+            self.dut.lyapunov_derivative_mip_pool_solutions = num_solutions
+            derivative_mip, derivative_mip_obj, derivative_mip_adversarial,\
+                derivative_mip_adversarial_next = \
+                self.dut.solve_derivative_mip()
+            self.assertEqual(derivative_mip_adversarial.shape[0],
+                             num_solutions)
+            np.testing.assert_allclose(
+                derivative_mip_adversarial_next.detach().numpy(),
+                self.lyap.system.step_forward(
+                    derivative_mip_adversarial).detach().numpy())
+            # Check the derivative_mip_obj is correct.
+            self.assertEqual(derivative_mip.gurobi_model.ObjVal,
+                             derivative_mip_obj)
+            derivative_return = self.lyap.lyapunov_derivative_as_milp(
+                self.dut.x_equilibrium,
+                self.dut.V_lambda,
+                self.dut.lyapunov_derivative_epsilon,
+                self.dut.lyapunov_derivative_eps_type,
+                R=self.R_options.R(),
+                fixed_R=True)
+            mip = derivative_return[0]
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
+                                      num_solutions)
+            mip.gurobi_model.optimize()
+            for i in range(num_solutions):
+                mip.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber, i)
+                np.testing.assert_allclose(
+                    np.array([v.xn for v in derivative_return[1]]),
+                    derivative_mip_adversarial[i].detach().numpy())
+
+
 class TestTrainLyapunovReLU(unittest.TestCase):
     def test_total_loss(self):
         system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
         V_lambda = 0.1
         x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
-        relu = setup_relu()
+        relu = setup_lyapunov_relu()
         lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
             system, relu)
         R_options = r_options.FixedROptions(
@@ -172,7 +282,7 @@ class TestTrainLyapunov(unittest.TestCase):
     def setUp(self):
         self.system = \
             test_hybrid_linear_system.setup_trecate_discrete_time_system()
-        self.relu = setup_relu()
+        self.relu = setup_lyapunov_relu()
 
     def test_train_value_approximator(self):
         dut = train_lyapunov.TrainValueApproximator()
