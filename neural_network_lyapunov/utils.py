@@ -4,6 +4,7 @@ import torch
 import cvxpy as cp
 import gurobipy
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.r_options as r_options
 import scipy.integrate
 
 
@@ -921,10 +922,15 @@ def save_lyapunov_model(lyapunov_relu, V_lambda, lyapunov_positivity_epsilon,
         "R": R_options.R(),
         "fixed_R": R_options.fixed_R
     }
-    if not R_options.fixed_R:
+    if isinstance(R_options, r_options.SearchRwithSPDOptions):
         saved_params["R_size"] = R_options.R_size
         saved_params["R_epsilon"] = R_options.epsilon
         saved_params["R_variables"] = R_options.variables()
+    elif isinstance(R_options, r_options.SearchRwithSVDOptions):
+        saved_params["R_size"] = R_options.R_size
+        saved_params["R_U"] = R_options.U
+        saved_params["R_V"] = R_options.V
+        saved_params["R_a"] = R_options.a
     torch.save(saved_params, file_path)
 
 

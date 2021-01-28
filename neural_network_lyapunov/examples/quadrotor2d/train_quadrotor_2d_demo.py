@@ -181,6 +181,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--enable_wandb", action="store_true")
     parser.add_argument("--train_adversarial", action="store_true")
+    parser.add_argument("--max_iterations", type=int, default=5000)
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -261,7 +262,7 @@ if __name__ == "__main__":
 
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
-    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
+    x_lo = torch.tensor([-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9],
                         dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([0, 0], dtype=dtype)
@@ -297,7 +298,8 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
 
     if args.search_R:
-        R_options = r_options.SearchROptions(R.shape, 0.01)
+        _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
+        R_options = r_options.SearchRwithSVDOptions(R.shape, R_sigma * 0.8)
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
@@ -308,7 +310,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.lyapunov_positivity_convergence_tol = 5e-6
-    dut.max_iterations = 5000
+    dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
