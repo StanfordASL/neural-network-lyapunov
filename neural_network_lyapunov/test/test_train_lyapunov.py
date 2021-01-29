@@ -155,6 +155,40 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                     derivative_mip_adversarial[i].detach().numpy())
 
 
+class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
+    """
+    Test the function TrainLyapunovReLU.train_adversarial()
+    """
+    def test_train_adversarial(self):
+        positivity_state_samples_init = utils.get_meshgrid_samples(
+            torch.from_numpy(self.lyap.system.x_lo_all),
+            torch.from_numpy(self.lyap.system.x_up_all), (3, 3), torch.float64)
+        derivative_state_samples_init = utils.get_meshgrid_samples(
+            torch.from_numpy(self.lyap.system.x_lo_all),
+            torch.from_numpy(self.lyap.system.x_up_all), (5, 5), torch.float64)
+        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options.num_batches = 10
+        options.num_epochs_per_mip = 5
+        options.positivity_samples_pool_size = 1000
+        options.derivative_samples_pool_size = 1000
+        self.dut.lyapunov_positivity_mip_pool_solutions = 10
+        self.dut.lyapunov_derivative_mip_pool_solutions = 20
+        self.dut.add_positivity_adversarial_state = True
+        self.dut.add_derivative_adversarial_state = True
+        self.dut.max_iterations = 1
+        self.dut.output_flag = False
+        result, positivity_state_samples, derivative_state_samples = \
+            self.dut.train_adversarial(
+                positivity_state_samples_init, derivative_state_samples_init,
+                options)
+        self.assertEqual(positivity_state_samples.shape,
+                         (positivity_state_samples_init.shape[0] +
+                          self.dut.lyapunov_positivity_mip_pool_solutions, 2))
+        self.assertEqual(derivative_state_samples.shape,
+                         (derivative_state_samples_init.shape[0] +
+                          self.dut.lyapunov_derivative_mip_pool_solutions, 2))
+
+
 class TestTrainLyapunovReLU(unittest.TestCase):
     def test_total_loss(self):
         system = test_hybrid_linear_system.setup_trecate_discrete_time_system()

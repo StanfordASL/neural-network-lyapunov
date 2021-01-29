@@ -262,7 +262,7 @@ if __name__ == "__main__":
 
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
-    x_lo = torch.tensor([-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9],
+    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
                         dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([0, 0], dtype=dtype)
@@ -325,14 +325,19 @@ if __name__ == "__main__":
     dut.enable_wandb = args.enable_wandb
     if args.train_adversarial:
         options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
-        options.num_batchs = 40
-        options.num_epochs_per_mip = 50
+        options.num_batches = 10
+        options.num_epochs_per_mip = 10
         options.positivity_samples_pool_size = 10000
         options.derivative_samples_pool_size = 30000
         dut.lyapunov_positivity_mip_pool_solutions = 100
         dut.lyapunov_derivative_mip_pool_solutions = 500
-        state_samples_init = utils.uniform_sample_in_box(x_lo, x_up, 10000)
-        result = dut.train_adversarial(state_samples_init, options)
+        dut.add_derivative_adversarial_state = True
+        dut.add_positivity_adversarial_state = True
+        positivity_state_samples_init = utils.uniform_sample_in_box(
+            x_lo, x_up, 1000)
+        derivative_state_samples_init = positivity_state_samples_init
+        result = dut.train_adversarial(positivity_state_samples_init,
+                                       derivative_state_samples_init, options)
     else:
         dut.train(torch.empty((0, 6), dtype=dtype))
     pass

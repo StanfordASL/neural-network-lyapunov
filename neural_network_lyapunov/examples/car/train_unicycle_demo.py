@@ -148,7 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--pretrain_num_epochs", type=int, default=20)
     parser.add_argument(
-        "--adversarial_training",
+        "--train_adversarial",
         action="store_true",
         help="only do adversarial training, not bilevel optimization")
     parser.add_argument(
@@ -162,9 +162,8 @@ if __name__ == "__main__":
         "--rrt_star_data",
         type=str,
         default=None,
-        help="path to the rrt* data. Will train the controller/Lyapunov"
-        + " for approximation"
-    )
+        help="path to the rrt* data. Will train the controller/Lyapunov" +
+        " for approximation")
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
@@ -197,7 +196,7 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 15, 10, 2),
+    controller_relu = utils.setup_relu((3, 20, 10, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
@@ -212,7 +211,7 @@ if __name__ == "__main__":
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
 
-    lyapunov_relu = utils.setup_relu((3, 25, 15, 5, 1),
+    lyapunov_relu = utils.setup_relu((3, 25, 20, 10, 1),
                                      params=None,
                                      negative_slope=0.01,
                                      bias=True,
@@ -297,7 +296,7 @@ if __name__ == "__main__":
 
     if args.search_R:
         _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
-        R_options = r_options.SearchRwithSVDOptions(R.shape, R_sigma / 2)
+        R_options = r_options.SearchRwithSVDOptions(R.shape, R_sigma * 0.8)
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
@@ -328,12 +327,21 @@ if __name__ == "__main__":
                                       num_epochs=args.pretrain_num_epochs,
                                       batch_size=50)
     dut.enable_wandb = args.enable_wandb
-    if args.adversarial_training:
-        dut.lyapunov_positivity_mip_cost_weight = 0.
-        dut.lyapunov_derivative_mip_cost_weight = 0.
-        dut.add_positivity_adversarial_state = True
+    if args.train_adversarial:
+        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options.positivity_samples_pool_size = 10000
+        options.derivative_samples_pool_size = 10000
+        options.num_epochs_per_mip = 5
         dut.add_derivative_adversarial_state = True
-        dut.lyapunov_derivative_sample_cost_weight = 100
-        dut.lyapunov_positivity_sample_cost_weight = 1
-    dut.train(torch.empty((0, 3), dtype=torch.float64))
+        dut.add_positivity_adversarial_state = True
+        dut.lyapunov_positivity_mip_pool_solutions = 100
+        dut.lyapunov_derivative_mip_pool_solutions = 200
+        positivity_state_samples_init = utils.get_meshgrid_samples(
+            x_lo, x_up, (20, 20, 20), dtype=torch.float64)
+        derivative_state_samples_init = positivity_state_samples_init
+        result = dut.train_adversarial(positivity_state_samples_init,
+                                       derivative_state_samples_init,
+                                       options)
+    else:
+        dut.train(torch.empty((0, 3), dtype=torch.float64))
     pass

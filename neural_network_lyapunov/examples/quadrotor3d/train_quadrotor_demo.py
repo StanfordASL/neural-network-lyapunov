@@ -84,7 +84,8 @@ def train_forward_model(forward_model, model_dataset, num_epochs, lr):
 
 
 def train_lqr_value_approximator(lyapunov_relu, V_lambda, R, x_equilibrium,
-                                 x_lo, x_up, num_samples, lqr_S: torch.Tensor):
+                                 x_lo, x_up, num_samples, lqr_S: torch.Tensor,
+                                 num_epochs):
     """
     We train both lyapunov_relu and R such that ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁
     approximates the lqr cost-to-go.
@@ -104,7 +105,7 @@ def train_lqr_value_approximator(lyapunov_relu, V_lambda, R, x_equilibrium,
                              lyapunov_relu,
                              compute_v,
                              batch_size=50,
-                             num_epochs=100,
+                             num_epochs=num_epochs,
                              lr=0.001,
                              additional_variable=[R])
     R.requires_grad_(False)
@@ -112,7 +113,7 @@ def train_lqr_value_approximator(lyapunov_relu, V_lambda, R, x_equilibrium,
 
 def train_lqr_control_approximator(controller_relu, x_equilibrium,
                                    u_equilibrium, x_lo, x_up, num_samples,
-                                   lqr_K: torch.Tensor):
+                                   lqr_K: torch.Tensor, num_epochs):
     x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
     u_samples = (lqr_K @ (x_samples - x_equilibrium).T).T + u_equilibrium
     state_control_dataset = torch.utils.data.TensorDataset(
@@ -125,7 +126,7 @@ def train_lqr_control_approximator(controller_relu, x_equilibrium,
                              controller_relu,
                              compute_u,
                              batch_size=50,
-                             num_epochs=50,
+                             num_epochs=num_epochs,
                              lr=0.001)
 
 
@@ -158,6 +159,8 @@ if __name__ == "__main__":
     parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--max_iterations", type=int, default=10000)
     parser.add_argument("--pretrain_num_epochs", type=int, default=20)
+    parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--train_adversarial", action="store_true")
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -183,14 +186,7 @@ if __name__ == "__main__":
                             lr=0.001)
 
     if args.load_forward_model:
-        forward_model_data = torch.load(args.load_forward_model)
-        forward_model = utils.setup_relu(
-            forward_model_data["linear_layer_width"],
-            params=None,
-            bias=forward_model_data["bias"],
-            negative_slope=forward_model_data["negative_slope"],
-            dtype=dtype)
-        forward_model.load_state_dict(forward_model_data["state_dict"])
+        forward_model = torch.load(args.load_forward_model)
 
     lyapunov_relu = utils.setup_relu((12, 14, 10, 1),
                                      params=None,
@@ -237,8 +233,8 @@ if __name__ == "__main__":
     plant = quadrotor.Quadrotor(dtype)
     u_equilibrium = plant.hover_thrust * torch.ones((4, ), dtype=dtype)
     x_lo = torch.tensor([
-        -0.1, -0.1, -0.1, -0.1 * np.pi, -0.1 * np.pi, -0.1 * np.pi, -1, -1, -1,
-        -np.pi * 0.2, -np.pi * 0.2, -np.pi * 0.2
+        -0.02, -0.02, -0.02, -0.02 * np.pi, -0.02 * np.pi, -0.02 * np.pi, -0.2,
+        -0.2, -0.2, -np.pi * 0.04, -np.pi * 0.04, -np.pi * 0.04
     ],
                         dtype=dtype)
     x_up = -x_lo
@@ -253,12 +249,23 @@ if __name__ == "__main__":
     lqr_K = np.linalg.solve(lqr_R, plant_B.T @ lqr_S)
 
     if args.train_lqr_approximator:
-        train_lqr_control_approximator(controller_relu, x_equilibrium,
-                                       u_equilibrium, x_lo, x_up, 100000,
-                                       torch.from_numpy(lqr_K))
-        train_lqr_value_approximator(lyapunov_relu, V_lambda, R,
-                                     x_equilibrium, x_lo, x_up, 100000,
-                                     torch.from_numpy(lqr_S))
+        train_lqr_control_approximator(controller_relu,
+                                       x_equilibrium,
+                                       u_equilibrium,
+                                       x_lo,
+                                       x_up,
+                                       100000,
+                                       torch.from_numpy(lqr_K),
+                                       num_epochs=100)
+        train_lqr_value_approximator(lyapunov_relu,
+                                     V_lambda,
+                                     R,
+                                     x_equilibrium,
+                                     x_lo,
+                                     x_up,
+                                     100000,
+                                     torch.from_numpy(lqr_S),
+                                     num_epochs=100)
 
     forward_system = quadrotor.QuadrotorReLUSystem(dtype, x_lo, x_up, u_lo,
                                                    u_up, forward_model,
@@ -272,7 +279,8 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
 
     if args.search_R:
-        R_options = r_options.SearchRwithSPDOptions(R.shape, 0.1)
+        _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
+        R_options = r_options.SearchRwithSVDOptions(R.shape, R_sigma * 0.8)
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
@@ -303,6 +311,22 @@ if __name__ == "__main__":
         dut.train_lyapunov_on_samples(state_samples_all,
                                       num_epochs=args.pretrain_num_epochs,
                                       batch_size=50)
-    dut.enable_wandb = True
-    dut.train(torch.empty((0, 12), dtype=dtype))
+    dut.enable_wandb = args.enable_wandb
+    if args.train_adversarial:
+        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options.num_batches = 10
+        options.num_epochs_per_mip = 5
+        options.positivity_samples_pool_size = 50000
+        options.derivative_samples_pool_size = 100000
+        dut.lyapunov_positivity_mip_pool_solutions = 100
+        dut.lyapunov_derivative_mip_pool_solutions = 1000
+        dut.add_positivity_adversarial_state = True
+        dut.add_derivative_adversarial_state = True
+        positivity_state_samples_init = utils.uniform_sample_in_box(
+            x_lo, x_up, 1000)
+        derivative_state_samples_init = positivity_state_samples_init
+        result = dut.train_adversarial(positivity_state_samples_init,
+                                       derivative_state_samples_init, options)
+    else:
+        dut.train(torch.empty((0, 12), dtype=dtype))
     pass
