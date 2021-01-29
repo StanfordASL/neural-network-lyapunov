@@ -72,8 +72,8 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
             x_lb = torch.tensor([-2, -3, -1], dtype=dtype)
             x_ub = torch.tensor([1, 2, 0], dtype=dtype)
             x_equilibrium = torch.tensor([0.5, -1.5, -0.2], dtype=dtype)
-            relu_z, relu_beta, Aout, Cout, xhat, z_post_relu_lo,\
-                z_post_relu_up = compute_xhat._compute_network_at_xhat(
+            relu_z, relu_beta, Aout, Cout, xhat, output_lo,\
+                output_up = compute_xhat._compute_network_at_xhat(
                     mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
                     x_lb, x_ub)
 
@@ -91,11 +91,11 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
             np.testing.assert_allclose(np.array([var.x for var in xhat]),
                                        xhat_val)
             relu_z_sol = torch.tensor([var.x for var in relu_z], dtype=dtype)
-            np.testing.assert_array_less(relu_z_sol.detach().numpy(),
-                                         z_post_relu_up.detach().numpy())
-            np.testing.assert_array_less(z_post_relu_lo.detach().numpy(),
-                                         relu_z_sol.detach().numpy())
             phi_xhat = Aout @ relu_z_sol + Cout
+            np.testing.assert_array_less(phi_xhat.detach().numpy(),
+                                         output_up.detach().numpy() + 1e-6)
+            np.testing.assert_array_less(output_lo.detach().numpy() - 1E-6,
+                                         phi_xhat.detach().numpy())
             phi_xhat_expected = relu(xhat_val)
             np.testing.assert_allclose(phi_xhat.detach().numpy(),
                                        phi_xhat_expected.detach().numpy())

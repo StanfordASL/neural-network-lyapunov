@@ -166,7 +166,7 @@ class AccelerationCarReLUModel:
             (self.x_lo[2], self.x_lo[3], self.u_lo[0], self.u_lo[1]))
         network_input_up = torch.stack(
             (self.x_up[2], self.x_up[3], self.u_up[0], self.u_up[1]))
-        mip_cnstr_result, _, _, _, _ = \
+        mip_cnstr_result, _, _, _, _, _, _ = \
             self.dynamics_relu_free_pattern.output_constraint(
                 network_input_lo,
                 network_input_up,

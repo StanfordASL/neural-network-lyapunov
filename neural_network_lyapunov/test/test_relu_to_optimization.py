@@ -283,7 +283,8 @@ class TestReLU(unittest.TestCase):
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
             (mip_constr_return,
-                z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up)\
+                z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,
+                output_lo, output_up)\
                 = relu_free_pattern.output_constraint(x_lo, x_up, method)
             self.assertIsNone(mip_constr_return.Aout_input)
             self.assertIsNone(mip_constr_return.Aout_binary)
@@ -315,6 +316,14 @@ class TestReLU(unittest.TestCase):
                 (z, beta, output) = \
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
                     x)
+                if torch.all(x <= x_up) and torch.all(x >= x_lo):
+                    output_torch = relu_free_pattern.model(x)
+                    np.testing.assert_array_less(
+                        output_torch.detach().numpy(),
+                        output_up.detach().numpy() + 1E-6)
+                    np.testing.assert_array_less(
+                        output_lo.detach().numpy() - 1E-6,
+                        output_torch.detach().numpy())
                 # Now formulate an optimization problem, with fixed input,
                 # search for z and beta. There should be only one solution.
                 z_var = cp.Variable(relu_free_pattern.num_relu_units)
@@ -486,7 +495,7 @@ class TestReLU(unittest.TestCase):
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
-            mip_constr_return, _, _, _, _ = \
+            mip_constr_return, _, _, _, _, _, _ = \
                 relu_free_pattern.output_constraint(
                     x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
             # This function compute the sum of all the return terms. If any of
@@ -802,7 +811,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
             utils.network_zero_grad(network)
             dut = relu_to_optimization.ReLUFreePattern(network,
                                                        params_torch.dtype)
-            mip_return, _, _, _, _ = dut.output_constraint(
+            mip_return, _, _, _, _, _, _ = dut.output_constraint(
                 x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
             entry = getattr(mip_return, mip_entry_name)
 
@@ -837,7 +846,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
         utils.update_relu_params(network, network_param)
         dut = relu_to_optimization.ReLUFreePattern(network,
                                                    network_param.dtype)
-        mip_return, _, _, _, _ = dut.output_constraint(
+        mip_return, _, _, _, _, _, _ = dut.output_constraint(
             x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
 
         def test_entry(entry_name):
