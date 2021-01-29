@@ -715,6 +715,9 @@ class TrainLyapunovReLU:
             positivity_state_samples_all)
         derivative_dataset = torch.utils.data.TensorDataset(
             derivative_state_samples_all)
+        # TODO(hongkai.dai): currently by using batch_size, I don't guarantee
+        # to get options.num_batches batches in the dataset. Write a customized
+        # loader later.
         positivity_loader = torch.utils.data.DataLoader(
             positivity_dataset,
             batch_size=int(
@@ -728,7 +731,8 @@ class TrainLyapunovReLU:
         for epoch in range(options.num_epochs_per_mip):
             it_positivity_samples = iter(positivity_loader)
             it_derivative_samples = iter(derivative_loader)
-            for i in range(options.num_batches):
+            for i in range(
+                    np.min((len(positivity_loader), len(derivative_loader)))):
                 optimizer.zero_grad()
                 positivity_state_batch = next(it_positivity_samples)[0]
                 derivative_state_batch = next(it_derivative_samples)[0]
@@ -765,23 +769,28 @@ class TrainLyapunovReLU:
                     derivative_sample_epoch_loss == 0.:
                 return
 
-    def train_adversarial(self, state_samples_init: torch.Tensor,
+    def train_adversarial(self, positivity_state_samples_init: torch.Tensor,
+                          derivative_state_samples_init: torch.Tensor,
                           options: AdversarialTrainingOptions):
+        """
+        We solve the MILP as verifier. If the MILP finds counter-examples, we
+        add the counter-examples to the training set (with a maximal buffer
+        size), and do gradient descent on this training set.
+        @param positivity_state_samples_init The initial training set for the
+        Lyapunov positivity condition.
+        @param derivative_state_samples_init The initial training set for the
+        derivative condition.
+        """
+        assert (self.add_derivative_adversarial_state)
+        assert (self.add_positivity_adversarial_state)
         if self.output_flag:
             self.print()
         if self.enable_wandb:
             options.wandb_config()
-        for attr in inspect.getmembers(self):
-            if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
-                if attr[0] not in ('lyapunov_hybrid_system',
-                                   'summary_writer_folder'):
-                    print(f"{attr[0]}: {attr[1]}")
-                    if self.enable_wandb:
-                        wandb.config.update({attr[0]: f"{attr[1]}"})
 
         train_start_time = time.time()
-        positivity_state_samples_all = state_samples_init.clone()
-        derivative_state_samples_all = state_samples_init.clone()
+        positivity_state_samples_all = positivity_state_samples_init.clone()
+        derivative_state_samples_all = derivative_state_samples_init.clone()
         training_params = self._training_params()
         if self.optimizer == "Adam":
             optimizer = torch.optim.Adam(training_params,
@@ -792,9 +801,6 @@ class TrainLyapunovReLU:
                                         momentum=self.momentum)
         iter_count = 0
         while iter_count < self.max_iterations:
-            self._batch_descent_on_samples(positivity_state_samples_all,
-                                           derivative_state_samples_all,
-                                           optimizer, options)
             # Now solve MIP to find adversarial states.
             lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
                 positivity_mip_adversarial = self.solve_positivity_mip()
@@ -828,9 +834,15 @@ class TrainLyapunovReLU:
                 self.lyapunov_positivity_convergence_tol and\
                 lyapunov_derivative_mip_obj < \
                     self.lyapunov_derivative_convergence_tol:
-                return True
+                return True, positivity_state_samples_all,\
+                    derivative_state_samples_all
+            # Now do gradient descent on the adversarial states.
+            self._batch_descent_on_samples(positivity_state_samples_all,
+                                           derivative_state_samples_all,
+                                           optimizer, options)
             iter_count += 1
-        return False
+        return False, positivity_state_samples_all,\
+            derivative_state_samples_all
 
 
 class TrainValueApproximator:

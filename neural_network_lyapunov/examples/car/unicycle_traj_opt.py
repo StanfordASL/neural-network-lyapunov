@@ -20,10 +20,8 @@ def dynamics_constraint_evaluator(plant, xut):
 def cost_trajectory(nT, ut):
     u = ut[:2 * nT].reshape((2, nT))
     dt_traj = ut[2 * nT:3 * nT - 1]
-    return np.sum(u[:, :-1]**2 * np.repeat(dt_traj.reshape(
-        (1, -1)), 2, axis=0) +
-                  u[:, 1:]**2 * np.repeat(dt_traj.reshape((1, -1)), 2, axis=0),
-                  axis=0)
+    return ((u[0, :-1] + u[0, 1:]) / 2)**2 * dt_traj + (
+        (u[1, :-1] + u[1, 1:]) / 2)**2 * dt_traj
 
 
 def cost(nT, ut):
@@ -61,14 +59,14 @@ def construct_training_set():
     u_lo = np.array([-3, -0.25 * np.pi])
     u_up = np.array([6, 0.25 * np.pi])
     dt_min = 0.001
-    dt_max = 0.1
-    nT = 30
+    dt_max = 0.03
+    nT = 40
     prog, initial_val_constraint, final_val_constraint, x, u, dt =\
         construct_traj_opt(nT, u_lo, u_up, dt_min, dt_max)
     # We sample many initial states in the box x_lo <= x <= x_up
     x_lo = torch.tensor([-3, -3, -1.2 * np.pi], dtype=torch.float64)
     x_up = torch.tensor([3, 3, 1.2 * np.pi], dtype=torch.float64)
-    x_init_samples = utils.uniform_sample_in_box(x_lo, x_up, 1000)
+    x_init_samples = utils.uniform_sample_in_box(x_lo, x_up, 3000)
 
     states = [torch.zeros((1, 3), dtype=torch.float64)]
     controls = [torch.zeros((1, 2), dtype=torch.float64)]

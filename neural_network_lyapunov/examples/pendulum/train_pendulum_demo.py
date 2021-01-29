@@ -400,9 +400,12 @@ if __name__ == "__main__":
         dut.add_positivity_adversarial_state = True
         dut.lyapunov_positivity_mip_pool_solutions = 50
         dut.lyapunov_derivative_mip_pool_solutions = 50
-        state_samples_init = utils.get_meshgrid_samples(
+        positivity_state_samples_init = utils.get_meshgrid_samples(
             x_lo, x_up, (21, 21), torch.float64)
-        result = dut.train_adversarial(state_samples_init, options)
+        derivative_state_samples_init = positivity_state_samples_init
+        result = dut.train_adversarial(
+            positivity_state_samples_init, derivative_state_samples_init,
+            options)
     else:
         dut.train(torch.empty((0, 2), dtype=torch.float64))
     pass
