@@ -206,8 +206,7 @@ class FeedbackSystem:
                     self.x_equilibrium, self.xhat_indices)
                 controller_relu_xhat_lo, controller_relu_xhat_up = \
                     mip_utils.propagate_bounds(
-                        self.controller_network, xhat_lo, xhat_up,
-                        mip_utils.PropagateBoundsMethod.IA)
+                        self.controller_network, xhat_lo, xhat_up)
 
         # Now add the saturation limit constraint
         if isinstance(self.controller_network, torch.nn.Linear):
@@ -215,8 +214,7 @@ class FeedbackSystem:
                 mip_utils.propagate_bounds(
                     self.controller_network,
                     torch.from_numpy(self.forward_system.x_lo_all),
-                    torch.from_numpy(self.forward_system.x_up_all),
-                    mip_utils.PropagateBoundsMethod.IA)
+                    torch.from_numpy(self.forward_system.x_up_all))
 
         for i in range(self.forward_system.u_dim):
             if np.isinf(self.u_lower_limit[i]) and\

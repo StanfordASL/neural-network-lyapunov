@@ -438,7 +438,7 @@ class ReLUFreePattern:
                 mip_constr_return.Cout = self.model[-1].bias.clone()
             output_lo, output_up = mip_utils.propagate_bounds(
                 self.model[-1], z_post_relu_lo[self.relu_unit_index[-1]],
-                z_post_relu_up[self.relu_unit_index[-1]], method)
+                z_post_relu_up[self.relu_unit_index[-1]])
 
         mip_constr_return.Ain_input = Ain_input[:ineq_constr_count]
         mip_constr_return.Ain_slack = Ain_slack[:ineq_constr_count]
@@ -832,7 +832,7 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
     Aeq_binary = [torch.empty((0, linear_layer.out_features), dtype=dtype)]
     rhs_eq = []
     linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
-        linear_layer, linear_input_lo, linear_input_up, method)
+        linear_layer, linear_input_lo, linear_input_up)
     bias = linear_layer.bias if linear_layer.bias is not None else \
         torch.zeros((linear_layer.out_features,), dtype=dtype)
     for j in range(linear_layer.out_features):
@@ -898,7 +898,7 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
             rhs_eq.append(torch.tensor(binary_value, dtype=dtype))
     z_next_lo, z_next_up = mip_utils.propagate_bounds(relu_layer,
                                                       linear_output_lo,
-                                                      linear_output_up, method)
+                                                      linear_output_up)
     # Aggregate all the constraints for each neuron.
     rhs_eq_all = torch.empty((0,), dtype=dtype) if len(rhs_eq) == 0 else\
         torch.stack(rhs_eq, dim=0)

@@ -921,13 +921,13 @@ class TestAddConstraintByLayer(unittest.TestCase):
                 linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
         linear_output_lo_expected, linear_output_up_expected =\
             mip_utils.propagate_bounds(
-                linear_layer, z_curr_lo, z_curr_up, method)
+                linear_layer, z_curr_lo, z_curr_up)
         np.testing.assert_allclose(linear_output_lo.detach().numpy(),
                                    linear_output_lo_expected.detach().numpy())
         np.testing.assert_allclose(linear_output_up.detach().numpy(),
                                    linear_output_up_expected.detach().numpy())
         z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
-            relu_layer, linear_output_lo, linear_output_up, method)
+            relu_layer, linear_output_lo, linear_output_up)
         np.testing.assert_allclose(z_next_lo.detach().numpy(),
                                    z_next_lo_expected.detach().numpy())
         np.testing.assert_allclose(z_next_up.detach().numpy(),

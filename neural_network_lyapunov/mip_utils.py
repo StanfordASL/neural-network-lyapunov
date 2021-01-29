@@ -112,7 +112,7 @@ class PropagateBoundsMethod(enum.Enum):
     LP = 2
 
 
-def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
+def propagate_bounds(layer, input_lo, input_up):
     """
     Given the bound of the layer's input, find the bound of the output.
     @param method Either use interval arithemtic (IA) or linear programming
@@ -121,7 +121,6 @@ def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
     """
     assert (isinstance(input_lo, torch.Tensor))
     assert (isinstance(input_up, torch.Tensor))
-    assert (isinstance(method, PropagateBoundsMethod))
     dtype = input_lo.dtype
     if isinstance(layer, torch.nn.ReLU):
         # ReLU is a monotonic increasing function.
@@ -140,20 +139,8 @@ def propagate_bounds(layer, input_lo, input_up, method: PropagateBoundsMethod):
     elif isinstance(layer, torch.nn.Linear):
         bias = torch.zeros((layer.out_features,), dtype=dtype) if\
             layer.bias is None else layer.bias.clone()
-        if method == PropagateBoundsMethod.IA:
-            output_lo, output_up = compute_range_by_IA(layer.weight, bias,
-                                                       input_lo, input_up)
-        elif method == PropagateBoundsMethod.LP:
-            output_lo_np, output_up_np = compute_range_by_lp(
-                layer.weight.detach().numpy(),
-                bias.detach().numpy(),
-                input_lo.detach().numpy(),
-                input_up.detach().numpy(), None, None)
-            output_lo = torch.from_numpy(output_lo_np).type(dtype)
-            output_up = torch.from_numpy(output_up_np).type(dtype)
-        else:
-            raise Exception(
-                "propagate_bounds(): unknown method for linear layer")
+        output_lo, output_up = compute_range_by_IA(layer.weight, bias,
+                                                   input_lo, input_up)
     else:
         raise Exception("progagate_bounds(): unknown layer type.")
     return output_lo, output_up
