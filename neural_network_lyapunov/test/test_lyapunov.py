@@ -1446,10 +1446,11 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         milp_relu = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
         relu1_free_pattern = relu_to_optimization.ReLUFreePattern(
             lyapunov_relu, dut.system.dtype)
-        mip_constr_return, _, _, _, _ = relu1_free_pattern.output_constraint(
-            torch.from_numpy(system.x_lo_all),
-            torch.from_numpy(system.x_up_all),
-            mip_utils.PropagateBoundsMethod.IA)
+        mip_constr_return, _, _, _, _, _, _ =\
+            relu1_free_pattern.output_constraint(
+                torch.from_numpy(system.x_lo_all),
+                torch.from_numpy(system.x_up_all),
+                mip_utils.PropagateBoundsMethod.IA)
         x = milp_relu.addVars(system.x_dim,
                               lb=-gurobipy.GRB.INFINITY,
                               vtype=gurobipy.GRB.CONTINUOUS)

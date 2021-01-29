@@ -88,11 +88,11 @@ def _compute_network_at_xhat(
                               name=f"xhat[{i}]")[0]
         xhat_lb[i] = x_equilibrium[i]
         xhat_ub[i] = x_equilibrium[i]
-    mip_cnstr_return, _, _, z_post_relu_lo, z_post_relu_up = \
+    mip_cnstr_return, _, _, _, _, output_lo, output_up = \
         relu_free_pattern.output_constraint(
             xhat_lb, xhat_ub, mip_utils.PropagateBoundsMethod.IA)
     relu_z, relu_beta = mip.add_mixed_integer_linear_constraints(
         mip_cnstr_return, xhat, None, "relu_xhat_slack", "relu_xhat_binary",
         "relu_xhat_ineq", "relu_xhat_eq", "")
     return (relu_z, relu_beta, mip_cnstr_return.Aout_slack,
-            mip_cnstr_return.Cout, xhat, z_post_relu_lo, z_post_relu_up)
+            mip_cnstr_return.Cout, xhat, output_lo, output_up)

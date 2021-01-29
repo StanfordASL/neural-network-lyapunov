@@ -300,7 +300,7 @@ class QuadrotorWithPixhawkReLUSystem:
                                - ϕ(0, u*)
         as mixed-integer linear constraints.
         """
-        mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
+        mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(
                     torch.cat((self.x_lo[3:6], self.u_lo)),
                     torch.cat((self.x_up[3:6], self.u_up)),
@@ -462,7 +462,7 @@ class QuadrotorReLUSystem:
         (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
         = ϕ(rpy[n],, angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
         """
-        mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
+        mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(
                 torch.cat((self.x_lo[3:6], self.x_lo[9:12], self.u_lo)),
                 torch.cat((self.x_up[3:6], self.x_up[9:12], self.u_up)),

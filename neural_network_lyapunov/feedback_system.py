@@ -104,8 +104,8 @@ class FeedbackSystem:
                                        controller_binary_var_name):
         # Add the constraint on the controller between x and u.
         if isinstance(self.controller_network, torch.nn.Sequential):
-            controller_mip_cnstr, _, _, controller_z_post_relu_lo,\
-                controller_z_post_relu_up = \
+            controller_mip_cnstr, _, _, _, _, controller_network_output_lo,\
+                controller_network_output_up = \
                 self.controller_relu_free_pattern.output_constraint(
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all),
@@ -134,8 +134,8 @@ class FeedbackSystem:
         else:
             if isinstance(self.controller_network, torch.nn.Sequential):
                 relu_xhat_slack, relu_xhat_binary, relu_xhat_Aout,\
-                    relu_xhat_Cout, _, controller_zhat_post_relu_lo,\
-                    controller_zhat_post_relu_up\
+                    relu_xhat_Cout, _, controller_relu_xhat_lo,\
+                    controller_relu_xhat_up\
                     = compute_xhat._compute_network_at_xhat(
                         mip, x_var, self.x_equilibrium,
                         self.controller_relu_free_pattern, self.xhat_indices,
@@ -197,12 +197,7 @@ class FeedbackSystem:
                 self.x_equilibrium)
             controller_relu_xhat_up = controller_relu_xhat_lo
         else:
-            if isinstance(self.controller_network, torch.nn.Sequential):
-                controller_relu_xhat_lo, controller_relu_xhat_up = \
-                    self.controller_relu_free_pattern.output_bounds_IA(
-                        controller_zhat_post_relu_lo,
-                        controller_zhat_post_relu_up)
-            elif isinstance(self.controller_network, torch.nn.Linear):
+            if isinstance(self.controller_network, torch.nn.Linear):
                 xhat_lo = compute_xhat._get_xhat_val(
                     torch.from_numpy(self.forward_system.x_lo_all),
                     self.x_equilibrium, self.xhat_indices)
@@ -215,17 +210,14 @@ class FeedbackSystem:
                         mip_utils.PropagateBoundsMethod.IA)
 
         # Now add the saturation limit constraint
-        if isinstance(self.controller_network, torch.nn.Sequential):
-            controller_network_output_lo, controller_network_output_up = \
-                self.controller_relu_free_pattern.output_bounds_IA(
-                    controller_z_post_relu_lo, controller_z_post_relu_up)
-        elif isinstance(self.controller_network, torch.nn.Linear):
+        if isinstance(self.controller_network, torch.nn.Linear):
             controller_network_output_lo, controller_network_output_up =\
                 mip_utils.propagate_bounds(
                     self.controller_network,
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all),
                     mip_utils.PropagateBoundsMethod.IA)
+
         for i in range(self.forward_system.u_dim):
             if np.isinf(self.u_lower_limit[i]) and\
                     np.isinf(self.u_upper_limit[i]):

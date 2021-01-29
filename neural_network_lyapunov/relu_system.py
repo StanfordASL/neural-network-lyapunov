@@ -50,9 +50,10 @@ class AutonomousReLUSystem:
                 Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            output_lo, output_up =\
+            self.dynamics_relu_free_pattern.output_constraint(
+                self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         return result
 
     def possible_dx(self, x):
@@ -111,9 +112,9 @@ class AutonomousReLUSystemGivenEquilibrium:
                 Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            _, _ = self.dynamics_relu_free_pattern.output_constraint(
+                self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
             self.x_equilibrium
 
@@ -178,9 +179,9 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
                 Ain_x @ x + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            _, _ = self.dynamics_relu_free_pattern.output_constraint(
+                self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium)
         if result.Aout_input is None:
             result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
@@ -266,9 +267,9 @@ class ReLUSystem:
         """
         xu_lo = torch.cat((self.x_lo, self.u_lo))
         xu_up = torch.cat((self.x_up, self.u_up))
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            _, _ = self.dynamics_relu_free_pattern.output_constraint(
+                xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
 
         return result
 
@@ -358,9 +359,9 @@ class ReLUSystemGivenEquilibrium:
         """
         xu_lo = torch.cat((self.x_lo, self.u_lo))
         xu_up = torch.cat((self.x_up, self.u_up))
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            _, _ = self.dynamics_relu_free_pattern.output_constraint(
+                xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
         result.Aout_slack = result.Aout_slack.reshape((self.x_dim, -1))
         result.Cout = result.Cout.reshape((-1))
         result.Cout += -self.dynamics_relu(
@@ -475,11 +476,11 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         # For the constraint v[n+1] = ϕ(q[n], v[n], u[n]) − ϕ(q*, v*, u*)
         # This is equivalent to
         # v[n+1] = result.Aout_slack * s  + result.Cout - ϕ(q*, v*, u*)
-        (result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo,
-         z_post_relu_up) = self.dynamics_relu_free_pattern.output_constraint(
-             torch.cat((self.x_lo, self.u_lo)),
-             torch.cat((self.x_up, self.u_up)),
-             mip_utils.PropagateBoundsMethod.IA)
+        result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
+            _, _ = self.dynamics_relu_free_pattern.output_constraint(
+                torch.cat((self.x_lo, self.u_lo)),
+                torch.cat((self.x_up, self.u_up)),
+                mip_utils.PropagateBoundsMethod.IA)
         assert (result.Aout_input is None)
         assert (result.Aout_binary is None)
         if (len(result.Aout_slack.shape) == 1):
@@ -645,7 +646,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
 
     def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
                                 slack_var_name, binary_var_name):
-        mip_cnstr_result, _, _, _, _ = self.dynamics_relu_free_pattern.\
+        mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(torch.cat((self.x_lo[
                 self._network_input_x_indices], self.u_lo)), torch.cat((
                     self.x_up[self._network_input_x_indices], self.u_up)),

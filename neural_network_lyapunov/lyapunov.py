@@ -110,7 +110,7 @@ class LyapunovHybridLinearSystem:
         """
         assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
         assert (isinstance(x, list))
-        mip_constr_return, _, _, _, _ = \
+        mip_constr_return, _, _, _, _, _, _ = \
             self.lyapunov_relu_free_pattern.output_constraint(
                  torch.from_numpy(self.system.x_lo_all),
                  torch.from_numpy(self.system.x_up_all),
