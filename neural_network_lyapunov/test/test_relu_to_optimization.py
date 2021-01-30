@@ -900,6 +900,94 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
                                         rtol=1E-5)
 
 
+class TestAddConstraintByNeuron(unittest.TestCase):
+    def constraint_test(self, Wij, bij, relu_layer, linear_input_lo,
+                        linear_input_up):
+        Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
+            Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
+            neuron_input_lo, neuron_input_up, neuron_output_lo,\
+            neuron_output_up = \
+            relu_to_optimization._add_constraint_by_neuron(
+                Wij, bij, relu_layer, linear_input_lo, linear_input_up)
+        neuron_input_lo_expected, neuron_input_up_expected = \
+            mip_utils.compute_range_by_IA(
+                Wij.reshape((1, -1)), bij.reshape((1, )), linear_input_lo,
+                linear_input_up)
+        np.testing.assert_allclose(neuron_input_lo.detach().numpy(),
+                                   neuron_input_lo_expected.detach().numpy())
+        np.testing.assert_allclose(neuron_input_up.detach().numpy(),
+                                   neuron_input_up_expected.detach().numpy())
+
+        neuron_output_lo_expected, neuron_output_up_expected =\
+            mip_utils.propagate_bounds(
+                relu_layer, neuron_input_lo, neuron_input_up)
+        np.testing.assert_allclose(neuron_output_lo.detach().numpy(),
+                                   neuron_output_lo_expected.detach().numpy())
+        np.testing.assert_allclose(neuron_output_up.detach().numpy(),
+                                   neuron_output_up_expected.detach().numpy())
+        # Now solve an optimization problem with the constraints, verify that
+        # the solution is the output of the neuron.
+        linear_input_val_samples = utils.uniform_sample_in_box(
+            linear_input_lo, linear_input_up, 30)
+        for i in range(linear_input_val_samples.shape[0]):
+            model = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
+            linear_input = model.addVars(Wij.numel(),
+                                         lb=-gurobipy.GRB.INFINITY)
+            neuron_output = model.addVars(1, lb=-gurobipy.GRB.INFINITY)
+            binary = model.addVars(1, vtype=gurobipy.GRB.BINARY)
+            model.addMConstrs(
+                [Ain_linear_input, Ain_neuron_output, Ain_binary],
+                [linear_input, neuron_output, binary],
+                b=rhs_in,
+                sense=gurobipy.GRB.LESS_EQUAL)
+            model.addMConstrs(
+                [Aeq_linear_input, Aeq_neuron_output, Aeq_binary],
+                [linear_input, neuron_output, binary],
+                b=rhs_eq,
+                sense=gurobipy.GRB.EQUAL)
+            model.addMConstrs([torch.eye(Wij.numel(), dtype=torch.float64)],
+                              [linear_input],
+                              b=linear_input_val_samples[i],
+                              sense=gurobipy.GRB.EQUAL)
+            model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            model.gurobi_model.optimize()
+
+            self.assertEqual(model.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            neuron_input_expected = Wij @ linear_input_val_samples[i] + bij
+            neuron_output_expected = relu_layer(neuron_input_expected)
+            self.assertAlmostEqual(neuron_output[0].x,
+                                   neuron_output_expected.item())
+            self.assertAlmostEqual(binary[0].x,
+                                   int(neuron_input_expected.item() >= 0))
+            self.assertLess(neuron_input_expected.item(),
+                            neuron_input_up[0].item() + 1E-6)
+            self.assertLess(neuron_input_lo[0].item() - 1E-6,
+                            neuron_input_expected.item())
+            self.assertLess(neuron_output_expected.item(),
+                            neuron_output_up[0].item() + 1E-6)
+            self.assertLess(neuron_output_lo[0].item() - 1E-6,
+                            neuron_output_expected.item())
+
+    def test(self):
+        dtype = torch.float64
+        Wij = torch.tensor([1., 2., -2.], dtype=dtype)
+        bij = torch.tensor([2.], dtype=dtype)
+        no_bias_bij = torch.tensor([0.], dtype=dtype)
+        relu_layer = torch.nn.ReLU()
+        leaky_relu_layer = torch.nn.LeakyReLU(0.1)
+        linear_input_lo = torch.tensor([-0.5, -2., 1.2], dtype=dtype)
+        linear_input_up = torch.tensor([-0.2, 1.5, 2.3], dtype=dtype)
+        self.constraint_test(Wij, bij, relu_layer, linear_input_lo,
+                             linear_input_up)
+        self.constraint_test(Wij, no_bias_bij, relu_layer, linear_input_lo,
+                             linear_input_up)
+        self.constraint_test(Wij, bij, leaky_relu_layer, linear_input_lo,
+                             linear_input_up)
+        self.constraint_test(Wij, no_bias_bij, leaky_relu_layer,
+                             linear_input_lo, linear_input_up)
+
+
 class TestAddConstraintByLayer(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
