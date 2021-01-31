@@ -4,6 +4,8 @@ import queue
 import torch
 import torch.nn as nn
 import numpy as np
+import gurobipy
+from typing import Tuple
 
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
@@ -250,6 +252,104 @@ class ReLUFreePattern:
             # The last linear layer is not connected to a ReLU layer.
             self.num_relu_units -= len(self.relu_unit_index[-1])
             self.relu_unit_index = self.relu_unit_index[:-1]
+
+    def _compute_neuron_bound_by_lp(
+            self, layer_index, neuron_in_layer_index,
+            previous_neuron_input_lo: np.ndarray,
+            previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
+            network_input_up: np.ndarray) -> Tuple[float, float, float, float]:
+        """
+        Compute the range of a neuron output.
+        We could solve a linear programing (LP) problem to find the
+        relaxed bound of the neuron output. The approach is explained in
+        Evaluating Robustness of Neural Networks with Mixed Integer Programming
+        by Vincent Tjeng, Kai Xiao and Russ Tedrake.
+        @param layer_index i in zᵢ₊₁(j). We compute the bound of the neuron
+        output on the layer with this index.
+        @param neuron_in_layer_index j in zᵢ₊₁(j).
+        @param previous_neuron_inut_lo The lower bound of all the ReLU neuron
+        input in the previous layers in the network. Note this doesn't
+        include the bounds on the network input.
+        @param previous_neuron_input_up The upper bound of all the ReLU neuron
+        input in the previous layers in the network. Note this doesn't
+        include the bounds on the network input.
+        """
+        assert (isinstance(previous_neuron_input_lo, np.ndarray))
+        assert (isinstance(previous_neuron_input_up, np.ndarray))
+        assert (isinstance(network_input_lo, np.ndarray))
+        assert (isinstance(network_input_up, np.ndarray))
+        # Form an LP.
+        lp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        input_dim = self.model[0].in_features
+        network_input = lp.addVars(input_dim, lb=-gurobipy.GRB.INFINITY)
+        lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                       [network_input],
+                       b=torch.from_numpy(network_input_up),
+                       sense=gurobipy.GRB.LESS_EQUAL)
+        lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                       [network_input],
+                       b=torch.from_numpy(network_input_lo),
+                       sense=gurobipy.GRB.GREATER_EQUAL)
+        z_curr = network_input
+        for layer in range(layer_index):
+            linear_layer = self.model[2 * layer]
+            relu_layer = self.model[2 * layer + 1]
+            z_next = lp.addVars(linear_layer.out_features,
+                                lb=-gurobipy.GRB.INFINITY)
+            binary_relax = lp.addVars(linear_layer.out_features, lb=0., ub=1.)
+            for j in range(linear_layer.out_features):
+                bij = torch.tensor(
+                    0., dtype=linear_layer.weight.dtype
+                ) if linear_layer.bias is None else linear_layer.bias[j]
+                Ain_linear_input, Ain_neuron_output, Ain_neuron_binary,\
+                    rhs_in, Aeq_linear_input, Aeq_neuron_output,\
+                    Aeq_neuron_binary, rhs_eq, _, _ =\
+                    _add_constraint_by_neuron(
+                        linear_layer.weight[j], bij, relu_layer,
+                        torch.tensor(previous_neuron_input_lo[
+                            self.relu_unit_index[layer][j]], dtype=self.dtype),
+                        torch.tensor(previous_neuron_input_up[
+                            self.relu_unit_index[layer][j]], dtype=self.dtype))
+                lp.addMConstrs(
+                    [Ain_linear_input, Ain_neuron_output, Ain_neuron_binary],
+                    [z_curr, [z_next[j]], [binary_relax[j]]],
+                    b=rhs_in,
+                    sense=gurobipy.GRB.LESS_EQUAL)
+                lp.addMConstrs(
+                    [Aeq_linear_input, Aeq_neuron_output, Aeq_neuron_binary],
+                    [z_curr, [z_next[j]], [binary_relax[j]]],
+                    b=rhs_eq,
+                    sense=gurobipy.GRB.EQUAL)
+            z_curr = z_next
+
+        # Now optimize the bound on the neuron input as Wij @ z_curr + bij
+        Wij = self.model[2 * layer_index].weight[neuron_in_layer_index]
+        bij = self.model[2 * layer_index].bias[
+            neuron_in_layer_index] if self.model[2*layer_index].bias is not\
+            None else torch.tensor(0, dtype=self.dtype)
+        lp.setObjective([Wij], [z_curr],
+                        constant=bij,
+                        sense=gurobipy.GRB.MAXIMIZE)
+        lp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        lp.gurobi_model.optimize()
+        assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        neuron_input_up = lp.gurobi_model.ObjVal
+
+        lp.setObjective([Wij], [z_curr],
+                        constant=bij,
+                        sense=gurobipy.GRB.MINIMIZE)
+        lp.gurobi_model.optimize()
+        assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        neuron_input_lo = lp.gurobi_model.ObjVal
+        relu_layer = self.model[2*layer_index + 1]
+        if isinstance(relu_layer, torch.nn.LeakyReLU):
+            assert (relu_layer.negative_slope >= 0)
+        neuron_output_lo = relu_layer(
+            torch.tensor([neuron_input_lo], dtype=self.dtype)).item()
+        neuron_output_up = relu_layer(
+            torch.tensor([neuron_input_up], dtype=self.dtype)).item()
+        return neuron_input_lo, neuron_input_up, neuron_output_lo,\
+            neuron_output_up
 
     def output_constraint(self, x_lo, x_up,
                           method: mip_utils.PropagateBoundsMethod):
@@ -809,9 +909,13 @@ class ReLUFreePattern:
         return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up)
 
 
-def _add_constraint_by_neuron(Wij: torch.Tensor, bij: torch.Tensor, relu_layer,
-                              linear_input_lo: torch.Tensor,
-                              linear_input_up: torch.Tensor):
+def _add_constraint_by_neuron(
+    Wij: torch.Tensor,
+    bij: torch.Tensor,
+    relu_layer,
+    neuron_input_lo: torch.Tensor,
+    neuron_input_up: torch.Tensor,
+):
     """
     This function adds the constraint on
     zᵢ₊₁(j) = leaky_relu((Wᵢzᵢ+bᵢ)(j))
@@ -819,9 +923,6 @@ def _add_constraint_by_neuron(Wij: torch.Tensor, bij: torch.Tensor, relu_layer,
     """
     dtype = Wij.dtype
     assert (len(Wij.shape) == 1)
-    neuron_input_lo, neuron_input_up = mip_utils.compute_range_by_IA(
-        Wij.reshape((1, -1)), bij.reshape((1, )), linear_input_lo,
-        linear_input_up)
     if neuron_input_lo < 0 and neuron_input_up > 0:
         # The ReLU unit can be either active or inactive. Add the mixed-integer
         # linear constraints the ReLU unit.
@@ -874,7 +975,7 @@ def _add_constraint_by_neuron(Wij: torch.Tensor, bij: torch.Tensor, relu_layer,
         relu_layer, neuron_input_lo, neuron_input_up)
     return Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
         Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
-        neuron_input_lo, neuron_input_up, neuron_output_lo, neuron_output_up
+        neuron_output_lo, neuron_output_up
 
 
 def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
@@ -906,12 +1007,17 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
     bias = linear_layer.bias if linear_layer.bias is not None else \
         torch.zeros((linear_layer.out_features,), dtype=dtype)
     for j in range(linear_layer.out_features):
+        if method == mip_utils.PropagateBoundsMethod.IA:
+            neuron_input_lo, neuron_input_up = mip_utils.compute_range_by_IA(
+                linear_layer.weight[j].reshape((1, -1)), bias[j].reshape(
+                    (1, )), linear_input_lo, linear_input_up)
+        elif method == mip_utils.PropagateBoundsMethod.LP:
+            raise NotImplementedError
         Ain_linear_input, Ain_neuron_output, Ain_binary_j, rhs_in_j,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary_j, rhs_eq_j,\
-            neuron_input_lo, neuron_input_up, neuron_output_lo,\
-            neuron_output_up = _add_constraint_by_neuron(
-                linear_layer.weight[j], bias[j], relu_layer, linear_input_lo,
-                linear_input_up)
+            neuron_output_lo, neuron_output_up = _add_constraint_by_neuron(
+                linear_layer.weight[j], bias[j], relu_layer, neuron_input_lo,
+                neuron_input_up)
         Ain_z_curr.append(Ain_linear_input)
         Ain_z_next.append(
             torch.zeros((rhs_in_j.numel(), linear_layer.out_features),
