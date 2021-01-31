@@ -103,19 +103,13 @@ class TestAddConstraintByLayer(unittest.TestCase):
         self.relu = nn.ReLU()
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
 
-    def constraint_test(self, linear_layer, relu_layer, z_curr_lo, z_curr_up,
-                        method):
+    def constraint_test(self, linear_layer, relu_layer, z_curr_lo, z_curr_up):
+        linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
+            linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
-            Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
-            z_next_up = relu_to_optimization._add_constraint_by_layer(
-                linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
-        linear_output_lo_expected, linear_output_up_expected =\
-            mip_utils.propagate_bounds(
-                linear_layer, z_curr_lo, z_curr_up)
-        np.testing.assert_allclose(linear_output_lo.detach().numpy(),
-                                   linear_output_lo_expected.detach().numpy())
-        np.testing.assert_allclose(linear_output_up.detach().numpy(),
-                                   linear_output_up_expected.detach().numpy())
+            Aeq_binary, rhs_eq, z_next_lo, z_next_up = \
+            relu_to_optimization._add_constraint_by_layer(
+                linear_layer, relu_layer, linear_output_lo, linear_output_up)
         z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
             relu_layer, linear_output_lo, linear_output_up)
         np.testing.assert_allclose(z_next_lo.detach().numpy(),
@@ -128,7 +122,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
         # 3. Only active.
         # Now form an optimization problem satisfying these added constraints,
         # and check the solution matches with evaluating the ReLU.
-        z_curr_val = utils.uniform_sample_in_box(z_curr_lo, z_curr_up, 20)
+        z_curr_val = utils.uniform_sample_in_box(z_curr_lo, z_curr_up, 40)
         for i in range(z_curr_val.shape[0]):
             model = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
             z_curr = model.addVars(linear_layer.in_features,
@@ -187,11 +181,13 @@ class TestAddConstraintByLayer(unittest.TestCase):
                     rhs_in.detach().numpy().squeeze() + 1E-6)
 
     def constraint_gradient_test(self, linear_layer, relu_layer, z_curr_lo,
-                                 z_curr_up, method):
+                                 z_curr_up):
+        linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
+            linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
-            Aeq_binary, rhs_eq, linear_output_lo, linear_output_up, z_next_lo,\
-            z_next_up = relu_to_optimization._add_constraint_by_layer(
-                linear_layer, relu_layer, z_curr_lo, z_curr_up, method)
+            Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
+            relu_to_optimization._add_constraint_by_layer(
+                linear_layer, relu_layer, linear_output_lo, linear_output_up)
 
         (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
          rhs_in.sum() + Aeq_z_curr.sum() + Aeq_z_next.sum() +
@@ -212,13 +208,15 @@ class TestAddConstraintByLayer(unittest.TestCase):
             if linear_layer.bias is not None:
                 linear_layer.bias.data = torch.from_numpy(linear_layer_bias)
             with torch.no_grad():
+                linear_output_lo, linear_output_up =\
+                    mip_utils.propagate_bounds(
+                        linear_layer, torch.from_numpy(input_lo_np),
+                        torch.from_numpy(input_up_np))
                 Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr,\
-                    Aeq_z_next, Aeq_binary, rhs_eq, linear_output_lo,\
-                    linear_output_up, z_next_lo, z_next_up =\
+                    Aeq_z_next, Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
                     relu_to_optimization._add_constraint_by_layer(
-                        linear_layer, relu_layer, torch.from_numpy(
-                            input_lo_np), torch.from_numpy(input_up_np),
-                        method)
+                        linear_layer, relu_layer, linear_output_lo,
+                        linear_output_up)
 
                 return np.array([
                     (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
@@ -245,27 +243,19 @@ class TestAddConstraintByLayer(unittest.TestCase):
         np.testing.assert_allclose(numerical_grads[2].squeeze(), input_lo_grad)
         np.testing.assert_allclose(numerical_grads[3].squeeze(), input_up_grad)
 
-    def test_with_bias_relu_IA(self):
+    def test_with_bias_relu(self):
         z_curr_lo = torch.tensor([-1., 2.],
                                  dtype=self.dtype,
                                  requires_grad=True)
         z_curr_up = torch.tensor([2., 4.],
                                  dtype=self.dtype,
                                  requires_grad=True)
-        method = mip_utils.PropagateBoundsMethod.IA
         self.constraint_test(self.linear_with_bias, self.relu, z_curr_lo,
-                             z_curr_up, method)
+                             z_curr_up)
         self.constraint_gradient_test(self.linear_with_bias, self.relu,
-                                      z_curr_lo, z_curr_up, method)
+                                      z_curr_lo, z_curr_up)
 
-    #def test_with_bias_relu_LP(self):
-    #    z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
-    #    z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
-    #    method = mip_utils.PropagateBoundsMethod.LP
-    #    self.constraint_test(self.linear_with_bias, self.relu, z_curr_lo,
-    #                         z_curr_up, method)
-
-    def test_with_bias_leaky_relu_IA1(self):
+    def test_with_bias_leaky_relu1(self):
         # The input bounds allow the output to be
         # 1. Either active or inactive.
         # 2. Only active.
@@ -276,13 +266,12 @@ class TestAddConstraintByLayer(unittest.TestCase):
         z_curr_up = torch.tensor([2., 4.],
                                  dtype=self.dtype,
                                  requires_grad=True)
-        method = mip_utils.PropagateBoundsMethod.IA
         self.constraint_test(self.linear_with_bias, self.leaky_relu, z_curr_lo,
-                             z_curr_up, method)
+                             z_curr_up)
         self.constraint_gradient_test(self.linear_with_bias, self.leaky_relu,
-                                      z_curr_lo, z_curr_up, method)
+                                      z_curr_lo, z_curr_up)
 
-    def test_with_bias_leaky_relu_IA2(self):
+    def test_with_bias_leaky_relu2(self):
         # Only a single output
         z_curr_lo = torch.tensor([-1., 2.],
                                  dtype=self.dtype,
@@ -296,62 +285,38 @@ class TestAddConstraintByLayer(unittest.TestCase):
         # 3. The ReLU could be either active or inactive.
         for bias_val in [5, -20, -4]:
             linear_layer.bias.data = torch.tensor([bias_val], dtype=self.dtype)
-            method = mip_utils.PropagateBoundsMethod.IA
             self.constraint_test(linear_layer, self.leaky_relu, z_curr_lo,
-                                 z_curr_up, method)
+                                 z_curr_up)
             self.constraint_gradient_test(linear_layer, self.leaky_relu,
-                                          z_curr_lo, z_curr_up, method)
+                                          z_curr_lo, z_curr_up)
             linear_layer.weight.grad.zero_()
             linear_layer.bias.grad.zero_()
             z_curr_lo.grad.zero_()
             z_curr_up.grad.zero_()
 
-    #def test_with_bias_leaky_relu_LP(self):
-    #    z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
-    #    z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
-    #    method = mip_utils.PropagateBoundsMethod.LP
-    #    self.constraint_test(self.linear_with_bias, self.leaky_relu, z_curr_lo,
-    #                         z_curr_up, method)
-
-    def test_no_bias_relu_IA(self):
+    def test_no_bias_relu(self):
         z_curr_lo = torch.tensor([-1., 2.],
                                  dtype=self.dtype,
                                  requires_grad=True)
         z_curr_up = torch.tensor([2., 4.],
                                  dtype=self.dtype,
                                  requires_grad=True)
-        method = mip_utils.PropagateBoundsMethod.IA
         self.constraint_test(self.linear_no_bias, self.relu, z_curr_lo,
-                             z_curr_up, method)
+                             z_curr_up)
         self.constraint_gradient_test(self.linear_no_bias, self.relu,
-                                      z_curr_lo, z_curr_up, method)
+                                      z_curr_lo, z_curr_up)
 
-    #def test_no_bias_relu_LP(self):
-    #    z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
-    #    z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
-    #    method = mip_utils.PropagateBoundsMethod.LP
-    #    self.constraint_test(self.linear_no_bias, self.relu, z_curr_lo,
-    #                         z_curr_up, method)
-
-    def test_no_bias_leaky_relu_IA(self):
+    def test_no_bias_leaky_relu(self):
         z_curr_lo = torch.tensor([-1., 2.],
                                  dtype=self.dtype,
                                  requires_grad=True)
         z_curr_up = torch.tensor([2., 4.],
                                  dtype=self.dtype,
                                  requires_grad=True)
-        method = mip_utils.PropagateBoundsMethod.IA
         self.constraint_test(self.linear_no_bias, self.leaky_relu, z_curr_lo,
-                             z_curr_up, method)
+                             z_curr_up)
         self.constraint_gradient_test(self.linear_no_bias, self.leaky_relu,
-                                      z_curr_lo, z_curr_up, method)
-
-    #def test_no_bias_leaky_relu_LP(self):
-    #    z_curr_lo = torch.tensor([-1., 2.], dtype=self.dtype)
-    #    z_curr_up = torch.tensor([2., 4.], dtype=self.dtype)
-    #    method = mip_utils.PropagateBoundsMethod.LP
-    #    self.constraint_test(self.linear_no_bias, self.leaky_relu, z_curr_lo,
-    #                         z_curr_up, method)
+                                      z_curr_lo, z_curr_up)
 
 
 if __name__ == "__main__":

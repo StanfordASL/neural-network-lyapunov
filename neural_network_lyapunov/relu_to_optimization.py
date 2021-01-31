@@ -341,7 +341,7 @@ class ReLUFreePattern:
         lp.gurobi_model.optimize()
         assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
         neuron_input_lo = lp.gurobi_model.ObjVal
-        relu_layer = self.model[2*layer_index + 1]
+        relu_layer = self.model[2 * layer_index + 1]
         if isinstance(relu_layer, torch.nn.LeakyReLU):
             assert (relu_layer.negative_slope >= 0)
         neuron_output_lo = relu_layer(
@@ -350,6 +350,47 @@ class ReLUFreePattern:
             torch.tensor([neuron_input_up], dtype=self.dtype)).item()
         return neuron_input_lo, neuron_input_up, neuron_output_lo,\
             neuron_output_up
+
+    def _compute_layer_bound(self, x_lo, x_up,
+                             method: mip_utils.PropagateBoundsMethod):
+        """
+        Compute the input and output bounds of each ReLU neurons.
+        """
+        linear_layer_input_lo = x_lo.clone()
+        linear_layer_input_up = x_up.clone()
+        z_pre_relu_lo = torch.empty((self.num_relu_units, ), dtype=self.dtype)
+        z_pre_relu_up = torch.empty((self.num_relu_units, ), dtype=self.dtype)
+        z_post_relu_lo = torch.empty((self.num_relu_units, ), dtype=self.dtype)
+        z_post_relu_up = torch.empty((self.num_relu_units, ), dtype=self.dtype)
+        for layer_count in range(len(self.relu_unit_index)):
+            z_indices = self.relu_unit_index[layer_count]
+            bias = self.model[2 * layer_count].bias if self.model[
+                2 * layer_count].bias is not None else torch.zeros(
+                    (self.model[2 * layer_count].out_features, ),
+                    dtype=self.dtype)
+            if method == mip_utils.PropagateBoundsMethod.IA:
+                z_pre_relu_lo[z_indices], z_pre_relu_up[z_indices] = \
+                    mip_utils.compute_range_by_IA(
+                        self.model[2 * layer_count].weight, bias,
+                        linear_layer_input_lo, linear_layer_input_up)
+            elif method == mip_utils.PropagateBoundsMethod.LP:
+                for j in range(self.model[2 * layer_count].out_features):
+                    neuron_index = self.relu_unit_index[layer_count][j]
+                    z_pre_relu_lo[neuron_index], z_pre_relu_up[
+                        neuron_index], _, _ = self._compute_neuron_bound_by_lp(
+                            layer_count, j,
+                            z_pre_relu_lo.detach().numpy(),
+                            z_pre_relu_up.detach().numpy(),
+                            x_lo.detach().numpy(),
+                            x_up.detach().numpy())
+
+            z_post_relu_lo[z_indices], z_post_relu_up[
+                z_indices] = mip_utils.propagate_bounds(
+                    self.model[2 * layer_count + 1], z_pre_relu_lo[z_indices],
+                    z_pre_relu_up[z_indices])
+            linear_layer_input_lo = z_post_relu_lo[z_indices].clone()
+            linear_layer_input_up = z_post_relu_up[z_indices].clone()
+        return z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up
 
     def output_constraint(self, x_lo, x_up,
                           method: mip_utils.PropagateBoundsMethod):
@@ -449,27 +490,15 @@ class ReLUFreePattern:
         rhs_in[self.x_size:2 * self.x_size] = -x_lo
         ineq_constr_count += 2 * self.x_size
 
-        linear_layer_input_lo = x_lo.clone()
-        linear_layer_input_up = x_up.clone()
-        z_pre_relu_lo = torch.empty((self.num_relu_units, ), dtype=self.dtype)
-        z_pre_relu_up = torch.empty((self.num_relu_units, ), dtype=self.dtype)
-        z_post_relu_lo = torch.empty((self.num_relu_units, ), dtype=self.dtype)
-        z_post_relu_up = torch.empty((self.num_relu_units, ), dtype=self.dtype)
-
+        z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
+            self._compute_layer_bound(x_lo, x_up, method)
         for layer_count in range(len(self.relu_unit_index)):
             Ain_z_curr, Ain_z_next, Ain_binary_layer, rhs_in_layer,\
-                Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer,\
-                z_pre_relu_lo[self.relu_unit_index[layer_count]],\
-                z_pre_relu_up[self.relu_unit_index[layer_count]],\
-                z_post_relu_lo[self.relu_unit_index[layer_count]],\
-                z_post_relu_up[self.relu_unit_index[layer_count]] =\
+                Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer, _, _ =\
                 _add_constraint_by_layer(
                     self.model[2*layer_count], self.model[2*layer_count+1],
-                    linear_layer_input_lo, linear_layer_input_up, method)
-            linear_layer_input_lo = z_post_relu_lo[
-                self.relu_unit_index[layer_count]].clone()
-            linear_layer_input_up = z_post_relu_up[
-                self.relu_unit_index[layer_count]].clone()
+                    z_pre_relu_lo[self.relu_unit_index[layer_count]],
+                    z_pre_relu_up[self.relu_unit_index[layer_count]])
             if layer_count == 0:
                 # For the input layer, z_curr is the network input.
                 if Ain_z_curr.shape[0] > 0:
@@ -978,9 +1007,9 @@ def _add_constraint_by_neuron(
         neuron_output_lo, neuron_output_up
 
 
-def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
-                             linear_input_up,
-                             method: mip_utils.PropagateBoundsMethod):
+def _add_constraint_by_layer(linear_layer, relu_layer,
+                             linear_output_lo: torch.Tensor,
+                             linear_output_up: torch.Tensor):
     """
     This function will be called inside output_constraint(). We group the
     network layers by a linear layer followed by a (leaky) ReLU layer,
@@ -989,8 +1018,12 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
     We add this condition as mixed-integer linear constraints between zᵢ,
     zᵢ₊₁, and the binary variable representing the activation of ReLU
     units.
+    @param linear_output_lo The lower bound of the linear layer output.
+    @param linear_output_up The upper bound of the linear layer output.
     """
     assert (isinstance(linear_layer, nn.Linear))
+    assert (isinstance(linear_output_lo, torch.Tensor))
+    assert (isinstance(linear_output_up, torch.Tensor))
     dtype = linear_layer.weight.data.dtype
     Ain_z_curr = []
     Ain_z_next = []
@@ -1000,24 +1033,16 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
     Aeq_z_next = []
     Aeq_binary = []
     rhs_eq = []
-    linear_output_lo = []
-    linear_output_up = []
     z_next_lo = []
     z_next_up = []
     bias = linear_layer.bias if linear_layer.bias is not None else \
         torch.zeros((linear_layer.out_features,), dtype=dtype)
     for j in range(linear_layer.out_features):
-        if method == mip_utils.PropagateBoundsMethod.IA:
-            neuron_input_lo, neuron_input_up = mip_utils.compute_range_by_IA(
-                linear_layer.weight[j].reshape((1, -1)), bias[j].reshape(
-                    (1, )), linear_input_lo, linear_input_up)
-        elif method == mip_utils.PropagateBoundsMethod.LP:
-            raise NotImplementedError
         Ain_linear_input, Ain_neuron_output, Ain_binary_j, rhs_in_j,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary_j, rhs_eq_j,\
             neuron_output_lo, neuron_output_up = _add_constraint_by_neuron(
-                linear_layer.weight[j], bias[j], relu_layer, neuron_input_lo,
-                neuron_input_up)
+                linear_layer.weight[j], bias[j], relu_layer,
+                linear_output_lo[j], linear_output_up[j])
         Ain_z_curr.append(Ain_linear_input)
         Ain_z_next.append(
             torch.zeros((rhs_in_j.numel(), linear_layer.out_features),
@@ -1038,13 +1063,10 @@ def _add_constraint_by_layer(linear_layer, relu_layer, linear_input_lo,
                         dtype=dtype))
         Aeq_binary[-1][:, j] = Aeq_binary_j.reshape((-1, ))
         rhs_eq.append(rhs_eq_j)
-        linear_output_lo.append(neuron_input_lo.squeeze())
-        linear_output_up.append(neuron_input_up.squeeze())
         z_next_lo.append(neuron_output_lo.squeeze())
         z_next_up.append(neuron_output_up.squeeze())
     return torch.cat(Ain_z_curr, dim=0), torch.cat(Ain_z_next, dim=0),\
         torch.cat(Ain_binary, dim=0), torch.cat(rhs_in, dim=0),\
         torch.cat(Aeq_z_curr, dim=0), torch.cat(Aeq_z_next, dim=0),\
         torch.cat(Aeq_binary, dim=0), torch.cat(rhs_eq, dim=0),\
-        torch.stack(linear_output_lo), torch.stack(linear_output_up),\
         torch.stack(z_next_lo), torch.stack(z_next_up)

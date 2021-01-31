@@ -44,7 +44,7 @@ class TestReLU(unittest.TestCase):
 
         # Model with leaky ReLU with a leaky ReLU unit in the output layer.
         self.leaky_relus =\
-            [nn.LeakyReLU(0.1), nn.LeakyReLU(-0.2), nn.LeakyReLU(0.01)]
+            [nn.LeakyReLU(0.1), nn.LeakyReLU(0.2), nn.LeakyReLU(0.01)]
         self.model3 = nn.Sequential(self.linear1, self.leaky_relus[0],
                                     self.linear2, self.leaky_relus[1],
                                     self.linear3, self.leaky_relus[2])
@@ -335,13 +335,15 @@ class TestReLU(unittest.TestCase):
                     con.append(
                         mip_constr_return.Ain_input.detach().numpy() @ x_np +
                         mip_constr_return.Ain_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Ain_binary.detach().numpy() @ beta_var
+                        mip_constr_return.Ain_binary.detach().numpy() @
+                        beta_var
                         <= mip_constr_return.rhs_in.squeeze().detach().numpy())
                 if mip_constr_return.rhs_eq.shape[0] != 0:
                     con.append(
                         mip_constr_return.Aeq_input.detach().numpy() @ x_np +
                         mip_constr_return.Aeq_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Aeq_binary.detach().numpy() @ beta_var
+                        mip_constr_return.Aeq_binary.detach().numpy() @
+                        beta_var
                         == mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
@@ -971,10 +973,11 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
         # tighter than IA.
         bij = dut.model[2 * layer_index].bias[neuron_in_layer_index].reshape(
             (1, )) if dut.model[2 * layer_index].bias is not None else\
-                torch.tensor([0.], dtype=self.dtype)
+            torch.tensor([0.], dtype=self.dtype)
         Wij = dut.model[2 * layer_index].weight[neuron_in_layer_index].reshape(
             (1, -1))
-        # At the input layer, the LP bounds should be the same as the IA bounds.
+        # At the input layer, the LP bounds should be the same as the IA
+        # bounds.
         if layer_index == 0:
             neuron_input_lo_ia, neuron_input_up_ia =\
                 mip_utils.compute_range_by_IA(
@@ -1041,6 +1044,71 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
         network_input_up = np.array([3.1, 10.])
         self.given_relu_test(self.relu_no_bias, network_input_lo,
                              network_input_up)
+
+
+class TestComputeLayerBound(TestComputeNeuronBoundByLp):
+    def bound_tester(self, relu_network, x_lo, x_up, method):
+        dut = relu_to_optimization.ReLUFreePattern(relu_network, self.dtype)
+        z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
+            dut._compute_layer_bound(x_lo, x_up, method)
+        # Now take many samples inside x_lo <= x <= x_up, compute the neuron
+        # values z and compare with the bound.
+        x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+        linear_inputs = x_samples
+        for layer in range(len(dut.relu_unit_index)):
+            linear_outputs = dut.model[2 * layer](linear_inputs)
+            z_indices = dut.relu_unit_index[layer]
+            np.testing.assert_array_less(
+                linear_outputs.detach().numpy(),
+                np.repeat(z_pre_relu_up[z_indices].detach().numpy().reshape(
+                    (1, -1)),
+                          linear_outputs.shape[0],
+                          axis=0) + 1E-6)
+            np.testing.assert_array_less(
+                np.repeat(z_pre_relu_lo[z_indices].detach().numpy().reshape(
+                    (1, -1)),
+                          linear_outputs.shape[0],
+                          axis=0) - 1E-6,
+                linear_outputs.detach().numpy())
+            relu_outputs = dut.model[2 * layer + 1](linear_outputs)
+            np.testing.assert_array_less(
+                relu_outputs.detach().numpy(),
+                np.repeat(z_post_relu_up[z_indices].detach().numpy().reshape(
+                    (1, -1)),
+                          relu_outputs.shape[0],
+                          axis=0) + 1E-6)
+            np.testing.assert_array_less(
+                np.repeat(z_post_relu_lo[z_indices].detach().numpy().reshape(
+                    (1, -1)),
+                          relu_outputs.shape[0],
+                          axis=0) - 1E-6,
+                relu_outputs.detach().numpy())
+            linear_inputs = relu_outputs
+
+    def network_tester(self, relu_network):
+        x_lo = torch.tensor([-2., -3.], dtype=self.dtype)
+        x_up = torch.tensor([-1., 2.], dtype=self.dtype)
+        for method in list(mip_utils.PropagateBoundsMethod):
+            self.bound_tester(relu_network, x_lo, x_up, method)
+        dut = relu_to_optimization.ReLUFreePattern(relu_network, self.dtype)
+        z_pre_relu_lo_ia, z_pre_relu_up_ia, z_post_relu_lo_ia,\
+            z_post_relu_up_ia = dut._compute_layer_bound(
+                x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
+        z_pre_relu_lo_lp, z_pre_relu_up_lp, z_post_relu_lo_lp,\
+            z_post_relu_up_lp = dut._compute_layer_bound(
+                x_lo, x_up, mip_utils.PropagateBoundsMethod.LP)
+        np.testing.assert_array_less(z_pre_relu_lo_ia.detach().numpy(),
+                                     z_pre_relu_lo_lp.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_pre_relu_up_lp.detach().numpy(),
+                                     z_pre_relu_up_ia.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_post_relu_lo_ia.detach().numpy(),
+                                     z_post_relu_lo_lp.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_post_relu_up_lp.detach().numpy(),
+                                     z_post_relu_up_ia.detach().numpy() + 1E-6)
+
+    def test(self):
+        self.network_tester(self.relu_with_bias)
+        self.network_tester(self.relu_no_bias)
 
 
 if __name__ == "__main__":
