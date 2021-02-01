@@ -261,8 +261,12 @@ class TrainLyapunovReLU:
                  lyapunov_positivity_mip.gurobi_model.PoolObjVal > 0):
                 positivity_mip_adversarial.append(
                     [v.xn for v in lyapunov_positivity_as_milp_return[1]])
-        positivity_mip_adversarial = torch.tensor(positivity_mip_adversarial,
-                                                  dtype=dtype)
+        if (len(positivity_mip_adversarial) > 0):
+            positivity_mip_adversarial = torch.tensor(
+                positivity_mip_adversarial, dtype=dtype)
+        else:
+            positivity_mip_adversarial = torch.empty(
+                (0, self.lyapunov_hybrid_system.system.x_dim), dtype=dtype)
         return lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
             positivity_mip_adversarial
 
@@ -335,16 +339,22 @@ class TrainLyapunovReLU:
                                          dtype=dtype),
                             derivative_mip_adversarial_mode))
 
-        derivative_mip_adversarial = torch.tensor(derivative_mip_adversarial,
-                                                  dtype=dtype)
-        if (isinstance(self.lyapunov_hybrid_system.system,
-                       hybrid_linear_system.AutonomousHybridLinearSystem)):
-            derivative_mip_adversarial_next = torch.stack(
-                derivative_mip_adversarial_next)
+        if len(derivative_mip_adversarial) > 0:
+            derivative_mip_adversarial = torch.tensor(
+                derivative_mip_adversarial, dtype=dtype)
+            if (isinstance(self.lyapunov_hybrid_system.system,
+                           hybrid_linear_system.AutonomousHybridLinearSystem)):
+                derivative_mip_adversarial_next = torch.stack(
+                    derivative_mip_adversarial_next)
+            else:
+                derivative_mip_adversarial_next = \
+                    self.lyapunov_hybrid_system.system.step_forward(
+                        derivative_mip_adversarial)
         else:
-            derivative_mip_adversarial_next = \
-                self.lyapunov_hybrid_system.system.step_forward(
-                    derivative_mip_adversarial)
+            derivative_mip_adversarial = torch.empty(
+                (0, self.lyapunov_hybrid_system.system.x_dim), dtype=dtype)
+            derivative_mip_adversarial_next = torch.empty(
+                (0, self.lyapunov_hybrid_system.system.x_dim), dtype=dtype)
 
         return lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
             derivative_mip_adversarial, derivative_mip_adversarial_next
