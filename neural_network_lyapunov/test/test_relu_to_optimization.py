@@ -900,7 +900,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
                                         rtol=1E-5)
 
 
-class TestComputeNeuronBoundByLp(unittest.TestCase):
+class TestComputeLinearOutputBoundByLp(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.relu_with_bias = utils.setup_relu((2, 5, 4, 3),
@@ -934,59 +934,50 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
             self.relu_no_bias[2 * i].weight.data = self.relu_with_bias[
                 2 * i].weight.data.clone()
 
-    def neuron_bound_tester(self, dut, layer_index, neuron_in_layer_index,
-                            previous_neuron_input_lo, previous_neuron_input_up,
-                            network_input_lo, network_input_up):
-        neuron_input_lo, neuron_input_up, neuron_output_lo, neuron_output_up\
-            = dut._compute_neuron_bound_by_lp(
-                layer_index, neuron_in_layer_index, previous_neuron_input_lo,
+    def linear_output_tester(self, dut, layer_index, linear_output_row_index,
+                             previous_neuron_input_lo,
+                             previous_neuron_input_up, network_input_lo,
+                             network_input_up):
+        linear_output_lo, linear_output_up = \
+            dut._compute_linear_output_bound_by_lp(
+                layer_index, linear_output_row_index, previous_neuron_input_lo,
                 previous_neuron_input_up, network_input_lo, network_input_up)
-        self.assertEqual(
-            neuron_output_lo, dut.model[2 * layer_index + 1](torch.tensor(
-                neuron_input_lo, dtype=self.dtype)).item())
-        self.assertEqual(
-            neuron_output_up, dut.model[2 * layer_index + 1](torch.tensor(
-                neuron_input_up, dtype=self.dtype)).item())
-        # Now take many sample inputs, check if the neuron output is within
+        # Now take many sample inputs, check if the linear output is within
         # the bounds.
         network_input_samples = utils.uniform_sample_in_box(
             torch.from_numpy(network_input_lo),
             torch.from_numpy(network_input_up), 1000)
-        # Now compute the neuron output for all these samples.
+        # Now compute the linear output for all these samples.
         linear_inputs = network_input_samples
         for layer in range(layer_index):
             linear_outputs = dut.model[2 * layer](linear_inputs)
             relu_outputs = dut.model[2 * layer + 1](linear_outputs)
             linear_inputs = relu_outputs
-        neuron_inputs = dut.model[2 * layer_index](
-            linear_inputs)[:, neuron_in_layer_index]
-        np.testing.assert_array_less(neuron_inputs.detach().numpy(),
-                                     neuron_input_up + 1E-6)
-        np.testing.assert_array_less(neuron_input_lo - 1E-6,
-                                     neuron_inputs.detach().numpy())
-        neuron_outputs = dut.model[2 * layer_index + 1](neuron_inputs)
-        np.testing.assert_array_less(neuron_outputs.detach().numpy(),
-                                     neuron_output_up + 1E-6)
-        np.testing.assert_array_less(neuron_output_lo - 1E-6,
-                                     neuron_outputs.detach().numpy())
+        linear_outputs = dut.model[2 * layer_index](
+            linear_inputs)[:, linear_output_row_index]
+        np.testing.assert_array_less(linear_outputs.detach().numpy(),
+                                     linear_output_up + 1E-6)
+        np.testing.assert_array_less(linear_output_lo - 1E-6,
+                                     linear_outputs.detach().numpy())
         # Propagate the bounds through IA. The bounds from LP should be
         # tighter than IA.
-        bij = dut.model[2 * layer_index].bias[neuron_in_layer_index].reshape(
+        bij = dut.model[2 * layer_index].bias[linear_output_row_index].reshape(
             (1, )) if dut.model[2 * layer_index].bias is not None else\
             torch.tensor([0.], dtype=self.dtype)
-        Wij = dut.model[2 * layer_index].weight[neuron_in_layer_index].reshape(
-            (1, -1))
+        Wij = dut.model[2 *
+                        layer_index].weight[linear_output_row_index].reshape(
+                            (1, -1))
         # At the input layer, the LP bounds should be the same as the IA
         # bounds.
         if layer_index == 0:
-            neuron_input_lo_ia, neuron_input_up_ia =\
+            linear_output_lo_ia, linear_output_up_ia =\
                 mip_utils.compute_range_by_IA(
                     Wij, bij, torch.from_numpy(network_input_lo),
                     torch.from_numpy(network_input_up))
-            self.assertAlmostEqual(neuron_input_lo_ia[0].item(),
-                                   neuron_input_lo)
-            self.assertAlmostEqual(neuron_input_up_ia[0].item(),
-                                   neuron_input_up)
+            self.assertAlmostEqual(linear_output_lo_ia[0].item(),
+                                   linear_output_lo)
+            self.assertAlmostEqual(linear_output_up_ia[0].item(),
+                                   linear_output_up)
         else:
             linear_input_lo = dut.model[2 * layer_index - 1](torch.from_numpy(
                 previous_neuron_input_lo[dut.relu_unit_index[layer_index -
@@ -994,14 +985,15 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
             linear_input_up = dut.model[2 * layer_index - 1](torch.from_numpy(
                 previous_neuron_input_up[dut.relu_unit_index[layer_index -
                                                              1]]))
-            neuron_input_lo_ia, neuron_input_up_ia =\
+            linear_output_lo_ia, linear_output_up_ia =\
                 mip_utils.compute_range_by_IA(
                     Wij, bij, linear_input_lo, linear_input_up)
-            self.assertLessEqual(neuron_input_lo_ia[0].item(), neuron_input_lo)
-            self.assertGreaterEqual(neuron_input_up_ia[0].item(),
-                                    neuron_input_up)
+            self.assertLessEqual(linear_output_lo_ia[0].item(),
+                                 linear_output_lo)
+            self.assertGreaterEqual(linear_output_up_ia[0].item(),
+                                    linear_output_up)
 
-        return neuron_input_lo, neuron_input_up
+        return linear_output_lo, linear_output_up
 
     def given_relu_test(self, relu, network_input_lo, network_input_up):
         dut = relu_to_optimization.ReLUFreePattern(relu, self.dtype)
@@ -1012,7 +1004,7 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
         for i in range(self.relu_with_bias[0].out_features):
             previous_neuron_input_lo[
                 dut.relu_unit_index[0][i]], previous_neuron_input_up[
-                    dut.relu_unit_index[0][i]] = self.neuron_bound_tester(
+                    dut.relu_unit_index[0][i]] = self.linear_output_tester(
                         dut, 0, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
                         network_input_up)
@@ -1020,7 +1012,7 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
         for i in range(self.relu_with_bias[2].out_features):
             previous_neuron_input_lo[
                 dut.relu_unit_index[1][i]], previous_neuron_input_up[
-                    dut.relu_unit_index[1][i]] = self.neuron_bound_tester(
+                    dut.relu_unit_index[1][i]] = self.linear_output_tester(
                         dut, 1, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
                         network_input_up)
@@ -1046,7 +1038,7 @@ class TestComputeNeuronBoundByLp(unittest.TestCase):
                              network_input_up)
 
 
-class TestComputeLayerBound(TestComputeNeuronBoundByLp):
+class TestComputeLayerBound(TestComputeLinearOutputBoundByLp):
     def bound_tester(self, relu_network, x_lo, x_up, method):
         dut = relu_to_optimization.ReLUFreePattern(relu_network, self.dtype)
         z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
@@ -1109,6 +1101,61 @@ class TestComputeLayerBound(TestComputeNeuronBoundByLp):
     def test(self):
         self.network_tester(self.relu_with_bias)
         self.network_tester(self.relu_no_bias)
+
+    def compute_network_output_bounds_tester(self, network, x_lo, x_up,
+                                             method):
+        dut = relu_to_optimization.ReLUFreePattern(network, self.dtype)
+        # I do not want to test when the last layer is relu. We don't use that
+        # in practice.
+        assert (not dut.last_layer_is_relu)
+        z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
+            dut._compute_layer_bound(x_lo, x_up, method)
+        output_lo, output_up = dut._compute_network_output_bounds(
+            z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
+        if method == mip_utils.PropagateBoundsMethod.IA:
+            output_lo_expected, output_up_expected =\
+                mip_utils.propagate_bounds(
+                    dut.model[-1], z_post_relu_lo[dut.relu_unit_index[-1]],
+                    z_post_relu_up[dut.relu_unit_index[-1]])
+        elif method == mip_utils.PropagateBoundsMethod.LP:
+            output_lo_expected = torch.empty((dut.model[-1].out_features, ),
+                                             dtype=self.dtype)
+            output_up_expected = torch.empty((dut.model[-1].out_features, ),
+                                             dtype=self.dtype)
+            for j in range(dut.model[-1].out_features):
+                output_lo_expected[j], output_up_expected[
+                    j] = dut._compute_linear_output_bound_by_lp(
+                        int((len(dut.model) - 1) / 2), j,
+                        z_pre_relu_lo.detach().numpy(),
+                        z_pre_relu_up.detach().numpy(),
+                        x_lo.detach().numpy(),
+                        x_up.detach().numpy())
+        np.testing.assert_allclose(output_lo.detach().numpy(),
+                                   output_lo_expected.detach().numpy())
+        np.testing.assert_allclose(output_up.detach().numpy(),
+                                   output_up_expected.detach().numpy())
+        # Take many sampled inputs, make sure the outputs are in the bounds.
+        input_samples = utils.uniform_sample_in_box(x_lo, x_up, 1000)
+        output_samples = dut.model(input_samples)
+        np.testing.assert_array_less(
+            output_samples.detach().numpy(),
+            np.repeat(output_up.detach().numpy().reshape((1, -1)),
+                      output_samples.shape[0],
+                      axis=0) + 1E-6)
+        np.testing.assert_array_less(
+            np.repeat(output_lo.detach().numpy().reshape((1, -1)),
+                      output_samples.shape[0],
+                      axis=0) - 1E-6,
+            output_samples.detach().numpy())
+
+    def test_compute_network_output_bounds(self):
+        x_lo = torch.tensor([-2., -1.], dtype=self.dtype)
+        x_up = torch.tensor([-1., 2.], dtype=self.dtype)
+        for method in list(mip_utils.PropagateBoundsMethod):
+            self.compute_network_output_bounds_tester(self.relu_with_bias,
+                                                      x_lo, x_up, method)
+            self.compute_network_output_bounds_tester(self.relu_no_bias, x_lo,
+                                                      x_up, method)
 
 
 if __name__ == "__main__":

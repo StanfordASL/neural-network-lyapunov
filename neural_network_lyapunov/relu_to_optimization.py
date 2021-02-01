@@ -253,26 +253,21 @@ class ReLUFreePattern:
             self.num_relu_units -= len(self.relu_unit_index[-1])
             self.relu_unit_index = self.relu_unit_index[:-1]
 
-    def _compute_neuron_bound_by_lp(
-            self, layer_index, neuron_in_layer_index,
+    def _compute_linear_output_bound_by_lp(
+            self, layer_index, linear_output_row_index,
             previous_neuron_input_lo: np.ndarray,
             previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
-            network_input_up: np.ndarray) -> Tuple[float, float, float, float]:
+            network_input_up: np.ndarray) -> Tuple[float, float]:
         """
-        Compute the range of a neuron output.
-        We could solve a linear programing (LP) problem to find the
-        relaxed bound of the neuron output. The approach is explained in
+        Compute the range of a linear layer output.
+        We could solve a linear programming (LP) problem to find the relaxed
+        bound of the linear layer output. The approach is explained in
         Evaluating Robustness of Neural Networks with Mixed Integer Programming
         by Vincent Tjeng, Kai Xiao and Russ Tedrake.
-        @param layer_index i in zᵢ₊₁(j). We compute the bound of the neuron
-        output on the layer with this index.
-        @param neuron_in_layer_index j in zᵢ₊₁(j).
-        @param previous_neuron_inut_lo The lower bound of all the ReLU neuron
-        input in the previous layers in the network. Note this doesn't
-        include the bounds on the network input.
-        @param previous_neuron_input_up The upper bound of all the ReLU neuron
-        input in the previous layers in the network. Note this doesn't
-        include the bounds on the network input.
+        @param layer_index layer 0 is the first linear layer, layer 1 is the
+        second linear layer, etc.
+        @param linear_output_row_index The row of the output in that linear
+        layer.
         """
         assert (isinstance(previous_neuron_input_lo, np.ndarray))
         assert (isinstance(previous_neuron_input_up, np.ndarray))
@@ -323,9 +318,9 @@ class ReLUFreePattern:
             z_curr = z_next
 
         # Now optimize the bound on the neuron input as Wij @ z_curr + bij
-        Wij = self.model[2 * layer_index].weight[neuron_in_layer_index]
+        Wij = self.model[2 * layer_index].weight[linear_output_row_index]
         bij = self.model[2 * layer_index].bias[
-            neuron_in_layer_index] if self.model[2*layer_index].bias is not\
+            linear_output_row_index] if self.model[2*layer_index].bias is not\
             None else torch.tensor(0, dtype=self.dtype)
         lp.setObjective([Wij], [z_curr],
                         constant=bij,
@@ -333,23 +328,15 @@ class ReLUFreePattern:
         lp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         lp.gurobi_model.optimize()
         assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        neuron_input_up = lp.gurobi_model.ObjVal
+        linear_output_up = lp.gurobi_model.ObjVal
 
         lp.setObjective([Wij], [z_curr],
                         constant=bij,
                         sense=gurobipy.GRB.MINIMIZE)
         lp.gurobi_model.optimize()
         assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        neuron_input_lo = lp.gurobi_model.ObjVal
-        relu_layer = self.model[2 * layer_index + 1]
-        if isinstance(relu_layer, torch.nn.LeakyReLU):
-            assert (relu_layer.negative_slope >= 0)
-        neuron_output_lo = relu_layer(
-            torch.tensor([neuron_input_lo], dtype=self.dtype)).item()
-        neuron_output_up = relu_layer(
-            torch.tensor([neuron_input_up], dtype=self.dtype)).item()
-        return neuron_input_lo, neuron_input_up, neuron_output_lo,\
-            neuron_output_up
+        linear_output_lo = lp.gurobi_model.ObjVal
+        return linear_output_lo, linear_output_up
 
     def _compute_layer_bound(self, x_lo, x_up,
                              method: mip_utils.PropagateBoundsMethod):
@@ -377,7 +364,8 @@ class ReLUFreePattern:
                 for j in range(self.model[2 * layer_count].out_features):
                     neuron_index = self.relu_unit_index[layer_count][j]
                     z_pre_relu_lo[neuron_index], z_pre_relu_up[
-                        neuron_index], _, _ = self._compute_neuron_bound_by_lp(
+                        neuron_index] = \
+                        self._compute_linear_output_bound_by_lp(
                             layer_count, j,
                             z_pre_relu_lo.detach().numpy(),
                             z_pre_relu_up.detach().numpy(),
@@ -391,6 +379,41 @@ class ReLUFreePattern:
             linear_layer_input_lo = z_post_relu_lo[z_indices].clone()
             linear_layer_input_up = z_post_relu_up[z_indices].clone()
         return z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up
+
+    def _compute_network_output_bounds(self, previous_neuron_input_lo,
+                                       previous_neuron_input_up,
+                                       network_input_lo, network_input_up,
+                                       method):
+        if self.last_layer_is_relu:
+            output_lo, output_up = mip_utils.propagate_bounds(
+                self.model[-1],
+                previous_neuron_input_lo[self.relu_unit_index[-1]],
+                previous_neuron_input_up[self.relu_unit_index[-1]])
+            return output_lo, output_up
+        else:
+            if method == mip_utils.PropagateBoundsMethod.IA:
+                linear_input_lo, linear_input_up = mip_utils.propagate_bounds(
+                    self.model[-2],
+                    previous_neuron_input_lo[self.relu_unit_index[-1]],
+                    previous_neuron_input_up[self.relu_unit_index[-1]])
+                linear_output_lo, linear_output_up = \
+                    mip_utils.propagate_bounds(
+                        self.model[-1], linear_input_lo, linear_input_up)
+                return linear_output_lo, linear_output_up
+            elif method == mip_utils.PropagateBoundsMethod.LP:
+                linear_output_lo = torch.empty((self.model[-1].out_features, ),
+                                               dtype=self.dtype)
+                linear_output_up = torch.empty((self.model[-1].out_features, ),
+                                               dtype=self.dtype)
+                for i in range(self.model[-1].out_features):
+                    linear_output_lo[i], linear_output_up[
+                        i] = self._compute_linear_output_bound_by_lp(
+                            int((len(self.model) - 1) / 2), i,
+                            previous_neuron_input_lo.detach().numpy(),
+                            previous_neuron_input_up.detach().numpy(),
+                            network_input_lo.detach().numpy(),
+                            network_input_up.detach().numpy())
+                return linear_output_lo, linear_output_up
 
     def output_constraint(self, x_lo, x_up,
                           method: mip_utils.PropagateBoundsMethod):
@@ -492,6 +515,8 @@ class ReLUFreePattern:
 
         z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
             self._compute_layer_bound(x_lo, x_up, method)
+        output_lo, output_up = self._compute_network_output_bounds(
+            z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
         for layer_count in range(len(self.relu_unit_index)):
             Ain_z_curr, Ain_z_next, Ain_binary_layer, rhs_in_layer,\
                 Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer, _, _ =\
@@ -550,8 +575,6 @@ class ReLUFreePattern:
                 torch.eye(self.model[-2].out_features, dtype=self.dtype)
             mip_constr_return.Cout = torch.zeros(
                 (self.model[-2].out_features, ), dtype=self.dtype)
-            output_lo = z_post_relu_lo[self.relu_unit_index[-1]]
-            output_up = z_post_relu_up[self.relu_unit_index[-1]]
         else:
             # If last layer is not ReLU, then the output is the last linear
             # layer applied on the last chunk of z.
@@ -565,9 +588,6 @@ class ReLUFreePattern:
                     (self.model[-1].out_features, ), dtype=self.dtype)
             else:
                 mip_constr_return.Cout = self.model[-1].bias.clone()
-            output_lo, output_up = mip_utils.propagate_bounds(
-                self.model[-1], z_post_relu_lo[self.relu_unit_index[-1]],
-                z_post_relu_up[self.relu_unit_index[-1]])
 
         mip_constr_return.Ain_input = Ain_input[:ineq_constr_count]
         mip_constr_return.Ain_slack = Ain_slack[:ineq_constr_count]
