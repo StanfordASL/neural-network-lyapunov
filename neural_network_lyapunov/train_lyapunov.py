@@ -164,6 +164,10 @@ class TrainLyapunovReLU:
         self.xbar_indices = None
         self.xhat_indices = None
 
+        # If set to true, then we only add the states that violate the
+        # Lyapunov conditions to the training set.
+        self.add_adversarial_state_only = False
+
     def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
                     lyapunov_positivity_sample_cost_weight,
@@ -252,8 +256,11 @@ class TrainLyapunovReLU:
                         lyapunov_positivity_mip.gurobi_model.solCount))):
             lyapunov_positivity_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.SolutionNumber, solution_number)
-            positivity_mip_adversarial.append(
-                [v.xn for v in lyapunov_positivity_as_milp_return[1]])
+            if not self.add_adversarial_state_only or \
+                (self.add_adversarial_state_only and
+                 lyapunov_positivity_mip.gurobi_model.PoolObjVal > 0):
+                positivity_mip_adversarial.append(
+                    [v.xn for v in lyapunov_positivity_as_milp_return[1]])
         positivity_mip_adversarial = torch.tensor(positivity_mip_adversarial,
                                                   dtype=dtype)
         return lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
@@ -309,20 +316,24 @@ class TrainLyapunovReLU:
                         lyapunov_derivative_mip.gurobi_model.solCount))):
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.SolutionNumber, solution_number)
-            derivative_mip_adversarial.append(
-                [v.xn for v in lyapunov_derivative_as_milp_return[1]])
+            if not self.add_adversarial_state_only or (
+                    self.add_adversarial_state_only
+                    and lyapunov_derivative_mip.gurobi_model.PoolObjVal > 0):
+                derivative_mip_adversarial.append(
+                    [v.xn for v in lyapunov_derivative_as_milp_return[1]])
 
-            if (isinstance(self.lyapunov_hybrid_system.system,
-                           hybrid_linear_system.AutonomousHybridLinearSystem)):
-                derivative_mip_adversarial_mode = np.argwhere(
-                    np.array([
-                        v.xn for v in lyapunov_derivative_as_milp_return[3]
-                    ]) > 0.99)[0][0]
-                derivative_mip_adversarial_next.append(
-                    self.lyapunov_hybrid_system.system.step_forward(
-                        torch.tensor(derivative_mip_adversarial[-1],
-                                     dtype=dtype),
-                        derivative_mip_adversarial_mode))
+                if (isinstance(
+                        self.lyapunov_hybrid_system.system,
+                        hybrid_linear_system.AutonomousHybridLinearSystem)):
+                    derivative_mip_adversarial_mode = np.argwhere(
+                        np.array([
+                            v.xn for v in lyapunov_derivative_as_milp_return[3]
+                        ]) > 0.99)[0][0]
+                    derivative_mip_adversarial_next.append(
+                        self.lyapunov_hybrid_system.system.step_forward(
+                            torch.tensor(derivative_mip_adversarial[-1],
+                                         dtype=dtype),
+                            derivative_mip_adversarial_mode))
 
         derivative_mip_adversarial = torch.tensor(derivative_mip_adversarial,
                                                   dtype=dtype)

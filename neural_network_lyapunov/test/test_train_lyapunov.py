@@ -83,12 +83,17 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                                                     self.R_options)
 
     def test_solve_positivity_mip(self):
-        for num_solutions in (1, 10):
+        for num_solutions in (1, 10, 1000):
+            self.dut.add_adversarial_state_only = True
             self.dut.lyapunov_positivity_mip_pool_solutions = num_solutions
             positivity_mip, positivity_mip_obj, positivity_mip_adversarial =\
                 self.dut.solve_positivity_mip()
-            self.assertEqual(positivity_mip_adversarial.shape[0],
-                             num_solutions)
+            self.assertLessEqual(positivity_mip_adversarial.shape[0],
+                                 num_solutions)
+            for i in range(positivity_mip_adversarial.shape[0]):
+                positivity_mip.gurobi_model.setParam(
+                    gurobipy.GRB.Param.SolutionNumber, i)
+                self.assertGreater(positivity_mip.gurobi_model.PoolObjVal, 0)
             # Check the positivity_mip_obj is correct.
             self.assertEqual(positivity_mip.gurobi_model.ObjVal,
                              positivity_mip_obj)
@@ -116,18 +121,20 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
             mip.gurobi_model.optimize()
             for i in range(num_solutions):
                 mip.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber, i)
-                np.testing.assert_allclose(
-                    np.array([v.xn for v in positivity_return[1]]),
-                    positivity_mip_adversarial[i].detach().numpy())
+                if i < mip.gurobi_model.SolCount and\
+                        mip.gurobi_model.PoolObjVal > 0:
+                    np.testing.assert_allclose(
+                        np.array([v.xn for v in positivity_return[1]]),
+                        positivity_mip_adversarial[i].detach().numpy())
 
     def test_solve_derivative_mip(self):
-        for num_solutions in (1, 10):
+        for num_solutions in (1, 10, 1000):
             self.dut.lyapunov_derivative_mip_pool_solutions = num_solutions
             derivative_mip, derivative_mip_obj, derivative_mip_adversarial,\
                 derivative_mip_adversarial_next = \
                 self.dut.solve_derivative_mip()
-            self.assertEqual(derivative_mip_adversarial.shape[0],
-                             num_solutions)
+            self.assertLessEqual(derivative_mip_adversarial.shape[0],
+                                 num_solutions)
             np.testing.assert_allclose(
                 derivative_mip_adversarial_next.detach().numpy(),
                 self.lyap.system.step_forward(
@@ -150,9 +157,11 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
             mip.gurobi_model.optimize()
             for i in range(num_solutions):
                 mip.gurobi_model.setParam(gurobipy.GRB.Param.SolutionNumber, i)
-                np.testing.assert_allclose(
-                    np.array([v.xn for v in derivative_return[1]]),
-                    derivative_mip_adversarial[i].detach().numpy())
+                if i < mip.gurobi_model.SolCount and\
+                        mip.gurobi_model.PoolObjVal > 0:
+                    np.testing.assert_allclose(
+                        np.array([v.xn for v in derivative_return[1]]),
+                        derivative_mip_adversarial[i].detach().numpy())
 
 
 class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
