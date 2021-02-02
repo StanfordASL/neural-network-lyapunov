@@ -58,6 +58,8 @@ class LyapunovHybridLinearSystem:
         self.lyapunov_relu_free_pattern = \
             relu_to_optimization.ReLUFreePattern(
                 lyapunov_relu, self.system.dtype)
+        self.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
 
     def add_system_constraint(self, milp, x, x_next):
         """
@@ -114,7 +116,7 @@ class LyapunovHybridLinearSystem:
             self.lyapunov_relu_free_pattern.output_constraint(
                  torch.from_numpy(self.system.x_lo_all),
                  torch.from_numpy(self.system.x_up_all),
-                 mip_utils.PropagateBoundsMethod.IA)
+                 self.network_bound_propagate_method)
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
             mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "")
