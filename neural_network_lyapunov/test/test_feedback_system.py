@@ -634,11 +634,68 @@ class TestFeedbackSystem(unittest.TestCase):
                     dut, torch.tensor([2., 0.5, 0.6, 3.1], dtype=self.dtype))
                 self.add_controller_mip_constraint_tester(
                     dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
-                dut.xhat_indices = [0, 2]
-                self.add_controller_mip_constraint_tester(
-                    dut, torch.tensor([2., 0.5, 0.6, 3.1], dtype=self.dtype))
-                self.add_controller_mip_constraint_tester(
-                    dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
+                if not isinstance(controller_network, torch.nn.Linear):
+                    dut.xhat_indices = [0, 2]
+                    self.add_controller_mip_constraint_tester(
+                        dut, torch.tensor([2., 0.5, 0.6, 3.1],
+                                          dtype=self.dtype))
+                    self.add_controller_mip_constraint_tester(
+                        dut,
+                        torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
+
+
+class TestAddInputSaturationConstraint(unittest.TestCase):
+    def add_input_saturation_constraint_tester(self, u_lower_limit,
+                                               u_upper_limit, u_pre_sat_lo,
+                                               u_pre_sat_up):
+        dtype = torch.float64
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        u_dim = len(u_lower_limit)
+        u_var = mip.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
+        u_pre_sat = mip.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
+        u_lower_bound, u_upper_bound = \
+            feedback_system._add_input_saturation_constraint(
+                mip, u_var, u_pre_sat, u_lower_limit, u_upper_limit,
+                u_pre_sat_lo, u_pre_sat_up, dtype)
+        for i in range(u_dim):
+            self.assertEqual(
+                u_lower_bound[i].item(),
+                torch.clamp(u_pre_sat_lo[i], u_lower_limit[i],
+                            u_upper_limit[i]).item())
+            self.assertEqual(
+                u_upper_bound[i].item(),
+                torch.clamp(u_pre_sat_up[i], u_lower_limit[i],
+                            u_upper_limit[i]).item())
+        # Now take many samples of u_pre, make sure u_var is the result of the
+        # saturation.
+        u_pre_sat_samples = utils.uniform_sample_in_box(
+            u_pre_sat_lo, u_pre_sat_up, 100)
+        for i in range(u_pre_sat_samples.shape[0]):
+            for j in range(u_dim):
+                u_pre_sat[j].lb = u_pre_sat_samples[i, j]
+                u_pre_sat[j].ub = u_pre_sat_samples[i, j]
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            mip.gurobi_model.optimize()
+            self.assertEqual(mip.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            u_val = u_pre_sat_samples[i]
+            for j in range(u_dim):
+                if u_val[j] > u_upper_limit[j]:
+                    u_val[j] = u_upper_limit[j]
+                elif u_val[j] < u_lower_limit[j]:
+                    u_val[j] = u_lower_limit[j]
+            np.testing.assert_allclose(np.array([v.x for v in u_var]), u_val)
+
+    def test_add_input_saturation_constraints(self):
+        dtype = torch.float64
+        self.add_input_saturation_constraint_tester(
+            np.array([-np.inf, 1.]), np.array([np.inf, 3.]),
+            torch.tensor([0.5, 0.2], dtype=dtype),
+            torch.tensor([0.9, 5.1], dtype=dtype))
+        self.add_input_saturation_constraint_tester(
+            np.array([1, -10, -2.]), np.array([5., 2., 5.]),
+            torch.tensor([0.5, 2.1, 4.5], dtype=dtype),
+            torch.tensor([0.9, 4., 5.2], dtype=dtype))
 
 
 if __name__ == "__main__":
