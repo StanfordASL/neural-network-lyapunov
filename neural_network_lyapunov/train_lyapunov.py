@@ -166,7 +166,7 @@ class TrainLyapunovReLU:
 
         # If set to true, then we only add the states that violate the
         # Lyapunov conditions to the training set.
-        self.add_adversarial_state_only = False
+        self.add_adversarial_state_only = True
 
     def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
