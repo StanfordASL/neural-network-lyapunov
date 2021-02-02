@@ -9,6 +9,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.r_options as r_options
+import neural_network_lyapunov.mip_utils as mip_utils
 
 import torch
 import numpy as np
@@ -270,13 +271,22 @@ if __name__ == "__main__":
     forward_system = quadrotor.QuadrotorReLUSystem(dtype, x_lo, x_up, u_lo,
                                                    u_up, forward_model,
                                                    plant.hover_thrust, dt)
+    if args.train_adversarial:
+        forward_system.network_bound_propagate_method =\
+            mip_utils.PropagateBoundsMethod.LP
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
         u_lo.detach().numpy(),
         u_up.detach().numpy())
+    if args.train_adversarial:
+        closed_loop_system.controller_network_bound_propagate_method =\
+            mip_utils.PropagateBoundsMethod.LP
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
+    if args.train_adversarial:
+        lyap.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.LP
 
     if args.search_R:
         _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
@@ -302,7 +312,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_params = {
         gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: True,
-        gurobipy.GRB.Param.TimeLimit: 300,
+        gurobipy.GRB.Param.TimeLimit: 900,
         gurobipy.GRB.Param.MIPFocus: 1
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)

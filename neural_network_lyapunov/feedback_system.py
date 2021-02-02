@@ -98,6 +98,8 @@ class FeedbackSystem:
         self.u_lower_limit = u_lower_limit
         self.u_upper_limit = u_upper_limit
         self.xhat_indices = xhat_indices
+        self.controller_network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
 
     def _add_controller_mip_constraint(self, mip, x_var, u_var,
                                        controller_slack_var_name,
@@ -109,7 +111,7 @@ class FeedbackSystem:
                 self.controller_relu_free_pattern.output_constraint(
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all),
-                    mip_utils.PropagateBoundsMethod.IA)
+                    self.controller_network_bound_propagate_method)
             assert (controller_mip_cnstr.Aout_input is None)
             assert (controller_mip_cnstr.Aout_binary is None)
             controller_slack, controller_binary = \

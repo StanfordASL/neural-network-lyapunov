@@ -397,6 +397,8 @@ class QuadrotorReLUSystem:
         assert (isinstance(dt, float))
         assert (dt > 0)
         self.dt = dt
+        self.network_bound_propagate_method =\
+            mip_utils.PropagateBoundsMethod.IA
 
     @property
     def x_lo_all(self):
@@ -466,7 +468,7 @@ class QuadrotorReLUSystem:
             output_constraint(
                 torch.cat((self.x_lo[3:6], self.x_lo[9:12], self.u_lo)),
                 torch.cat((self.x_up[3:6], self.x_up[9:12], self.u_up)),
-                mip_utils.PropagateBoundsMethod.IA)
+                self.network_bound_propagate_method)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
         input_vars = x_var[3:6] + x_var[9:12] + u_var
