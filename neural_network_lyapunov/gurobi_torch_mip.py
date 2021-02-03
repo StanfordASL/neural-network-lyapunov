@@ -36,6 +36,8 @@ class MixedIntegerConstraintsReturn:
         self.Aeq_slack = None
         self.Aeq_binary = None
         self.rhs_eq = None
+        self.binary_up = None
+        self.binary_lo = None
 
 
 class GurobiTorchMIP:
@@ -87,8 +89,17 @@ class GurobiTorchMIP:
         """
         @return new_vars_list A list of new variables.
         """
+        if isinstance(lb, float) or isinstance(lb, int):
+            lb = torch.full((num_vars, ), lb, dtype=self.dtype)
+        if isinstance(ub, float) or isinstance(ub, int):
+            ub = torch.full((num_vars, ), ub, dtype=self.dtype)
+        assert (isinstance(lb, torch.Tensor))
+        assert (isinstance(ub, torch.Tensor))
+        assert (lb.shape == (num_vars, ))
+        assert (ub.shape == (num_vars, ))
         new_vars = self.gurobi_model.addVars(num_vars,
                                              lb=lb,
+                                             ub=ub,
                                              vtype=vtype,
                                              name=name)
         self.gurobi_model.update()
@@ -99,26 +110,26 @@ class GurobiTorchMIP:
                 self.r_indices[new_vars[i]] = num_existing_r + i
             # If lower bound is not -inf, then add the inequality constraint
             # x>lb
-            if lb != -gurobipy.GRB.INFINITY:
-                self.Ain_r_row.extend(
-                    range(len(self.rhs_in),
-                          len(self.rhs_in) + num_vars))
-                self.Ain_r_col.extend(
-                    range(num_existing_r, num_existing_r + num_vars))
-                self.Ain_r_val.extend([torch.tensor(-1, dtype=self.dtype)] *
-                                      num_vars)
-                self.rhs_in.extend([torch.tensor(-lb, dtype=self.dtype)] *
-                                   num_vars)
-            if ub != gurobipy.GRB.INFINITY:
-                self.Ain_r_row.extend(
-                    range(len(self.rhs_in),
-                          len(self.rhs_in) + num_vars))
-                self.Ain_r_col.extend(
-                    range(num_existing_r, num_existing_r + num_vars))
-                self.Ain_r_val.extend([torch.tensor(1, dtype=self.dtype)] *
-                                      num_vars)
-                self.rhs_in.extend([torch.tensor(ub, dtype=self.dtype)] *
-                                   num_vars)
+            for i in range(num_vars):
+                if lb[i].item() > -gurobipy.GRB.INFINITY and lb[i].item(
+                ) < ub[i].item():
+                    self.Ain_r_row.append(len(self.rhs_in))
+                    self.Ain_r_col.append(num_existing_r + i)
+                    self.Ain_r_val.append(torch.tensor(-1, dtype=self.dtype))
+                    self.rhs_in.append(-lb[i])
+            for i in range(num_vars):
+                if ub[i] < gurobipy.GRB.INFINITY and lb[i].item() < ub[i].item(
+                ):
+                    self.Ain_r_row.append(len(self.rhs_in))
+                    self.Ain_r_col.append(num_existing_r + i)
+                    self.Ain_r_val.append(torch.tensor(1, dtype=self.dtype))
+                    self.rhs_in.append(ub[i])
+            for i in range(num_vars):
+                if lb[i].item() == ub[i].item():
+                    self.Aeq_r_row.append(len(self.rhs_eq))
+                    self.Aeq_r_col.append(num_existing_r + i)
+                    self.Aeq_r_val.append(torch.tensor(1, dtype=self.dtype))
+                    self.rhs_eq.append(lb[i])
         elif vtype == gurobipy.GRB.BINARY:
             num_existing_zeta = len(self.zeta_indices)
             self.zeta.extend([new_vars[i] for i in range(num_vars)])
@@ -357,18 +368,40 @@ class GurobiTorchMIP:
                                  lb=-gurobipy.GRB.INFINITY,
                                  vtype=gurobipy.GRB.CONTINUOUS,
                                  name=slack_var_name)
+        else:
+            slack = []
         # Now add the binary variables
         binary_size = 0
         if mip_cnstr_return.Ain_binary is not None:
             binary_size = mip_cnstr_return.Ain_binary.shape[1]
         elif mip_cnstr_return.Aeq_binary is not None:
             binary_size = mip_cnstr_return.Aeq_binary.shape[1]
+        elif mip_cnstr_return.binary_lo is not None:
+            binary_size = mip_cnstr_return.binary_lo.numel()
+        elif mip_cnstr_return.binary_up is not None:
+            binary_size = mip_cnstr_return.binary_up.numel()
         if binary_size != 0:
             assert (isinstance(binary_var_name, str))
-            binary = self.addVars(binary_size,
-                                  lb=-gurobipy.GRB.INFINITY,
-                                  vtype=gurobipy.GRB.BINARY,
-                                  name=binary_var_name)
+            if mip_cnstr_return.binary_lo is None and\
+                    mip_cnstr_return.binary_up is None:
+                binary = self.addVars(binary_size,
+                                      lb=-gurobipy.GRB.INFINITY,
+                                      vtype=gurobipy.GRB.BINARY,
+                                      name=binary_var_name)
+            else:
+                binary_lo = mip_cnstr_return.binary_lo if\
+                    mip_cnstr_return.binary_lo is not None else\
+                    -gurobipy.GRB.INFINITY
+                binary_up = mip_cnstr_return.binary_up if\
+                    mip_cnstr_return.binary_up is not None else\
+                    gurobipy.GRB.INFINITY
+                binary = self.addVars(binary_size,
+                                      lb=binary_lo,
+                                      ub=binary_up,
+                                      vtype=gurobipy.GRB.BINARY,
+                                      name=binary_var_name)
+        else:
+            binary = []
 
         def add_var_if_not_none(coeff_matrix, var, coeff_matrices, var_list):
             # if coeff_matrix is not None, then append coeff_matrix to
