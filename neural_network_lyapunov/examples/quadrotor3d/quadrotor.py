@@ -291,8 +291,15 @@ class QuadrotorWithPixhawkReLUSystem:
     def possible_dx(self, x, u):
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         """
         Add the dynamic constraint
         pos[n+1] = pos[n] + (v[n] + v[n+1]) * dt / 2
@@ -300,10 +307,14 @@ class QuadrotorWithPixhawkReLUSystem:
                                - ϕ(0, u*)
         as mixed-integer linear constraints.
         """
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
         mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(
-                    torch.cat((self.x_lo[3:6], self.u_lo)),
-                    torch.cat((self.x_up[3:6], self.u_up)),
+                    torch.cat((self.x_lo[3:6], u_lo)),
+                    torch.cat((self.x_up[3:6], u_up)),
                     mip_utils.PropagateBoundsMethod.IA)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
@@ -456,18 +467,32 @@ class QuadrotorReLUSystem:
     def possible_dx(self, x, u):
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         """
         Add the dynamics constraints
         pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
         (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
         = ϕ(rpy[n],, angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+        @param additional_u_lo The additional lower bound on u.
+        @param additional_u_up The additional upper bound on u.
         """
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
+
         mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(
-                torch.cat((self.x_lo[3:6], self.x_lo[9:12], self.u_lo)),
-                torch.cat((self.x_up[3:6], self.x_up[9:12], self.u_up)),
+                torch.cat((self.x_lo[3:6], self.x_lo[9:12], u_lo)),
+                torch.cat((self.x_up[3:6], self.x_up[9:12], u_up)),
                 self.network_bound_propagate_method)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)

@@ -149,9 +149,15 @@ class AccelerationCarReLUModel:
         """
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip: gurobi_torch_mip.GurobiTorchMIP,
-                                x_var, x_next_var, u_var, slack_var_name,
-                                binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
@@ -162,10 +168,14 @@ class AccelerationCarReLUModel:
         vel[n+1] = vel[n] + accel[n] * dt
         """
         assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
         network_input_lo = torch.stack(
-            (self.x_lo[2], self.x_lo[3], self.u_lo[0], self.u_lo[1]))
+            (self.x_lo[2], self.x_lo[3], u_lo[0], u_lo[1]))
         network_input_up = torch.stack(
-            (self.x_up[2], self.x_up[3], self.u_up[0], self.u_up[1]))
+            (self.x_up[2], self.x_up[3], u_up[0], u_up[1]))
         mip_cnstr_result, _, _, _, _, _, _ = \
             self.dynamics_relu_free_pattern.output_constraint(
                 network_input_lo,
