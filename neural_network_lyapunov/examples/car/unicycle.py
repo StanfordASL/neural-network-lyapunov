@@ -189,9 +189,15 @@ class UnicycleReLUModel:
         assert (isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip: gurobi_torch_mip.GurobiTorchMIP,
-                                x_var, x_next_var, u_var, slack_var_name,
-                                binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
@@ -204,16 +210,18 @@ class UnicycleReLUModel:
         [pos_x[n+1], pos_y[n+1]] =
         [pos_x[n], pos_y[n]] + ϕ(θ[n], vel[n]) − ϕ(0, 0)
         """
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
         assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
         if self.thetadot_as_input:
-            network_input_lo = torch.stack(
-                (self.x_lo[2], self.u_lo[0], self.u_lo[1]))
-            network_input_up = torch.stack(
-                (self.x_up[2], self.u_up[0], self.u_up[1]))
+            network_input_lo = torch.stack((self.x_lo[2], u_lo[0], u_lo[1]))
+            network_input_up = torch.stack((self.x_up[2], u_up[0], u_up[1]))
             network_input_size = 3
         else:
-            network_input_lo = torch.stack((self.x_lo[2], self.u_lo[0]))
-            network_input_up = torch.stack((self.x_up[2], self.u_up[0]))
+            network_input_lo = torch.stack((self.x_lo[2], u_lo[0]))
+            network_input_up = torch.stack((self.x_up[2], u_up[0]))
             network_input_size = 2
         mip_cnstr_result, _, _, _, _, _, _ = \
             self.dynamics_relu_free_pattern.output_constraint(
@@ -347,9 +355,15 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
                 (-1, 1))
             return torch.cat((position_next, theta_next), dim=1)
 
-    def add_dynamics_constraint(self, mip: gurobi_torch_mip.GurobiTorchMIP,
-                                x_var, x_next_var, u_var, slack_var_name,
-                                binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
@@ -364,22 +378,22 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
         Note that the network ϕ takes two different set of inputs, one is
         (θ[n], vel[n], θ_dot[n]), another one is (θ[n], 0, θ_dot[n])
         """
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
         assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
         if self.thetadot_as_input:
-            network_input_lo = torch.stack(
-                (self.x_lo[2], self.u_lo[0], self.u_lo[1]))
-            network_input_up = torch.stack(
-                (self.x_up[2], self.u_up[0], self.u_up[1]))
+            network_input_lo = torch.stack((self.x_lo[2], u_lo[0], u_lo[1]))
+            network_input_up = torch.stack((self.x_up[2], u_up[0], u_up[1]))
             # The lower/upper bound for the (theta, 0, thetadot)
             network_input_zero_vel_lo = torch.stack(
-                (self.x_lo[2], torch.tensor(0,
-                                            dtype=self.dtype), self.u_lo[1]))
+                (self.x_lo[2], torch.tensor(0, dtype=self.dtype), u_lo[1]))
             network_input_zero_vel_up = torch.stack(
-                (self.x_up[2], torch.tensor(0,
-                                            dtype=self.dtype), self.u_up[1]))
+                (self.x_up[2], torch.tensor(0, dtype=self.dtype), u_up[1]))
         else:
-            network_input_lo = torch.stack((self.x_lo[2], self.u_lo[0]))
-            network_input_up = torch.stack((self.x_up[2], self.u_up[0]))
+            network_input_lo = torch.stack((self.x_lo[2], u_lo[0]))
+            network_input_up = torch.stack((self.x_up[2], u_up[0]))
             network_input_zero_vel_lo = torch.stack(
                 (self.x_lo[2], torch.tensor(0, dtype=self.dtype)))
             network_input_zero_vel_up = torch.stack(

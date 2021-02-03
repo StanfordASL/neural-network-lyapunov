@@ -38,7 +38,7 @@ def setup_mip1(dut):
 
 
 class TestGurobiTorchMIP(unittest.TestCase):
-    def test_add_vars(self):
+    def test_add_vars1(self):
         dut = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
         # Add continuous variables with no bounds
         x = dut.addVars(2,
@@ -57,6 +57,9 @@ class TestGurobiTorchMIP(unittest.TestCase):
 
         # Add continuous variables with bounds
         y = dut.addVars(3, lb=1, ub=2, vtype=gurobipy.GRB.CONTINUOUS)
+        for i in range(3):
+            self.assertEqual(y[i].lb, 1)
+            self.assertEqual(y[i].ub, 2)
         self.assertEqual(dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumVars),
                          5)
         self.assertEqual(dut.r, [x[0], x[1], y[0], y[1], y[2]])
@@ -105,6 +108,69 @@ class TestGurobiTorchMIP(unittest.TestCase):
             y[2]: 4
         })
         self.assertEqual(dut.zeta_indices, {alpha[0]: 0, alpha[1]: 1})
+
+    def test_addVars2(self):
+        # addVars for continuous variable with a tensor type of lb and(or) ub.
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        lb = torch.tensor([-2, -np.inf, 4., -np.inf, 5], dtype=dtype)
+        ub = torch.tensor([4., 3, np.inf, np.inf, 5], dtype=dtype)
+        x = dut.addVars(5, lb=lb, ub=ub, vtype=gurobipy.GRB.CONTINUOUS)
+        self.assertEqual(len(x), 5)
+        for i in range(5):
+            self.assertEqual(x[i].lb, lb[i].item())
+            self.assertEqual(x[i].ub, ub[i].item())
+            self.assertEqual(x[i].vtype, gurobipy.GRB.CONTINUOUS)
+        self.assertListEqual(dut.Ain_r_row, [0, 1, 2, 3])
+        self.assertListEqual(dut.Ain_r_col, [0, 2, 0, 1])
+        self.assertEqual(dut.Ain_r_val, [
+            torch.tensor(-1, dtype=dtype),
+            torch.tensor(-1, dtype=dtype),
+            torch.tensor(1, dtype=dtype),
+            torch.tensor(1, dtype=dtype)
+        ])
+        self.assertEqual(dut.rhs_in, [
+            torch.tensor(2, dtype=dtype),
+            torch.tensor(-4, dtype=dtype),
+            torch.tensor(4, dtype=dtype),
+            torch.tensor(3, dtype=dtype)
+        ])
+        self.assertEqual(len(dut.Ain_zeta_row), 0)
+        self.assertEqual(len(dut.Ain_zeta_col), 0)
+        self.assertEqual(len(dut.Ain_zeta_val), 0)
+
+        self.assertEqual(dut.Aeq_r_row, [0])
+        self.assertEqual(dut.Aeq_r_col, [4])
+        self.assertEqual(dut.Aeq_r_val, [torch.tensor(1, dtype=dtype)])
+        self.assertEqual(dut.rhs_eq, [torch.tensor(5, dtype=dtype)])
+
+        self.assertEqual(len(dut.Aeq_zeta_row), 0)
+        self.assertEqual(len(dut.Aeq_zeta_col), 0)
+        self.assertEqual(len(dut.Aeq_zeta_val), 0)
+
+    def test_addVars3(self):
+        # addVars for binary variable with a tensor type of lb and(or) ub.
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        lb = torch.tensor([0., -1., 1., -np.inf, 0], dtype=dtype)
+        ub = torch.tensor([1., 0., 2., np.inf, 0], dtype=dtype)
+        b = dut.addVars(5, lb=lb, ub=ub, vtype=gurobipy.GRB.BINARY)
+        for i in range(5):
+            self.assertEqual(b[i].lb, torch.clamp(lb[i], 0, 1).item())
+            self.assertEqual(b[i].ub, torch.clamp(ub[i], 0, 1).item())
+            self.assertEqual(b[i].vtype, gurobipy.GRB.BINARY)
+        self.assertEqual(len(dut.Ain_r_row), 0)
+        self.assertEqual(len(dut.Ain_r_col), 0)
+        self.assertEqual(len(dut.Ain_r_val), 0)
+        self.assertEqual(len(dut.Aeq_r_row), 0)
+        self.assertEqual(len(dut.Aeq_r_col), 0)
+        self.assertEqual(len(dut.Aeq_r_val), 0)
+        self.assertEqual(len(dut.Ain_zeta_row), 0)
+        self.assertEqual(len(dut.Ain_zeta_col), 0)
+        self.assertEqual(len(dut.Ain_zeta_val), 0)
+        self.assertEqual(len(dut.Aeq_zeta_row), 0)
+        self.assertEqual(len(dut.Aeq_zeta_col), 0)
+        self.assertEqual(len(dut.Aeq_zeta_val), 0)
 
     def test_addLConstr(self):
         dut = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
@@ -562,7 +628,8 @@ class TestGurobiTorchMIP(unittest.TestCase):
     def test_add_mixed_integer_linear_constraints1(self):
         """
         Test with MixedIntegerConstraintsReturn that doesn't contain any None
-        items, it also adds the output constraint.
+        items (except binary_lo and binary_up), it also adds the output
+        constraint.
         """
         mip_constr_return, dtype = \
             self.setup_mixed_integer_constraints_return()
@@ -685,6 +752,45 @@ class TestGurobiTorchMIP(unittest.TestCase):
             dut, Ain_r_expected, Ain_zeta_expected, rhs_in_expected,
             Aeq_r_expected, Aeq_zeta_expected, rhs_eq_expected)
 
+    def test_add_mixed_integer_linear_constraints4(self):
+        # Test adding bounds on the binary variables.
+        dtype = torch.float64
+
+        def check_binary_bounds(binary_lo, binary_up, lo_expected,
+                                up_expected):
+            mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+            mip_cnstr_return.binary_lo = binary_lo
+            mip_cnstr_return.binary_up = binary_up
+            mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+            slack, binary = mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, [], None, None, "binary", "ineq", "eq",
+                "out")
+            self.assertEqual(len(binary), 2)
+            self.assertEqual(binary[0].vtype, gurobipy.GRB.BINARY)
+            self.assertEqual(binary[1].vtype, gurobipy.GRB.BINARY)
+            for i in range(2):
+                self.assertEqual(binary[i].lb, lo_expected[i])
+                self.assertEqual(binary[i].ub, up_expected[i])
+            self.assertEqual(len(mip.Ain_r_row), 0)
+            self.assertEqual(len(mip.Ain_r_col), 0)
+            self.assertEqual(len(mip.Ain_r_val), 0)
+            self.assertEqual(len(mip.Aeq_r_row), 0)
+            self.assertEqual(len(mip.Aeq_r_col), 0)
+            self.assertEqual(len(mip.Aeq_r_val), 0)
+            self.assertEqual(len(mip.Ain_zeta_row), 0)
+            self.assertEqual(len(mip.Ain_zeta_col), 0)
+            self.assertEqual(len(mip.Ain_zeta_val), 0)
+            self.assertEqual(len(mip.Aeq_zeta_row), 0)
+            self.assertEqual(len(mip.Aeq_zeta_col), 0)
+            self.assertEqual(len(mip.Aeq_zeta_val), 0)
+
+        check_binary_bounds(None, torch.tensor([0, 1], dtype=dtype), [0, 0],
+                            [0, 1])
+        check_binary_bounds(torch.tensor([0, 1], dtype=dtype), None, [0, 1],
+                            [1, 1])
+        check_binary_bounds(torch.tensor([0, 1], dtype=dtype),
+                            torch.tensor([0, 1], dtype=dtype), [0, 1], [0, 1])
+
 
 class TestGurobiTorchMILP(unittest.TestCase):
     def test_setObjective(self):
@@ -785,7 +891,7 @@ class TestGurobiTorchMILP(unittest.TestCase):
                            rhs=a[0] + 2 * a[2] * a[1])
             dut.addLConstr([
                 torch.stack((torch.tensor(2., dtype=dtype), a[1]**2,
-                            torch.tensor(0.5, dtype=dtype))),
+                             torch.tensor(0.5, dtype=dtype))),
                 torch.tensor([1., 1.], dtype=dtype)
             ], [x, alpha],
                            sense=gurobipy.GRB.EQUAL,

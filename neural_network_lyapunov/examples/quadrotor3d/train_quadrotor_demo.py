@@ -162,6 +162,11 @@ if __name__ == "__main__":
     parser.add_argument("--pretrain_num_epochs", type=int, default=20)
     parser.add_argument("--enable_wandb", action="store_true")
     parser.add_argument("--train_adversarial", action="store_true")
+    parser.add_argument(
+        "--training_set",
+        type=str,
+        default=None,
+        help="path to the training set for adversarial training.")
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -332,9 +337,16 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_mip_pool_solutions = 1000
         dut.add_positivity_adversarial_state = True
         dut.add_derivative_adversarial_state = True
-        positivity_state_samples_init = utils.uniform_sample_in_box(
-            x_lo, x_up, 1000)
-        derivative_state_samples_init = positivity_state_samples_init
+        if args.training_set:
+            training_set = torch.load(args.training_set)
+            positivity_state_samples_init = training_set[
+                "positivity_state_samples_all"]
+            derivative_state_samples_init = training_set[
+                "derivative_state_samples_all"]
+        else:
+            positivity_state_samples_init = utils.uniform_sample_in_box(
+                x_lo, x_up, 1000)
+            derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)
     else:

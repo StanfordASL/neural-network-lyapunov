@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import cvxpy as cp
 from scipy.integrate import solve_ivp
+import warnings
 
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -232,8 +233,20 @@ class HybridLinearSystem:
         mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
+        if additional_u_lo is not None or additional_u_up is not None:
+            warnings.warn(
+                "hybrid linear system don't accept additional u_lo and u_up " +
+                "add_dynamics_constraint yet."
+            )
         mip_cnstr = self.mixed_integer_constraints()
         slack, binary = mip.add_mixed_integer_linear_constraints(
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,

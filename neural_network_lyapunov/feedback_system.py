@@ -242,16 +242,18 @@ class FeedbackSystem:
                         lb=-gurobipy.GRB.INFINITY,
                         vtype=gurobipy.GRB.CONTINUOUS,
                         name=u_var_name)
-        # Now add the forward dynamics constraint
-        forward_slack, forward_binary = \
-            self.forward_system.add_dynamics_constraint(
-                mip, x_var, x_next_var, u, forward_slack_var_name,
-                forward_binary_var_name)
-
+        # Add the controller constraint.
         controller_slack, controller_binary, u_lower_bound, u_upper_bound = \
             self._add_controller_mip_constraint(
                 mip, x_var, u, controller_slack_var_name,
                 controller_binary_var_name)
+
+        # Now add the forward dynamics constraint
+        forward_slack, forward_binary = \
+            self.forward_system.add_dynamics_constraint(
+                mip, x_var, x_next_var, u, forward_slack_var_name,
+                forward_binary_var_name, additional_u_lo=u_lower_bound,
+                additional_u_up=u_upper_bound)
 
         return u, forward_slack, controller_slack, forward_binary,\
             controller_binary
