@@ -46,30 +46,30 @@ if __name__ == "__main__":
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dtype = torch.float64
     model_dataset = torch.load(args.load_dynamics_data)
-    dt = 1./30.
+    dt = 1./5.
     hover_thrust = .705
     rpyu_equilibrium = torch.tensor(
         [0., 0., 0., 0., 0., 0., hover_thrust], dtype=dtype)
     V_lambda = 0.9
     x_lo = torch.tensor(
         [-.25, -.25, -.25,
-         -np.pi/4, -np.pi/4, -np.pi/4,
-         -1, -1, -1], dtype=dtype)
+         -np.pi/25, -np.pi/25, -np.pi/5,
+         -3, -3, -.1], dtype=dtype)
     x_up = torch.tensor(
         [.25, .25, .25,
-         np.pi/4, np.pi/4, np.pi/4,
-         1, 1, 1], dtype=dtype)
-    u_lo = torch.tensor([-np.pi/4, -np.pi/4, -np.pi/4, 0.], dtype=dtype)
-    u_up = torch.tensor([np.pi/4, np.pi/4, np.pi/4, 1.], dtype=dtype)
+         np.pi/25, np.pi/25, np.pi/5,
+         3, 3, .1], dtype=dtype)
+    u_lo = torch.tensor([-np.pi/20, -np.pi/20, -np.pi/4, 0.70], dtype=dtype)
+    u_up = torch.tensor([np.pi/20, np.pi/20, np.pi/4, 0.725], dtype=dtype)
     if args.load_forward_model:
         forward_model = torch.load(args.load_forward_model)
     else:
         forward_model = utils.setup_relu(
-            (7, 14, 14, 6), params=None, bias=True, negative_slope=0.01,
+            (7, 30, 30, 15, 6), params=None, bias=True, negative_slope=0.,
             dtype=dtype)
     if args.train_forward_model:
         train_forward_model(forward_model, rpyu_equilibrium, model_dataset,
-                            num_epochs=100)
+                            num_epochs=1000)
     if args.save_forward_model:
         torch.save(forward_model, args.save_forward_model)
     if args.forward_model_only:
@@ -86,10 +86,10 @@ if __name__ == "__main__":
             (.1 * torch.eye(9, dtype=dtype),
              .123 * torch.ones((6, 9), dtype=dtype)), dim=0)
         lyapunov_relu = utils.setup_relu(
-            (9, 12, 6, 1), params=None, negative_slope=0.1, bias=True,
+            (9, 15, 10, 1), params=None, negative_slope=0.01, bias=True,
             dtype=dtype)
         controller_relu = utils.setup_relu(
-            (9, 7, 4), params=None, negative_slope=0.01, bias=True,
+            (9, 15, 4), params=None, negative_slope=0.01, bias=True,
             dtype=dtype)
     forward_system = quadrotor.QuadrotorWithPixhawkReLUSystem(
         dtype, x_lo, x_up, u_lo, u_up, forward_model, hover_thrust, dt)
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_params = {
         gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: False,
-        gurobipy.GRB.Param.TimeLimit: 100,
+        gurobipy.GRB.Param.TimeLimit: 150,
         gurobipy.GRB.Param.MIPFocus: 1
     }
     dut.lyapunov_positivity_mip_warmstart = True
@@ -120,15 +120,15 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.lyapunov_positivity_convergence_tol = 5e-6
-    dut.lyapunov_positivity_epsilon = 0.1
-    dut.lyapunov_derivative_epsilon = 0.003
+    dut.lyapunov_positivity_epsilon = 0.5
+    dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     dut.save_network_path = 'models'
-    state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 100000)
+    state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
     dut.output_flag = True
     if args.train_on_samples:
         dut.train_lyapunov_on_samples(
-            state_samples_all, num_epochs=10, batch_size=100)
+            state_samples_all, num_epochs=25, batch_size=100)
     dut.enable_wandb = True
     dut.train(torch.empty((0, 9), dtype=dtype))
     pass

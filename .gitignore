@@ -133,6 +133,9 @@ gurobi.log
 # Pytorch tensors
 *.pt
 
+# Numpy serialized data
+*.npy
+
 # trained model used in tests
 !*/test/data/*.pt
 
