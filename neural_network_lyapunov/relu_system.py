@@ -254,7 +254,7 @@ class ReLUSystem:
     def x_up_all(self):
         return self.x_up.detach().numpy()
 
-    def mixed_integer_constraints(self):
+    def mixed_integer_constraints(self, u_lo=None, u_up=None):
         """
         @return mixed-integer linear constraints MixedIntegerConstraintsReturn
                 Ain_x, Ain_u, Ain_s, Ain_gamma, rhs_in,
@@ -265,8 +265,12 @@ class ReLUSystem:
                 Ain_x @ x + Ain_u @ u + Ain_s @ s + Ain_gamma @ gamma <= rhs_in
                 Aeq_x @ x + Aeq_u @ u + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
-        xu_lo = torch.cat((self.x_lo, self.u_lo))
-        xu_up = torch.cat((self.x_up, self.u_up))
+        if u_lo is None:
+            u_lo = self.u_lo
+        if u_up is None:
+            u_up = self.u_up
+        xu_lo = torch.cat((self.x_lo, u_lo))
+        xu_up = torch.cat((self.x_up, u_up))
         result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
             _, _ = self.dynamics_relu_free_pattern.output_constraint(
                 xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
@@ -283,11 +287,19 @@ class ReLUSystem:
         assert (isinstance(u, torch.Tensor))
         return [self.dynamics_relu(torch.cat((x, u), dim=-1))]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
-                                             binary_var_name)
+                                             binary_var_name, additional_u_lo,
+                                             additional_u_up)
 
 
 class ReLUSystemGivenEquilibrium:
@@ -352,13 +364,17 @@ class ReLUSystemGivenEquilibrium:
     def x_up_all(self):
         return self.x_up.detach().numpy()
 
-    def mixed_integer_constraints(self):
+    def mixed_integer_constraints(self, u_lo=None, u_up=None):
         """
         The relationship between x[n], u[n] and x[n+1] can be captured by mixed
         -integer linear constraints.
         """
-        xu_lo = torch.cat((self.x_lo, self.u_lo))
-        xu_up = torch.cat((self.x_up, self.u_up))
+        if u_lo is None:
+            u_lo = self.u_lo
+        if u_up is None:
+            u_up = self.u_up
+        xu_lo = torch.cat((self.x_lo, u_lo))
+        xu_up = torch.cat((self.x_up, u_up))
         result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
             _, _ = self.dynamics_relu_free_pattern.output_constraint(
                 xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
@@ -383,11 +399,19 @@ class ReLUSystemGivenEquilibrium:
         assert (isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
-                                             binary_var_name)
+                                             binary_var_name, additional_u_lo,
+                                             additional_u_up)
 
 
 class ReLUSecondOrderSystemGivenEquilibrium:
@@ -461,7 +485,7 @@ class ReLUSecondOrderSystemGivenEquilibrium:
     def x_up_all(self):
         return self.x_up.detach().numpy()
 
-    def mixed_integer_constraints(self) ->\
+    def mixed_integer_constraints(self, u_lo=None, u_up=None) ->\
             gurobi_torch_mip.MixedIntegerConstraintsReturn:
         """
         The relationship between x[n], u[n] and x[n+1] can be captured by mixed
@@ -476,10 +500,14 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         # For the constraint v[n+1] = ϕ(q[n], v[n], u[n]) − ϕ(q*, v*, u*)
         # This is equivalent to
         # v[n+1] = result.Aout_slack * s  + result.Cout - ϕ(q*, v*, u*)
+        if u_lo is None:
+            u_lo = self.u_lo
+        if u_up is None:
+            u_up = self.u_up
         result, z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,\
             _, _ = self.dynamics_relu_free_pattern.output_constraint(
-                torch.cat((self.x_lo, self.u_lo)),
-                torch.cat((self.x_up, self.u_up)),
+                torch.cat((self.x_lo, u_lo)),
+                torch.cat((self.x_up, u_up)),
                 mip_utils.PropagateBoundsMethod.IA)
         assert (result.Aout_input is None)
         assert (result.Aout_binary is None)
@@ -531,11 +559,19 @@ class ReLUSecondOrderSystemGivenEquilibrium:
         assert (isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
-                                             binary_var_name)
+                                             binary_var_name, additional_u_lo,
+                                             additional_u_up)
 
 
 class ReLUSecondOrderResidueSystemGivenEquilibrium:
@@ -644,12 +680,23 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         assert (isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self, mip, x_var, x_next_var, u_var,
-                                slack_var_name, binary_var_name):
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None):
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
         mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
             output_constraint(torch.cat((self.x_lo[
-                self._network_input_x_indices], self.u_lo)), torch.cat((
-                    self.x_up[self._network_input_x_indices], self.u_up)),
+                self._network_input_x_indices], u_lo)), torch.cat((
+                    self.x_up[self._network_input_x_indices], u_up)),
                 mip_utils.PropagateBoundsMethod.IA)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
@@ -699,9 +746,20 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         return forward_slack, forward_binary
 
 
-def _add_dynamics_mip_constraints(mip, relu_system, x_var, x_next_var, u_var,
-                                  slack_var_name, binary_var_name):
-    mip_cnstr = relu_system.mixed_integer_constraints()
+def _add_dynamics_mip_constraints(mip,
+                                  relu_system,
+                                  x_var,
+                                  x_next_var,
+                                  u_var,
+                                  slack_var_name,
+                                  binary_var_name,
+                                  additional_u_lo: torch.Tensor = None,
+                                  additional_u_up: torch.Tensor = None):
+    u_lo = relu_system.u_lo if additional_u_lo is None else torch.max(
+        relu_system.u_lo, additional_u_lo)
+    u_up = relu_system.u_up if additional_u_up is None else torch.min(
+        relu_system.u_up, additional_u_up)
+    mip_cnstr = relu_system.mixed_integer_constraints(u_lo, u_up)
     slack, binary = mip.add_mixed_integer_linear_constraints(
         mip_cnstr, x_var + u_var, x_next_var, slack_var_name, binary_var_name,
         "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
