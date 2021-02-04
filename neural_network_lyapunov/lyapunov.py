@@ -389,7 +389,8 @@ class LyapunovHybridLinearSystem:
                                             R,
                                             margin=0.,
                                             xbar_indices=None,
-                                            xhat_indices=None):
+                                            xhat_indices=None,
+                                            reduction="mean"):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
@@ -403,6 +404,8 @@ class LyapunovHybridLinearSystem:
         R * (x̅ⁱ - x̅*)
         @param margin The margin used in the hinge loss.
         @param xbar_indices x̅ = x[xbar_indices]
+        @param reduction If reduction="mean", we use the mean loss across all
+        samples, if reduction="max", we use the max loss among all samples.
         """
         assert (isinstance(state_samples, torch.Tensor))
         assert (state_samples.shape[1] == self.system.x_dim)
@@ -410,21 +413,28 @@ class LyapunovHybridLinearSystem:
         assert (x_equilibrium.shape == (self.system.x_dim, ))
         assert (isinstance(V_lambda, float))
         assert (isinstance(margin, float))
+        assert (reduction == "mean" or reduction == "max")
         xbar_indices = compute_xhat._get_xbar_indices(self.system.x_dim,
                                                       xbar_indices)
         R = _get_R(R, len(xbar_indices), state_samples.device)
-        return torch.nn.HingeEmbeddingLoss(margin=margin)(
-            self.lyapunov_value(state_samples,
-                                x_equilibrium,
-                                V_lambda,
-                                R=R,
-                                xbar_indices=xbar_indices,
-                                xhat_indices=xhat_indices) -
-            epsilon * torch.norm(R @ (state_samples[:, xbar_indices] -
-                                      x_equilibrium[xbar_indices]).T,
-                                 p=1,
-                                 dim=0),
-            torch.tensor(-1.).to(state_samples.device))
+        loss = self.lyapunov_value(
+            state_samples,
+            x_equilibrium,
+            V_lambda,
+            R=R,
+            xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices) - epsilon * torch.norm(
+                R @ (state_samples[:, xbar_indices] -
+                     x_equilibrium[xbar_indices]).T,
+                p=1,
+                dim=0)
+        if reduction == "mean":
+            return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                loss, torch.tensor(-1.).to(state_samples.device))
+        elif reduction == "max":
+            return torch.max(
+                torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
+                    loss, torch.tensor(-1.).to(state_samples.device)))
 
     def _add_relu_xhat_constraint(self, mip, x_var, x_equilibrium,
                                   xhat_indices: list):
@@ -816,7 +826,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                             R,
                                             margin=0.,
                                             xbar_indices=None,
-                                            xhat_indices=None):
+                                            xhat_indices=None,
+                                            reduction="mean"):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -838,6 +849,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         exponential or asymptotic convergence.
         @param margin We might want to shift the margin for the Lyapunov
         loss.
+        @param reduction If reduction=mean, then use the mean loss, otherwise
+        use the max over all samples.
         @return loss The loss
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n]) + margin, 0))
         """
@@ -863,7 +876,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R=R,
             margin=margin,
             xbar_indices=xbar_indices,
-            xhat_indices=xhat_indices)
+            xhat_indices=xhat_indices,
+            reduction=reduction)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -877,7 +891,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R,
             margin=0.,
             xbar_indices=None,
-            xhat_indices=None):
+            xhat_indices=None,
+            reduction="mean"):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -915,6 +930,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert (state_next.shape[1] == self.system.x_dim)
         assert (state_samples.shape[0] == state_next.shape[0])
         assert (isinstance(eps_type, ConvergenceEps))
+        assert (reduction == "mean" or reduction == "max")
         R = _get_R(
             R,
             len(compute_xhat._get_xbar_indices(self.system.x_dim,
@@ -933,23 +949,47 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                  xbar_indices=xbar_indices,
                                  xhat_indices=xhat_indices)
         if eps_type == ConvergenceEps.ExpLower:
-            return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                -(v2 - v1 + epsilon * v1),
-                torch.tensor(-1.).to(state_samples.device))
+            if reduction == "mean":
+                return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                    -(v2 - v1 + epsilon * v1),
+                    torch.tensor(-1.).to(state_samples.device))
+            elif reduction == "max":
+                return torch.max(
+                    torch.nn.HingeEmbeddingLoss(margin=margin,
+                                                reduction="none")(
+                                                    -(v2 - v1 + epsilon * v1),
+                                                    torch.tensor(-1.).to(
+                                                        state_samples.device)))
         elif eps_type == ConvergenceEps.ExpUpper:
-            return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                (v2 - v1 + epsilon * v1),
-                torch.tensor(-1.).to(state_samples.device))
+            if reduction == "mean":
+                return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                    (v2 - v1 + epsilon * v1),
+                    torch.tensor(-1.).to(state_samples.device))
+            elif reduction == "max":
+                return torch.max(
+                    torch.nn.HingeEmbeddingLoss(margin=margin,
+                                                reduction="none")(
+                                                    (v2 - v1 + epsilon * v1),
+                                                    torch.tensor(-1.).to(
+                                                        state_samples.device)))
         elif eps_type == ConvergenceEps.Asymp:
             xbar_indices = compute_xhat._get_xbar_indices(
                 self.system.x_dim, xbar_indices)
-            return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                -(v2 - v1 +
-                  epsilon * torch.norm(R @ (state_samples[:, xbar_indices] -
+            sample_loss = -(v2 - v1 + epsilon *
+                            torch.norm(R @ (state_samples[:, xbar_indices] -
                                             x_equilibrium[xbar_indices]).T,
                                        p=1,
-                                       dim=0)),
-                torch.tensor(-1.).to(state_samples.device))
+                                       dim=0))
+            if reduction == "mean":
+                return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                    sample_loss, torch.tensor(-1.).to(state_samples.device))
+            elif reduction == "max":
+                return torch.max(
+                    torch.nn.HingeEmbeddingLoss(margin=margin,
+                                                reduction="none")(
+                                                    sample_loss,
+                                                    torch.tensor(-1.).to(
+                                                        state_samples.device)))
         else:
             raise Exception("Unknown eps_type")
 

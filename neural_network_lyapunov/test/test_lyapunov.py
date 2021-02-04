@@ -692,23 +692,32 @@ class TestLyapunovHybridSystem(unittest.TestCase):
         R = torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=self.dtype)
 
         def test_fun(x_samples):
-            loss = 0
+            losses = torch.zeros((x_samples.shape[0], ), dtype=x_samples.dtype)
             for i in range(x_samples.shape[0]):
                 relu_x = lyapunov_relu1.forward(x_samples[i])
                 v = (relu_x - relu_at_equilibrium) + V_lambda * torch.norm(
                     R @ (x_samples[i] - x_equilibrium), p=1)
                 v_minus_l1 = v - epsilon * torch.norm(
                     R @ (x_samples[i] - x_equilibrium), p=1)
-                loss += 0 if v_minus_l1 > margin else margin - v_minus_l1
-            loss = loss / x_samples.shape[0]
+                losses[i] = 0 if v_minus_l1 > margin else margin - v_minus_l1
             self.assertAlmostEqual(
-                loss.item(),
+                torch.mean(losses).item(),
                 dut.lyapunov_positivity_loss_at_samples(x_equilibrium,
                                                         x_samples,
                                                         V_lambda,
                                                         epsilon,
                                                         R=R,
                                                         margin=margin).item())
+            self.assertAlmostEqual(
+                torch.max(losses).item(),
+                dut.lyapunov_positivity_loss_at_samples(
+                    x_equilibrium,
+                    x_samples,
+                    V_lambda,
+                    epsilon,
+                    R=R,
+                    margin=margin,
+                    reduction="max").item())
 
         test_fun(torch.tensor([[0, 0]], dtype=self.dtype))
         test_fun(torch.tensor([[0, 0], [0, 1]], dtype=self.dtype))
@@ -1895,9 +1904,22 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     R=R,
                     margin=margin)
                 loss_batch_expected = torch.mean(torch.cat(loss_expected))
-
                 self.assertAlmostEqual(loss_batch.item(),
                                        loss_batch_expected.item())
+
+                loss_max_batch = dut.lyapunov_derivative_loss_at_samples(
+                    V_lambda,
+                    epsilon,
+                    torch.stack(x_samples),
+                    x_equilibrium,
+                    eps_type,
+                    R=R,
+                    margin=margin,
+                    reduction="max")
+                loss_max_batch_expected = torch.max(torch.cat(loss_expected))
+                self.assertAlmostEqual(loss_max_batch.item(),
+                                       loss_max_batch_expected.item())
+
                 relu.zero_grad()
                 loss_batch.backward()
                 grad = [p.grad.data.clone() for p in relu.parameters()]
