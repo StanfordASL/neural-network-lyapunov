@@ -791,6 +791,86 @@ class TestGurobiTorchMIP(unittest.TestCase):
         check_binary_bounds(torch.tensor([0, 1], dtype=dtype),
                             torch.tensor([0, 1], dtype=dtype), [0, 1], [0, 1])
 
+    def test_add_mixed_integer_linear_constraints5(self):
+        # Test adding bounds on the input variables.
+        dtype = torch.float64
+
+        def check_input_bounds(input_lo, input_up, lo_expected, up_expected):
+            mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+            mip_cnstr_return.input_lo = input_lo
+            mip_cnstr_return.input_up = input_up
+            mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+            x = mip.addVars(len(lo_expected), lb=-2, ub=3)
+            self.assertEqual(len(mip.Ain_r_row), 4)
+            self.assertEqual(len(mip.Ain_r_col), 4)
+            self.assertEqual(len(mip.Ain_r_val), 4)
+            self.assertEqual(len(mip.rhs_in), 4)
+            slack, binary = mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, x, None, None, "binary", "ineq", "eq", "out")
+            self.assertEqual(len(slack), 0)
+            self.assertEqual(len(binary), 0)
+            for i in range(len(x)):
+                self.assertEqual(x[i].lb, lo_expected[i])
+                self.assertEqual(x[i].ub, up_expected[i])
+            self.assertEqual(len(mip.Ain_r_row), 4)
+            self.assertEqual(len(mip.Ain_r_col), 4)
+            self.assertEqual(len(mip.Ain_r_val), 4)
+            self.assertEqual(len(mip.rhs_in), 4)
+            self.assertEqual(len(mip.Aeq_r_row), 0)
+            self.assertEqual(len(mip.Aeq_r_col), 0)
+            self.assertEqual(len(mip.Aeq_r_val), 0)
+            self.assertEqual(len(mip.Ain_zeta_row), 0)
+            self.assertEqual(len(mip.Ain_zeta_col), 0)
+            self.assertEqual(len(mip.Ain_zeta_val), 0)
+            self.assertEqual(len(mip.Aeq_zeta_row), 0)
+            self.assertEqual(len(mip.Aeq_zeta_col), 0)
+            self.assertEqual(len(mip.Aeq_zeta_val), 0)
+
+        check_input_bounds(None, torch.tensor([0, 5], dtype=dtype), [-2, -2],
+                           [0, 3])
+        check_input_bounds(torch.tensor([-4, 1], dtype=dtype), None, [-2, 1],
+                           [3, 3])
+        check_input_bounds(torch.tensor([-4, -1], dtype=dtype),
+                           torch.tensor([1, 6], dtype=dtype), [-2, -1], [1, 3])
+
+    def test_add_mixed_integer_linear_constraints6(self):
+        # Test adding bounds on the slack variables.
+        dtype = torch.float64
+
+        def check_slack_bounds(slack_lo, slack_up, lo_expected, up_expected):
+            mip_cnstr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+            mip_cnstr_return.slack_lo = slack_lo
+            mip_cnstr_return.slack_up = slack_up
+            mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+            slack, binary = mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, [], None, "slack", "binary", "ineq", "eq",
+                "out")
+            self.assertEqual(len(slack), len(lo_expected))
+            self.assertEqual(len(binary), 0)
+            for i in range(len(slack)):
+                self.assertEqual(slack[i].lb, lo_expected[i])
+                self.assertEqual(slack[i].ub, up_expected[i])
+            self.assertEqual(len(mip.Ain_r_row), 0)
+            self.assertEqual(len(mip.Ain_r_col), 0)
+            self.assertEqual(len(mip.Ain_r_val), 0)
+            self.assertEqual(len(mip.rhs_in), 0)
+            self.assertEqual(len(mip.Aeq_r_row), 0)
+            self.assertEqual(len(mip.Aeq_r_col), 0)
+            self.assertEqual(len(mip.Aeq_r_val), 0)
+            self.assertEqual(len(mip.Ain_zeta_row), 0)
+            self.assertEqual(len(mip.Ain_zeta_col), 0)
+            self.assertEqual(len(mip.Ain_zeta_val), 0)
+            self.assertEqual(len(mip.Aeq_zeta_row), 0)
+            self.assertEqual(len(mip.Aeq_zeta_col), 0)
+            self.assertEqual(len(mip.Aeq_zeta_val), 0)
+
+        check_slack_bounds(None, torch.tensor([0, 5], dtype=dtype),
+                           [-np.inf, -np.inf], [0, 5])
+        check_slack_bounds(torch.tensor([-4, 1], dtype=dtype), None, [-4, 1],
+                           [np.inf, np.inf])
+        check_slack_bounds(torch.tensor([-4, -1], dtype=dtype),
+                           torch.tensor([1, 6], dtype=dtype), [-4, -1], [1, 6])
+
 
 class TestGurobiTorchMILP(unittest.TestCase):
     def test_setObjective(self):
