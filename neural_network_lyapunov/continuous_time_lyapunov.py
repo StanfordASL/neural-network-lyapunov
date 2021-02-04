@@ -827,7 +827,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                             R,
                                             margin=0.,
                                             xbar_indices=None,
-                                            xhat_indices=None):
+                                            xhat_indices=None,
+                                            reduction="mean"):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -878,7 +879,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             x_equilibrium,
             eps_type,
             R=R,
-            margin=margin)
+            margin=margin,
+            reduction=reduction)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -892,7 +894,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             R,
             margin=0.,
             xbar_indices=None,
-            xhat_indices=None):
+            xhat_indices=None,
+            reduction="mean"):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -924,6 +927,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (xdot_samples.shape[1] == self.system.x_dim)
         assert (state_samples.shape[0] == xdot_samples.shape[0])
         assert (isinstance(eps_type, lyapunov.ConvergenceEps))
+        assert (reduction == "mean")
         if R is not None and torch.norm(
                 R - torch.eye(self.system.x_dim, dtype=R.dtype)).item() > 0:
             raise Exception("R != None has not been implemented yet.")

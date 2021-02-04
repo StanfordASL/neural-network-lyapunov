@@ -168,6 +168,10 @@ class TrainLyapunovReLU:
         # Lyapunov conditions to the training set.
         self.add_adversarial_state_only = True
 
+        # Take the mean of the loss across all samples. Could use the maximal
+        # loss across all samples if sample_loss_reduction="max".
+        self.sample_loss_reduction = "mean"
+
     def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
                     lyapunov_positivity_sample_cost_weight,
@@ -198,7 +202,8 @@ class TrainLyapunovReLU:
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     margin=self.lyapunov_positivity_sample_margin,
                     xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices)
+                    xhat_indices=self.xhat_indices,
+                    reduction=self.sample_loss_reduction)
         else:
             positivity_sample_loss = torch.tensor(0., dtype=dtype)
         if lyapunov_derivative_sample_cost_weight != 0 and\
@@ -212,7 +217,8 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     margin=self.lyapunov_derivative_sample_margin,
                     xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices)
+                    xhat_indices=self.xhat_indices,
+                    reduction=self.sample_loss_reduction)
         else:
             derivative_sample_loss = torch.tensor(0., dtype=dtype)
 
@@ -732,6 +738,21 @@ class TrainLyapunovReLU:
         Give the samples, divide the samples to small batches, and run several
         epochs to reduce the loss on the sampled states.
         """
+        derivative_state_samples_next_all =\
+            self.lyapunov_hybrid_system.system.step_forward(
+                derivative_state_samples_all)
+        positivity_sample_epoch_loss, derivative_sample_epoch_loss = \
+            self.sample_loss(
+                positivity_state_samples_all,
+                derivative_state_samples_all,
+                derivative_state_samples_next_all,
+                self.lyapunov_positivity_sample_cost_weight,
+                self.lyapunov_derivative_sample_cost_weight)
+        if self.output_flag:
+            print("Before training, positivity_sample_loss " +
+                  f"{positivity_sample_epoch_loss.item()}, " +
+                  "derivative_sample_loss " +
+                  f"{derivative_sample_epoch_loss.item()}")
         positivity_dataset = torch.utils.data.TensorDataset(
             positivity_state_samples_all)
         derivative_dataset = torch.utils.data.TensorDataset(
