@@ -298,7 +298,7 @@ class ReLUFreePattern:
                 ) if linear_layer.bias is None else linear_layer.bias[j]
                 Ain_linear_input, Ain_neuron_output, Ain_neuron_binary,\
                     rhs_in, Aeq_linear_input, Aeq_neuron_output,\
-                    Aeq_neuron_binary, rhs_eq, _, _ =\
+                    Aeq_neuron_binary, rhs_eq, _, _, _, _ =\
                     _add_constraint_by_neuron(
                         linear_layer.weight[j], bij, relu_layer,
                         torch.tensor(previous_neuron_input_lo[
@@ -519,8 +519,8 @@ class ReLUFreePattern:
             z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
         for layer_count in range(len(self.relu_unit_index)):
             Ain_z_curr, Ain_z_next, Ain_binary_layer, rhs_in_layer,\
-                Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer, _, _ =\
-                _add_constraint_by_layer(
+                Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer, _, _,\
+                _, _ = _add_constraint_by_layer(
                     self.model[2*layer_count], self.model[2*layer_count+1],
                     z_pre_relu_lo[self.relu_unit_index[layer_count]],
                     z_pre_relu_up[self.relu_unit_index[layer_count]])
@@ -588,7 +588,14 @@ class ReLUFreePattern:
                     (self.model[-1].out_features, ), dtype=self.dtype)
             else:
                 mip_constr_return.Cout = self.model[-1].bias.clone()
-
+        binary_lo = torch.zeros((self.num_relu_units,), dtype=self.dtype)
+        binary_up = torch.ones((self.num_relu_units,), dtype=self.dtype)
+        # If the input to the relu is always >= 0, then the relu will always
+        # be active.
+        binary_lo[z_pre_relu_lo >= 0] = 1.
+        # If the input to the relu is always <= 0, then the relu will always
+        # be inactive.
+        binary_up[z_pre_relu_up <= 0] = 0.
         mip_constr_return.Ain_input = Ain_input[:ineq_constr_count]
         mip_constr_return.Ain_slack = Ain_slack[:ineq_constr_count]
         mip_constr_return.Ain_binary = Ain_binary[:ineq_constr_count]
@@ -597,6 +604,8 @@ class ReLUFreePattern:
         mip_constr_return.Aeq_slack = Aeq_slack[:eq_constr_count]
         mip_constr_return.Aeq_binary = Aeq_binary[:eq_constr_count]
         mip_constr_return.rhs_eq = rhs_eq[:eq_constr_count]
+        mip_constr_return.binary_lo = binary_lo
+        mip_constr_return.binary_up = binary_up
         return (mip_constr_return, z_pre_relu_lo, z_pre_relu_up,
                 z_post_relu_lo, z_post_relu_up, output_lo, output_up)
 
@@ -994,6 +1003,8 @@ def _add_constraint_by_neuron(
         Aeq_neuron_output = torch.empty((0, 1), dtype=dtype)
         Aeq_binary = torch.empty((0, 1), dtype=dtype)
         rhs_eq = torch.empty((0, ), dtype=dtype)
+        binary_lo = 0
+        binary_up = 1
     else:
         # The (leaky) ReLU is always active, or always inactive. If
         # the lower bound output_lo[j] >= 0, then it is always active,
@@ -1004,18 +1015,17 @@ def _add_constraint_by_neuron(
         # zᵢ₊₁(j) = c*((Wᵢzᵢ)(j) + bᵢ(j)) and βᵢ(j) = 0
         if neuron_input_lo >= 0:
             slope = 1.
-            binary_value = 1
+            binary_lo = 1
+            binary_up = 1
         elif neuron_input_up <= 0:
             slope = relu_layer.negative_slope if isinstance(
                 relu_layer, nn.LeakyReLU) else 0.
-            binary_value = 0.
-        Aeq_linear_input = torch.cat((-slope * Wij.reshape(
-            (1, -1)), torch.zeros((1, Wij.numel()), dtype=dtype)),
-                                     dim=0)
-        Aeq_neuron_output = torch.tensor([[1.], [0]], dtype=dtype)
-        Aeq_binary = torch.tensor([[0.], [1.]], dtype=dtype)
-        rhs_eq = torch.stack(
-            (slope * bij, torch.tensor(binary_value, dtype=dtype)))
+            binary_lo = 0
+            binary_up = 0
+        Aeq_linear_input = -slope * Wij.reshape((1, -1))
+        Aeq_neuron_output = torch.tensor([[1.]], dtype=dtype)
+        Aeq_binary = torch.tensor([[0.]], dtype=dtype)
+        rhs_eq = slope * bij.reshape((1,))
         Ain_linear_input = torch.empty((0, Wij.numel()), dtype=dtype)
         Ain_neuron_output = torch.empty((0, 1), dtype=dtype)
         Ain_binary = torch.empty((0, 1), dtype=dtype)
@@ -1024,7 +1034,7 @@ def _add_constraint_by_neuron(
         relu_layer, neuron_input_lo, neuron_input_up)
     return Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
         Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
-        neuron_output_lo, neuron_output_up
+        neuron_output_lo, neuron_output_up, binary_lo, binary_up
 
 
 def _add_constraint_by_layer(linear_layer, relu_layer,
@@ -1057,10 +1067,13 @@ def _add_constraint_by_layer(linear_layer, relu_layer,
     z_next_up = []
     bias = linear_layer.bias if linear_layer.bias is not None else \
         torch.zeros((linear_layer.out_features,), dtype=dtype)
+    binary_lo = torch.zeros((linear_layer.out_features,), dtype=dtype)
+    binary_up = torch.ones((linear_layer.out_features,), dtype=dtype)
     for j in range(linear_layer.out_features):
         Ain_linear_input, Ain_neuron_output, Ain_binary_j, rhs_in_j,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary_j, rhs_eq_j,\
-            neuron_output_lo, neuron_output_up = _add_constraint_by_neuron(
+            neuron_output_lo, neuron_output_up, binary_lo[j], binary_up[j] =\
+            _add_constraint_by_neuron(
                 linear_layer.weight[j], bias[j], relu_layer,
                 linear_output_lo[j], linear_output_up[j])
         Ain_z_curr.append(Ain_linear_input)
@@ -1089,4 +1102,4 @@ def _add_constraint_by_layer(linear_layer, relu_layer,
         torch.cat(Ain_binary, dim=0), torch.cat(rhs_in, dim=0),\
         torch.cat(Aeq_z_curr, dim=0), torch.cat(Aeq_z_next, dim=0),\
         torch.cat(Aeq_binary, dim=0), torch.cat(rhs_eq, dim=0),\
-        torch.stack(z_next_lo), torch.stack(z_next_up)
+        torch.stack(z_next_lo), torch.stack(z_next_up), binary_lo, binary_up
