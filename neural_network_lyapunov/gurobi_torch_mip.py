@@ -36,6 +36,14 @@ class MixedIntegerConstraintsReturn:
         self.Aeq_slack = None
         self.Aeq_binary = None
         self.rhs_eq = None
+        # Lower and upper bounds on the variables. We will use these bounds to
+        # modify the variable bound in v.lb and v.ub, where v is a gurobi
+        # variable object. Note that the inequality (and equality) constraints
+        # should still include the constraints lb <= var <= ub.
+        self.input_lo = None
+        self.input_up = None
+        self.slack_lo = None
+        self.slack_up = None
         self.binary_up = None
         self.binary_lo = None
 
@@ -356,18 +364,45 @@ class GurobiTorchMIP:
         """
         # Do some check
         assert (isinstance(mip_cnstr_return, MixedIntegerConstraintsReturn))
+
+        def set_var_bound(variables, var_lo, var_up):
+            if var_lo is not None:
+                assert (isinstance(var_lo, torch.Tensor))
+                assert (var_lo.shape == (len(variables), ))
+                for i in range(len(variables)):
+                    if variables[i].lb < var_lo[i].item():
+                        variables[i].lb = var_lo[i].item()
+            if var_up is not None:
+                assert (isinstance(var_up, torch.Tensor))
+                assert (var_up.shape == (len(variables), ))
+                for i in range(len(variables)):
+                    if variables[i].ub > var_up[i].item():
+                        variables[i].ub = var_up[i].item()
+            if var_lo is not None or var_up is not None:
+                self.gurobi_model.update()
+
+        # Enforce the lower and upper bound on the input variable if it exists.
+        set_var_bound(input_vars, mip_cnstr_return.input_lo,
+                      mip_cnstr_return.input_up)
+
         # First add the slack variables
         slack_size = 0
         if mip_cnstr_return.Ain_slack is not None:
             slack_size = mip_cnstr_return.Ain_slack.shape[1]
         elif mip_cnstr_return.Aeq_slack is not None:
             slack_size = mip_cnstr_return.Aeq_slack.shape[1]
+        elif mip_cnstr_return.slack_lo is not None:
+            slack_size = mip_cnstr_return.slack_lo.numel()
+        elif mip_cnstr_return.slack_up is not None:
+            slack_size = mip_cnstr_return.slack_up.numel()
         if slack_size != 0:
             assert (isinstance(slack_var_name, str))
             slack = self.addVars(slack_size,
                                  lb=-gurobipy.GRB.INFINITY,
                                  vtype=gurobipy.GRB.CONTINUOUS,
                                  name=slack_var_name)
+            set_var_bound(slack, mip_cnstr_return.slack_lo,
+                          mip_cnstr_return.slack_up)
         else:
             slack = []
         # Now add the binary variables
@@ -382,24 +417,12 @@ class GurobiTorchMIP:
             binary_size = mip_cnstr_return.binary_up.numel()
         if binary_size != 0:
             assert (isinstance(binary_var_name, str))
-            if mip_cnstr_return.binary_lo is None and\
-                    mip_cnstr_return.binary_up is None:
-                binary = self.addVars(binary_size,
-                                      lb=-gurobipy.GRB.INFINITY,
-                                      vtype=gurobipy.GRB.BINARY,
-                                      name=binary_var_name)
-            else:
-                binary_lo = mip_cnstr_return.binary_lo if\
-                    mip_cnstr_return.binary_lo is not None else\
-                    -gurobipy.GRB.INFINITY
-                binary_up = mip_cnstr_return.binary_up if\
-                    mip_cnstr_return.binary_up is not None else\
-                    gurobipy.GRB.INFINITY
-                binary = self.addVars(binary_size,
-                                      lb=binary_lo,
-                                      ub=binary_up,
-                                      vtype=gurobipy.GRB.BINARY,
-                                      name=binary_var_name)
+            binary = self.addVars(binary_size,
+                                  lb=-gurobipy.GRB.INFINITY,
+                                  vtype=gurobipy.GRB.BINARY,
+                                  name=binary_var_name)
+            set_var_bound(binary, mip_cnstr_return.binary_lo,
+                          mip_cnstr_return.binary_up)
         else:
             binary = []
 
