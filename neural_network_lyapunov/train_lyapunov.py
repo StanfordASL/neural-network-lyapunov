@@ -731,6 +731,35 @@ class TrainLyapunovReLU:
                         attr[1]):
                     wandb.config.update({attr[0]: f"{attr[1]}"})
 
+    def _get_current_training_params(self):
+        """
+        Return the parameters (weights/bias etc) of the current model.
+        """
+        params = {}
+        params["lyap_relu_params"] = copy.deepcopy(
+            self.lyapunov_hybrid_system.lyapunov_relu.state_dict())
+        if not self.R_options.fixed_R:
+            params["R_params"] = self.R_options._variables.clone()
+        if isinstance(self.lyapunov_hybrid_system.system,
+                      feedback_system.FeedbackSystem):
+            params["controller_params"] = copy.deepcopy(
+                self.lyapunov_hybrid_system.system.controller_network.
+                state_dict())
+        return params
+
+    def _set_training_params(self, params):
+        """
+        @params is returned from _get_current_training_params()
+        """
+        self.lyapunov_hybrid_system.lyapunov_relu.load_state_dict(
+            params["lyap_relu_params"])
+        if not self.R_options.fixed_R:
+            self.R_options._variables = params["R_params"].clone()
+        if isinstance(self.lyapunov_hybrid_system.system,
+                      feedback_system.FeedbackSystem):
+            self.lyapunov_hybrid_system.system.controller_network.\
+                load_state_dict(params["controller_params"])
+
     def _batch_descent_on_samples(self, positivity_state_samples_all,
                                   derivative_state_samples_all, optimizer,
                                   options: AdversarialTrainingOptions):
@@ -741,18 +770,21 @@ class TrainLyapunovReLU:
         derivative_state_samples_next_all =\
             self.lyapunov_hybrid_system.system.step_forward(
                 derivative_state_samples_all)
-        positivity_sample_epoch_loss, derivative_sample_epoch_loss = \
+        positivity_sample_initial_loss, derivative_sample_initial_loss = \
             self.sample_loss(
                 positivity_state_samples_all,
                 derivative_state_samples_all,
                 derivative_state_samples_next_all,
                 self.lyapunov_positivity_sample_cost_weight,
                 self.lyapunov_derivative_sample_cost_weight)
+        best_loss = positivity_sample_initial_loss +\
+            derivative_sample_initial_loss
+        best_training_params = self._get_current_training_params()
         if self.output_flag:
             print("Before training, positivity_sample_loss " +
-                  f"{positivity_sample_epoch_loss.item()}, " +
+                  f"{positivity_sample_initial_loss.item()}, " +
                   "derivative_sample_loss " +
-                  f"{derivative_sample_epoch_loss.item()}")
+                  f"{derivative_sample_initial_loss.item()}")
         positivity_dataset = torch.utils.data.TensorDataset(
             positivity_state_samples_all)
         derivative_dataset = torch.utils.data.TensorDataset(
@@ -810,6 +842,15 @@ class TrainLyapunovReLU:
             if positivity_sample_epoch_loss == 0. and\
                     derivative_sample_epoch_loss == 0.:
                 return
+            if positivity_sample_epoch_loss + derivative_sample_epoch_loss <\
+                    best_loss:
+                best_training_params = self._get_current_training_params()
+                best_loss = positivity_sample_epoch_loss +\
+                    derivative_sample_epoch_loss
+        # End of training, set the training parameters to the one
+        # corresponding to the best loss
+        self._set_training_params(best_training_params)
+        pass
 
     def train_adversarial(self, positivity_state_samples_init: torch.Tensor,
                           derivative_state_samples_init: torch.Tensor,
