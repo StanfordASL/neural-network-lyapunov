@@ -405,7 +405,9 @@ class LyapunovHybridLinearSystem:
         @param margin The margin used in the hinge loss.
         @param xbar_indices x̅ = x[xbar_indices]
         @param reduction If reduction="mean", we use the mean loss across all
-        samples, if reduction="max", we use the max loss among all samples.
+        samples, if reduction="max", we use the max loss among all samples, if
+        reduction="4norm", we use the 4-norm on the loss vector for all
+        samples.
         """
         assert (isinstance(state_samples, torch.Tensor))
         assert (state_samples.shape[1] == self.system.x_dim)
@@ -413,7 +415,7 @@ class LyapunovHybridLinearSystem:
         assert (x_equilibrium.shape == (self.system.x_dim, ))
         assert (isinstance(V_lambda, float))
         assert (isinstance(margin, float))
-        assert (reduction == "mean" or reduction == "max")
+        assert (reduction in {"mean", "max", "4norm"})
         xbar_indices = compute_xhat._get_xbar_indices(self.system.x_dim,
                                                       xbar_indices)
         R = _get_R(R, len(xbar_indices), state_samples.device)
@@ -435,6 +437,10 @@ class LyapunovHybridLinearSystem:
             return torch.max(
                 torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
                     loss, torch.tensor(-1.).to(state_samples.device)))
+        elif reduction == "4norm":
+            return torch.norm(
+                torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
+                    loss, torch.tensor(-1.).to(state_samples.device)), p=4)
 
     def _add_relu_xhat_constraint(self, mip, x_var, x_equilibrium,
                                   xhat_indices: list):
@@ -930,7 +936,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         assert (state_next.shape[1] == self.system.x_dim)
         assert (state_samples.shape[0] == state_next.shape[0])
         assert (isinstance(eps_type, ConvergenceEps))
-        assert (reduction == "mean" or reduction == "max")
+        assert (reduction in {"mean", "max", "4norm"})
         R = _get_R(
             R,
             len(compute_xhat._get_xbar_indices(self.system.x_dim,
@@ -949,49 +955,34 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                  xbar_indices=xbar_indices,
                                  xhat_indices=xhat_indices)
         if eps_type == ConvergenceEps.ExpLower:
-            if reduction == "mean":
-                return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                    -(v2 - v1 + epsilon * v1),
-                    torch.tensor(-1.).to(state_samples.device))
-            elif reduction == "max":
-                return torch.max(
-                    torch.nn.HingeEmbeddingLoss(margin=margin,
-                                                reduction="none")(
-                                                    -(v2 - v1 + epsilon * v1),
-                                                    torch.tensor(-1.).to(
-                                                        state_samples.device)))
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")(-(v2 - v1 + epsilon * v1),
+                                  torch.tensor(-1.).to(state_samples.device))
         elif eps_type == ConvergenceEps.ExpUpper:
-            if reduction == "mean":
-                return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                    (v2 - v1 + epsilon * v1),
-                    torch.tensor(-1.).to(state_samples.device))
-            elif reduction == "max":
-                return torch.max(
-                    torch.nn.HingeEmbeddingLoss(margin=margin,
-                                                reduction="none")(
-                                                    (v2 - v1 + epsilon * v1),
-                                                    torch.tensor(-1.).to(
-                                                        state_samples.device)))
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")((v2 - v1 + epsilon * v1),
+                                  torch.tensor(-1.).to(state_samples.device))
         elif eps_type == ConvergenceEps.Asymp:
             xbar_indices = compute_xhat._get_xbar_indices(
                 self.system.x_dim, xbar_indices)
-            sample_loss = -(v2 - v1 + epsilon *
-                            torch.norm(R @ (state_samples[:, xbar_indices] -
-                                            x_equilibrium[xbar_indices]).T,
-                                       p=1,
-                                       dim=0))
-            if reduction == "mean":
-                return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                    sample_loss, torch.tensor(-1.).to(state_samples.device))
-            elif reduction == "max":
-                return torch.max(
-                    torch.nn.HingeEmbeddingLoss(margin=margin,
-                                                reduction="none")(
-                                                    sample_loss,
-                                                    torch.tensor(-1.).to(
-                                                        state_samples.device)))
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin, reduction="none")(
+                    -(v2 - v1 + epsilon *
+                      torch.norm(R @ (state_samples[:, xbar_indices] -
+                                      x_equilibrium[xbar_indices]).T,
+                                 p=1,
+                                 dim=0)),
+                    torch.tensor(-1.).to(state_samples.device))
         else:
             raise Exception("Unknown eps_type")
+        if reduction == "mean":
+            return torch.mean(hinge_loss_all)
+        elif reduction == "max":
+            return torch.max(hinge_loss_all)
+        elif reduction == "4norm":
+            return torch.norm(hinge_loss_all, p=4)
 
     def compute_region_of_attraction(self,
                                      V_lambda,

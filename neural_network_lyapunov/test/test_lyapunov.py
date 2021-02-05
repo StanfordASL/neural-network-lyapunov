@@ -719,6 +719,17 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                     margin=margin,
                     reduction="max").item())
 
+            self.assertAlmostEqual(
+                torch.norm(losses, p=4).item(),
+                dut.lyapunov_positivity_loss_at_samples(
+                    x_equilibrium,
+                    x_samples,
+                    V_lambda,
+                    epsilon,
+                    R=R,
+                    margin=margin,
+                    reduction="4norm").item())
+
         test_fun(torch.tensor([[0, 0]], dtype=self.dtype))
         test_fun(torch.tensor([[0, 0], [0, 1]], dtype=self.dtype))
         test_fun(
@@ -1919,6 +1930,19 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 loss_max_batch_expected = torch.max(torch.cat(loss_expected))
                 self.assertAlmostEqual(loss_max_batch.item(),
                                        loss_max_batch_expected.item())
+                loss_4norm_batch = dut.lyapunov_derivative_loss_at_samples(
+                    V_lambda,
+                    epsilon,
+                    torch.stack(x_samples),
+                    x_equilibrium,
+                    eps_type,
+                    R=R,
+                    margin=margin,
+                    reduction="4norm")
+                loss_4norm_batch_expected = torch.norm(
+                    torch.cat(loss_expected), p=4)
+                self.assertAlmostEqual(loss_4norm_batch.item(),
+                                       loss_4norm_batch_expected.item())
 
                 relu.zero_grad()
                 loss_batch.backward()
