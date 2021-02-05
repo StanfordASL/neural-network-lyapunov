@@ -15,7 +15,7 @@ class TestAddConstraintByNeuron(unittest.TestCase):
                         neuron_input_up):
         Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
-            neuron_output_lo, neuron_output_up = \
+            neuron_output_lo, neuron_output_up, binary_lo, binary_up = \
             relu_to_optimization._add_constraint_by_neuron(
                 Wij, bij, relu_layer, neuron_input_lo, neuron_input_up)
 
@@ -35,7 +35,10 @@ class TestAddConstraintByNeuron(unittest.TestCase):
             linear_input = model.addVars(Wij.numel(),
                                          lb=-gurobipy.GRB.INFINITY)
             neuron_output = model.addVars(1, lb=-gurobipy.GRB.INFINITY)
-            binary = model.addVars(1, vtype=gurobipy.GRB.BINARY)
+            binary = model.addVars(1,
+                                   lb=binary_lo,
+                                   ub=binary_up,
+                                   vtype=gurobipy.GRB.BINARY)
             model.addMConstrs(
                 [Ain_linear_input, Ain_neuron_output, Ain_binary],
                 [linear_input, neuron_output, binary],
@@ -107,7 +110,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
         linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
             linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
-            Aeq_binary, rhs_eq, z_next_lo, z_next_up = \
+            Aeq_binary, rhs_eq, z_next_lo, z_next_up, binary_lo, binary_up = \
             relu_to_optimization._add_constraint_by_layer(
                 linear_layer, relu_layer, linear_output_lo, linear_output_up)
         z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
@@ -130,6 +133,8 @@ class TestAddConstraintByLayer(unittest.TestCase):
             z_next = model.addVars(linear_layer.out_features,
                                    lb=-gurobipy.GRB.INFINITY)
             beta = model.addVars(linear_layer.out_features,
+                                 lb=binary_lo,
+                                 ub=binary_up,
                                  vtype=gurobipy.GRB.BINARY)
             model.addMConstrs(
                 [torch.eye(linear_layer.in_features, dtype=self.dtype)],
@@ -185,7 +190,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
         linear_output_lo, linear_output_up = mip_utils.propagate_bounds(
             linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
-            Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
+            Aeq_binary, rhs_eq, z_next_lo, z_next_up, binary_lo, binary_up =\
             relu_to_optimization._add_constraint_by_layer(
                 linear_layer, relu_layer, linear_output_lo, linear_output_up)
 
@@ -213,7 +218,8 @@ class TestAddConstraintByLayer(unittest.TestCase):
                         linear_layer, torch.from_numpy(input_lo_np),
                         torch.from_numpy(input_up_np))
                 Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr,\
-                    Aeq_z_next, Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
+                    Aeq_z_next, Aeq_binary, rhs_eq, z_next_lo, z_next_up,\
+                    binary_lo, binary_up =\
                     relu_to_optimization._add_constraint_by_layer(
                         linear_layer, relu_layer, linear_output_lo,
                         linear_output_up)

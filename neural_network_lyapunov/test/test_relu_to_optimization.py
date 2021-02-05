@@ -297,8 +297,7 @@ class TestReLU(unittest.TestCase):
             num_ineq = (relu_free_pattern.num_relu_units -
                         num_z_pre_relu_lo_positive -
                         num_z_pre_relu_up_negative) * 4 + 4
-            num_eq = (num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative)\
-                * 2
+            num_eq = num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative
             self.assertEqual(mip_constr_return.Ain_input.shape, (num_ineq, 2))
             self.assertEqual(mip_constr_return.Ain_slack.shape,
                              (num_ineq, relu_free_pattern.num_relu_units))
@@ -345,6 +344,10 @@ class TestReLU(unittest.TestCase):
                         mip_constr_return.Aeq_binary.detach().numpy() @
                         beta_var
                         == mip_constr_return.rhs_eq.squeeze().detach().numpy())
+                if mip_constr_return.binary_lo is not None:
+                    con.append(beta_var >= mip_constr_return.binary_lo)
+                if mip_constr_return.binary_up is not None:
+                    con.append(beta_var <= mip_constr_return.binary_up)
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
                 prob.solve(solver=cp.GUROBI)
