@@ -262,11 +262,11 @@ if __name__ == "__main__":
 
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
-    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
+    x_lo = torch.tensor([-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9],
                         dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([0, 0], dtype=dtype)
-    u_up = torch.tensor([17, 17], dtype=dtype)
+    u_up = torch.tensor([8, 8], dtype=dtype)
     if args.enable_wandb:
         train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
                                         x_lo, x_up, u_lo, u_up)
