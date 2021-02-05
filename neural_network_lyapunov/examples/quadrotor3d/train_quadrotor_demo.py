@@ -116,7 +116,7 @@ def train_lqr_control_approximator(controller_relu, x_equilibrium,
                                    u_equilibrium, x_lo, x_up, num_samples,
                                    lqr_K: torch.Tensor, num_epochs):
     x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
-    u_samples = (lqr_K @ (x_samples - x_equilibrium).T).T + u_equilibrium
+    u_samples = -(lqr_K @ (x_samples - x_equilibrium).T).T + u_equilibrium
     state_control_dataset = torch.utils.data.TensorDataset(
         x_samples, u_samples)
 
@@ -311,7 +311,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_convergence_tol = 1E-5
     dut.lyapunov_positivity_convergence_tol = 5E-6
     dut.max_iterations = args.max_iterations
-    dut.lyapunov_positivity_epsilon = 0.5
+    dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     dut.lyapunov_derivative_mip_params = {
