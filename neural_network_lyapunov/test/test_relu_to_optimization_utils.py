@@ -1,4 +1,5 @@
-import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.relu_to_optimization_utils as\
+    relu_to_optimization_utils
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -16,7 +17,7 @@ class TestAddConstraintByNeuron(unittest.TestCase):
         Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
             neuron_output_lo, neuron_output_up = \
-            relu_to_optimization._add_constraint_by_neuron(
+            relu_to_optimization_utils._add_constraint_by_neuron(
                 Wij, bij, relu_layer, neuron_input_lo, neuron_input_up)
 
         neuron_output_lo_expected, neuron_output_up_expected =\
@@ -108,7 +109,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
             linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
             Aeq_binary, rhs_eq, z_next_lo, z_next_up = \
-            relu_to_optimization._add_constraint_by_layer(
+            relu_to_optimization_utils._add_constraint_by_layer(
                 linear_layer, relu_layer, linear_output_lo, linear_output_up)
         z_next_lo_expected, z_next_up_expected = mip_utils.propagate_bounds(
             relu_layer, linear_output_lo, linear_output_up)
@@ -186,7 +187,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
             linear_layer, z_curr_lo, z_curr_up)
         Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr, Aeq_z_next,\
             Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
-            relu_to_optimization._add_constraint_by_layer(
+            relu_to_optimization_utils._add_constraint_by_layer(
                 linear_layer, relu_layer, linear_output_lo, linear_output_up)
 
         (Ain_z_curr.sum() + Ain_z_next.sum() + Ain_binary.sum() +
@@ -214,7 +215,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
                         torch.from_numpy(input_up_np))
                 Ain_z_curr, Ain_z_next, Ain_binary, rhs_in, Aeq_z_curr,\
                     Aeq_z_next, Aeq_binary, rhs_eq, z_next_lo, z_next_up =\
-                    relu_to_optimization._add_constraint_by_layer(
+                    relu_to_optimization_utils._add_constraint_by_layer(
                         linear_layer, relu_layer, linear_output_lo,
                         linear_output_up)
 
@@ -317,6 +318,88 @@ class TestAddConstraintByLayer(unittest.TestCase):
                              z_curr_up)
         self.constraint_gradient_test(self.linear_no_bias, self.leaky_relu,
                                       z_curr_lo, z_curr_up)
+
+
+class TestAddLinearRelaxationByLayer(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+
+    def add_linear_relaxation_by_layer_tester(self, linear_layer, relu_layer,
+                                              linear_input_lo,
+                                              linear_input_up):
+        relu_input_lo, relu_input_up = mip_utils.propagate_bounds(
+            linear_layer, linear_input_lo, linear_input_up)
+        prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        linear_input_var = prog.addVars(linear_layer.in_features,
+                                        lb=-gurobipy.GRB.INFINITY)
+        relu_output_var, binary_relax = \
+            relu_to_optimization_utils._add_linear_relaxation_by_layer(
+                prog, linear_layer, relu_layer, linear_input_var,
+                relu_input_lo, relu_input_up)
+        self.assertEqual(len(relu_output_var), linear_layer.out_features)
+        self.assertEqual(len(binary_relax), linear_layer.out_features)
+        for i in range(linear_layer.out_features):
+            self.assertEqual(relu_output_var[i].vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(binary_relax[i].vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(binary_relax[i].lb, 0.)
+            self.assertEqual(binary_relax[i].ub, 1.)
+        # Now take a sampled value of the input, compute the output. Make sure
+        # the output falls within the convex hull of the ReLU function.
+        input_samples = utils.uniform_sample_in_box(linear_input_lo,
+                                                    linear_input_up, 100)
+        for i in range(input_samples.shape[0]):
+            for j in range(linear_layer.in_features):
+                linear_input_var[j].lb = input_samples[i][j].item()
+                linear_input_var[j].ub = input_samples[i][j].item()
+                prog.gurobi_model.update()
+            prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            prog.gurobi_model.optimize()
+            relu_output_sol = np.array([v.x for v in relu_output_var])
+            relu_input = linear_layer(input_samples[i])
+            relu_actual_output = relu_layer(relu_input)
+            for j in range(linear_layer.out_features):
+                # If the relu input lower and upper are both >= 0 or both <= 0,
+                # then the solution to relu_output_var is the same as the
+                # actual output of the ReLU layer.
+                if relu_input_up[j] <= 0 or relu_input_lo[j] >= 0:
+                    self.assertAlmostEqual(relu_output_sol[j],
+                                           relu_actual_output[j].item())
+                else:
+                    # The set of LP solution is the intersection of the
+                    # line output=relu_actual_output, and the triangle with
+                    # three vertices (0, 0), (relu_input_up, relu_input_up),
+                    # (relu_input_lo, relu(relu_input_low))
+                    self.assertGreaterEqual(
+                        relu_output_sol[j],
+                        relu_actual_output[j].item() - 1E-6)
+                    self.assertLessEqual(
+                        relu_output_sol[j],
+                        ((relu_input_up[j] - relu_layer(relu_input_lo[j])) /
+                         (relu_input_up[j] - relu_input_lo[j]) *
+                         (relu_input[j] - relu_input_lo[j]) +
+                         relu_layer(relu_input_lo[j])).item() + 1E-6)
+
+    def test(self):
+        linear_layer = torch.nn.Linear(2, 5)
+        linear_layer.weight.data = torch.tensor(
+            [[1, 0], [0, 1], [-1, -2], [2, 1], [1, -2]], dtype=self.dtype)
+        linear_layer.bias.data = torch.tensor([1, -2, -3, 4, 5],
+                                              dtype=self.dtype)
+        self.add_linear_relaxation_by_layer_tester(
+            linear_layer,
+            torch.nn.LeakyReLU(negative_slope=0.1),
+            linear_input_lo=torch.tensor([-2, -1], dtype=self.dtype),
+            linear_input_up=torch.tensor([2, 1], dtype=self.dtype))
+        self.add_linear_relaxation_by_layer_tester(
+            linear_layer,
+            torch.nn.LeakyReLU(negative_slope=0.1),
+            linear_input_lo=torch.tensor([2, 1], dtype=self.dtype),
+            linear_input_up=torch.tensor([3, 4], dtype=self.dtype))
+        self.add_linear_relaxation_by_layer_tester(
+            linear_layer,
+            torch.nn.LeakyReLU(negative_slope=0.1),
+            linear_input_lo=torch.tensor([-2, -3], dtype=self.dtype),
+            linear_input_up=torch.tensor([-1, -2], dtype=self.dtype))
 
 
 if __name__ == "__main__":
