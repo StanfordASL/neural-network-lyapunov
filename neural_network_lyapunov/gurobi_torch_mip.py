@@ -347,11 +347,16 @@ class GurobiTorchMIP:
                 self.rhs_in.extend([-b[i] for i in range(num_constraints)])
         return constr
 
-    def add_mixed_integer_linear_constraints(self, mip_cnstr_return,
-                                             input_vars, output_vars,
-                                             slack_var_name, binary_var_name,
-                                             ineq_constr_name, eq_constr_name,
-                                             out_constr_name):
+    def add_mixed_integer_linear_constraints(self,
+                                             mip_cnstr_return,
+                                             input_vars,
+                                             output_vars,
+                                             slack_var_name,
+                                             binary_var_name,
+                                             ineq_constr_name,
+                                             eq_constr_name,
+                                             out_constr_name,
+                                             lp_relaxation: bool = False):
         """
         Given a MixedIntegerConstraintsReturn
         @p mip_cnstr_return, add the mixed-integer linear
@@ -361,9 +366,15 @@ class GurobiTorchMIP:
         @param output_vars If output_vars is None, thn we do not add the output
         constraint output_vars = Aout_input * input + Aout_slack * slack +
         Aout_binary * binary + Cout, otherwise we add the constraint.
+        @param lp_relaxation. If set to True, then instead of adding binary
+        variables, the function adds continuous variables within range [0, 1],
+        and instead of adding the term Aeq_zeta_row/col/val and
+        Ain_zeta_row/col/val, we add the coefficients for these binary
+        relaxation variables to Aeq_r_row/col/val and Ain_r_row/col/val
         """
         # Do some check
         assert (isinstance(mip_cnstr_return, MixedIntegerConstraintsReturn))
+        assert (isinstance(lp_relaxation, bool))
 
         def set_var_bound(variables, var_lo, var_up):
             if var_lo is not None:
@@ -417,10 +428,17 @@ class GurobiTorchMIP:
             binary_size = mip_cnstr_return.binary_up.numel()
         if binary_size != 0:
             assert (isinstance(binary_var_name, str))
-            binary = self.addVars(binary_size,
-                                  lb=-gurobipy.GRB.INFINITY,
-                                  vtype=gurobipy.GRB.BINARY,
-                                  name=binary_var_name)
+            if lp_relaxation:
+                binary = self.addVars(binary_size,
+                                      lb=0.,
+                                      ub=1.,
+                                      vtype=gurobipy.GRB.CONTINUOUS,
+                                      name=binary_var_name)
+            else:
+                binary = self.addVars(binary_size,
+                                      lb=-gurobipy.GRB.INFINITY,
+                                      vtype=gurobipy.GRB.BINARY,
+                                      name=binary_var_name)
             set_var_bound(binary, mip_cnstr_return.binary_lo,
                           mip_cnstr_return.binary_up)
         else:
