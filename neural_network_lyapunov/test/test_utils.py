@@ -466,8 +466,16 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
                         lb=-gurobipy.GRB.INFINITY,
                         vtype=gurobipy.GRB.CONTINUOUS)[0]
         beta = utils.add_saturation_as_mixed_integer_constraint(
-            mip, x, y, lower_limit, upper_limit, input_lower_bound,
-            input_upper_bound)
+            mip,
+            x,
+            y,
+            lower_limit,
+            upper_limit,
+            input_lower_bound,
+            input_upper_bound,
+            lp_relaxation=False)
+        for v in beta:
+            self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Set input value
         mip.addLConstr([torch.tensor([1], dtype=torch.float64)], [[x]],
                        sense=gurobipy.GRB.EQUAL,
@@ -476,6 +484,29 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
         mip.gurobi_model.optimize()
         self.assertEqual(mip.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
         self.assertAlmostEqual(y.x, y_val)
+
+        # Now test the case when lp_relaxation=True.
+        lp = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
+        x_lp = lp.addVars(1,
+                          lb=-gurobipy.GRB.INFINITY,
+                          vtype=gurobipy.GRB.CONTINUOUS)[0]
+        y_lp = lp.addVars(1,
+                          lb=-gurobipy.GRB.INFINITY,
+                          vtype=gurobipy.GRB.CONTINUOUS)[0]
+        beta_relax = utils.add_saturation_as_mixed_integer_constraint(
+            lp,
+            x_lp,
+            y_lp,
+            lower_limit,
+            upper_limit,
+            input_lower_bound,
+            input_upper_bound,
+            lp_relaxation=True)
+        for v in beta_relax:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(v.lb, 0.)
+            self.assertEqual(v.ub, 1.)
+        self.assertEqual(len(lp.zeta), 0)
 
         return mip, beta
 

@@ -103,7 +103,8 @@ class FeedbackSystem:
 
     def _add_network_controller_mip_constraint(self, mip, x_var, u_var,
                                                controller_slack_var_name,
-                                               controller_binary_var_name):
+                                               controller_binary_var_name,
+                                               lp_relaxation: bool):
         assert (isinstance(self.controller_network, torch.nn.Sequential))
         controller_mip_cnstr, _, _, _, _, controller_network_output_lo,\
             controller_network_output_up = \
@@ -117,7 +118,7 @@ class FeedbackSystem:
             mip.add_mixed_integer_linear_constraints(
                 controller_mip_cnstr, x_var, None,
                 controller_slack_var_name, controller_binary_var_name,
-                "controller_ineq", "controller_eq", "")
+                "controller_ineq", "controller_eq", "", lp_relaxation)
         u_pre_sat = mip.addVars(self.forward_system.u_dim,
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
@@ -136,7 +137,9 @@ class FeedbackSystem:
                     mip, x_var, self.x_equilibrium,
                     self.controller_relu_free_pattern, self.xhat_indices,
                     torch.from_numpy(self.forward_system.x_lo_all),
-                    torch.from_numpy(self.forward_system.x_up_all))
+                    torch.from_numpy(self.forward_system.x_up_all),
+                    self.controller_network_bound_propagate_method,
+                    lp_relaxation)
             relu_xhat_coeff = [relu_xhat_Aout]
             relu_xhat_var = [relu_xhat_slack]
             relu_xhat_constant = relu_xhat_Cout.reshape((-1, ))
@@ -173,11 +176,12 @@ class FeedbackSystem:
             controller_relu_xhat_lo + self.u_equilibrium
         u_lower_bound, u_upper_bound = _add_input_saturation_constraint(
             mip, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
-            u_pre_sat_lo, u_pre_sat_up, self.dtype)
+            u_pre_sat_lo, u_pre_sat_up, self.dtype, lp_relaxation)
         return controller_slack, controller_binary, u_lower_bound,\
             u_upper_bound
 
-    def _add_linear_controller_mip_constraint(self, mip, x_var, u_var):
+    def _add_linear_controller_mip_constraint(self, mip, x_var, u_var,
+                                              lp_relaxation: bool):
         assert (isinstance(self.controller_network, torch.nn.Linear))
         controller_slack = []
         controller_binary = []
@@ -217,20 +221,21 @@ class FeedbackSystem:
             network_at_x_equilibrium + self.u_equilibrium
         u_lower_bound, u_upper_bound = _add_input_saturation_constraint(
             mip, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
-            u_pre_sat_lo, u_pre_sat_up, self.dtype)
+            u_pre_sat_lo, u_pre_sat_up, self.dtype, lp_relaxation)
         return controller_slack, controller_binary, u_lower_bound,\
             u_upper_bound
 
     def _add_controller_mip_constraint(self, mip, x_var, u_var,
                                        controller_slack_var_name,
-                                       controller_binary_var_name):
+                                       controller_binary_var_name,
+                                       lp_relaxation: bool):
         if isinstance(self.controller_network, torch.nn.Sequential):
             return self._add_network_controller_mip_constraint(
                 mip, x_var, u_var, controller_slack_var_name,
-                controller_binary_var_name)
+                controller_binary_var_name, lp_relaxation)
         elif isinstance(self.controller_network, torch.nn.Linear):
             return self._add_linear_controller_mip_constraint(
-                mip, x_var, u_var)
+                mip, x_var, u_var, lp_relaxation)
 
     def add_dynamics_mip_constraint(self, mip, x_var, x_next_var, u_var_name,
                                     forward_slack_var_name,
@@ -246,7 +251,7 @@ class FeedbackSystem:
         controller_slack, controller_binary, u_lower_bound, u_upper_bound = \
             self._add_controller_mip_constraint(
                 mip, x_var, u, controller_slack_var_name,
-                controller_binary_var_name)
+                controller_binary_var_name, lp_relaxation=False)
 
         # Now add the forward dynamics constraint
         forward_slack, forward_binary = \
@@ -297,7 +302,8 @@ def _add_input_saturation_constraint(mip, u_var, u_pre_sat,
                                      u_lower_limit: np.ndarray,
                                      u_upper_limit: np.ndarray,
                                      u_pre_sat_lo: torch.Tensor,
-                                     u_pre_sat_up: torch.Tensor, dtype):
+                                     u_pre_sat_up: torch.Tensor, dtype,
+                                     lp_relaxation: bool):
     """
     Add the MIP constraints of the saturation block. Also output the bounds of
     u after the saturation.
@@ -322,6 +328,7 @@ def _add_input_saturation_constraint(mip, u_var, u_pre_sat,
                     and not np.isinf(u_upper_limit[i]))
             utils.add_saturation_as_mixed_integer_constraint(
                 mip, u_pre_sat[i], u_var[i], u_lower_limit[i],
-                u_upper_limit[i], u_pre_sat_lo[i], u_pre_sat_up[i])
+                u_upper_limit[i], u_pre_sat_lo[i], u_pre_sat_up[i],
+                lp_relaxation)
     assert (torch.all(u_lower_bound <= u_upper_bound))
     return u_lower_bound, u_upper_bound

@@ -594,8 +594,11 @@ class TestFeedbackSystem(unittest.TestCase):
                             lb=-gurobipy.GRB.INFINITY,
                             vtype=gurobipy.GRB.CONTINUOUS,
                             name="u")
-        dut._add_controller_mip_constraint(mip, x_var, u_var, "slack",
-                                           "binary")
+        controller_slack, controller_binary, u_lower_bound, u_upper_bound =\
+            dut._add_controller_mip_constraint(mip, x_var, u_var, "slack",
+                                               "binary", lp_relaxation=False)
+        for v in controller_binary:
+            self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Now add constraint on x_var = x_val
         mip.addMConstrs([torch.eye(dut.x_dim, dtype=torch.float64)], [x_var],
                         b=x_val,
@@ -606,6 +609,29 @@ class TestFeedbackSystem(unittest.TestCase):
         u_val = np.array([u.x for u in u_var])
         u_val_expected = dut.compute_u(x_val)
         np.testing.assert_allclose(u_val, u_val_expected.detach().numpy())
+
+        # Now test with lp_relaxation=True
+        lp = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
+        x_var_lp = lp.addVars(dut.x_dim,
+                              lb=-gurobipy.GRB.INFINITY,
+                              vtype=gurobipy.GRB.CONTINUOUS,
+                              name="x")
+        u_var_lp = lp.addVars(dut.forward_system.u_dim,
+                              lb=-gurobipy.GRB.INFINITY,
+                              vtype=gurobipy.GRB.CONTINUOUS,
+                              name="u")
+        controller_slack_lp, controller_binary_lp, u_lower_bound_lp,\
+            u_upper_bound_lp = dut._add_controller_mip_constraint(
+                lp, x_var_lp, u_var_lp, "slack", "binary", lp_relaxation=True)
+        self.assertEqual(len(lp.zeta), 0)
+        for v in controller_binary_lp:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(v.lb, 0.)
+            self.assertEqual(v.ub, 1.)
+        np.testing.assert_allclose(u_lower_bound.detach().numpy(),
+                                   u_lower_bound_lp.detach().numpy())
+        np.testing.assert_allclose(u_upper_bound.detach().numpy(),
+                                   u_upper_bound_lp.detach().numpy())
 
     def test_add_controller_mip_constraint(self):
         """
@@ -656,7 +682,7 @@ class TestAddInputSaturationConstraint(unittest.TestCase):
         u_lower_bound, u_upper_bound = \
             feedback_system._add_input_saturation_constraint(
                 mip, u_var, u_pre_sat, u_lower_limit, u_upper_limit,
-                u_pre_sat_lo, u_pre_sat_up, dtype)
+                u_pre_sat_lo, u_pre_sat_up, dtype, lp_relaxation=False)
         for i in range(u_dim):
             self.assertEqual(
                 u_lower_bound[i].item(),
@@ -685,6 +711,20 @@ class TestAddInputSaturationConstraint(unittest.TestCase):
                 elif u_val[j] < u_lower_limit[j]:
                     u_val[j] = u_lower_limit[j]
             np.testing.assert_allclose(np.array([v.x for v in u_var]), u_val)
+
+        # Now test lp_relaxation=True
+        lp = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        u_var_lp = lp.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
+        u_pre_sat_lp = lp.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
+        u_lower_bound_lp, u_upper_bound_lp = \
+            feedback_system._add_input_saturation_constraint(
+                lp, u_var_lp, u_pre_sat_lp, u_lower_limit, u_upper_limit,
+                u_pre_sat_lo, u_pre_sat_up, dtype, lp_relaxation=True)
+        self.assertEqual(len(lp.zeta), 0)
+        np.testing.assert_allclose(u_lower_bound.detach().numpy(),
+                                   u_lower_bound_lp.detach().numpy())
+        np.testing.assert_allclose(u_upper_bound.detach().numpy(),
+                                   u_upper_bound_lp.detach().numpy())
 
     def test_add_input_saturation_constraints(self):
         dtype = torch.float64
