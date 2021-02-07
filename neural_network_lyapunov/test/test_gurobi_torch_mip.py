@@ -871,6 +871,44 @@ class TestGurobiTorchMIP(unittest.TestCase):
         check_slack_bounds(torch.tensor([-4, -1], dtype=dtype),
                            torch.tensor([1, 6], dtype=dtype), [-4, -1], [1, 6])
 
+    def test_add_mixed_integer_linear_constraints7(self):
+        # Test lp_relaxation=True
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        input_vars = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+        output_vars = mip.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        slack, binary_relax = mip.add_mixed_integer_linear_constraints(
+            mip_constr_return,
+            input_vars,
+            output_vars,
+            "slack",
+            "binary_relax",
+            "ineq",
+            "eq",
+            "out",
+            lp_relaxation=True)
+        self.assertEqual(len(binary_relax), 2)
+        for v in binary_relax:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(v.lb, 0)
+            self.assertEqual(v.ub, 1)
+        self.assertEqual(len(mip.r), 2 + 1 + 3 + 2)
+        self.assertEqual(len(mip.zeta), 0)
+        self.assertEqual(len(mip.Ain_zeta_row), 0)
+        self.assertEqual(len(mip.Ain_zeta_col), 0)
+        self.assertEqual(len(mip.Ain_zeta_val), 0)
+        self.assertEqual(len(mip.Aeq_zeta_row), 0)
+        self.assertEqual(len(mip.Aeq_zeta_col), 0)
+        self.assertEqual(len(mip.Aeq_zeta_val), 0)
+        # First add the constraint 0 <= binary_slack <= 1.
+        self.assertEqual(mip.Ain_r_row[:4], [0, 1, 2, 3])
+        binary_relax_indices = [
+            mip.r_indices[binary_relax[0]], mip.r_indices[binary_relax[1]]
+        ]
+        self.assertEqual(mip.Ain_r_col[:4],
+                         binary_relax_indices + binary_relax_indices)
+
 
 class TestGurobiTorchMILP(unittest.TestCase):
     def test_setObjective(self):
