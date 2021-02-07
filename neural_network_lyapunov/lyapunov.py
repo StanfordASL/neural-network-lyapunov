@@ -460,7 +460,8 @@ class LyapunovHybridLinearSystem:
                 xhat, _, _ = compute_xhat._compute_network_at_xhat(
                     mip, x_var, x_equilibrium, self.lyapunov_relu_free_pattern,
                     xhat_indices, torch.from_numpy(self.system.x_lo_all),
-                    torch.from_numpy(self.system.x_up_all))
+                    torch.from_numpy(self.system.x_up_all),
+                    self.network_bound_propagate_method, lp_relaxation=False)
             relu_xhat_coeff = [relu_xhat_aout.squeeze()]
             relu_xhat_var = [relu_xhat_slack]
             relu_xhat_constant = relu_xhat_cout.squeeze()
@@ -735,7 +736,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                 compute_xhat._compute_network_at_xhat(
                     milp, x, x_equilibrium, self.lyapunov_relu_free_pattern,
                     xhat_indices, torch.from_numpy(self.system.x_lo_all),
-                    torch.from_numpy(self.system.x_up_all))
+                    torch.from_numpy(self.system.x_up_all),
+                    self.network_bound_propagate_method, lp_relaxation=False)
             relu_xhat_var = [slack_hat]
             relu_xhat_coeff = [a_out_hat.squeeze()]
             relu_xhat_constant = b_out_hat.squeeze()
@@ -744,7 +746,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                     milp, x_next, x_equilibrium,
                     self.lyapunov_relu_free_pattern, xhat_indices,
                     torch.from_numpy(self.system.x_lo_all),
-                    torch.from_numpy(self.system.x_up_all))
+                    torch.from_numpy(self.system.x_up_all),
+                    self.network_bound_propagate_method, lp_relaxation=False)
             relu_xhat_next_var = [slack_hat_next]
             if x_warmstart is not None:
                 xhat_warmstart = compute_xhat._get_xhat_val(

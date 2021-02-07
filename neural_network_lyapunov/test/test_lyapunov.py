@@ -1518,7 +1518,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     milp_relu, x, x_equilibrium, relu1_free_pattern,
                     xhat_indices,
                     torch.from_numpy(system.x_lo_all),
-                    torch.from_numpy(system.x_up_all))
+                    torch.from_numpy(system.x_up_all),
+                    mip_utils.PropagateBoundsMethod.IA,
+                    lp_relaxation=False)
             relu_xhat_var = [relu_xhat_slack]
             relu_xhat_coeff = [relu_xhat_a_out.squeeze()]
             relu_xhat_constant = relu_xhat_c_out.squeeze()

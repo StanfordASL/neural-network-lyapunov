@@ -5,6 +5,7 @@ import neural_network_lyapunov.compute_xhat as compute_xhat
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import unittest
 
 
@@ -75,7 +76,8 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
             relu_z, relu_beta, Aout, Cout, xhat, output_lo,\
                 output_up = compute_xhat._compute_network_at_xhat(
                     mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
-                    x_lb, x_ub)
+                    x_lb, x_ub, mip_utils.PropagateBoundsMethod.IA,
+                    lp_relaxation=False)
 
             # Now fix x_var to x_val, and check the solution ϕ(x̂)
             x_val = torch.tensor([-1.2, 0.5, -0.8], dtype=dtype)
@@ -108,6 +110,28 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
         tester(xhat_indices=[1, 2])
         tester(xhat_indices=[0, 2])
         tester(xhat_indices=[0])
+
+    def test_with_lp_relaxation(self):
+        dtype = torch.float64
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x_var = mip.addVars(3, lb=-gurobipy.GRB.INFINITY)
+        torch.manual_seed(0)
+        relu = utils.setup_relu((3, 5, 4, 2),
+                                params=None,
+                                negative_slope=0.1,
+                                bias=True,
+                                dtype=dtype)
+        relu_free_pattern = relu_to_optimization.ReLUFreePattern(relu, dtype)
+        x_lb = torch.tensor([-2, -3, -1], dtype=dtype)
+        x_ub = torch.tensor([1, 2, 0], dtype=dtype)
+        x_equilibrium = torch.tensor([0.5, -1.5, -0.2], dtype=dtype)
+        xhat_indices = [0, 1]
+        relu_z, relu_beta, Aout, Cout, xhat, output_lo,\
+            output_up = compute_xhat._compute_network_at_xhat(
+                mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
+                x_lb, x_ub, mip_utils.PropagateBoundsMethod.IA,
+                lp_relaxation=True)
+        self.assertEqual(len(mip.zeta), 0)
 
 
 if __name__ == "__main__":
