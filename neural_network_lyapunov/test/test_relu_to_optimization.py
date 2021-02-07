@@ -937,16 +937,20 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
     def linear_output_tester(self, dut, layer_index, linear_output_row_index,
                              previous_neuron_input_lo,
                              previous_neuron_input_up, network_input_lo,
-                             network_input_up):
+                             network_input_up, create_prog_callback,
+                             input_checker):
         linear_output_lo, linear_output_up = \
             dut._compute_linear_output_bound_by_lp(
                 layer_index, linear_output_row_index, previous_neuron_input_lo,
-                previous_neuron_input_up, network_input_lo, network_input_up)
+                previous_neuron_input_up, network_input_lo, network_input_up,
+                create_prog_callback)
         # Now take many sample inputs, check if the linear output is within
         # the bounds.
-        network_input_samples = utils.uniform_sample_in_box(
+        network_input_guesses = utils.uniform_sample_in_box(
             torch.from_numpy(network_input_lo),
             torch.from_numpy(network_input_up), 1000)
+        network_input_samples = network_input_guesses[
+            input_checker(network_input_guesses), :]
         # Now compute the linear output for all these samples.
         linear_inputs = network_input_samples
         for layer in range(layer_index):
@@ -967,17 +971,24 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
         Wij = dut.model[2 *
                         layer_index].weight[linear_output_row_index].reshape(
                             (1, -1))
-        # At the input layer, the LP bounds should be the same as the IA
-        # bounds.
         if layer_index == 0:
             linear_output_lo_ia, linear_output_up_ia =\
                 mip_utils.compute_range_by_IA(
                     Wij, bij, torch.from_numpy(network_input_lo),
                     torch.from_numpy(network_input_up))
-            self.assertAlmostEqual(linear_output_lo_ia[0].item(),
-                                   linear_output_lo)
-            self.assertAlmostEqual(linear_output_up_ia[0].item(),
-                                   linear_output_up)
+            # At the input layer, the LP bounds should be the same as the IA
+            # bounds, if there is no additional constraints on the network
+            # input.
+            if create_prog_callback is None:
+                self.assertAlmostEqual(linear_output_lo_ia[0].item(),
+                                       linear_output_lo)
+                self.assertAlmostEqual(linear_output_up_ia[0].item(),
+                                       linear_output_up)
+            else:
+                self.assertLessEqual(linear_output_lo_ia[0].item(),
+                                     linear_output_lo)
+                self.assertGreaterEqual(linear_output_up_ia[0].item(),
+                                        linear_output_up)
         else:
             linear_input_lo = dut.model[2 * layer_index - 1](torch.from_numpy(
                 previous_neuron_input_lo[dut.relu_unit_index[layer_index -
@@ -995,7 +1006,8 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
 
         return linear_output_lo, linear_output_up
 
-    def given_relu_test(self, relu, network_input_lo, network_input_up):
+    def given_relu_test(self, relu, network_input_lo, network_input_up,
+                        create_prog_callback, input_checker):
         dut = relu_to_optimization.ReLUFreePattern(relu, self.dtype)
         previous_neuron_input_lo = np.zeros((dut.num_relu_units, ))
         previous_neuron_input_up = np.zeros((dut.num_relu_units, ))
@@ -1007,7 +1019,7 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                     dut.relu_unit_index[0][i]] = self.linear_output_tester(
                         dut, 0, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
-                        network_input_up)
+                        network_input_up, create_prog_callback, input_checker)
         # Now test the second layer.
         for i in range(self.relu_with_bias[2].out_features):
             previous_neuron_input_lo[
@@ -1015,27 +1027,64 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                     dut.relu_unit_index[1][i]] = self.linear_output_tester(
                         dut, 1, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
-                        network_input_up)
+                        network_input_up, create_prog_callback, input_checker)
 
     def test_relu_with_bias(self):
+        def checker(x):
+            return torch.ones(x.shape[0], dtype=torch.bool)
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        self.given_relu_test(self.relu_with_bias, network_input_lo,
-                             network_input_up)
+        self.given_relu_test(self.relu_with_bias,
+                             network_input_lo,
+                             network_input_up,
+                             create_prog_callback=None,
+                             input_checker=checker)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
+        self.given_relu_test(self.relu_with_bias,
+                             network_input_lo,
+                             network_input_up,
+                             create_prog_callback=None,
+                             input_checker=checker)
+
+    def test_relu_with_bias_create_prog_callback(self):
+        # Create a simple program with some constraints.
+        def create_prog_callback():
+            prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            input_var = prog.addVars(2,
+                                     lb=-gurobipy.GRB.INFINITY,
+                                     ub=gurobipy.GRB.INFINITY)
+            prog.addLConstr([torch.tensor([1., 1.], dtype=self.dtype)],
+                            [input_var],
+                            rhs=2.,
+                            sense=gurobipy.GRB.LESS_EQUAL)
+            return prog, input_var
+
+        def checker(x):
+            return torch.sum(x, dim=1) <= 2.
+
+        network_input_lo = np.array([0.1, -0.2])
+        network_input_up = np.array([2., 1.])
         self.given_relu_test(self.relu_with_bias, network_input_lo,
-                             network_input_up)
+                             network_input_up, create_prog_callback, checker)
 
     def test_relu_no_bias(self):
+        def checker(x):
+            return torch.ones(x.shape[0], dtype=torch.bool)
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        self.given_relu_test(self.relu_no_bias, network_input_lo,
-                             network_input_up)
+        self.given_relu_test(self.relu_no_bias,
+                             network_input_lo,
+                             network_input_up,
+                             create_prog_callback=None,
+                             input_checker=checker)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
-        self.given_relu_test(self.relu_no_bias, network_input_lo,
-                             network_input_up)
+        self.given_relu_test(self.relu_no_bias,
+                             network_input_lo,
+                             network_input_up,
+                             create_prog_callback=None,
+                             input_checker=checker)
 
 
 class TestComputeLayerBound(TestComputeLinearOutputBoundByLp):
@@ -1125,11 +1174,13 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByLp):
             for j in range(dut.model[-1].out_features):
                 output_lo_expected[j], output_up_expected[
                     j] = dut._compute_linear_output_bound_by_lp(
-                        int((len(dut.model) - 1) / 2), j,
+                        int((len(dut.model) - 1) / 2),
+                        j,
                         z_pre_relu_lo.detach().numpy(),
                         z_pre_relu_up.detach().numpy(),
                         x_lo.detach().numpy(),
-                        x_up.detach().numpy())
+                        x_up.detach().numpy(),
+                        create_prog_callback=None)
         np.testing.assert_allclose(output_lo.detach().numpy(),
                                    output_lo_expected.detach().numpy())
         np.testing.assert_allclose(output_up.detach().numpy(),
