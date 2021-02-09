@@ -2,6 +2,8 @@ import numpy as np
 import neural_network_lyapunov.examples.car.unicycle_traj_opt as\
     unicycle_traj_opt
 import pydrake.solvers.mathematicalprogram as mp
+import math
+import argparse
 
 
 def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
@@ -49,6 +51,10 @@ def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--load_r", help="load precomputed r ",action="store_true")
+    args = parser.parse_args()
+
     nT = 4
     u_lo = np.array([-3, -0.25 * np.pi])
     u_up = np.array([6, 0.25 * np.pi])
@@ -69,21 +75,37 @@ if __name__ == "__main__":
     # u = u.reshape((2, n_grid ** 2))
     ns = s.shape[1]
     # nu = u.shape[1]
-    r = np.zeros((ns, ns))
-    for i in range(ns):
-        if i % 100 == 0:
-            print("r iteration: ", i)
-        for j in range(ns):
-            initial_val_constraint.evaluator().set_bounds(s[:, i], s[:, i])
-            final_val_constraint.evaluator().set_bounds(s[:, j], s[:, j])
-            prog.SetInitialGuess(x, np.linspace(s[:, i], s[:, j], nT).T)
-            prog.SetInitialGuess(dt, dt_max * np.ones((nT - 1,)))
-            result = mp.Solve(prog)
-            if result.is_success():
-                r[i, j] = result.get_optimal_cost()
-            else:
-                r[i, j] = np.inf
-    np.save("value/r", r)
+    n0 = math.ceil(x_up[0]*dt_max/(x_up[0]-x_lo[0])*n_grid)
+    n1 = math.ceil(x_up[1] * dt_max / (x_up[1] - x_lo[1]) * n_grid)
+    n2 = math.ceil(x_up[2] * dt_max / (x_up[2] - x_lo[2]) * n_grid)
+    if args.load_r:
+        r = np.load("neural_network_lyapunov/examples/car/value/r.npy")
+    else:
+        r = np.zeros((ns, ns))
+        for i in range(ns):
+            i0 = i // 10000
+            i1 = (i - 10000 * i0) // 100
+            i2 = i - 10000 * i0 - 100 * i1
+            if i % 100 == 0:
+                print("r iteration: ", i)
+            for j in range(ns):
+                j0 = j // 10000
+                j1 = (j - 10000 * j0) // 100
+                j2 = j - 10000 * j0 - 100 * j1
+                if (i0 - n0) < j0 < (i0 + n0) and\
+                   (i1 - n1) < j1 < (i1 + n1) and\
+                   (i2 - n2) < j2 < (i2 + n2):
+                    initial_val_constraint.evaluator().set_bounds(s[:, i], s[:, i])
+                    final_val_constraint.evaluator().set_bounds(s[:, j], s[:, j])
+                    prog.SetInitialGuess(x, np.linspace(s[:, i], s[:, j], nT).T)
+                    prog.SetInitialGuess(dt, dt_max * np.ones((nT - 1,)))
+                    result = mp.Solve(prog)
+                    if result.is_success():
+                        r[i, j] = result.get_optimal_cost()
+                else:
+                    r[i,j] = np.inf
+        np.save("neural_network_lyapunov/examples/car/value/r", r)
 
     V = value_iteration(ns, r, discount_factor=1)
-    np.save("value/V", V)
+    np.save("neural_network_lyapunov/examples/car/value/V", V)
+    np.save("neural_network_lyapunov/examples/car/value/s", s)
