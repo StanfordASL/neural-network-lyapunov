@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import pybullet as pybullet
 import numpy as np
 import time
@@ -8,7 +5,6 @@ import utils_simulation
 import argparse
 from pynput import keyboard
 import unicycle
-import acceleration_car
 
 ##########################################################################
 # Functions
@@ -249,17 +245,9 @@ def simulate_controller(numEnvs, params, husky, sphere, GUI, seed):
     return u_data, depth_data, state_data
 
 
-def simulate_random_sample(
-        numEnvs,
-        params,
-        husky,
-        sphere,
-        GUI,
-        seed,
-        car_model="dubins"):
+def simulate_random_sample(numEnvs, params, husky, sphere, GUI, seed):
     """
     @param sphere: spherical area surronding the vehicle for collision
-    @param car_model: "dubins" or "acceleration"
     check
     """
     # Parameters
@@ -278,11 +266,9 @@ def simulate_random_sample(
     next_depth_data = []
     state_data = []
     next_state_data = []
-    if car_model == "dubins":
-        plant = dubins_car.DubinsCar(None)
-    elif car_model == "acceleration":
-        plant = acceleration_car.AccelerationCar(None)
+    plant = unicycle.Unicycle(None)
     for env in range(0, numEnvs):
+        visualize_ray = False
         # Sample environment
         heightObs = 20 * robotHeight
         obsUid = utils_simulation.generate_obstacles(pybullet, heightObs,
@@ -293,7 +279,6 @@ def simulate_random_sample(
             print(env)
 
         for t in range(0, T_horizon):
-            visualize_ray = False
             # Randomly sample initial position
             while True:
                 state = np.array([
@@ -308,6 +293,7 @@ def simulate_random_sample(
                     # goalUid = utils_simulation.generate_goal(pybullet,
                     #                                          goal_pos)
                     break
+
             quat = pybullet.getQuaternionFromEuler([0.0, 0.0, state[2]])
             pybullet.resetBasePositionAndOrientation(husky,
                                                      [state[0], state[1], 0.0],
@@ -315,20 +301,17 @@ def simulate_random_sample(
             pybullet.resetBasePositionAndOrientation(
                 sphere, [state[0], state[1], robotHeight], [0, 0, 0, 1])
 
-            # Visualize rays emanating from the car
-            # if t == 8:
-            #     visualize_ray = True
+            if t == 8:
+                utils_simulation.getImage(pybullet, state, robotHeight)
+                time.sleep(0.1)
+                visualize_ray = True
 
             if (GUI):
                 pybullet.resetDebugVisualizerCamera(
                     cameraDistance=5.0,
                     cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
                     cameraPitch=-89.9,  # -45.0,
-                    cameraTargetPosition=[
-                        state[0],
-                        state[1],
-                        2 * robotHeight])
-                time.sleep(0.1)
+                    cameraTargetPosition=[state[0], state[1], 2 * robotHeight])
 
             # Get depth sensor measurement with FOV > pi/2
             depth = utils_simulation.getDistances(pybullet,
@@ -342,12 +325,7 @@ def simulate_random_sample(
                                                   RGB=[1, 0, 0],
                                                   parentObjectId=husky)
 
-            if car_model == "dubins":
-                u = [np.random.uniform(-2, 5), np.random.uniform(-0.5, 0.5)]
-            elif car_model == "acceleration":
-                state = np.append(state, np.random.uniform(-2, 5))
-                u = [np.random.uniform(-np.pi / 6, np.pi / 6),
-                     np.random.uniform(-4, 4)]
+            u = [np.random.uniform(-2, 5), np.random.uniform(-0.5, 0.5)]
             u_data.append(u)
             depth_data.append(depth)
             state_data.append(state)
@@ -377,19 +355,17 @@ def simulate_random_sample(
             next_depth_data.append(depth)
             next_state_data.append(state)
 
-            # if t == 8:
-            #     time.sleep(0.1)
+            if t == 8:
+                utils_simulation.getImage(pybullet, state, robotHeight)
+                time.sleep(0.1)
 
             if (GUI):
                 pybullet.resetDebugVisualizerCamera(
                     cameraDistance=5.0,
                     cameraYaw=state[2] / np.pi * 180 - 120,  # 0.0,
                     cameraPitch=-89.9,  # -45.0,
-                    cameraTargetPosition=[
-                        state[0],
-                        state[1],
-                        2 * robotHeight])
-                time.sleep(0.1)
+                    cameraTargetPosition=[state[0], state[1], 2 * robotHeight])
+                # time.sleep(0.1)
 
         # Remove obstacles
         pybullet.removeBody(obsUid)
@@ -420,7 +396,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Flag that sets if things are visualized
-    GUI = False
+    GUI = True
 
     # pyBullet
     if (GUI):
@@ -458,7 +434,7 @@ if __name__ == "__main__":
     #     simulate_controller(numEnvs, params, husky, sphere, GUI, random_seed)
     u_data, depth_data, state_data, next_depth_data, next_state_data = \
         simulate_random_sample(numEnvs, params, husky, sphere,
-                               GUI, random_seed, car_model="acceleration")
+                               GUI, random_seed)
 
     # Disconect from pybullet
     pybullet.disconnect()
@@ -466,7 +442,6 @@ if __name__ == "__main__":
     print("Done.")
 
     # Saving control, depth sensor and state data
-    utils_simulation.save_data(u_data, depth_data,
-                               state_data, args.file_name,
-                               next_depth_data,
-                               next_state_data)
+    # utils_simulation.save_data(u_data, depth_data,
+    #                            state_data, next_depth_data,
+    #                            next_state_data, args.file_name)
