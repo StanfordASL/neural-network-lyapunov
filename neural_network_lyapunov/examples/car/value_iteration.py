@@ -11,9 +11,12 @@ def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
     Value Iteration Algorithm.
     Args:
         nx: number of state in the environment.
+        r: numpy array of size (nx, nx). immediate cost from state x to x'.
+        epsilon: threshold for convergence.
         discount_factor: Gamma discount factor.
     Returns:
-        V: the optimal value function.
+        V: numpy array of size nx. V[i] is the optimal value function of
+        state s[i].
     """
 
     def one_step_lookahead(V, r, i):
@@ -52,7 +55,10 @@ def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--load_r", help="load precomputed r ",action="store_true")
+    parser.add_argument(
+        "--load_r",
+        help="load precomputed r ",
+        action="store_true")
     args = parser.parse_args()
 
     nT = 4
@@ -61,11 +67,11 @@ if __name__ == "__main__":
     x_lo = np.array([-3, -3, -1.2 * np.pi])
     x_up = np.array([3, 3, 1.2 * np.pi])
     dt_min = 0.001
-    dt_max = 0.05
+    dt_max = 0.08
     prog, initial_val_constraint, final_val_constraint, x, u, dt =\
         unicycle_traj_opt.construct_traj_opt(
             nT, u_lo, u_up, dt_min, dt_max)
-    n_grid = 100
+    n_grid = 80
     s = np.array(np.meshgrid(np.linspace(x_lo[0], x_up[0], n_grid),
                              np.linspace(x_lo[1], x_up[1], n_grid),
                              np.linspace(x_lo[2], x_up[2], n_grid)))
@@ -75,35 +81,40 @@ if __name__ == "__main__":
     # u = u.reshape((2, n_grid ** 2))
     ns = s.shape[1]
     # nu = u.shape[1]
-    n0 = math.ceil(x_up[0]*dt_max/(x_up[0]-x_lo[0])*n_grid)
-    n1 = math.ceil(x_up[1] * dt_max / (x_up[1] - x_lo[1]) * n_grid)
-    n2 = math.ceil(x_up[2] * dt_max / (x_up[2] - x_lo[2]) * n_grid)
+    n0 = math.ceil(u_up[0] * dt_max * (nT - 1) / (x_up[0] - x_lo[0]) * n_grid)
+    n1 = math.ceil(u_up[0] * dt_max * (nT - 1) / (x_up[1] - x_lo[1]) * n_grid)
+    n2 = math.ceil(u_up[1] * dt_max * (nT - 1) / (x_up[2] - x_lo[2]) * n_grid)
     if args.load_r:
         r = np.load("neural_network_lyapunov/examples/car/value/r.npy")
     else:
         r = np.zeros((ns, ns))
         for i in range(ns):
-            i0 = i // 10000
-            i1 = (i - 10000 * i0) // 100
-            i2 = i - 10000 * i0 - 100 * i1
+            i0 = i // n_grid ** 2
+            i1 = (i - n_grid ** 2 * i0) // n_grid
+            i2 = i - n_grid ** 2 * i0 - n_grid * i1
             if i % 100 == 0:
                 print("r iteration: ", i)
             for j in range(ns):
-                j0 = j // 10000
-                j1 = (j - 10000 * j0) // 100
-                j2 = j - 10000 * j0 - 100 * j1
+                j0 = j // n_grid ** 2
+                j1 = (j - n_grid ** 2 * j0) // n_grid
+                j2 = j - n_grid ** 2 * j0 - n_grid * j1
                 if (i0 - n0) < j0 < (i0 + n0) and\
                    (i1 - n1) < j1 < (i1 + n1) and\
                    (i2 - n2) < j2 < (i2 + n2):
-                    initial_val_constraint.evaluator().set_bounds(s[:, i], s[:, i])
-                    final_val_constraint.evaluator().set_bounds(s[:, j], s[:, j])
-                    prog.SetInitialGuess(x, np.linspace(s[:, i], s[:, j], nT).T)
+                    initial_val_constraint.evaluator(
+                    ).set_bounds(s[:, i], s[:, i])
+                    final_val_constraint.evaluator(
+                    ).set_bounds(s[:, j], s[:, j])
+                    prog.SetInitialGuess(
+                        x, np.linspace(s[:, i], s[:, j], nT).T)
                     prog.SetInitialGuess(dt, dt_max * np.ones((nT - 1,)))
                     result = mp.Solve(prog)
                     if result.is_success():
                         r[i, j] = result.get_optimal_cost()
+                    else:
+                        r[i, j] = np.inf
                 else:
-                    r[i,j] = np.inf
+                    r[i, j] = np.inf
         np.save("neural_network_lyapunov/examples/car/value/r", r)
 
     V = value_iteration(ns, r, discount_factor=1)
