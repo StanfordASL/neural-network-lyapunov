@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import pybullet as pybullet
 import numpy as np
 import time
