@@ -259,7 +259,8 @@ class ReLUFreePattern:
             self, layer_index, linear_output_row_index,
             previous_neuron_input_lo: np.ndarray,
             previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
-            network_input_up: np.ndarray) -> Tuple[float, float]:
+            network_input_up: np.ndarray,
+            create_prog_callback) -> Tuple[float, float]:
         """
         Compute the range of a linear layer output.
         We could solve a linear programming (LP) problem to find the relaxed
@@ -270,17 +271,38 @@ class ReLUFreePattern:
         second linear layer, etc.
         @param linear_output_row_index The row of the output in that linear
         layer.
+        @param create_prog_callback A function that returns a GurobiTorchMIP
+        object and the variable for the network input. The returned
+        GurobiTorchMIP object contains the additional constraints imposed on
+        network_input, that are not included in this function
+        _compute_linear_output_bound_by_lp. If set to None, then we create an
+        empty GurobiTorchMIP at the beginning of this program by ourselves.
         """
         assert (isinstance(previous_neuron_input_lo, np.ndarray))
         assert (isinstance(previous_neuron_input_up, np.ndarray))
         assert (isinstance(network_input_lo, np.ndarray))
         assert (isinstance(network_input_up, np.ndarray))
         # Form an LP.
-        lp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         input_dim = self.model[0].in_features
-        network_input = lp.addVars(input_dim,
-                                   lb=torch.from_numpy(network_input_lo),
-                                   ub=torch.from_numpy(network_input_up))
+        if create_prog_callback is None:
+            lp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            network_input = lp.addVars(input_dim,
+                                       lb=torch.from_numpy(network_input_lo),
+                                       ub=torch.from_numpy(network_input_up))
+        else:
+            assert (callable(create_prog_callback))
+            lp, network_input = create_prog_callback()
+            assert (isinstance(lp, gurobi_torch_mip.GurobiTorchMILP))
+            assert (isinstance(network_input, list))
+            assert (len(network_input) == input_dim)
+            lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                           [network_input],
+                           b=torch.from_numpy(network_input_up),
+                           sense=gurobipy.GRB.LESS_EQUAL)
+            lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                           [network_input],
+                           b=torch.from_numpy(network_input_lo),
+                           sense=gurobipy.GRB.GREATER_EQUAL)
         z_curr = network_input
         for layer in range(layer_index):
             linear_layer = self.model[2 * layer]
@@ -303,16 +325,25 @@ class ReLUFreePattern:
                         constant=bij,
                         sense=gurobipy.GRB.MAXIMIZE)
         lp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        lp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
         lp.gurobi_model.optimize()
-        assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        linear_output_up = lp.gurobi_model.ObjVal
+        if lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+            linear_output_up = lp.gurobi_model.ObjVal
+        elif lp.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
+            linear_output_up = np.inf
+        elif lp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
+            linear_output_up = -np.inf
 
         lp.setObjective([Wij], [z_curr],
                         constant=bij,
                         sense=gurobipy.GRB.MINIMIZE)
         lp.gurobi_model.optimize()
-        assert (lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        linear_output_lo = lp.gurobi_model.ObjVal
+        if lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+            linear_output_lo = lp.gurobi_model.ObjVal
+        elif lp.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
+            linear_output_lo = -np.inf
+        elif lp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
+            linear_output_lo = np.inf
         return linear_output_lo, linear_output_up
 
     def _compute_layer_bound(self, x_lo, x_up,
@@ -347,7 +378,8 @@ class ReLUFreePattern:
                             z_pre_relu_lo.detach().numpy(),
                             z_pre_relu_up.detach().numpy(),
                             x_lo.detach().numpy(),
-                            x_up.detach().numpy())
+                            x_up.detach().numpy(),
+                            create_prog_callback=None)
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -385,79 +417,21 @@ class ReLUFreePattern:
                 for i in range(self.model[-1].out_features):
                     linear_output_lo[i], linear_output_up[
                         i] = self._compute_linear_output_bound_by_lp(
-                            int((len(self.model) - 1) / 2), i,
+                            int((len(self.model) - 1) / 2),
+                            i,
                             previous_neuron_input_lo.detach().numpy(),
                             previous_neuron_input_up.detach().numpy(),
                             network_input_lo.detach().numpy(),
-                            network_input_up.detach().numpy())
+                            network_input_up.detach().numpy(),
+                            create_prog_callback=None)
                 return linear_output_lo, linear_output_up
 
-    def output_constraint(self, x_lo, x_up,
-                          method: mip_utils.PropagateBoundsMethod):
-        """
-        The output of (leaky) ReLU network is a piecewise linear function of
-        the input.
-        ReLU(x) = wₙᵀzₙ+bₙ
-        s.t zᵢ₊₁ = max{0, Wᵢzᵢ+bᵢ}
-            z₀ = x
-        Hence we can formulate the ReLU network as a linear function subject to
-        mixed-integer linear constraints
-        If we define the bound (Wᵢzᵢ)(j) + bᵢ(j) as [zₗₒ, zᵤₚ], then depending
-        on the bounds, there are 3 cases:
-        case 1
-            If  zₗₒ < 0 <  zᵤₚ, we don't know if the ReLU unit is always
-            active, then the constraints are
-            zᵢ₊₁(j) ≥ 0
-            zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
-            zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
-            (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
-            This formulation is explained in
-            replace_relu_with_mixed_integer_constraint()
-            Similarly if the layer is a leaky relu layer, then we replace the
-            leaky relu output using
-            replace_leaky_relu_with_mixed_integer_constraint()
-        case 2
-            If 0 <= zₗₒ <= zᵤₚ, the ReLU unit is always active,  then
-            the constraints are
-            zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
-            βᵢ(j) = 1
-        case 3
-            zₗₒ <= zᵤₚ <= 0, the ReLU unit is always inactive, then the
-            constraint are
-            zᵢ₊₁(j) = 0
-            βᵢ(j) = 0
-        where βᵢ(j) is a binary variable,
-        such that βᵢ(j) = 1 means that the j'th ReLU unit on the i'th layer
-        is active.
-        Moreover, we impose the constraint that x_lo <= x <= x_up
-        We will write the constraint in a more concise way
-        Ain1 * x + Ain2 * z + Ain3 * β <= rhs_in  (case 1)
-        Aeq1 * x + Aeq2 * z + Aeq3 * β = rhs_eq   (case 2 and 3)
-        ReLU(x) = Aₒᵤₜ*z + bₒᵤₜ
-        where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
-        β = [β₀; β₁; ...; βₙ₋₁].
-        @param x_lo A 1-D vector, the lower bound of input x.
-        @param x_up A 1-D vector, the upper bound of input x.
-        @param method The method to propagate the bounds of the inputs in each
-        layer. If you want to take the gradient w.r.t the parameter in this
-        network, then use PropagateBoundsMethod.IA, otherwise use
-        PropagateBoundsMethod.LP.
-        @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
-        b_out, z_pre_relu_lo, z_pre_relu_up, output_lo, output_up)
-        Ain1, Ain2, Ain3, Aeq1, Aeq2, Aeq3, A_out are matrices, rhs_in, rhs_eq,
-        b_out column vectors. z_pre_relu_lo and z_pre_relu_up are 1-D vectors.
-        When the output is a scalar, then A_out is a vector, and b_out is a
-        scalar.
-        Notice that z_pre_relu_lo[i] and z_pre_relu_up[i] are the bounds of
-        z[i] BEFORE applying the ReLU activation function, note these are NOT
-        the bounds on z.
-        """
-        assert (x_lo.dtype == self.dtype)
-        assert (x_up.dtype == self.dtype)
-        assert (len(x_lo.shape) == 1)
-        assert (len(x_up.shape) == 1)
-        assert (torch.all(torch.le(x_lo, x_up)))
-
+    def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,
+                                        x_lo, x_up):
+        assert (isinstance(z_pre_relu_lo, torch.Tensor))
+        assert (isinstance(z_pre_relu_up, torch.Tensor))
+        assert (isinstance(x_lo, torch.Tensor))
+        assert (isinstance(x_up, torch.Tensor))
         # Each ReLU unit introduces at most 4 inequality constraints.
         Ain_input = torch.zeros(
             (4 * self.num_relu_units + 2 * self.x_size, self.x_size),
@@ -490,10 +464,6 @@ class ReLUFreePattern:
         rhs_in[self.x_size:2 * self.x_size] = -x_lo
         ineq_constr_count += 2 * self.x_size
 
-        z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
-            self._compute_layer_bound(x_lo, x_up, method)
-        output_lo, output_up = self._compute_network_output_bounds(
-            z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
         for layer_count in range(len(self.relu_unit_index)):
             Ain_z_curr, Ain_z_next, Ain_binary_layer, rhs_in_layer,\
                 Aeq_z_curr, Aeq_z_next, Aeq_binary_layer, rhs_eq_layer, _, _ =\
@@ -574,6 +544,80 @@ class ReLUFreePattern:
         mip_constr_return.Aeq_slack = Aeq_slack[:eq_constr_count]
         mip_constr_return.Aeq_binary = Aeq_binary[:eq_constr_count]
         mip_constr_return.rhs_eq = rhs_eq[:eq_constr_count]
+        return mip_constr_return
+
+    def output_constraint(self, x_lo, x_up,
+                          method: mip_utils.PropagateBoundsMethod):
+        """
+        The output of (leaky) ReLU network is a piecewise linear function of
+        the input.
+        ReLU(x) = wₙᵀzₙ+bₙ
+        s.t zᵢ₊₁ = max{0, Wᵢzᵢ+bᵢ}
+            z₀ = x
+        Hence we can formulate the ReLU network as a linear function subject to
+        mixed-integer linear constraints
+        If we define the bound (Wᵢzᵢ)(j) + bᵢ(j) as [zₗₒ, zᵤₚ], then depending
+        on the bounds, there are 3 cases:
+        case 1
+            If  zₗₒ < 0 <  zᵤₚ, we don't know if the ReLU unit is always
+            active, then the constraints are
+            zᵢ₊₁(j) ≥ 0
+            zᵢ₊₁(j) ≥ (Wᵢzᵢ)(j)+bᵢ(j)
+            zᵢ₊₁(j) ≤ zᵤₚβᵢ(j)
+            (Wᵢzᵢ)(j) + bᵢ(j) - zᵢ₊₁(j) + zₗₒβᵢ(j) ≥ zₗₒ
+            This formulation is explained in
+            replace_relu_with_mixed_integer_constraint()
+            Similarly if the layer is a leaky relu layer, then we replace the
+            leaky relu output using
+            replace_leaky_relu_with_mixed_integer_constraint()
+        case 2
+            If 0 <= zₗₒ <= zᵤₚ, the ReLU unit is always active,  then
+            the constraints are
+            zᵢ₊₁(j) = (Wᵢzᵢ)(j) + bᵢ(j)
+            βᵢ(j) = 1
+        case 3
+            zₗₒ <= zᵤₚ <= 0, the ReLU unit is always inactive, then the
+            constraint are
+            zᵢ₊₁(j) = 0
+            βᵢ(j) = 0
+        where βᵢ(j) is a binary variable,
+        such that βᵢ(j) = 1 means that the j'th ReLU unit on the i'th layer
+        is active.
+        Moreover, we impose the constraint that x_lo <= x <= x_up
+        We will write the constraint in a more concise way
+        Ain1 * x + Ain2 * z + Ain3 * β <= rhs_in  (case 1)
+        Aeq1 * x + Aeq2 * z + Aeq3 * β = rhs_eq   (case 2 and 3)
+        ReLU(x) = Aₒᵤₜ*z + bₒᵤₜ
+        where z, β are the "flat" column vectors, z = [z₁; z₂;...;zₙ],
+        β = [β₀; β₁; ...; βₙ₋₁].
+        @param x_lo A 1-D vector, the lower bound of input x.
+        @param x_up A 1-D vector, the upper bound of input x.
+        @param method The method to propagate the bounds of the inputs in each
+        layer. If you want to take the gradient w.r.t the parameter in this
+        network, then use PropagateBoundsMethod.IA, otherwise use
+        PropagateBoundsMethod.LP.
+        @return (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, A_out,
+        b_out, z_pre_relu_lo, z_pre_relu_up, output_lo, output_up)
+        Ain1, Ain2, Ain3, Aeq1, Aeq2, Aeq3, A_out are matrices, rhs_in, rhs_eq,
+        b_out column vectors. z_pre_relu_lo and z_pre_relu_up are 1-D vectors.
+        When the output is a scalar, then A_out is a vector, and b_out is a
+        scalar.
+        Notice that z_pre_relu_lo[i] and z_pre_relu_up[i] are the bounds of
+        z[i] BEFORE applying the ReLU activation function, note these are NOT
+        the bounds on z.
+        """
+        assert (x_lo.dtype == self.dtype)
+        assert (x_up.dtype == self.dtype)
+        assert (len(x_lo.shape) == 1)
+        assert (len(x_up.shape) == 1)
+        assert (torch.all(torch.le(x_lo, x_up)))
+
+        z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
+            self._compute_layer_bound(x_lo, x_up, method)
+        output_lo, output_up = self._compute_network_output_bounds(
+            z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
+        mip_constr_return = self._output_constraint_given_bounds(
+            z_pre_relu_lo, z_pre_relu_up, x_lo, x_up)
         return (mip_constr_return, z_pre_relu_lo, z_pre_relu_up,
                 z_post_relu_lo, z_post_relu_up, output_lo, output_up)
 

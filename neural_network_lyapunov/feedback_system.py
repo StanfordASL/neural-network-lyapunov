@@ -101,28 +101,28 @@ class FeedbackSystem:
         self.controller_network_bound_propagate_method = \
             mip_utils.PropagateBoundsMethod.IA
 
-    def _add_network_controller_mip_constraint(self, mip, x_var, u_var,
-                                               controller_slack_var_name,
-                                               controller_binary_var_name,
-                                               lp_relaxation: bool):
+    def _add_network_controller_mip_constraint_given_relu_bound(
+            self, prog, x_var, u_var, controller_pre_relu_lo,
+            controller_pre_relu_up, network_input_lo, network_input_up,
+            controller_network_output_lo, controller_network_output_up,
+            controller_slack_var_name, controller_binary_var_name,
+            lp_relaxation: bool):
         assert (isinstance(self.controller_network, torch.nn.Sequential))
-        controller_mip_cnstr, _, _, _, _, controller_network_output_lo,\
-            controller_network_output_up = \
-            self.controller_relu_free_pattern.output_constraint(
-                torch.from_numpy(self.forward_system.x_lo_all),
-                torch.from_numpy(self.forward_system.x_up_all),
-                self.controller_network_bound_propagate_method)
+        controller_mip_cnstr =\
+            self.controller_relu_free_pattern._output_constraint_given_bounds(
+                controller_pre_relu_lo, controller_pre_relu_up,
+                network_input_lo, network_input_up)
         assert (controller_mip_cnstr.Aout_input is None)
         assert (controller_mip_cnstr.Aout_binary is None)
         controller_slack, controller_binary = \
-            mip.add_mixed_integer_linear_constraints(
+            prog.add_mixed_integer_linear_constraints(
                 controller_mip_cnstr, x_var, None,
                 controller_slack_var_name, controller_binary_var_name,
                 "controller_ineq", "controller_eq", "", lp_relaxation)
-        u_pre_sat = mip.addVars(self.forward_system.u_dim,
-                                lb=-gurobipy.GRB.INFINITY,
-                                vtype=gurobipy.GRB.CONTINUOUS,
-                                name="u_pre_sat")
+        u_pre_sat = prog.addVars(self.forward_system.u_dim,
+                                 lb=-gurobipy.GRB.INFINITY,
+                                 vtype=gurobipy.GRB.CONTINUOUS,
+                                 name="u_pre_sat")
         # Write ϕᵤ(x̂) = relu_xhat_coeff * relu_xhat_var + relu_xhat_constant
         if self.xhat_indices is None or self.xhat_indices == list(
                 range(self.x_dim)):
@@ -134,7 +134,7 @@ class FeedbackSystem:
                 relu_xhat_Cout, _, controller_relu_xhat_lo,\
                 controller_relu_xhat_up\
                 = compute_xhat._compute_network_at_xhat(
-                    mip, x_var, self.x_equilibrium,
+                    prog, x_var, self.x_equilibrium,
                     self.controller_relu_free_pattern, self.xhat_indices,
                     torch.from_numpy(self.forward_system.x_lo_all),
                     torch.from_numpy(self.forward_system.x_up_all),
@@ -152,17 +152,17 @@ class FeedbackSystem:
         # Aout_slack * controller_slack -u_pre_sat
         # - relu_xhat_coeff * relu_xhat_var = relu_xhat_constant - u* -Cout
         if isinstance(self.controller_network, torch.nn.Sequential):
-            mip.addMConstrs([
+            prog.addMConstrs([
                 controller_mip_cnstr.Aout_slack.reshape(
                     (self.forward_system.u_dim, len(controller_slack))),
                 -torch.eye(self.forward_system.u_dim,
                            dtype=self.forward_system.dtype)
             ] + [-coeff for coeff in relu_xhat_coeff],
-                            [controller_slack, u_pre_sat] + relu_xhat_var,
-                            sense=gurobipy.GRB.EQUAL,
-                            b=relu_xhat_constant - self.u_equilibrium -
-                            controller_mip_cnstr.Cout,
-                            name="controller_output")
+                             [controller_slack, u_pre_sat] + relu_xhat_var,
+                             sense=gurobipy.GRB.EQUAL,
+                             b=relu_xhat_constant - self.u_equilibrium -
+                             controller_mip_cnstr.Cout,
+                             name="controller_output")
         # Now compute the bounds of ϕᵤ(x̂)
         if self.xhat_indices is None or self.xhat_indices == list(
                 range(self.x_dim)):
@@ -175,10 +175,31 @@ class FeedbackSystem:
         u_pre_sat_up = controller_network_output_up -\
             controller_relu_xhat_lo + self.u_equilibrium
         u_lower_bound, u_upper_bound = _add_input_saturation_constraint(
-            mip, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
+            prog, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
             u_pre_sat_lo, u_pre_sat_up, self.dtype, lp_relaxation)
         return controller_slack, controller_binary, u_lower_bound,\
-            u_upper_bound
+            u_upper_bound, controller_pre_relu_lo, controller_pre_relu_up
+
+    def _add_network_controller_mip_constraint(self, mip, x_var, u_var,
+                                               controller_slack_var_name,
+                                               controller_binary_var_name,
+                                               lp_relaxation: bool):
+        network_input_lo = torch.from_numpy(self.forward_system.x_lo_all)
+        network_input_up = torch.from_numpy(self.forward_system.x_up_all)
+        controller_pre_relu_lo, controller_pre_relu_up, _, _, =\
+            self.controller_relu_free_pattern._compute_layer_bound(
+                network_input_lo, network_input_up,
+                self.controller_network_bound_propagate_method)
+        network_output_lo, network_output_up =\
+            self.controller_relu_free_pattern._compute_network_output_bounds(
+                controller_pre_relu_lo, controller_pre_relu_up,
+                network_input_lo, network_input_up,
+                self.controller_network_bound_propagate_method)
+        return self._add_network_controller_mip_constraint_given_relu_bound(
+            mip, x_var, u_var, controller_pre_relu_lo, controller_pre_relu_up,
+            network_input_lo, network_input_up, network_output_lo,
+            network_output_up, controller_slack_var_name,
+            controller_binary_var_name, lp_relaxation)
 
     def _add_linear_controller_mip_constraint(self, mip, x_var, u_var,
                                               lp_relaxation: bool):
@@ -230,9 +251,12 @@ class FeedbackSystem:
                                        controller_binary_var_name,
                                        lp_relaxation: bool):
         if isinstance(self.controller_network, torch.nn.Sequential):
-            return self._add_network_controller_mip_constraint(
-                mip, x_var, u_var, controller_slack_var_name,
-                controller_binary_var_name, lp_relaxation)
+            controller_slack, controller_binary, u_lower_bound, u_upper_bound,\
+                _, _ = self._add_network_controller_mip_constraint(
+                    mip, x_var, u_var, controller_slack_var_name,
+                    controller_binary_var_name, lp_relaxation)
+            return controller_slack, controller_binary, u_lower_bound,\
+                u_upper_bound
         elif isinstance(self.controller_network, torch.nn.Linear):
             return self._add_linear_controller_mip_constraint(
                 mip, x_var, u_var, lp_relaxation)
