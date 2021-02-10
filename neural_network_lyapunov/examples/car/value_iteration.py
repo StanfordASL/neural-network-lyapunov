@@ -67,7 +67,7 @@ if __name__ == "__main__":
     x_lo = np.array([-1, -1, -1.05 * np.pi])
     x_up = np.array([1, 1, 1.05 * np.pi])
     dt_min = 0.001
-    dt_max = 0.08
+    dt_max = 0.07
     prog, initial_val_constraint, final_val_constraint, x, u, dt =\
         unicycle_traj_opt.construct_traj_opt(
             nT, u_lo, u_up, dt_min, dt_max)
@@ -120,11 +120,35 @@ if __name__ == "__main__":
                     #     r[i, j] = np.inf
                 # else:
                 #     r[i, j] = np.inf
-        np.save("neural_network_lyapunov/examples/car/value/r_" +
-                str(nT) + "_" + str(n_grid_xy) + "_" + str(n_grid_angle), r)
+        np.save(
+            "neural_network_lyapunov/examples/car/value/r_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max),
+            r)
 
     V = value_iteration(ns, r, discount_factor=1)
-    np.save("neural_network_lyapunov/examples/car/value/V_" +
-            str(nT) + "_" + str(n_grid_xy) + "_" + str(n_grid_angle), V)
-    np.save("neural_network_lyapunov/examples/car/value/s_" +
-            str(nT) + "_" + str(n_grid_xy) + "_" + str(n_grid_angle), s)
+    np.save(
+        "neural_network_lyapunov/examples/car/value/V_" +
+        str(nT) +
+        "_" +
+        str(n_grid_xy) +
+        "_" +
+        str(n_grid_angle) +
+        "_" +
+        str(dt_max),
+        V)
+    np.save(
+        "neural_network_lyapunov/examples/car/value/s_" +
+        str(nT) +
+        "_" +
+        str(n_grid_xy) +
+        "_" +
+        str(n_grid_angle) +
+        "_" +
+        str(dt_max),
+        s)
