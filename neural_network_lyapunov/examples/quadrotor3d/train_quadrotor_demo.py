@@ -5,11 +5,12 @@ controller).
 import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.examples.quadrotor3d.quadrotor_feedback_system\
+    as quadrotor_feedback_system
 
 import torch
 import numpy as np
@@ -279,9 +280,8 @@ if __name__ == "__main__":
     if args.train_adversarial:
         forward_system.network_bound_propagate_method =\
             mip_utils.PropagateBoundsMethod.LP
-    closed_loop_system = feedback_system.FeedbackSystem(
-        forward_system, controller_relu, forward_system.x_equilibrium,
-        forward_system.u_equilibrium,
+    closed_loop_system = quadrotor_feedback_system.QuadrotorFeedbackSystem(
+        forward_system, controller_relu,
         u_lo.detach().numpy(),
         u_up.detach().numpy())
     if args.train_adversarial:

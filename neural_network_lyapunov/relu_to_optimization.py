@@ -347,7 +347,8 @@ class ReLUFreePattern:
         return linear_output_lo, linear_output_up
 
     def _compute_layer_bound(self, x_lo, x_up,
-                             method: mip_utils.PropagateBoundsMethod):
+                             method: mip_utils.PropagateBoundsMethod,
+                             create_prog_callback=None):
         """
         Compute the input and output bounds of each ReLU neurons.
         """
@@ -379,7 +380,7 @@ class ReLUFreePattern:
                             z_pre_relu_up.detach().numpy(),
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
-                            create_prog_callback=None)
+                            create_prog_callback)
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -392,7 +393,7 @@ class ReLUFreePattern:
     def _compute_network_output_bounds(self, previous_neuron_input_lo,
                                        previous_neuron_input_up,
                                        network_input_lo, network_input_up,
-                                       method):
+                                       method, create_prog_callback=None):
         if self.last_layer_is_relu:
             output_lo, output_up = mip_utils.propagate_bounds(
                 self.model[-1],
@@ -423,7 +424,7 @@ class ReLUFreePattern:
                             previous_neuron_input_up.detach().numpy(),
                             network_input_lo.detach().numpy(),
                             network_input_up.detach().numpy(),
-                            create_prog_callback=None)
+                            create_prog_callback)
                 return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,
