@@ -467,33 +467,12 @@ class QuadrotorReLUSystem:
     def possible_dx(self, x, u):
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self,
-                                mip,
-                                x_var,
-                                x_next_var,
-                                u_var,
-                                slack_var_name,
-                                binary_var_name,
-                                additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
-        """
-        Add the dynamics constraints
-        pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
-        (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
-        = ϕ(rpy[n],, angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
-        @param additional_u_lo The additional lower bound on u.
-        @param additional_u_up The additional upper bound on u.
-        """
-        u_lo = self.u_lo if additional_u_lo is None else torch.max(
-            self.u_lo, additional_u_lo)
-        u_up = self.u_up if additional_u_up is None else torch.min(
-            self.u_up, additional_u_up)
-
-        mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
-            output_constraint(
-                torch.cat((self.x_lo[3:6], self.x_lo[9:12], u_lo)),
-                torch.cat((self.x_up[3:6], self.x_up[9:12], u_up)),
-                self.network_bound_propagate_method)
+    def _add_dynamics_constraint_given_relu_bounds(
+            self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name, relu_input_lo, relu_input_up, network_input_lo,
+            network_input_up):
+        mip_cnstr_result = self.dynamics_relu_free_pattern._output_constraint_given_bounds(  # noqa
+            relu_input_lo, relu_input_up, network_input_lo, network_input_up)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
         input_vars = x_var[3:6] + x_var[9:12] + u_var
@@ -535,3 +514,44 @@ class QuadrotorReLUSystem:
                         sense=gurobipy.GRB.EQUAL,
                         name="update_pos")
         return forward_slack, forward_binary
+
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None,
+                                create_lp_prog_callback=None):
+        """
+        Add the dynamics constraints
+        pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
+        (rpy[n+1], pos_dot[n+1] - pos_dot[n], angular_vel[n+1])
+        = ϕ(rpy[n],, angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
+        @param additional_u_lo The additional lower bound on u.
+        @param additional_u_up The additional upper bound on u.
+        @param create_lp_prog_callback Only used when propagating the bounds of
+        the network ReLU inputs using LP. This callback will be used to add
+        additional constraints to the LP. The additional constraints include
+        those from the feedback system when connecting this forward system with
+        a controller.
+        """
+        u_lo = self.u_lo if additional_u_lo is None else torch.max(
+            self.u_lo, additional_u_lo)
+        u_up = self.u_up if additional_u_up is None else torch.min(
+            self.u_up, additional_u_up)
+
+        network_input_lo = torch.cat((self.x_lo[3:6], self.x_lo[9:12], u_lo))
+        network_input_up = torch.cat((self.x_up[3:6], self.x_up[9:12], u_up))
+
+        relu_input_lo, relu_input_up, _, _ =\
+            self.dynamics_relu_free_pattern._compute_layer_bound(
+                network_input_lo, network_input_up,
+                self.network_bound_propagate_method,
+                create_prog_callback=create_lp_prog_callback)
+
+        return self._add_dynamics_constraint_given_relu_bounds(
+            mip, x_var, x_next_var, u_var, slack_var_name, binary_var_name,
+            relu_input_lo, relu_input_up, network_input_lo, network_input_up)
