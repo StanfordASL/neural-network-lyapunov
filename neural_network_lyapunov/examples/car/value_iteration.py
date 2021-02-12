@@ -89,10 +89,18 @@ if __name__ == "__main__":
     n2 = math.ceil(u_up[1] * dt_max * (nT - 1) /
                    (x_up[2] - x_lo[2]) * n_grid_angle)
     if args.load_r:
-        r = np.load("neural_network_lyapunov/examples/car/value/r.npy")
+        r = np.load(
+            "neural_network_lyapunov/examples/car/value/r_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max))
     else:
-        # r = np.zeros((ns, ns))
-        r = np.full((ns, ns), np.inf)
+        r = np.ones((ns, ns))*1000
+        # r = np.full((ns, ns), np.inf)
         for i in range(ns):
             i0 = i // (n_grid_angle * n_grid_xy)
             i1 = (i - n_grid_angle * n_grid_xy * i0) // n_grid_angle
@@ -116,10 +124,10 @@ if __name__ == "__main__":
                     result = mp.Solve(prog)
                     if result.is_success():
                         r[i, j] = result.get_optimal_cost()
-                    # else:
-                    #     r[i, j] = np.inf
-                # else:
-                #     r[i, j] = np.inf
+                    else:
+                        r[i, j] = np.inf
+                else:
+                    r[i, j] = np.inf
         np.save(
             "neural_network_lyapunov/examples/car/value/r_" +
             str(nT) +
