@@ -40,7 +40,11 @@ def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
 
             # get the biggest difference between best action value and our old
             # value function
-            delta = max(delta, abs(v - V[i]))
+            try:
+                delta = max(delta, abs(v - V[i]))
+            except:
+                if v == V[i]:
+                    pass
 
             # apply bellman optimality eqn
             V[i] = v
@@ -59,7 +63,13 @@ if __name__ == "__main__":
         "--load_r",
         help="load precomputed r ",
         action="store_true")
+    parser.add_argument(
+        "--load_V",
+        help="load computed V ",
+        action="store_true")
     args = parser.parse_args()
+
+    epsilon = 1e-4
 
     nT = 5
     u_lo = np.array([-3, -0.25 * np.pi])
@@ -76,6 +86,7 @@ if __name__ == "__main__":
     s = np.array(np.meshgrid(np.linspace(x_lo[0], x_up[0], n_grid_xy),
                              np.linspace(x_lo[1], x_up[1], n_grid_xy),
                              np.linspace(x_lo[2], x_up[2], n_grid_angle)))
+    # ss = s.copy()
     s = s.reshape((3, n_grid_xy * n_grid_xy * n_grid_angle))
     # u = np.array(np.meshgrid(np.linspace(u_lo[0], u_up[0], n_grid),
     #                          np.linspace(u_lo[1], u_up[1], n_grid)))
@@ -97,10 +108,22 @@ if __name__ == "__main__":
             "_" +
             str(n_grid_angle) +
             "_" +
-            str(dt_max))
+            str(dt_max) +
+            ".npy")
+    elif args.load_V:
+        V = np.load(
+            "neural_network_lyapunov/examples/car/value/V_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".npy")
     else:
-        r = np.ones((ns, ns))*1000
-        # r = np.full((ns, ns), np.inf)
+        # r = np.ones((ns, ns))*1000
+        r = np.full((ns, ns), np.inf)
         for i in range(ns):
             i0 = i // (n_grid_angle * n_grid_xy)
             i1 = (i - n_grid_angle * n_grid_xy * i0) // n_grid_angle
@@ -108,12 +131,12 @@ if __name__ == "__main__":
             if i % 100 == 0:
                 print("r iteration: ", i)
             for j in range(ns):
-                j0 = j // n_grid_xy ** 2
-                j1 = (j - n_grid_xy ** 2 * j0) // n_grid_xy
-                j2 = j - n_grid_xy ** 2 * j0 - n_grid_xy * j1
-                if (i0 - n0) < j0 < (i0 + n0) and\
-                   (i1 - n1) < j1 < (i1 + n1) and\
-                   (i2 - n2) < j2 < (i2 + n2):
+                j0 = j // (n_grid_angle * n_grid_xy)
+                j1 = (j - n_grid_angle * n_grid_xy * j0) // n_grid_xy
+                j2 = j - n_grid_angle * n_grid_xy * j0 - n_grid_angle * j1
+                if i != j and (i0 - n0) <= j0 <= (i0 + n0) and\
+                   (i1 - n1) <= j1 <= (i1 + n1) and\
+                   (i2 - n2) <= j2 <= (i2 + n2):
                     initial_val_constraint.evaluator(
                     ).set_bounds(s[:, i], s[:, i])
                     final_val_constraint.evaluator(
@@ -124,10 +147,13 @@ if __name__ == "__main__":
                     result = mp.Solve(prog)
                     if result.is_success():
                         r[i, j] = result.get_optimal_cost()
-                    else:
-                        r[i, j] = np.inf
-                else:
-                    r[i, j] = np.inf
+                #     else:
+                #         r[i, j] = np.inf
+                # else:
+                #     r[i, j] = np.inf
+        # r(0,0) = 0
+        eq_ind = np.argmin(np.linalg.norm(s, axis=0))
+        r[eq_ind, eq_ind] = 0
         np.save(
             "neural_network_lyapunov/examples/car/value/r_" +
             str(nT) +
