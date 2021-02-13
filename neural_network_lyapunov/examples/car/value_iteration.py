@@ -132,7 +132,7 @@ if __name__ == "__main__":
                 print("r iteration: ", i)
             for j in range(ns):
                 j0 = j // (n_grid_angle * n_grid_xy)
-                j1 = (j - n_grid_angle * n_grid_xy * j0) // n_grid_xy
+                j1 = (j - n_grid_angle * n_grid_xy * j0) // n_grid_angle
                 j2 = j - n_grid_angle * n_grid_xy * j0 - n_grid_angle * j1
                 if i != j and (i0 - n0) <= j0 <= (i0 + n0) and\
                    (i1 - n1) <= j1 <= (i1 + n1) and\
