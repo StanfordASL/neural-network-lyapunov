@@ -40,11 +40,8 @@ def value_iteration(nx, r, epsilon=0.0001, discount_factor=0.95):
 
             # get the biggest difference between best action value and our old
             # value function
-            try:
+            if v != V[i]:
                 delta = max(delta, abs(v - V[i]))
-            except:
-                if v == V[i]:
-                    pass
 
             # apply bellman optimality eqn
             V[i] = v
