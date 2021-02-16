@@ -197,6 +197,14 @@ if __name__ == "__main__":
         "--r_complete",
         help="calculate r using complete without duplicate ",
         action="store_true")
+    parser.add_argument(
+        "--n_grid_xy",
+        help="number of grids along x/y axis ",
+        default=20)
+    parser.add_argument(
+        "--n_grid_angle",
+        help="number of grids along angle axis ",
+        default=60)
     args = parser.parse_args()
 
     epsilon = 1e-4
@@ -212,8 +220,8 @@ if __name__ == "__main__":
         unicycle_traj_opt.construct_traj_opt(
             nT, u_lo, u_up, dt_min, dt_max)
 
-    n_grid_xy = 20
-    n_grid_angle = 60
+    n_grid_xy = args.n_grid_xy
+    n_grid_angle = args.n_grid_angle
 
     print("n_grid_xy: {}, n_grid_angle: {}". format(n_grid_xy, n_grid_angle))
 
