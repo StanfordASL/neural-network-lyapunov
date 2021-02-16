@@ -4,6 +4,7 @@ import neural_network_lyapunov.examples.car.unicycle_traj_opt as\
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.examples.car.train_unicycle_demo as\
     train_unicycle_demo
+import neural_network_lyapunov.examples.car.unicycle as unicycle
 import pydrake.solvers.mathematicalprogram as mp
 import math
 import argparse
@@ -17,11 +18,13 @@ def value_iteration(nx, r, u_optimal, epsilon=0.0001, discount_factor=0.95):
     Args:
         nx: number of state in the environment.
         r: numpy array of size (nx, nx). immediate cost from state x to x'.
+        u_optimal: numpy array of size (nx, nx, u_dim). u[i, j] is the
+        optimal control action from state s[i] to s[j].
         epsilon: threshold for convergence.
         discount_factor: Gamma discount factor.
     Returns:
-        policy: numpy array of size (nx, nu). policy[i] is the optimal control
-        of state s[i].
+        policy: numpy array of size (nx, u_dim). policy[i] is the optimal
+        control of state s[i].
         V: numpy array of size nx. V[i] is the optimal value function of
         state s[i].
     """
@@ -76,6 +79,13 @@ def calculate_r_complete(
     x,
     u,
         dt):
+    """
+    @return:
+    r: numpy array of size (nx, nx). immediate cost from state x to x'.
+    u_optimal: numpy array of size (nx, nx, u_dim). u[i, j] is the
+    optimal control action from state s[i] to s[j].
+    """
+
     # r = np.ones((ns, ns))*1000
     r = np.full((ns, ns), np.inf)
     u_optimal = np.full((ns, ns, 2), np.nan)
@@ -117,6 +127,13 @@ def calculate_r_duplicate(
     x,
     u,
         dt):
+    """
+    @return:
+    r: numpy array of size (nx, nx). immediate cost from state x to x'.
+    u_optimal: numpy array of size (nx, nx, u_dim). u[i, j] is the
+    optimal control action from state s[i] to s[j].
+    """
+
     r = np.full((ns, ns), np.inf)
     u_optimal = np.full((ns, ns, 2), np.nan)
     # Calculate a quarter of a duplicated block at the four corners
@@ -213,6 +230,22 @@ def plot_V(V, n_angle=20):
     plt.show()
 
 
+def plot_u(u, n_angle=20):
+    u_copy = u.reshape((n_grid_xy, n_grid_xy, n_grid_angle, 2))
+    theta = np.linspace(x_lo[2], x_up[2], n_grid_angle)[n_angle]
+
+    x, y = np.meshgrid(np.linspace(x_lo[0], x_up[0], n_grid_xy),
+                       np.linspace(x_lo[1], x_up[1], n_grid_xy))
+
+    plt.quiver(x, y, np.cos(u_copy[:, :, n_angle, 1]), np.sin(
+        u_copy[:, :, n_angle, 1]))
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("Vector Field of Yaw Rate with Heading " +
+              str(theta * 180 / np.pi))
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -228,6 +261,10 @@ if __name__ == "__main__":
         help="calculate r using complete without duplicate ",
         action="store_true")
     parser.add_argument(
+        "--train_approximator",
+        help="train function approximator for controller and cost ",
+        action="store_true")
+    parser.add_argument(
         "--n_grid_xy", type=int,
         help="number of grids along x/y axis ",
         default=20)
@@ -239,7 +276,7 @@ if __name__ == "__main__":
 
     epsilon = 1e-4
 
-    nT = 5
+    nT = 8
     u_lo = np.array([-3, -0.25 * np.pi])
     u_up = np.array([6, 0.25 * np.pi])
     x_lo = np.array([-1, -1, -1.05 * np.pi])
@@ -285,7 +322,7 @@ if __name__ == "__main__":
             str(dt_max) +
             ".npy")
 
-        plot_V(V)
+        plot_V(V, 66)
 
         s = np.load(
             folder_name + "s_" +
@@ -307,6 +344,7 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
+        plot_u(policy, 18)
     else:
         if args.load_r:
             # r = np.random.random((ns, ns))
@@ -435,19 +473,80 @@ if __name__ == "__main__":
                                 dtype=torch.float64)),
                   dim=0)
 
-    traj_opt_states = torch.from_numpy(s.T)
-    traj_opt_controls = torch.from_numpy(policy)
-    traj_opt_costs = torch.from_numpy(V.T)
-    train_unicycle_demo.train_controller_approximator(controller_relu,
-                                                      traj_opt_states,
-                                                      traj_opt_controls,
-                                                      num_epochs=400,
-                                                      lr=0.001)
+    if args.train_approximator:
+        traj_opt_states = torch.from_numpy(s.T)
+        traj_opt_controls = torch.from_numpy(policy)
+        traj_opt_costs = torch.from_numpy(V.T)
+        train_unicycle_demo.train_controller_approximator(controller_relu,
+                                                          traj_opt_states,
+                                                          traj_opt_controls,
+                                                          num_epochs=400,
+                                                          lr=0.001)
+        torch.save(
+            controller_relu.state_dict(),
+            "neural_network_lyapunov/examples/car/data/controller_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".pt")
+        train_unicycle_demo.train_cost_approximator(lyapunov_relu,
+                                                    V_lambda,
+                                                    R,
+                                                    traj_opt_states,
+                                                    traj_opt_costs,
+                                                    num_epochs=100,
+                                                    lr=0.001)
+        torch.save(
+            lyapunov_relu.state_dict(),
+            "neural_network_lyapunov/examples/car/data/cost_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".pt")
+    else:
+        controller_relu.load_state_dict(
+            torch.load(
+                "neural_network_lyapunov/examples/car/data/controller_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max) +
+                ".pt"))
+        lyapunov_relu.load_state_dict(
+            torch.load(
+                "neural_network_lyapunov/examples/car/data/cost_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max) +
+                ".pt"))
 
-    train_unicycle_demo.train_cost_approximator(lyapunov_relu,
-                                                V_lambda,
-                                                R,
-                                                traj_opt_states,
-                                                traj_opt_costs,
-                                                num_epochs=100,
-                                                lr=0.001)
+    plant = unicycle.Unicycle(torch.float64)
+    x0 = np.array([0.5, 0.5, 0.5 * np.pi])  # Choose your initial state
+    t_span = (0, 10)
+    result = utils.\
+        simulate_plant_with_controller(plant,
+                                       controller_relu,
+                                       t_span,
+                                       torch.tensor([0, 0, 0],
+                                                    dtype=torch.float64),
+                                       torch.tensor([0, 0],
+                                                    dtype=torch.float64),
+                                       torch.from_numpy(u_lo),
+                                       torch.from_numpy(u_up),
+                                       x0)
+    print(result.y[:, -1])

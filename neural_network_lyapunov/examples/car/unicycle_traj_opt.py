@@ -19,13 +19,21 @@ def dynamics_constraint_evaluator(plant, xut):
 
 def cost_trajectory(nT, ut):
     u = ut[:2 * nT].reshape((2, nT))
-    dt_traj = ut[2 * nT:3 * nT - 1]
-    return ((u[0, :-1] + u[0, 1:]) / 2)**2 * dt_traj + (
-        (u[1, :-1] + u[1, 1:]) / 2)**2 * dt_traj
+
+    return u[0, :] ** 2 + u[1, :] ** 2
+
+
+def delta_cost_trajectory(nT, ut):
+    u = ut[:2 * nT].reshape((2, nT))
+    w_delta_v = 200
+    w_delta_angle = 800
+    return w_delta_v * np.diff(u[0, :]) ** 2 + \
+        w_delta_angle * np.diff(u[1, :]) ** 2
 
 
 def cost(nT, ut):
-    return np.sum(cost_trajectory(nT, ut))
+    return np.sum(cost_trajectory(nT, ut)) + \
+        np.sum(delta_cost_trajectory(nT, ut))
 
 
 def construct_traj_opt(nT, u_lo, u_up, dt_min, dt_max):
