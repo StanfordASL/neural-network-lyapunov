@@ -198,11 +198,11 @@ if __name__ == "__main__":
         help="calculate r using complete without duplicate ",
         action="store_true")
     parser.add_argument(
-        "--n_grid_xy",
+        "--n_grid_xy", type=int,
         help="number of grids along x/y axis ",
         default=20)
     parser.add_argument(
-        "--n_grid_angle",
+        "--n_grid_angle", type=int,
         help="number of grids along angle axis ",
         default=60)
     args = parser.parse_args()
