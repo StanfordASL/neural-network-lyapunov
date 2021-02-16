@@ -193,6 +193,10 @@ if __name__ == "__main__":
         "--load_V",
         help="load computed V ",
         action="store_true")
+    parser.add_argument(
+        "--r_complete",
+        help="calculate r using complete without duplicate ",
+        action="store_true")
     args = parser.parse_args()
 
     epsilon = 1e-4
@@ -207,8 +211,12 @@ if __name__ == "__main__":
     prog, initial_val_constraint, final_val_constraint, x, u, dt =\
         unicycle_traj_opt.construct_traj_opt(
             nT, u_lo, u_up, dt_min, dt_max)
+
     n_grid_xy = 20
     n_grid_angle = 60
+
+    print("n_grid_xy: {}, n_grid_angle: {}". format(n_grid_xy, n_grid_angle))
+
     s = np.array(np.meshgrid(np.linspace(x_lo[0], x_up[0], n_grid_xy),
                              np.linspace(x_lo[1], x_up[1], n_grid_xy),
                              np.linspace(x_lo[2], x_up[2], n_grid_angle)))
@@ -221,11 +229,27 @@ if __name__ == "__main__":
                    (x_up[1] - x_lo[1]) * (n_grid_xy - 1))
     n2 = math.ceil(u_up[1] * dt_max * (nT - 1) /
                    (x_up[2] - x_lo[2]) * (n_grid_angle - 1))
+
+    if args.r_complete:
+        folder_name = "neural_network_lyapunov/examples/car/value/complete/"
+    else:
+        folder_name = "neural_network_lyapunov/examples/car/value/"
+
     if args.load_r:
         # r = np.random.random((ns, ns))
         # u_optimal = np.random.random((ns, ns, 2))
         r = np.load(
-            "neural_network_lyapunov/examples/car/value/r_" +
+            folder_name + "r_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".npy")
+        u_optimal = np.load(
+            folder_name + "u_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -236,7 +260,7 @@ if __name__ == "__main__":
             ".npy")
     elif args.load_V:
         V = np.load(
-            "neural_network_lyapunov/examples/car/value/V_" +
+            folder_name + "V_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -246,17 +270,21 @@ if __name__ == "__main__":
             str(dt_max) +
             ".npy")
     else:
-        # r, u_optimal = calculate_r_complete(
-        #     ns, n0, n1, n2, prog, initial_val_constraint,
-        #     final_val_constraint, x, u, dt)
-        r, u_optimal = calculate_r_duplicate(ns, n0, n1, n2,
-                                             prog, initial_val_constraint,
-                                             final_val_constraint, x, u, dt)
+        if args.r_complete:
+            r, u_optimal = calculate_r_complete(
+                ns, n0, n1, n2, prog, initial_val_constraint,
+                final_val_constraint, x, u, dt)
+        else:
+            r, u_optimal = calculate_r_duplicate(ns, n0, n1, n2,
+                                                 prog, initial_val_constraint,
+                                                 final_val_constraint, x, u, dt)
+
         # r(0,0) = 0
         eq_ind = np.argmin(np.linalg.norm(s, axis=0))
         r[eq_ind, eq_ind] = 0
+
         np.save(
-            "neural_network_lyapunov/examples/car/value/r_" +
+            folder_name + "r_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -266,7 +294,7 @@ if __name__ == "__main__":
             str(dt_max),
             r)
         np.save(
-            "neural_network_lyapunov/examples/car/value/u_" +
+            folder_name + "u_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -277,8 +305,9 @@ if __name__ == "__main__":
             u_optimal)
 
     V, policy = value_iteration(ns, r, u_optimal, discount_factor=1)
+
     np.save(
-        "neural_network_lyapunov/examples/car/value/V_" +
+        folder_name + "V_" +
         str(nT) +
         "_" +
         str(n_grid_xy) +
@@ -287,8 +316,9 @@ if __name__ == "__main__":
         "_" +
         str(dt_max),
         V)
+
     np.save(
-        "neural_network_lyapunov/examples/car/value/policy_" +
+        folder_name + "policy_" +
         str(nT) +
         "_" +
         str(n_grid_xy) +
@@ -297,8 +327,9 @@ if __name__ == "__main__":
         "_" +
         str(dt_max),
         policy)
+
     np.save(
-        "neural_network_lyapunov/examples/car/value/s_" +
+        folder_name + "s_" +
         str(nT) +
         "_" +
         str(n_grid_xy) +
