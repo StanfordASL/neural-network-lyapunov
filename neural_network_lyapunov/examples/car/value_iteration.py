@@ -283,9 +283,9 @@ if __name__ == "__main__":
                 ns, n0, n1, n2, prog, initial_val_constraint,
                 final_val_constraint, x, u, dt)
         else:
-            r, u_optimal = calculate_r_duplicate(ns, n0, n1, n2,
-                                                 prog, initial_val_constraint,
-                                                 final_val_constraint, x, u, dt)
+            r, u_optimal = calculate_r_duplicate(
+                ns, n0, n1, n2, prog, initial_val_constraint,
+                final_val_constraint, x, u, dt)
 
         # r(0,0) = 0
         eq_ind = np.argmin(np.linalg.norm(s, axis=0))
