@@ -1,9 +1,12 @@
 import numpy as np
 import neural_network_lyapunov.examples.car.unicycle_traj_opt as\
     unicycle_traj_opt
+import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.examples.car.train_unicycle_demo as train_unicycle_demo
 import pydrake.solvers.mathematicalprogram as mp
 import math
 import argparse
+import torch
 
 
 def value_iteration(nx, r, u_optimal, epsilon=0.0001, discount_factor=0.95):
@@ -243,30 +246,7 @@ if __name__ == "__main__":
     else:
         folder_name = "neural_network_lyapunov/examples/car/value/"
 
-    if args.load_r:
-        # r = np.random.random((ns, ns))
-        # u_optimal = np.random.random((ns, ns, 2))
-        r = np.load(
-            folder_name + "r_" +
-            str(nT) +
-            "_" +
-            str(n_grid_xy) +
-            "_" +
-            str(n_grid_angle) +
-            "_" +
-            str(dt_max) +
-            ".npy")
-        u_optimal = np.load(
-            folder_name + "u_" +
-            str(nT) +
-            "_" +
-            str(n_grid_xy) +
-            "_" +
-            str(n_grid_angle) +
-            "_" +
-            str(dt_max) +
-            ".npy")
-    elif args.load_V:
+    if args.load_V:
         V = np.load(
             folder_name + "V_" +
             str(nT) +
@@ -277,22 +257,91 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
+        s = np.load(
+            folder_name + "s_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".npy")
+        policy = np.load(
+            folder_name + "policy_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".npy")
     else:
-        if args.r_complete:
-            r, u_optimal = calculate_r_complete(
-                ns, n0, n1, n2, prog, initial_val_constraint,
-                final_val_constraint, x, u, dt)
+        if args.load_r:
+            # r = np.random.random((ns, ns))
+            # u_optimal = np.random.random((ns, ns, 2))
+            r = np.load(
+                folder_name + "r_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max) +
+                ".npy")
+            u_optimal = np.load(
+                folder_name + "u_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max) +
+                ".npy")
         else:
-            r, u_optimal = calculate_r_duplicate(
-                ns, n0, n1, n2, prog, initial_val_constraint,
-                final_val_constraint, x, u, dt)
+            if args.r_complete:
+                r, u_optimal = calculate_r_complete(
+                    ns, n0, n1, n2, prog, initial_val_constraint,
+                    final_val_constraint, x, u, dt)
+            else:
+                r, u_optimal = calculate_r_duplicate(
+                    ns, n0, n1, n2, prog, initial_val_constraint,
+                    final_val_constraint, x, u, dt)
 
-        # r(0,0) = 0
-        eq_ind = np.argmin(np.linalg.norm(s, axis=0))
-        r[eq_ind, eq_ind] = 0
+            # r(0,0) = 0
+            eq_ind = np.argmin(np.linalg.norm(s, axis=0))
+            r[eq_ind, eq_ind] = 0
+
+            np.save(
+                folder_name + "r_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max),
+                r)
+            np.save(
+                folder_name + "u_" +
+                str(nT) +
+                "_" +
+                str(n_grid_xy) +
+                "_" +
+                str(n_grid_angle) +
+                "_" +
+                str(dt_max),
+                u_optimal)
+
+        V, policy = value_iteration(ns, r, u_optimal, discount_factor=1)
+        # Control at eq should be 0
+        policy[eq_ind] = np.array([0, 0])
 
         np.save(
-            folder_name + "r_" +
+            folder_name + "V_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -300,9 +349,10 @@ if __name__ == "__main__":
             str(n_grid_angle) +
             "_" +
             str(dt_max),
-            r)
+            V)
+
         np.save(
-            folder_name + "u_" +
+            folder_name + "policy_" +
             str(nT) +
             "_" +
             str(n_grid_xy) +
@@ -310,39 +360,48 @@ if __name__ == "__main__":
             str(n_grid_angle) +
             "_" +
             str(dt_max),
-            u_optimal)
+            policy)
 
-    V, policy = value_iteration(ns, r, u_optimal, discount_factor=1)
+        np.save(
+            folder_name + "s_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max),
+            s)
 
-    np.save(
-        folder_name + "V_" +
-        str(nT) +
-        "_" +
-        str(n_grid_xy) +
-        "_" +
-        str(n_grid_angle) +
-        "_" +
-        str(dt_max),
-        V)
+    V_lambda = 0.5
+    controller_relu = utils.setup_relu((3, 8, 8, 2),
+                                       params=None,
+                                       negative_slope=0.1,
+                                       bias=True,
+                                       dtype=torch.float64)
+    lyapunov_relu = utils.setup_relu((3, 10, 10, 10, 1),
+                                     params=None,
+                                     negative_slope=0.01,
+                                     bias=True,
+                                     dtype=torch.float64)
+    R = torch.cat((torch.eye(3, dtype=torch.float64),
+                   torch.tensor([[1, -1, 0], [-1, -1, 1], [0, 1, 1]],
+                                dtype=torch.float64)),
+                  dim=0)
 
-    np.save(
-        folder_name + "policy_" +
-        str(nT) +
-        "_" +
-        str(n_grid_xy) +
-        "_" +
-        str(n_grid_angle) +
-        "_" +
-        str(dt_max),
-        policy)
+    traj_opt_states = torch.from_numpy(s.T)
+    traj_opt_controls = torch.from_numpy(policy)
+    traj_opt_costs = torch.from_numpy(V.T)
+    train_unicycle_demo.train_controller_approximator(controller_relu,
+                                  traj_opt_states,
+                                  traj_opt_controls,
+                                  num_epochs=400,
+                                  lr=0.001)
 
-    np.save(
-        folder_name + "s_" +
-        str(nT) +
-        "_" +
-        str(n_grid_xy) +
-        "_" +
-        str(n_grid_angle) +
-        "_" +
-        str(dt_max),
-        s)
+    train_unicycle_demo.train_cost_approximator(lyapunov_relu,
+                                V_lambda,
+                                R,
+                                traj_opt_states,
+                                traj_opt_costs,
+                                num_epochs=100,
+                                lr=0.001)
