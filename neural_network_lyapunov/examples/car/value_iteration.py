@@ -2,11 +2,13 @@ import numpy as np
 import neural_network_lyapunov.examples.car.unicycle_traj_opt as\
     unicycle_traj_opt
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.examples.car.train_unicycle_demo as train_unicycle_demo
+import neural_network_lyapunov.examples.car.train_unicycle_demo as\
+    train_unicycle_demo
 import pydrake.solvers.mathematicalprogram as mp
 import math
 import argparse
 import torch
+import matplotlib.pyplot as plt
 
 
 def value_iteration(nx, r, u_optimal, epsilon=0.0001, discount_factor=0.95):
@@ -186,6 +188,31 @@ def threeD_to_flat(i0, i1, i2):
     return n_grid_angle * n_grid_xy * i0 + n_grid_angle * i1 + i2
 
 
+def plot_V(V, n_angle=20):
+    V_copy = V.reshape((n_grid_xy, n_grid_xy, n_grid_angle))
+    x, y = np.meshgrid(np.linspace(x_lo[0], x_up[0], n_grid_xy),
+                       np.linspace(x_lo[1], x_up[1], n_grid_xy))
+
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+
+    ax.plot_surface(x, y, V_copy[:, :, n_angle],
+                    cmap='viridis', edgecolor='none')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('V')
+    ax.set_title('Surface plot')
+    plt.show()
+
+    fig, ax = plt.subplots(1, 1)
+    cp = ax.contourf(x, y, V_copy[:, :, n_angle])
+    fig.colorbar(cp)
+    ax.set_title('Value Function Contours')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -257,6 +284,9 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
+
+        plot_V(V)
+
         s = np.load(
             folder_name + "s_" +
             str(nT) +
@@ -291,6 +321,22 @@ if __name__ == "__main__":
                 "_" +
                 str(dt_max) +
                 ".npy")
+
+            # rc = np.load(
+            #     folder_name + "complete/r_" +
+            #     str(nT) +
+            #     "_" +
+            #     str(n_grid_xy) +
+            #     "_" +
+            #     str(n_grid_angle) +
+            #     "_" +
+            #     str(dt_max) +
+            #     ".npy")
+            # r100 = r[:100, :]
+            # Check duplicate code matches complete code
+            # print((np.absolute(r100[np.isfinite(r100)] -
+            #                    rc[np.isfinite(rc)]) < epsilon).all())
+
             u_optimal = np.load(
                 folder_name + "u_" +
                 str(nT) +
@@ -393,15 +439,15 @@ if __name__ == "__main__":
     traj_opt_controls = torch.from_numpy(policy)
     traj_opt_costs = torch.from_numpy(V.T)
     train_unicycle_demo.train_controller_approximator(controller_relu,
-                                  traj_opt_states,
-                                  traj_opt_controls,
-                                  num_epochs=400,
-                                  lr=0.001)
+                                                      traj_opt_states,
+                                                      traj_opt_controls,
+                                                      num_epochs=400,
+                                                      lr=0.001)
 
     train_unicycle_demo.train_cost_approximator(lyapunov_relu,
-                                V_lambda,
-                                R,
-                                traj_opt_states,
-                                traj_opt_costs,
-                                num_epochs=100,
-                                lr=0.001)
+                                                V_lambda,
+                                                R,
+                                                traj_opt_states,
+                                                traj_opt_costs,
+                                                num_epochs=100,
+                                                lr=0.001)
