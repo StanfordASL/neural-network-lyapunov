@@ -163,7 +163,7 @@ def plot_lyapunov_colormap(fig, ax, relu, V_lambda,
                 R @ (state_samples_all - x_equilibrium).T, p=1, dim=0
                 ).reshape((-1, 1))
         V_minus_l1 = V - lyapunov_positivity_epsilon * torch.norm(
-            R @ (state_samples_all - x_equilibrium), p=1, dim=0).reshape(
+            R @ (state_samples_all - x_equilibrium).T, p=1, dim=0).reshape(
                 (-1, 1))
         V_minus_l1_np = np.empty(mesh_size)
         samples_x = torch.empty(mesh_size)
@@ -188,7 +188,7 @@ def plot_lyapunov_colormap(fig, ax, relu, V_lambda,
 
 
 def plot_lyapunov_dot_colormap(fig, ax, relu, system, V_lambda,
-                               lyapunov_derivative_epsilon, x_equilibrium,
+                               lyapunov_derivative_epsilon, x_equilibrium, R,
                                x_lower, x_upper, mesh_size, discrete_time,
                                fontsize, **kwargs):
     if discrete_time:
@@ -216,7 +216,8 @@ def plot_lyapunov_dot_colormap(fig, ax, relu, system, V_lambda,
                         dut.lyapunov_derivative(state_sample, x_equilibrium,
                                                 V_lambda,
                                                 lyapunov_derivative_epsilon,
-                                                x_indices=dut.x_indices)))
+                                                R=R, xbar_indices=None,
+                                                xhat_indices=None)))
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
         dV_np = dV.detach().numpy()
@@ -225,7 +226,7 @@ def plot_lyapunov_dot_colormap(fig, ax, relu, system, V_lambda,
         ax.set_xlabel("x(1)", fontsize=fontsize)
         ax.set_ylabel("x(2)", fontsize=fontsize)
         if discrete_time:
-            ax.set_title(r"$V(x_{n+1})-V(x_n)+\epsilon_2V(x_n)",
+            ax.set_title(r"$V(x_{t+1})-V(x_t)+\epsilon_2V(x_t)$",
                          fontsize=fontsize)
         else:
             ax.set_title(r"$\dot{V} + \epsilon_2V$", fontsize=fontsize)

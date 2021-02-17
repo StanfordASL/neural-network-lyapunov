@@ -438,9 +438,11 @@ class LyapunovHybridLinearSystem:
                 torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
                     loss, torch.tensor(-1.).to(state_samples.device)))
         elif reduction == "4norm":
-            return torch.norm(
-                torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
-                    loss, torch.tensor(-1.).to(state_samples.device)), p=4)
+            return torch.norm(torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")(loss,
+                                  torch.tensor(-1.).to(state_samples.device)),
+                              p=4)
 
     def _add_relu_xhat_constraint(self, mip, x_var, x_equilibrium,
                                   xhat_indices: list):
@@ -510,6 +512,90 @@ class LyapunovHybridLinearSystem:
             ] + relu_xhat_coeff, [relu_z, state_error_s] + relu_xhat_var,
                             sense=gurobipy.GRB.LESS_EQUAL,
                             rhs=lyapunov_upper - b_relu + relu_xhat_constant)
+
+    def _construct_milp_for_roa_boundary(self,
+                                         V_lambda,
+                                         R,
+                                         x_equilibrium,
+                                         xbar_indices=None,
+                                         xhat_indices=None):
+        """
+        Construct an MILP to solve the problem
+        min V(x)
+        s.t x in the boundary of the box.
+        """
+        dtype = self.system.dtype
+        # I could use the original gurobi interface directly, instead of the
+        # gurobi_torch_mip interface, as we don't need to compute the gradient
+        # of the results.
+        milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x_lo = torch.from_numpy(self.system.x_lo_all)
+        x_up = torch.from_numpy(self.system.x_up_all)
+        x = milp.addVars(self.system.x_dim,
+                         lb=x_lo,
+                         ub=x_up,
+                         vtype=gurobipy.GRB.CONTINUOUS,
+                         name="x[n]")
+
+        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(milp, x)
+
+        # Now add the constraint that x is on the boundary of the box
+        # x_lo <= x <= x_up
+        # We add binary variables ζ_up and ζ_lo, such that
+        # ζ_up(i)=1 => x[i] = x_up[i]
+        # ζ_lo(i)=1 => x[i] = x_lo[i]
+        # Using big-M trick, we get
+        # x[i] >= x_lo[i] + (x_up[i]-x_lo[i]) * ζ_up[i]
+        # x[i] <= x_up[i] - (x_up[i]-x_lo[i]) * ζ_lo[i]
+        zeta_lo = milp.addVars(self.system.x_dim, vtype=gurobipy.GRB.BINARY)
+        zeta_up = milp.addVars(self.system.x_dim, vtype=gurobipy.GRB.BINARY)
+        milp.addLConstr([
+            torch.ones((self.system.x_dim, ), dtype=dtype),
+            torch.ones((self.system.x_dim, ), dtype=dtype)
+        ], [zeta_lo, zeta_up],
+                        rhs=1.,
+                        sense=gurobipy.GRB.EQUAL)
+        milp.addMConstrs([
+            torch.eye(self.system.x_dim, dtype=dtype),
+            torch.diag(x_lo - x_up)
+        ], [x, zeta_up],
+                         b=x_lo,
+                         sense=gurobipy.GRB.GREATER_EQUAL)
+        milp.addMConstrs([
+            torch.eye(self.system.x_dim, dtype=dtype),
+            torch.diag(x_up - x_lo)
+        ], [x, zeta_lo],
+                         b=x_up,
+                         sense=gurobipy.GRB.LESS_EQUAL)
+
+        # compute ϕ(x̂) = relu_xhat_coeff * relu_xhat_var + relu_xhat_constant
+        relu_xhat_coeff, relu_xhat_var, relu_xhat_constant, _ = \
+            self._add_relu_xhat_constraint(
+                milp, x, x_equilibrium, xhat_indices)
+
+        # Now write the 1-norm |R*(x̅[n] - x̅*)|₁ as mixed-integer linear
+        # constraints.
+        (s,
+         gamma) = self.add_state_error_l1_constraint(milp,
+                                                     x_equilibrium,
+                                                     x,
+                                                     R=R,
+                                                     slack_name="s",
+                                                     binary_var_name="gamma",
+                                                     fixed_R=True,
+                                                     xbar_indices=xbar_indices)
+
+        # Objective is
+        # min V(x[n])
+        # = ϕ(x) − ϕ(x*) + λ|R(x̅−x̅*)|₁
+        # = a_out * z + b_out + λ * s - relu_xhat_coeff * relu_xhat_var
+        #   - relu_xhat_constant
+        milp.setObjective(
+            [a_out.squeeze(), V_lambda * torch.ones((len(s), ), dtype=dtype)] +
+            [-coeff for coeff in relu_xhat_coeff], [z, s] + relu_xhat_var,
+            constant=b_out - relu_xhat_constant,
+            sense=gurobipy.GRB.MINIMIZE)
+        return milp, x
 
 
 class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):

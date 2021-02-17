@@ -153,3 +153,5 @@ class Quadrotor2DVisualizer:
         self.right_prop_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
 
         self.ax.set_title("t = {:.1f}".format(t))
+        self.ax.set_xlabel('x (m)')
+        self.ax.set_ylabel('z (m)')
