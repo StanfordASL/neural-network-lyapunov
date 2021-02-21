@@ -524,9 +524,9 @@ class TrainLyapunovReLU:
             # For a feedback system, we train both the Lyapunov network
             # parameters and the controller network parameters.
             training_params = list(
-                self.lyapunov_hybrid_system.lyapunov_relu.parameters()) + list(
-                    self.lyapunov_hybrid_system.system.controller_network.
-                    parameters()) + self.R_options.variables()
+                self.lyapunov_hybrid_system.lyapunov_relu.parameters(
+                )) + self.lyapunov_hybrid_system.system.controller_variables(
+                ) + self.R_options.variables()
         else:
             training_params = \
                 list(self.lyapunov_hybrid_system.lyapunov_relu.parameters()) +\

@@ -23,6 +23,9 @@ class ROptions:
     def fixed_R(self) -> bool:
         pass
 
+    def extract_params(self):
+        return dict()
+
 
 class SearchRwithSPDOptions(ROptions):
     """
@@ -105,6 +108,13 @@ class SearchRwithSPDOptions(ROptions):
     def fixed_R(self):
         return False
 
+    def extract_params(self):
+        return {
+            "R_size": self.R_size,
+            "R_epsilon": self.R_epsilon,
+            "R_variables": self.R_variables()
+        }
+
 
 class FixedROptions(ROptions):
     """
@@ -167,7 +177,7 @@ class SearchRwithSVDOptions(ROptions):
 
     def set_variable_value_directly(self, variable_val: np.ndarray):
         assert (isinstance(variable_val, np.ndarray))
-        assert (variable_val.shape == (np.min(self.R_size),))
+        assert (variable_val.shape == (np.min(self.R_size), ))
         self._variables = torch.from_numpy(variable_val)
         self._variables.requires_grad = True
 
@@ -199,3 +209,11 @@ class SearchRwithSVDOptions(ROptions):
     @property
     def fixed_R(self):
         return False
+
+    def extract_params(self):
+        return {
+            "R_size": self.R_size,
+            "R_U": self.U,
+            "R_V": self.V,
+            "R_a": self.a
+        }

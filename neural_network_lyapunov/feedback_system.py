@@ -321,6 +321,9 @@ class FeedbackSystem:
         else:
             return self.forward_system.step_forward(x, u)
 
+    def controller_variables(self):
+        return list(self.controller_network.parameters())
+
 
 def _add_input_saturation_constraint(mip, u_var, u_pre_sat,
                                      u_lower_limit: np.ndarray,
