@@ -1,6 +1,7 @@
 import neural_network_lyapunov.examples.car.unicycle as unicycle
+import neural_network_lyapunov.examples.car.unicycle_feedback_system as\
+    unicycle_feedback_system
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.train_utils as train_utils
@@ -9,6 +10,28 @@ import argparse
 import torch
 import numpy as np
 import os
+
+
+def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, lambda_u,
+                          Ru_options, file_path):
+    linear_layer_width, negative_slope, bias = utils.extract_relu_structure(
+        controller_relu)
+    saved_params = {
+        "linear_layer_width": linear_layer_width,
+        "state_dict": controller_relu.state_dict(),
+        "negative_slope": negative_slope,
+        "x_lo": x_lo,
+        "x_up": x_up,
+        "u_lo": u_lo,
+        "u_up": u_up,
+        "bias": bias,
+        "lambda_u": lambda_u,
+        "Ru": Ru_options.R(),
+        "fixed_R": Ru_options.fixed_R,
+    }
+    Ru_params = Ru_options.extract_params()
+    saved_params.update(Ru_params)
+    torch.save(saved_params, file_path)
 
 
 def generate_dynamics_data(dt):
@@ -80,21 +103,27 @@ def train_forward_model(dynamics_relu, dataset, num_epochs, thetadot_as_input):
                              lr=0.001)
 
 
-def train_controller_approximator(controller_relu, states, controls,
-                                  num_epochs, lr):
+def train_controller_approximator(controller_relu, states, controls, lambda_u,
+                                  Ru, num_epochs, lr):
     dataset = torch.utils.data.TensorDataset(states, controls)
     x_equilibrium = torch.zeros((3, ), dtype=torch.float64)
     u_equilibrium = torch.zeros((2, ), dtype=torch.float64)
+    Ru.requires_grad_(True)
 
     def compute_u(model, x):
-        return model(x) - model(x_equilibrium) + u_equilibrium
+        return model(x) - model(
+            x_equilibrium) + u_equilibrium + lambda_u * torch.stack(
+                (torch.norm(Ru @ x[:, :2].T, p=1, dim=0),
+                 torch.zeros((x.shape[0], ), dtype=torch.float64))).T
 
     utils.train_approximator(dataset,
                              controller_relu,
                              compute_u,
                              batch_size=30,
                              num_epochs=num_epochs,
-                             lr=lr)
+                             lr=lr,
+                             additional_variable=[Ru])
+    Ru.requires_grad_(False)
 
 
 def train_cost_approximator(lyapunov_relu, V_lambda, R, states, costs,
@@ -151,6 +180,9 @@ if __name__ == "__main__":
         "--train_adversarial",
         action="store_true",
         help="only do adversarial training, not bilevel optimization")
+    parser.add_argument("--dp_states", type=str, default=None)
+    parser.add_argument("--dp_costs", type=str, default=None)
+    parser.add_argument("--dp_actions", type=str, default=None)
     parser.add_argument(
         "--traj_opt_data",
         type=str,
@@ -196,11 +228,14 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 20, 10, 2),
+    controller_relu = utils.setup_relu((3, 10, 10, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
                                        dtype=torch.float64)
+    controller_lambda_u = 0.2
+    controller_Ru = torch.tensor([[1, -1], [0, 1], [1, 0]],
+                                 dtype=torch.float64)
     if args.load_controller_relu:
         controller_data = torch.load(args.load_controller_relu)
         controller_relu = utils.setup_relu(
@@ -210,8 +245,10 @@ if __name__ == "__main__":
             bias=controller_data["bias"],
             dtype=torch.float64)
         controller_relu.load_state_dict(controller_data["state_dict"])
+        controller_lambda_u = controller_data["lambda_u"]
+        controller_Ru = controller_data["Ru"]
 
-    lyapunov_relu = utils.setup_relu((3, 25, 20, 10, 1),
+    lyapunov_relu = utils.setup_relu((3, 10, 10, 10, 1),
                                      params=None,
                                      negative_slope=0.01,
                                      bias=True,
@@ -235,8 +272,27 @@ if __name__ == "__main__":
 
     x_lo = torch.tensor([-0.1, -0.1, -np.pi / 10], dtype=torch.float64)
     x_up = torch.tensor([0.1, 0.1, np.pi / 10], dtype=torch.float64)
-    u_lo = torch.tensor([-3, -0.25 * np.pi], dtype=torch.float64)
+    u_lo = torch.tensor([0, -0.25 * np.pi], dtype=torch.float64)
     u_up = torch.tensor([6, 0.25 * np.pi], dtype=torch.float64)
+
+    if args.dp_states:
+        dp_states = torch.from_numpy(np.load(args.dp_states)).T
+        dp_costs = torch.from_numpy(np.load(args.dp_costs)).reshape((-1, 1))
+        dp_actions = torch.from_numpy(np.load(args.dp_actions))
+        train_controller_approximator(controller_relu,
+                                      dp_states,
+                                      dp_actions,
+                                      controller_lambda_u,
+                                      controller_Ru,
+                                      num_epochs=300,
+                                      lr=0.001)
+        train_cost_approximator(lyapunov_relu,
+                                V_lambda,
+                                R,
+                                dp_states,
+                                dp_costs,
+                                num_epochs=1000,
+                                lr=0.001)
 
     if args.traj_opt_data:
         traj_opt_data = torch.load(args.traj_opt_data)
@@ -246,6 +302,8 @@ if __name__ == "__main__":
         train_controller_approximator(controller_relu,
                                       traj_opt_states,
                                       traj_opt_controls,
+                                      controller_lambda_u,
+                                      controller_Ru,
                                       num_epochs=50,
                                       lr=0.001)
         train_cost_approximator(lyapunov_relu,
@@ -283,14 +341,18 @@ if __name__ == "__main__":
                                                        thetadot_as_input)
     # We only stabilize the horizontal position, not the orientation of the car
     xhat_indices = None
-    closed_loop_system = feedback_system.FeedbackSystem(
-        forward_system,
-        controller_relu,
-        forward_system.x_equilibrium,
-        forward_system.u_equilibrium,
+    Ru_options = r_options.SearchRwithSVDOptions(controller_Ru.shape,
+                                                 np.array([0.1, 0.2]))
+    Ru_options.set_variable_value(controller_Ru.detach().numpy())
+    if args.search_R:
+        _, Ru_sigma, _ = np.linalg.svd(controller_Ru.detach().numpy())
+        Ru_options = r_options.SearchRwithSVDOptions(controller_Ru.shape,
+                                                     Ru_sigma * 0.8)
+        Ru_options.set_variable_value(controller_Ru.detach().numpy())
+    closed_loop_system = unicycle_feedback_system.UnicycleFeedbackSystem(
+        forward_system, controller_relu,
         u_lo.detach().numpy(),
-        u_up.detach().numpy(),
-        xhat_indices=xhat_indices)
+        u_up.detach().numpy(), controller_lambda_u, Ru_options)
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
 
@@ -331,7 +393,7 @@ if __name__ == "__main__":
         options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
         options.positivity_samples_pool_size = 10000
         options.derivative_samples_pool_size = 10000
-        options.num_epochs_per_mip = 5
+        options.num_epochs_per_mip = 10
         dut.add_derivative_adversarial_state = True
         dut.add_positivity_adversarial_state = True
         dut.lyapunov_positivity_mip_pool_solutions = 100
@@ -340,8 +402,7 @@ if __name__ == "__main__":
             x_lo, x_up, (20, 20, 20), dtype=torch.float64)
         derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
-                                       derivative_state_samples_init,
-                                       options)
+                                       derivative_state_samples_init, options)
     else:
         dut.train(torch.empty((0, 3), dtype=torch.float64))
     pass
