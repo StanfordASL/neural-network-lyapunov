@@ -228,13 +228,13 @@ if __name__ == "__main__":
         dynamics_relu.load_state_dict(dynamics_model_data["state_dict"])
 
     V_lambda = 0.5
-    controller_relu = utils.setup_relu((3, 10, 10, 2),
+    controller_relu = utils.setup_relu((3, 15, 10, 5, 2),
                                        params=None,
                                        negative_slope=0.1,
                                        bias=True,
                                        dtype=torch.float64)
-    controller_lambda_u = 0.2
-    controller_Ru = torch.tensor([[1, -1], [0, 1], [1, 0]],
+    controller_lambda_u = 4.
+    controller_Ru = torch.tensor([[1, -1], [0, 1], [1, 0], [1, 1], [0.5, 0.9]],
                                  dtype=torch.float64)
     if args.load_controller_relu:
         controller_data = torch.load(args.load_controller_relu)
@@ -248,7 +248,7 @@ if __name__ == "__main__":
         controller_lambda_u = controller_data["lambda_u"]
         controller_Ru = controller_data["Ru"]
 
-    lyapunov_relu = utils.setup_relu((3, 10, 10, 10, 1),
+    lyapunov_relu = utils.setup_relu((3, 15, 10, 5, 1),
                                      params=None,
                                      negative_slope=0.01,
                                      bias=True,
@@ -345,9 +345,7 @@ if __name__ == "__main__":
                                                  np.array([0.1, 0.2]))
     Ru_options.set_variable_value(controller_Ru.detach().numpy())
     if args.search_R:
-        _, Ru_sigma, _ = np.linalg.svd(controller_Ru.detach().numpy())
-        Ru_options = r_options.SearchRwithSVDOptions(controller_Ru.shape,
-                                                     Ru_sigma * 0.8)
+        Ru_options = r_options.SearchRfreeOptions(controller_Ru.shape)
         Ru_options.set_variable_value(controller_Ru.detach().numpy())
     closed_loop_system = unicycle_feedback_system.UnicycleFeedbackSystem(
         forward_system, controller_relu,
@@ -357,8 +355,8 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
 
     if args.search_R:
-        _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
-        R_options = r_options.SearchRwithSVDOptions(R.shape, R_sigma * 0.8)
+        R_options = r_options.SearchRwithSVDOptions(R.shape,
+                                                    np.array([0.5, 0.5, 0.5]))
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
@@ -374,8 +372,8 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-6
     dut.max_iterations = args.max_iterations
-    dut.lyapunov_positivity_epsilon = 0.2
-    dut.lyapunov_derivative_epsilon = 0.001
+    dut.lyapunov_positivity_epsilon = 0.1
+    dut.lyapunov_derivative_epsilon = 0.002
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
     dut.xbar_indices = xhat_indices
