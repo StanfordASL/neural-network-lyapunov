@@ -567,6 +567,8 @@ class TrainLyapunovReLU:
         if self.summary_writer_folder is not None:
             writer = torch.utils.tensorboard.SummaryWriter(
                 self.summary_writer_folder)
+        best_derivative_mip_cost = np.inf
+        best_training_params = None
         while iter_count < self.max_iterations:
             self._save_network(iter_count)
             optimizer.zero_grad()
@@ -620,6 +622,11 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_convergence_tol:
                 return (True, loss.item(), lyapunov_positivity_mip_cost,
                         lyapunov_derivative_mip_cost)
+            if lyapunov_positivity_mip_cost < \
+                self.lyapunov_positivity_convergence_tol and\
+                    lyapunov_derivative_mip_cost < best_derivative_mip_cost:
+                best_training_params = [p.clone() for p in training_params]  # noqa
+                best_derivative_mip_cost = lyapunov_derivative_mip_cost
             loss.backward()
             optimizer.step()
             iter_count += 1
