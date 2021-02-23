@@ -217,3 +217,42 @@ class SearchRwithSVDOptions(ROptions):
             "R_V": self.V,
             "R_a": self.a
         }
+
+
+class SearchRfreeOptions(ROptions):
+    def __init__(self, R_size: tuple):
+        super(SearchRfreeOptions, self).__init__()
+        assert (isinstance(R_size, tuple))
+        assert (len(R_size) == 2)
+        self.R_size = R_size
+        self._variables = torch.empty(R_size,
+                                      dtype=torch.float64,
+                                      requires_grad=True)
+
+    def set_variable_value(self, R_val: np.ndarray):
+        assert (isinstance(R_val, np.ndarray))
+        assert (R_val.shape == self.R_size)
+        self._variables = torch.from_numpy(R_val)
+        self._variables.requires_grad = True
+
+    def set_variable_value_directly(self, variable_val: np.ndarray):
+        assert (isinstance(variable_val, np.ndarray))
+        assert (variable_val.shape == self.R_size)
+        self._variables = torch.from_numpy(variable_val)
+        self._variables.requires_grad = True
+
+    def R(self):
+        return self._variables
+
+    def variables(self) -> list:
+        return [self._variables]
+
+    def __str__(self):
+        return f"Search R freely. Size {self.R_size}"
+
+    @property
+    def fixed_R(self):
+        return False
+
+    def extract_params(self):
+        return {"R_size": self.R_size}
