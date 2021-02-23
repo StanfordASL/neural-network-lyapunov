@@ -42,10 +42,10 @@ def generate_dynamics_data(dt):
     """
     dtype = torch.float64
     plant = unicycle.Unicycle(dtype)
-    theta_grid = torch.linspace(-2. * np.pi, 2. * np.pi, 301, dtype=dtype)
-    vel_grid = torch.linspace(-3, 6, 201, dtype=dtype)
-    thetadot_grid = torch.linspace(-0.25 * np.pi,
-                                   0.25 * np.pi,
+    theta_grid = torch.linspace(-1.05 * np.pi, 1.05 * np.pi, 201, dtype=dtype)
+    vel_grid = torch.linspace(0, 1, 201, dtype=dtype)
+    thetadot_grid = torch.linspace(-0.15 * np.pi,
+                                   0.15 * np.pi,
                                    51,
                                    dtype=dtype)
 
@@ -270,10 +270,10 @@ if __name__ == "__main__":
         V_lambda = lyapunov_data["V_lambda"]
         R = lyapunov_data["R"]
 
-    x_lo = torch.tensor([-0.1, -0.1, -np.pi / 10], dtype=torch.float64)
-    x_up = torch.tensor([0.1, 0.1, np.pi / 10], dtype=torch.float64)
-    u_lo = torch.tensor([0, -0.25 * np.pi], dtype=torch.float64)
-    u_up = torch.tensor([6, 0.25 * np.pi], dtype=torch.float64)
+    x_lo = torch.tensor([-0.1, -0.1, -np.pi / 5], dtype=torch.float64)
+    x_up = torch.tensor([0.1, 0.1, np.pi / 5], dtype=torch.float64)
+    u_lo = torch.tensor([0, -0.15 * np.pi], dtype=torch.float64)
+    u_up = torch.tensor([1, 0.15 * np.pi], dtype=torch.float64)
 
     if args.dp_states:
         dp_states = torch.from_numpy(np.load(args.dp_states)).T
