@@ -4,6 +4,7 @@ import neural_network_lyapunov.examples.car.unicycle_traj_opt as\
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.examples.car.train_unicycle_demo as\
     train_unicycle_demo
+import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.examples.car.unicycle as unicycle
 import pydrake.solvers.mathematicalprogram as mp
 import math
@@ -250,33 +251,37 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--load_r",
-        help="load precomputed r ",
+        help="load precomputed r",
         action="store_true")
     parser.add_argument(
         "--load_V",
-        help="load computed V ",
+        help="load computed V",
         action="store_true")
     parser.add_argument(
         "--r_complete",
-        help="calculate r using complete without duplicate ",
+        help="calculate r using complete without duplicate",
         action="store_true")
     parser.add_argument(
         "--train_approximator",
-        help="train function approximator for controller and cost ",
+        help="train function approximator for controller and cost",
         action="store_true")
     parser.add_argument(
+        "--nT", type=int,
+        help="number of time step for trajectory optimization",
+        default=5)
+    parser.add_argument(
         "--n_grid_xy", type=int,
-        help="number of grids along x/y axis ",
+        help="number of grids along x/y axis",
         default=20)
     parser.add_argument(
         "--n_grid_angle", type=int,
-        help="number of grids along angle axis ",
+        help="number of grids along angle axis",
         default=60)
     args = parser.parse_args()
 
     epsilon = 1e-4
 
-    nT = 8
+    nT = args.nT
     u_lo = np.array([-3, -0.25 * np.pi])
     u_up = np.array([6, 0.25 * np.pi])
     x_lo = np.array([-1, -1, -1.05 * np.pi])
@@ -322,7 +327,7 @@ if __name__ == "__main__":
             str(dt_max) +
             ".npy")
 
-        plot_V(V, 66)
+        plot_V(V)
 
         s = np.load(
             folder_name + "s_" +
@@ -344,7 +349,7 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
-        plot_u(policy, 18)
+        # plot_u(policy, 18)
     else:
         if args.load_r:
             # r = np.random.random((ns, ns))
@@ -476,14 +481,18 @@ if __name__ == "__main__":
     if args.train_approximator:
         traj_opt_states = torch.from_numpy(s.T)
         traj_opt_controls = torch.from_numpy(policy)
-        traj_opt_costs = torch.from_numpy(V.T)
+        traj_opt_costs = torch.from_numpy(V.T.reshape(-1, 1))
         train_unicycle_demo.train_controller_approximator(controller_relu,
                                                           traj_opt_states,
                                                           traj_opt_controls,
                                                           num_epochs=400,
                                                           lr=0.001)
-        torch.save(
-            controller_relu.state_dict(),
+        utils.save_controller_model(
+            controller_relu,
+            torch.from_numpy(x_lo),
+            torch.from_numpy(x_up),
+            torch.from_numpy(u_lo),
+            torch.from_numpy(u_up),
             "neural_network_lyapunov/examples/car/data/controller_" +
             str(nT) +
             "_" +
@@ -500,8 +509,13 @@ if __name__ == "__main__":
                                                     traj_opt_costs,
                                                     num_epochs=100,
                                                     lr=0.001)
-        torch.save(
-            lyapunov_relu.state_dict(),
+        utils.save_lyapunov_model(
+            lyapunov_relu,
+            V_lambda,
+            0.,
+            0.,
+            None,
+            r_options.FixedROptions(R),
             "neural_network_lyapunov/examples/car/data/cost_" +
             str(nT) +
             "_" +
