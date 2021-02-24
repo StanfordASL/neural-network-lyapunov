@@ -327,7 +327,7 @@ if __name__ == "__main__":
             str(dt_max) +
             ".npy")
 
-        plot_V(V, 66)
+        plot_V(V)
 
         s = np.load(
             folder_name + "s_" +
@@ -349,7 +349,7 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
-        plot_u(policy, 18)
+        # plot_u(policy, 18)
     else:
         if args.load_r:
             # r = np.random.random((ns, ns))
