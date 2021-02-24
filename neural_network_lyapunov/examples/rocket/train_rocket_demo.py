@@ -17,17 +17,18 @@ def generate_dynamics_data(dt):
     dtype = torch.float64
     plant = rocket.Rocket()
 
-    theta_range = [-np.pi / 2, np.pi / 2]
-    u0_range = [-plant.hover_thrust * 0.25, plant.hover_thrust * 0.25]
+    theta_range = [-np.pi / 3, np.pi / 3]
+    thetadot_range = [-np.pi, np.pi]
+    u0_range = [-plant.hover_thrust * 0.15, plant.hover_thrust * 0.15]
     u1_range = [0, 3 * plant.hover_thrust]
-    x_samples = torch.zeros((101, 6), dtype=dtype)
-    x_samples[:, 2] = torch.linspace(theta_range[0],
-                                     theta_range[1],
-                                     x_samples.shape[0],
-                                     dtype=dtype)
+    theta_thetadot_samples = utils.uniform_sample_in_box(
+        torch.tensor([theta_range[0], thetadot_range[0]], dtype=dtype),
+        torch.tensor([theta_range[1], thetadot_range[1]], dtype=dtype), 1000)
+    x_samples = torch.zeros((theta_thetadot_samples.shape[0], 6), dtype=dtype)
+    x_samples[:, [2, 5]] = theta_thetadot_samples
     u_samples = utils.uniform_sample_in_box(
         torch.tensor([u0_range[0], u1_range[0]], dtype=dtype),
-        torch.tensor([u0_range[1], u1_range[1]], dtype=dtype), 3000)
+        torch.tensor([u0_range[1], u1_range[1]], dtype=dtype), 1000)
     xu_tensors = []
     x_next_tensors = []
     for i in range(x_samples.shape[0]):
@@ -50,14 +51,14 @@ def train_forward_model(forward_model, model_dataset, num_epochs):
     u_equilibrium = torch.tensor([0, plant.hover_thrust], dtype=dtype)
 
     xu_inputs, x_next_outputs = model_dataset[:]
-    network_input_data = xu_inputs[:, [2, 6, 7]]
+    network_input_data = xu_inputs[:, [2, 5, 6, 7]]
     network_output_data = x_next_outputs[:, 3:] - xu_inputs[:, 3:6]
     v_dataset = torch.utils.data.TensorDataset(network_input_data,
                                                network_output_data)
 
-    def compute_next_v(model, theta_u):
-        return model(theta_u) - model(
-            torch.cat((torch.tensor([0], dtype=dtype), u_equilibrium)))
+    def compute_next_v(model, theta_thetadot_u):
+        return model(theta_thetadot_u) - model(
+            torch.cat((torch.tensor([0, 0], dtype=dtype), u_equilibrium)))
 
     utils.train_approximator(v_dataset,
                              forward_model,
@@ -141,7 +142,7 @@ if __name__ == "__main__":
         dynamics_dataset = torch.load(args.load_dynamics_data)
 
     if args.train_forward_model:
-        forward_relu = utils.setup_relu((3, 6, 6, 3),
+        forward_relu = utils.setup_relu((4, 6, 6, 3),
                                         params=None,
                                         bias=True,
                                         negative_slope=0.01,
@@ -206,11 +207,11 @@ if __name__ == "__main__":
     u_equilibrium = torch.tensor([0, plant.hover_thrust], dtype=dtype)
 
     x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
-                        dtype=dtype)
-    x_up = torch.tensor([0.05, 0.08, np.pi * 0.05, 0.25, 0.25, 0.15],
-                        dtype=dtype)
-    u_lo = torch.tensor([-0.25 * plant.hover_thrust, 0], dtype=dtype)
-    u_up = torch.tensor([0.25 * plant.hover_thrust, 3 * plant.hover_thrust],
+                        dtype=dtype) / 2
+    x_up = torch.tensor([0.05, 0.05, np.pi * 0.05, 0.25, 0.25, 0.15],
+                        dtype=dtype) / 2
+    u_lo = torch.tensor([-0.15 * plant.hover_thrust, 0], dtype=dtype)
+    u_up = torch.tensor([0.15 * plant.hover_thrust, 3 * plant.hover_thrust],
                         dtype=dtype)
 
     if args.train_lqr_approximator:
@@ -235,8 +236,16 @@ if __name__ == "__main__":
                                      num_epochs=50)
 
     forward_system = relu_system.ReLUSecondOrderResidueSystemGivenEquilibrium(
-        dtype, x_lo, x_up, u_lo, u_up, forward_relu, q_equilibrium,
-        u_equilibrium, dt, network_input_x_indices=[2])
+        dtype,
+        x_lo,
+        x_up,
+        u_lo,
+        u_up,
+        forward_relu,
+        q_equilibrium,
+        u_equilibrium,
+        dt,
+        network_input_x_indices=[2, 5])
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
