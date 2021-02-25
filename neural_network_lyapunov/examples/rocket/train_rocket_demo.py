@@ -168,9 +168,12 @@ if __name__ == "__main__":
     plant_A, plant_B = plant.linearized_dynamics(x_star, u_star)
     lqr_S = scipy.linalg.solve_continuous_are(plant_A, plant_B, lqr_Q, lqr_R)
     lqr_K = -np.linalg.solve(lqr_R, plant_B.T @ lqr_S)
-    R = torch.from_numpy(lqr_S)
+    R = torch.cat((torch.tensor(
+        [[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0]],
+        dtype=dtype), torch.from_numpy(lqr_S)),
+                  dim=0)
 
-    lyapunov_relu = utils.setup_relu((6, 8, 8, 6, 1),
+    lyapunov_relu = utils.setup_relu((6, 10, 8, 6, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -206,10 +209,10 @@ if __name__ == "__main__":
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0, plant.hover_thrust], dtype=dtype)
 
-    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.25, -0.25, -0.15],
+    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.2, -0.2, -0.1],
                         dtype=dtype) / 2
-    x_up = torch.tensor([0.05, 0.05, np.pi * 0.05, 0.25, 0.25, 0.15],
-                        dtype=dtype) / 2
+    x_up = torch.tensor([0.05, 0.05, np.pi * 0.05, 0.2, 0.2, 0.1],
+                        dtype=dtype) * 2
     u_lo = torch.tensor([-0.15 * plant.hover_thrust, 0], dtype=dtype)
     u_up = torch.tensor([0.15 * plant.hover_thrust, 3 * plant.hover_thrust],
                         dtype=dtype)
