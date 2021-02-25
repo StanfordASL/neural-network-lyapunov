@@ -126,3 +126,52 @@ class Rocket2(Rocket):
         B[4, 1] = c_theta / self.mass
         B[5, 0] = self.length / (2 * self.inertia)
         return A, B
+
+
+class RocketVisualizer:
+    def __init__(self, ax, x_lim, y_lim, length):
+        self.ax = ax
+        self.ax.set_aspect("equal")
+        self.ax.set_xlim(x_lim[0], x_lim[1])
+        self.ax.set_ylim(y_lim[0], y_lim[1])
+
+        self.length = length
+
+        self.body = np.vstack(
+            (self.length * np.array([-0.05, 0.05, 0.05, -0.05, -0.05]),
+             self.length * np.array([-0.5, -0.5, 0.5, 0.5, -0.5])))
+        self.head = np.vstack((self.length * np.array([-0.05, 0.05, 0, -0.05]),
+                               self.length * np.array([0.5, 0.5, 0.6, 0.5])))
+        self.bottom = np.vstack(
+            (self.length * np.array([-0.05, -0.08, 0.08, 0.05, -0.05]),
+             self.length * np.array([-0.5, -0.55, -0.55, -0.5, -0.5])))
+        self.body_fill = self.ax.fill(self.body[0, :],
+                                      self.body[1, :],
+                                      zorder=1,
+                                      edgecolor='k',
+                                      facecolor=[.6, .6, .6])
+        self.head_fill = self.ax.fill(self.head[0, :],
+                                      self.head[1, :],
+                                      zorder=0,
+                                      edgecolor="k",
+                                      facecolor=[0, 0, 0])
+        self.bottom_fill = self.ax.fill(self.bottom[0, :],
+                                        self.bottom[1, :],
+                                        zorder=0,
+                                        edgecolor="k",
+                                        facecolor=[0, 0, 0])
+
+    def draw(self, x):
+        R = np.array([[np.cos(x[2]), -np.sin(x[2])],
+                      [np.sin(x[2]), np.cos(x[2])]])
+        p = np.dot(R, self.body)
+        self.body_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
+        self.body_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
+
+        p = np.dot(R, self.head)
+        self.head_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
+        self.head_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
+
+        p = np.dot(R, self.bottom)
+        self.bottom_fill[0].get_path().vertices[:, 0] = x[0] + p[0, :]
+        self.bottom_fill[0].get_path().vertices[:, 1] = x[1] + p[1, :]
