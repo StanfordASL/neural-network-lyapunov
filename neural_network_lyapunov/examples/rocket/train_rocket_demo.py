@@ -268,8 +268,8 @@ if __name__ == "__main__":
                                            R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
-    dut.lyapunov_derivative_convergence_tol = 1E-5
-    dut.lyapunov_positivity_convergence_tol = 5e-6
+    dut.lyapunov_derivative_convergence_tol =5E-6
+    dut.lyapunov_positivity_convergence_tol =1E-5
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.1
     dut.lyapunov_derivative_epsilon = 0.001
@@ -300,4 +300,6 @@ if __name__ == "__main__":
                                        derivative_state_samples_init, options)
     else:
         dut.train(torch.empty((0, 6), dtype=dtype))
+    utils.save_lyapunov_model(lyapunov_relu, V_lambda, dut.lyapunov_positivity_epsilon, dut.lyapunov_derivative_epsilon, dut.lyapunov_derivative_eps_type, R_options, "rocket_lyapunov.pt")
+    utils.save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, "rocket_controller.pt")
     pass
