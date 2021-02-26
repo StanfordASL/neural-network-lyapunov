@@ -5,6 +5,7 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.r_options as r_options
 
@@ -13,6 +14,7 @@ import numpy as np
 import scipy.integrate
 import argparse
 import os
+import gurobipy
 
 
 def generate_quadrotor_dynamics_data(dt):
@@ -182,6 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--enable_wandb", action="store_true")
     parser.add_argument("--train_adversarial", action="store_true")
     parser.add_argument("--max_iterations", type=int, default=5000)
+    parser.add_argument("--training_set", type=str, default=None)
     args = parser.parse_args()
     dir_path = os.path.dirname(os.path.realpath(__file__))
     dt = 0.01
@@ -262,7 +265,7 @@ if __name__ == "__main__":
 
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = plant.u_equilibrium
-    x_lo = torch.tensor([-0.3, -0.3, -np.pi * 0.3, -1.5, -1.5, -0.9],
+    x_lo = torch.tensor([-0.45, -0.45, -np.pi * 0.45, -2.5, -2.5, -1.5],
                         dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([0, 0], dtype=dtype)
@@ -333,9 +336,20 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_mip_pool_solutions = 500
         dut.add_derivative_adversarial_state = True
         dut.add_positivity_adversarial_state = True
-        positivity_state_samples_init = utils.uniform_sample_in_box(
-            x_lo, x_up, 1000)
-        derivative_state_samples_init = positivity_state_samples_init
+        forward_system.network_bound_propagate_method = mip_utils.PropagateBoundsMethod.LP
+        dut.lyapunov_hybrid_system.network_bound_propagate_method = mip_utils.PropagateBoundsMethod.LP
+        closed_loop_system.controller_network_bound_propagate_method = mip_utils.PropagateBoundsMethod.LP
+        #dut.lyapunov_derivative_mip_params = {
+        #    gurobipy.GRB.Param.OutputFlag: True
+        #}
+        if args.training_set:
+            training_set_data = torch.load(args.training_set)
+            positivity_state_samples_init = training_set_data["positivity_state_samples"]
+            derivative_state_samples_init = training_set_data["derivative_state_samples"]
+        else:
+            positivity_state_samples_init = utils.uniform_sample_in_box(
+                x_lo, x_up, 1000)
+            derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)
     else:
