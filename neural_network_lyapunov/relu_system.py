@@ -638,6 +638,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         assert (dt > 0)
         self.dt = dt
         self._network_input_x_indices = network_input_x_indices
+        self.network_bound_propagate_method = mip_utils.PropagateBoundsMethod.IA
 
     @property
     def x_lo_all(self):
@@ -697,7 +698,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
             output_constraint(torch.cat((self.x_lo[
                 self._network_input_x_indices], u_lo)), torch.cat((
                     self.x_up[self._network_input_x_indices], u_up)),
-                mip_utils.PropagateBoundsMethod.IA)
+                self.network_bound_propagate_method)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
         input_vars = [x_var[i] for i in self._network_input_x_indices] + u_var
