@@ -638,7 +638,8 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         assert (dt > 0)
         self.dt = dt
         self._network_input_x_indices = network_input_x_indices
-        self.network_bound_propagate_method = mip_utils.PropagateBoundsMethod.IA
+        self.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
 
     @property
     def x_lo_all(self):
