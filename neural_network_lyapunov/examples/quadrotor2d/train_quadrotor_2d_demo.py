@@ -27,8 +27,8 @@ def generate_quadrotor_dynamics_data(dt):
     theta_range = [-np.pi / 2, np.pi / 2]
     ydot_range = [-5, 5]
     zdot_range = [-5, 5]
-    thetadot_range = [-2, 2]
-    u_range = [-10, 20]
+    thetadot_range = [-2.5, 2.5]
+    u_range = [-0.5, 8.5]
     # We don't need to take the grid on y and z dimension of the quadrotor,
     # since the dynamics is invariant along these dimensions.
     x_samples = torch.cat((
@@ -71,14 +71,15 @@ def train_forward_model(forward_model, model_dataset, num_epochs):
     u_equilibrium = plant.u_equilibrium
 
     xu_inputs, x_next_outputs = model_dataset[:]
-    network_input_data = xu_inputs[:, [2, 6, 7]]
+    network_input_data = xu_inputs[:, [2, 5, 6, 7]]
     network_output_data = x_next_outputs[:, 3:] - xu_inputs[:, 3:6]
     v_dataset = torch.utils.data.TensorDataset(network_input_data,
                                                network_output_data)
 
-    def compute_next_v(model, theta_u):
-        return model(theta_u) - model(
-            torch.cat((torch.tensor([0], dtype=torch.float64), u_equilibrium)))
+    def compute_next_v(model, theta_thetadot_u):
+        return model(theta_thetadot_u) - model(
+            torch.cat(
+                (torch.tensor([0, 0], dtype=torch.float64), u_equilibrium)))
 
     utils.train_approximator(v_dataset,
                              forward_model,
@@ -134,6 +135,51 @@ def train_lqr_control_approximator(controller_relu, x_equilibrium,
                              batch_size=50,
                              num_epochs=50,
                              lr=0.001)
+
+
+def train_nn_controller_approximator(controller_relu, target_controller_relu,
+                                     x_lo, x_up, num_samples, num_epochs):
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    target_controller_relu_output = target_controller_relu(x_samples)
+    dataset = torch.utils.data.TensorDataset(x_samples,
+                                             utarget_controller_relu_output)
+
+    def compute_output(model, x):
+        return model(x)
+
+    utils.train_approximator(dataset,
+                             controller_relu,
+                             compute_output,
+                             batch_size=50,
+                             num_epochs=num_epochs,
+                             lr=0.001)
+
+
+def train_nn_lyapunov_approximator(lyapunov_relu, R, target_lyapunov_relu,
+                                   target_R, V_lambda, x_equilibrium, x_lo,
+                                   x_up, num_samples, num_epochs):
+    x_samples = utils.uniform_sample_in_box(x_lo, x_up, num_samples)
+    with torch.no_grad():
+        target_V = target_lyapunov_relu(x_samples) - target_lyapunov_relu(
+            x_equilibrium) + V_lambda * torch.norm(
+                target_R @ (x_samples - x_equilibrium).T, p=1, dim=0).reshape(
+                    (-1, 1))
+
+    dataset = torch.utils.data.TensorDataset(x_samples, target_V)
+
+    def compute_V(model, x):
+        return model(x) - model(x_equilibrium) + V_lambda * torch.norm(
+            R @ (x - x_equilibrium).T, p=1, dim=0).reshape((-1, 1))
+
+    R.requires_grad_(True)
+    utils.train_approximator(dataset,
+                             lyapunov_relu,
+                             compute_V,
+                             batch_size=50,
+                             num_epochs=num_epochs,
+                             lr=0.001,
+                             additional_variable=[R])
+    R.requires_grad_(False)
 
 
 def simulate_quadrotor_with_controller(controller_relu, t_span, x_equilibrium,
@@ -196,7 +242,7 @@ if __name__ == "__main__":
         model_dataset = torch.load(args.load_dynamics_data)
 
     if args.train_forward_model:
-        forward_model = utils.setup_relu((3, 5, 5, 3),
+        forward_model = utils.setup_relu((4, 6, 6, 3),
                                          params=None,
                                          bias=True,
                                          negative_slope=0.01,
@@ -230,7 +276,7 @@ if __name__ == "__main__":
     # R = torch.cat((R, torch.from_numpy(S_eig_vec)), dim=0)
     R = torch.from_numpy(S) + 0.01 * torch.eye(6, dtype=dtype)
 
-    lyapunov_relu = utils.setup_relu((6, 8, 8, 4, 1),
+    lyapunov_relu = utils.setup_relu((6, 10, 10, 4, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -291,7 +337,7 @@ if __name__ == "__main__":
         q_equilibrium,
         u_equilibrium,
         dt,
-        network_input_x_indices=[2])
+        network_input_x_indices=[2, 5])
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, forward_system.x_equilibrium,
         forward_system.u_equilibrium,
@@ -344,8 +390,10 @@ if __name__ == "__main__":
         #}
         if args.training_set:
             training_set_data = torch.load(args.training_set)
-            positivity_state_samples_init = training_set_data["positivity_state_samples"]
-            derivative_state_samples_init = training_set_data["derivative_state_samples"]
+            positivity_state_samples_init = training_set_data[
+                "positivity_state_samples"]
+            derivative_state_samples_init = training_set_data[
+                "derivative_state_samples"]
         else:
             positivity_state_samples_init = utils.uniform_sample_in_box(
                 x_lo, x_up, 1000)
