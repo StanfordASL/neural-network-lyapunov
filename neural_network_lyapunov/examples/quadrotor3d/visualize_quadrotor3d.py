@@ -26,9 +26,34 @@ def get_line_marker(traj):
     return line_marker
 
 
-def get_mesh_markers(traj, num_markers):
+def get_marker(pos, euler, marker_id, alpha=1):
     mesh_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "meshes", "iris.stl")
+    m = Marker()
+    m.header.frame_id = "/map"
+    m.type = Marker.MESH_RESOURCE
+    m.mesh_resource = "file://" + mesh_path
+    m.action = Marker.ADD
+    m.color.a = alpha
+    m.color.r = 0.2
+    m.color.g = 0.1
+    m.color.b = 0.9
+    m.scale.x = 1.
+    m.scale.y = 1.
+    m.scale.z = 1.
+    m.pose.position.x = pos[0]
+    m.pose.position.y = pos[1]
+    m.pose.position.z = pos[2]
+    quat = quaternion_from_euler(*euler)
+    m.pose.orientation.x = quat[0]
+    m.pose.orientation.y = quat[1]
+    m.pose.orientation.z = quat[2]
+    m.pose.orientation.w = quat[3]
+    m.id = marker_id
+    return m
+
+
+def get_mesh_markers(traj, num_markers):
     marker_indices = [0]
     marker_dist = int(traj.shape[1] / (num_markers - 1))
     for k in range(num_markers - 2):
@@ -37,27 +62,9 @@ def get_mesh_markers(traj, num_markers):
     mesh_markers = []
     alphas = np.linspace(.7, .99, len(marker_indices))
     for i in range(len(marker_indices)):
-        m = Marker()
-        m.header.frame_id = "/map"
-        m.type = Marker.MESH_RESOURCE
-        m.mesh_resource = "file://" + mesh_path
-        m.action = Marker.ADD
-        m.color.a = alphas[i]
-        m.color.r = 0.2
-        m.color.g = 0.1
-        m.color.b = 0.9
-        m.scale.x = 1.
-        m.scale.y = 1.
-        m.scale.z = 1.
-        m.pose.position.x = traj[0, marker_indices[i]]
-        m.pose.position.y = traj[1, marker_indices[i]]
-        m.pose.position.z = traj[2, marker_indices[i]]
-        quat = quaternion_from_euler(*traj[3:6, marker_indices[i]])
-        m.pose.orientation.x = quat[0]
-        m.pose.orientation.y = quat[1]
-        m.pose.orientation.z = quat[2]
-        m.pose.orientation.w = quat[3]
-        m.id = 1 + i
+        m = get_marker(
+            traj[:3, marker_indices[i]], traj[3:6, marker_indices[i]],
+            1 + i, alpha=alphas[i])
         mesh_markers.append(m)
     mesh_marker_arr = MarkerArray()
     mesh_marker_arr.markers = mesh_markers
@@ -68,6 +75,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file", type=str)
     parser.add_argument("--num_markers", default=4, type=int)
+    parser.add_argument("--animate", action="store_true")
+    parser.add_argument("--dt", default=.01, type=float)
+    parser.add_argument("--include_line", action="store_true")
     args = parser.parse_args()
 
     traj = np.load(args.file)
@@ -76,14 +86,26 @@ if __name__ == "__main__":
     assert(traj.shape[0] >= 6)
     assert(traj.shape[1] >= 2)
 
-    line_marker = get_line_marker(traj)
-    mesh_markers = get_mesh_markers(traj, args.num_markers)
-
+    mesh_pub = rospy.Publisher('animated_mesh', Marker, queue_size=10)
     traj_line_pub = rospy.Publisher('traj_line', Marker, queue_size=10)
     traj_mesh_pub = rospy.Publisher('traj_mesh', MarkerArray, queue_size=10)
     rospy.init_node('quad_viz')
 
-    while not rospy.is_shutdown():
-        traj_line_pub.publish(line_marker)
-        traj_mesh_pub.publish(mesh_markers)
-        rospy.sleep(.1)
+    if args.animate:
+        k = 0
+        while not rospy.is_shutdown():
+            marker = get_marker(traj[:3, k], traj[3:6, k], 0)
+            mesh_pub.publish(marker)
+            if args.include_line:
+                line_marker = get_line_marker(traj)
+                traj_line_pub.publish(line_marker)
+            k += 1
+            k %= (traj.shape[1] - 1)
+            rospy.sleep(args.dt)
+    else:
+        line_marker = get_line_marker(traj)
+        mesh_markers = get_mesh_markers(traj, args.num_markers)
+        while not rospy.is_shutdown():
+            traj_line_pub.publish(line_marker)
+            traj_mesh_pub.publish(mesh_markers)
+            rospy.sleep(.1)
