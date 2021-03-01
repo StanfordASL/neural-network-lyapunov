@@ -85,6 +85,16 @@ class Quadrotor2D:
         K = -np.linalg.solve(R, B.T @ S)
         return K, S
 
+    def next_pose(self, x, u, dt):
+        """
+        Computes the next pose of the quadrotor after dt.
+        """
+        x_np = x.detach().numpy() if isinstance(x, torch.Tensor) else x
+        u_np = u.detach().numpy() if isinstance(u, torch.Tensor) else u
+        result = scipy.integrate.solve_ivp(
+            lambda t, x_val: self.dynamics(x_val, u_np), [0, dt], x_np)
+        return result.y[:, -1]
+
 
 class Quadrotor2DVisualizer:
     """
