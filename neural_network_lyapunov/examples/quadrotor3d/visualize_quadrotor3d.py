@@ -7,6 +7,10 @@ import rospy
 import argparse
 import os
 
+LINE_RGB = [1., 1., 0.]
+MARKER_RGB = [.2, .1, .9]
+GOAL_MARKER_RGB = [.8, .2, .1]
+
 
 def get_line_marker(traj):
     line_marker = Marker()
@@ -14,9 +18,9 @@ def get_line_marker(traj):
     line_marker.type = Marker.LINE_STRIP
     line_marker.action = Marker.ADD
     line_marker.color.a = .9
-    line_marker.color.r = 1.0
-    line_marker.color.g = 1.0
-    line_marker.color.b = 0.0
+    line_marker.color.r = LINE_RGB[0]
+    line_marker.color.g = LINE_RGB[1]
+    line_marker.color.b = LINE_RGB[2]
     line_marker.scale.x = .01
     line_marker.id = 0
     line_points = []
@@ -26,7 +30,7 @@ def get_line_marker(traj):
     return line_marker
 
 
-def get_marker(pos, euler, marker_id, alpha=1):
+def get_marker(pos, euler, marker_id, alpha=1, is_goal=False):
     mesh_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "meshes", "iris.stl")
     m = Marker()
@@ -35,9 +39,14 @@ def get_marker(pos, euler, marker_id, alpha=1):
     m.mesh_resource = "file://" + mesh_path
     m.action = Marker.ADD
     m.color.a = alpha
-    m.color.r = 0.2
-    m.color.g = 0.1
-    m.color.b = 0.9
+    if is_goal:
+        m.color.r = GOAL_MARKER_RGB[0]
+        m.color.g = GOAL_MARKER_RGB[1]
+        m.color.b = GOAL_MARKER_RGB[2]
+    else:
+        m.color.r = MARKER_RGB[0]
+        m.color.g = MARKER_RGB[1]
+        m.color.b = MARKER_RGB[2]
     m.scale.x = 1.
     m.scale.y = 1.
     m.scale.z = 1.
@@ -64,7 +73,7 @@ def get_mesh_markers(traj, num_markers):
     for i in range(len(marker_indices)):
         m = get_marker(
             traj[:3, marker_indices[i]], traj[3:6, marker_indices[i]],
-            1 + i, alpha=alphas[i])
+            1 + i, alpha=alphas[i], is_goal=(i == len(marker_indices)-1))
         mesh_markers.append(m)
     mesh_marker_arr = MarkerArray()
     mesh_marker_arr.markers = mesh_markers
