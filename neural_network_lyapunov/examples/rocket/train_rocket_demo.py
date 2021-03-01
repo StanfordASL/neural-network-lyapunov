@@ -19,7 +19,7 @@ def generate_dynamics_data(dt):
 
     theta_range = [-np.pi / 3, np.pi / 3]
     thetadot_range = [-np.pi, np.pi]
-    u0_range = [-plant.hover_thrust * 0.15, plant.hover_thrust * 0.15]
+    u0_range = [-plant.hover_thrust * 0.25, plant.hover_thrust * 0.25]
     u1_range = [0, 3 * plant.hover_thrust]
     theta_thetadot_samples = utils.uniform_sample_in_box(
         torch.tensor([theta_range[0], thetadot_range[0]], dtype=dtype),
@@ -131,6 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--search_R", action="store_true")
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--train_adversarial", action="store_true")
+    parser.add_argument("--training_set", type=str, default=None)
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -173,7 +174,7 @@ if __name__ == "__main__":
         dtype=dtype), torch.from_numpy(lqr_S)),
                   dim=0)
 
-    lyapunov_relu = utils.setup_relu((6, 10, 8, 6, 1),
+    lyapunov_relu = utils.setup_relu((6, 14, 12, 10, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -191,7 +192,7 @@ if __name__ == "__main__":
         V_lambda = lyapunov_data["V_lambda"]
         R = lyapunov_data["R"]
 
-    controller_relu = utils.setup_relu((6, 6, 6, 2),
+    controller_relu = utils.setup_relu((6, 8, 8, 4, 2),
                                        params=None,
                                        negative_slope=0.01,
                                        bias=True,
@@ -209,12 +210,12 @@ if __name__ == "__main__":
     q_equilibrium = torch.tensor([0, 0, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0, plant.hover_thrust], dtype=dtype)
 
-    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.05, -0.2, -0.2, -0.1],
+    x_lo = torch.tensor([-0.05, -0.05, -np.pi * 0.1, -0.2, -0.2, -0.2],
                         dtype=dtype) / 2
-    x_up = torch.tensor([0.05, 0.05, np.pi * 0.05, 0.2, 0.2, 0.1],
-                        dtype=dtype) * 2
-    u_lo = torch.tensor([-0.15 * plant.hover_thrust, 0], dtype=dtype)
-    u_up = torch.tensor([0.15 * plant.hover_thrust, 3 * plant.hover_thrust],
+    x_up = torch.tensor([0.05, 0.05, np.pi * 0.1, 0.2, 0.2, 0.2],
+                        dtype=dtype) / 2
+    u_lo = torch.tensor([-0.25 * plant.hover_thrust, 0], dtype=dtype)
+    u_up = torch.tensor([0.25 * plant.hover_thrust, 3 * plant.hover_thrust],
                         dtype=dtype)
 
     if args.train_lqr_approximator:
@@ -293,9 +294,15 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_mip_pool_solutions = 500
         dut.add_derivative_adversarial_state = True
         dut.add_positivity_adversarial_state = True
-        positivity_state_samples_init = utils.uniform_sample_in_box(
-            x_lo, x_up, 1000)
-        derivative_state_samples_init = positivity_state_samples_init
+        dut.sample_loss_reduction = "mean"
+        if args.training_set:
+            training_set = torch.load(args.training_set)
+            positivity_state_samples_init = training_set["positivity_state_samples"]
+            derivative_state_samples_init = training_set["derivative_state_samples"]
+        else:
+            positivity_state_samples_init = utils.uniform_sample_in_box(
+                x_lo, x_up, 1000)
+            derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)
     else:
