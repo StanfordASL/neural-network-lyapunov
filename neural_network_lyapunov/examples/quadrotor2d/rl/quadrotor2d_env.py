@@ -35,8 +35,10 @@ class Quadrotor2DEnv(gym.Env):
         x_next = torch.tensor(self.system.next_pose(
             self.x_current, action, self.dt), dtype=self.dtype)
         observation = x_next.detach().numpy()
-        reward = -action.dot(self.lqr_R @ action).item() - \
-            x_next.dot(self.lqr_Q @ x_next).item()
+        act_delta = (action - self.act_equ)
+        obs_delta = (x_next - self.obs_equ)
+        reward = -(act_delta).dot(self.lqr_R @ act_delta).item() - \
+            obs_delta.dot(self.lqr_Q @ obs_delta).item()
         done = False
         self.x_current = x_next.clone()
         self.t_current += self.dt
