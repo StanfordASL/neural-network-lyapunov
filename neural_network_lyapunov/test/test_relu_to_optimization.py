@@ -295,8 +295,9 @@ class TestReLU(unittest.TestCase):
             num_z_pre_relu_up_negative = np.sum(
                 [z_pre_relu_up_i <= 0 for z_pre_relu_up_i in z_pre_relu_up])
             num_ineq = (relu_free_pattern.num_relu_units -
-                        num_z_pre_relu_lo_positive -
-                        num_z_pre_relu_up_negative) * 4 + 4
+                        num_z_pre_relu_lo_positive - num_z_pre_relu_up_negative
+                        ) * 4 + 4 + (num_z_pre_relu_lo_positive +
+                                     num_z_pre_relu_up_negative) * 2
             num_eq = (num_z_pre_relu_lo_positive + num_z_pre_relu_up_negative)\
                 * 2
             self.assertEqual(mip_constr_return.Ain_input.shape, (num_ineq, 2))
@@ -1032,6 +1033,7 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
     def test_relu_with_bias(self):
         def checker(x):
             return torch.ones(x.shape[0], dtype=torch.bool)
+
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
         self.given_relu_test(self.relu_with_bias,
@@ -1071,6 +1073,7 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
     def test_relu_no_bias(self):
         def checker(x):
             return torch.ones(x.shape[0], dtype=torch.bool)
+
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
         self.given_relu_test(self.relu_no_bias,
