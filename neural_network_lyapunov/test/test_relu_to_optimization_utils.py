@@ -30,7 +30,7 @@ class TestAddConstraintByNeuron(unittest.TestCase):
         # Now solve an optimization problem with the constraints, verify that
         # the solution is the output of the neuron.
         linear_output_val_samples = utils.uniform_sample_in_box(
-            neuron_input_lo, neuron_input_up, 30)
+            neuron_input_lo - 0.5, neuron_input_up + 0.5, 30)
         for i in range(linear_output_val_samples.shape[0]):
             model = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
             linear_input = model.addVars(Wij.numel(),
@@ -53,21 +53,27 @@ class TestAddConstraintByNeuron(unittest.TestCase):
             model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             model.gurobi_model.optimize()
 
-            self.assertEqual(model.gurobi_model.status,
-                             gurobipy.GRB.Status.OPTIMAL)
-            linear_input_sol = torch.tensor([v.x for v in linear_input],
-                                            dtype=Wij.dtype)
-            self.assertAlmostEqual((Wij @ linear_input_sol + bij).item(),
-                                   linear_output_val_samples[i].item())
-            neuron_output_expected = relu_layer(linear_output_val_samples[i])
-            self.assertAlmostEqual(neuron_output[0].x,
-                                   neuron_output_expected.item())
-            self.assertAlmostEqual(
-                binary[0].x, int(linear_output_val_samples[i].item() >= 0))
-            self.assertLess(neuron_output_expected.item(),
-                            neuron_output_up[0].item() + 1E-6)
-            self.assertLess(neuron_output_lo[0].item() - 1E-6,
-                            neuron_output_expected.item())
+            if torch.all(linear_output_val_samples[i] >= neuron_input_lo) and\
+                    torch.all(linear_output_val_samples[i] <= neuron_input_up):
+                self.assertEqual(model.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                linear_input_sol = torch.tensor([v.x for v in linear_input],
+                                                dtype=Wij.dtype)
+                self.assertAlmostEqual((Wij @ linear_input_sol + bij).item(),
+                                       linear_output_val_samples[i].item())
+                neuron_output_expected = relu_layer(
+                    linear_output_val_samples[i])
+                self.assertAlmostEqual(neuron_output[0].x,
+                                       neuron_output_expected.item())
+                self.assertAlmostEqual(
+                    binary[0].x, int(linear_output_val_samples[i].item() >= 0))
+                self.assertLess(neuron_output_expected.item(),
+                                neuron_output_up[0].item() + 1E-6)
+                self.assertLess(neuron_output_lo[0].item() - 1E-6,
+                                neuron_output_expected.item())
+            else:
+                self.assertEqual(model.gurobi_model.status,
+                                 gurobipy.GRB.Status.INFEASIBLE)
 
     def test(self):
         dtype = torch.float64
@@ -320,7 +326,7 @@ class TestAddConstraintByLayer(unittest.TestCase):
                                       z_curr_lo, z_curr_up)
 
 
-class TestAddLinearRelaxationByLayer(unittest.TestCase):
+class TestAddConstraintToProgramByLayer(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
 
@@ -333,9 +339,9 @@ class TestAddLinearRelaxationByLayer(unittest.TestCase):
         linear_input_var = prog.addVars(linear_layer.in_features,
                                         lb=-gurobipy.GRB.INFINITY)
         relu_output_var, binary_relax = \
-            relu_to_optimization_utils._add_linear_relaxation_by_layer(
+            relu_to_optimization_utils._add_constraint_to_program_by_layer(
                 prog, linear_layer, relu_layer, linear_input_var,
-                relu_input_lo, relu_input_up)
+                relu_input_lo, relu_input_up, lp_relaxation=True)
         self.assertEqual(len(relu_output_var), linear_layer.out_features)
         self.assertEqual(len(binary_relax), linear_layer.out_features)
         for i in range(linear_layer.out_features):
@@ -379,7 +385,7 @@ class TestAddLinearRelaxationByLayer(unittest.TestCase):
                          (relu_input[j] - relu_input_lo[j]) +
                          relu_layer(relu_input_lo[j])).item() + 1E-6)
 
-    def test(self):
+    def test_lp_relaxation(self):
         linear_layer = torch.nn.Linear(2, 5)
         linear_layer.weight.data = torch.tensor(
             [[1, 0], [0, 1], [-1, -2], [2, 1], [1, -2]], dtype=self.dtype)
@@ -400,6 +406,64 @@ class TestAddLinearRelaxationByLayer(unittest.TestCase):
             torch.nn.LeakyReLU(negative_slope=0.1),
             linear_input_lo=torch.tensor([-2, -3], dtype=self.dtype),
             linear_input_up=torch.tensor([-1, -2], dtype=self.dtype))
+
+    def add_mip_constraint_tester(self, linear_layer, relu_layer,
+                                  relu_input_lo, relu_input_up):
+        """
+        Test _add_constraint_to_program_by_layer with lp_relaxation=False.
+        """
+        mip = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
+        linear_input_var = mip.addVars(linear_layer.in_features,
+                                       lb=-gurobipy.GRB.INFINITY)
+        relu_output_var, binary_var = relu_to_optimization_utils.\
+            _add_constraint_to_program_by_layer(
+                mip,
+                linear_layer,
+                relu_layer,
+                linear_input_var,
+                relu_input_lo,
+                relu_input_up,
+                lp_relaxation=False)
+        # Now fix the linear layer input input to many values and solve
+        # MIP. If the ReLU input is within the bound, then the MIP
+        # solution should be the same as evaluating the layers at the
+        # linear layer input. Otherwise the problem should be infeasible.
+        for i in range(100):
+            linear_input_val = torch.rand(
+                (linear_layer.in_features), dtype=self.dtype) * 2
+            for j in range(linear_layer.in_features):
+                linear_input_var[j].lb = linear_input_val[j]
+                linear_input_var[j].ub = linear_input_val[j]
+            mip.gurobi_model.update()
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            mip.gurobi_model.optimize()
+            linear_output_val = linear_layer(linear_input_val)
+            if torch.all(linear_output_val <= relu_input_up) and torch.all(
+                    linear_input_val >= relu_input_lo):
+                self.assertEqual(mip.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                binary_var_expected = linear_output_val.detach().numpy() >= 0
+                np.testing.assert_allclose(np.array([v.x for v in binary_var]),
+                                           binary_var_expected)
+                relu_output_expected = relu_layer(linear_output_val)
+                np.testing.assert_allclose(
+                    np.array([v.x for v in relu_output_var]),
+                    relu_output_expected.detach().numpy())
+            else:
+                self.assertEqual(mip.gurobi_model.status,
+                                 gurobipy.GRB.INFEASIBLE)
+
+    def test_add_constraint_to_program_by_layer_mip(self):
+        linear_layer = torch.nn.Linear(2, 5)
+        linear_layer.weight.data = torch.tensor(
+            [[1, 0], [0, 1], [-1, -2], [2, 1], [1, -2]], dtype=self.dtype)
+        linear_layer.bias.data = torch.tensor([1, -2, -3, 4, 5],
+                                              dtype=self.dtype)
+        self.add_mip_constraint_tester(
+            linear_layer,
+            torch.nn.LeakyReLU(negative_slope=0.1),
+            relu_input_lo=torch.tensor([-2, -1, -3, 0, 1], dtype=self.dtype),
+            relu_input_up=torch.tensor([2, 1, -1, 2, 3], dtype=self.dtype))
 
 
 if __name__ == "__main__":

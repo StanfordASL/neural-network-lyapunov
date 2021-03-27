@@ -194,7 +194,7 @@ def replace_leaky_relu_mixed_integer_constraint(negative_slope,
     indicate whether the ReLU unit is active or not. Namely
     β = 1 => x >= 0
     β = 0 => x <= 0
-    We can writ the relationship between (x, y, β) as mixed-integer linear
+    We can write the relationship between (x, y, β) as mixed-integer linear
     constraints
     if a <=1:
     y >= x

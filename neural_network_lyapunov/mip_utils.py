@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import gurobipy
 import enum
+import warnings
 
 
 def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
@@ -10,6 +11,9 @@ def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
     """
     Given x_lb <= x <= x_ub and C * x <= d, compute the range of y = A * x + b
     through linear programming
+    Note that if C * x <= d is not imposed, then this function returns the
+    same bound as interval arithmetics (because the optimal solution of
+    an LP occurs at the vertices of the bounding box x_lb <= x <= x_ub).
     @param x_lb Either np.ndarray or None
     @param x_ub Either np.ndarray or None
     @param C Either np.ndarray or None
@@ -21,6 +25,12 @@ def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
     assert (isinstance(x_ub, np.ndarray) or x_ub is None)
     assert (isinstance(C, np.ndarray) or C is None)
     assert (isinstance(d, np.ndarray) or d is None)
+
+    if (C is None and d is None):
+        warnings.warn(
+            "Compute_range_by_lp with empty C*x<=d constraint. This is the "
+            "same as calling compute_range_by_IA"
+        )
 
     y_dim = A.shape[0]
     x_dim = A.shape[1]

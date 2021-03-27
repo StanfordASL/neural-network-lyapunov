@@ -146,9 +146,6 @@ class LyapunovHybridLinearSystem:
         R=None, then we use identity as R.
         @param fixed_R If set to False, then we will treat R as free
         variables, which eventually we will need to compute the gradient of R.
-        Hence if fixed_R is True, then we compute the range of R*(x-x*)
-        by linear programming (LP), otherwise we compute the range by interval
-        arithmetic (IA).
         @param xbar_indices x̅ = x[xbar_indices]. If we care about all entries
         in x, then we could set xbar_indices=None, then x̅ = x.
         """
@@ -172,17 +169,10 @@ class LyapunovHybridLinearSystem:
                              vtype=gurobipy.GRB.BINARY,
                              name=binary_var_name)
 
-        if fixed_R:
-            s_lb, s_ub = mip_utils.compute_range_by_lp(
-                R.detach().numpy(),
-                (-R @ x_equilibrium[xbar_indices]).detach().numpy(),
-                self.system.x_lo_all[xbar_indices],
-                self.system.x_up_all[xbar_indices], None, None)
-        else:
-            s_lb, s_ub = mip_utils.compute_range_by_IA(
-                R, -R @ x_equilibrium[xbar_indices],
-                torch.from_numpy(self.system.x_lo_all[xbar_indices]),
-                torch.from_numpy(self.system.x_up_all[xbar_indices]))
+        s_lb, s_ub = mip_utils.compute_range_by_IA(
+            R, -R @ x_equilibrium[xbar_indices],
+            torch.from_numpy(self.system.x_lo_all[xbar_indices]),
+            torch.from_numpy(self.system.x_up_all[xbar_indices]))
         xbar = [x[i] for i in xbar_indices]
         for i in range(s_dim):
             if s_lb[i] < 0 and s_ub[i] > 0:
@@ -306,9 +296,7 @@ class LyapunovHybridLinearSystem:
         @param V_epsilon A scalar. ε in the documentation above.
         @param R This matrix must have full column rank, we will use the
         1-norm of R * (x̅ - x̅*). If R=None, then we use identity matrix as R.
-        @param fixed_R Whether R is fixed or not. If R is fixed, we compute
-        the range of R * (x̅-x̅*) by LP, otherwise we compute it through
-        interval arithmetics.
+        @param fixed_R Whether R is fixed or not.
         @param x_warmstart tensor of size self.system.x_dim. If provided, will
         use x_warmstart as initial guess for the *binary* variables of the
         milp. Instead of warm start beta with the binary variable solution from

@@ -308,12 +308,13 @@ class ReLUFreePattern:
             linear_layer = self.model[2 * layer]
             relu_layer = self.model[2 * layer + 1]
             z_next, binary_relax = \
-                relu_to_optimization_utils._add_linear_relaxation_by_layer(
+                relu_to_optimization_utils._add_constraint_to_program_by_layer(
                     lp, linear_layer, relu_layer, z_curr,
                     torch.from_numpy(
                         previous_neuron_input_lo[self.relu_unit_index[layer]]),
                     torch.from_numpy(
-                        previous_neuron_input_up[self.relu_unit_index[layer]]))
+                        previous_neuron_input_up[self.relu_unit_index[layer]]),
+                    lp_relaxation=True)
             z_curr = z_next
 
         # Now optimize the bound on the neuron input as Wij @ z_curr + bij
@@ -346,7 +347,9 @@ class ReLUFreePattern:
             linear_output_lo = np.inf
         return linear_output_lo, linear_output_up
 
-    def _compute_layer_bound(self, x_lo, x_up,
+    def _compute_layer_bound(self,
+                             x_lo,
+                             x_up,
                              method: mip_utils.PropagateBoundsMethod,
                              create_prog_callback=None):
         """
@@ -390,10 +393,13 @@ class ReLUFreePattern:
             linear_layer_input_up = z_post_relu_up[z_indices].clone()
         return z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up
 
-    def _compute_network_output_bounds(self, previous_neuron_input_lo,
+    def _compute_network_output_bounds(self,
+                                       previous_neuron_input_lo,
                                        previous_neuron_input_up,
-                                       network_input_lo, network_input_up,
-                                       method, create_prog_callback=None):
+                                       network_input_lo,
+                                       network_input_up,
+                                       method,
+                                       create_prog_callback=None):
         if self.last_layer_is_relu:
             output_lo, output_up = mip_utils.propagate_bounds(
                 self.model[-1],
@@ -418,8 +424,7 @@ class ReLUFreePattern:
                 for i in range(self.model[-1].out_features):
                     linear_output_lo[i], linear_output_up[
                         i] = self._compute_linear_output_bound_by_lp(
-                            int((len(self.model) - 1) / 2),
-                            i,
+                            int((len(self.model) - 1) / 2), i,
                             previous_neuron_input_lo.detach().numpy(),
                             previous_neuron_input_up.detach().numpy(),
                             network_input_lo.detach().numpy(),

@@ -50,6 +50,8 @@ def _add_constraint_by_neuron(
         # If the upper bound output_up[j] <= 0, then it is always
         # inactive, and we add to linear equality constraints
         # zᵢ₊₁(j) = c*((Wᵢzᵢ)(j) + bᵢ(j)) and βᵢ(j) = 0
+        # and the linear inequality
+        # constraint output_lo[j] <= (Wᵢzᵢ)(j) + bᵢ(j) <= output_up[j]
         if neuron_input_lo >= 0:
             slope = 1.
             binary_value = 1
@@ -64,10 +66,13 @@ def _add_constraint_by_neuron(
         Aeq_binary = torch.tensor([[0.], [1.]], dtype=dtype)
         rhs_eq = torch.stack(
             (slope * bij, torch.tensor(binary_value, dtype=dtype)))
-        Ain_linear_input = torch.empty((0, Wij.numel()), dtype=dtype)
-        Ain_neuron_output = torch.empty((0, 1), dtype=dtype)
-        Ain_binary = torch.empty((0, 1), dtype=dtype)
-        rhs_in = torch.empty((0, ), dtype=dtype)
+
+        Ain_linear_input = torch.cat((Wij.reshape((1, -1)), -Wij.reshape(
+            (1, -1))),
+                                     dim=0)
+        Ain_neuron_output = torch.tensor([[0], [0]], dtype=dtype)
+        Ain_binary = torch.tensor([[0], [0]], dtype=dtype)
+        rhs_in = torch.stack((neuron_input_up - bij, bij - neuron_input_lo))
     neuron_output_lo, neuron_output_up = mip_utils.propagate_bounds(
         relu_layer, neuron_input_lo, neuron_input_up)
     return Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
@@ -140,21 +145,31 @@ def _add_constraint_by_layer(linear_layer, relu_layer,
         torch.stack(z_next_lo), torch.stack(z_next_up)
 
 
-def _add_linear_relaxation_by_layer(prog: gurobi_torch_mip.GurobiTorchMIP,
-                                    linear_layer, relu_layer,
-                                    linear_input_var: list,
-                                    relu_input_lo: torch.Tensor,
-                                    relu_input_up: torch.Tensor):
+def _add_constraint_to_program_by_layer(prog: gurobi_torch_mip.GurobiTorchMIP,
+                                        linear_layer: torch.nn.Linear,
+                                        relu_layer, linear_input_var: list,
+                                        relu_input_lo: torch.Tensor,
+                                        relu_input_up: torch.Tensor,
+                                        lp_relaxation: bool):
     """
-    Add the linear relaxation of constraint output = relu(W * input + b)
-    The relu input W*input+b is within the bound relu_input_lo to relu_input_up
+    Add the constraint on output = relu(W * input + b).
+    @param linear_layer
+    @param lp_relaxation If lp_relaxation is false, then this is added as
+    mixed-integer linear constraints. Otherwise we relax the binary variable to
+    continuous variable within [0, 1].
     """
     assert (isinstance(prog, gurobi_torch_mip.GurobiTorchMIP))
     assert (isinstance(relu_input_lo, torch.Tensor))
     assert (isinstance(relu_input_up, torch.Tensor))
     relu_output_var = prog.addVars(linear_layer.out_features,
                                    lb=-gurobipy.GRB.INFINITY)
-    binary_relax = prog.addVars(linear_layer.out_features, lb=0., ub=1.)
+    if lp_relaxation:
+        relu_activation_var = prog.addVars(linear_layer.out_features,
+                                           lb=0.,
+                                           ub=1.)
+    else:
+        relu_activation_var = prog.addVars(linear_layer.out_features,
+                                           vtype=gurobipy.GRB.BINARY)
     for j in range(linear_layer.out_features):
         bij = torch.tensor(
             0., dtype=linear_layer.weight.dtype
@@ -166,12 +181,12 @@ def _add_linear_relaxation_by_layer(prog: gurobi_torch_mip.GurobiTorchMIP,
                 relu_input_up[j])
         prog.addMConstrs(
             [Ain_linear_input, Ain_neuron_output, Ain_neuron_binary],
-            [linear_input_var, [relu_output_var[j]], [binary_relax[j]]],
+            [linear_input_var, [relu_output_var[j]], [relu_activation_var[j]]],
             b=rhs_in,
             sense=gurobipy.GRB.LESS_EQUAL)
         prog.addMConstrs(
             [Aeq_linear_input, Aeq_neuron_output, Aeq_neuron_binary],
-            [linear_input_var, [relu_output_var[j]], [binary_relax[j]]],
+            [linear_input_var, [relu_output_var[j]], [relu_activation_var[j]]],
             b=rhs_eq,
             sense=gurobipy.GRB.EQUAL)
-    return relu_output_var, binary_relax
+    return relu_output_var, relu_activation_var
