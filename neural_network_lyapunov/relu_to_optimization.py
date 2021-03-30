@@ -255,16 +255,21 @@ class ReLUFreePattern:
             self.num_relu_units -= len(self.relu_unit_index[-1])
             self.relu_unit_index = self.relu_unit_index[:-1]
 
-    def _compute_linear_output_bound_by_lp(
-            self, layer_index, linear_output_row_index,
-            previous_neuron_input_lo: np.ndarray,
-            previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
-            network_input_up: np.ndarray,
-            create_prog_callback) -> Tuple[float, float]:
+    def _compute_linear_output_bound_by_optimization(
+        self, layer_index, linear_output_row_index,
+        previous_neuron_input_lo: np.ndarray,
+        previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
+        network_input_up: np.ndarray, create_prog_callback, lp_relaxation: bool
+    ) -> Tuple[float, float, torch.Tensor, torch.Tensor]:
         """
         Compute the range of a linear layer output.
-        We could solve a linear programming (LP) problem to find the relaxed
-        bound of the linear layer output. The approach is explained in
+        We could solve an optimization problem (LP or MILP) to find (relaxed)
+        bound of the linear layer output.
+        The idea is to convert the neural network to constraints. If we use
+        a binary variable for each neuron activation, then we have an MILP to
+        compute the exact bound. If we relax the binary variable to continuous
+        variable in the range [0, 1], then we have an LP to compute the relaxed
+        bound. The LP approach is explained in
         Evaluating Robustness of Neural Networks with Mixed Integer Programming
         by Vincent Tjeng, Kai Xiao and Russ Tedrake.
         @param layer_index layer 0 is the first linear layer, layer 1 is the
@@ -275,46 +280,46 @@ class ReLUFreePattern:
         object and the variable for the network input. The returned
         GurobiTorchMIP object contains the additional constraints imposed on
         network_input, that are not included in this function
-        _compute_linear_output_bound_by_lp. If set to None, then we create an
-        empty GurobiTorchMIP at the beginning of this program by ourselves.
+        _compute_linear_output_bound_by_optimization. If set to None, then we
+        create an empty GurobiTorchMIP at the beginning of this program by
+        ourselves.
         """
         assert (isinstance(previous_neuron_input_lo, np.ndarray))
         assert (isinstance(previous_neuron_input_up, np.ndarray))
         assert (isinstance(network_input_lo, np.ndarray))
         assert (isinstance(network_input_up, np.ndarray))
-        # Form an LP.
         input_dim = self.model[0].in_features
         if create_prog_callback is None:
-            lp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
-            network_input = lp.addVars(input_dim,
-                                       lb=torch.from_numpy(network_input_lo),
-                                       ub=torch.from_numpy(network_input_up))
+            prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            network_input = prog.addVars(input_dim,
+                                         lb=torch.from_numpy(network_input_lo),
+                                         ub=torch.from_numpy(network_input_up))
         else:
             assert (callable(create_prog_callback))
-            lp, network_input = create_prog_callback()
-            assert (isinstance(lp, gurobi_torch_mip.GurobiTorchMILP))
+            prog, network_input = create_prog_callback()
+            assert (isinstance(prog, gurobi_torch_mip.GurobiTorchMILP))
             assert (isinstance(network_input, list))
             assert (len(network_input) == input_dim)
-            lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
-                           [network_input],
-                           b=torch.from_numpy(network_input_up),
-                           sense=gurobipy.GRB.LESS_EQUAL)
-            lp.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
-                           [network_input],
-                           b=torch.from_numpy(network_input_lo),
-                           sense=gurobipy.GRB.GREATER_EQUAL)
+            prog.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                             [network_input],
+                             b=torch.from_numpy(network_input_up),
+                             sense=gurobipy.GRB.LESS_EQUAL)
+            prog.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
+                             [network_input],
+                             b=torch.from_numpy(network_input_lo),
+                             sense=gurobipy.GRB.GREATER_EQUAL)
         z_curr = network_input
         for layer in range(layer_index):
             linear_layer = self.model[2 * layer]
             relu_layer = self.model[2 * layer + 1]
             z_next, binary_relax = \
                 relu_to_optimization_utils._add_constraint_to_program_by_layer(
-                    lp, linear_layer, relu_layer, z_curr,
+                    prog, linear_layer, relu_layer, z_curr,
                     torch.from_numpy(
                         previous_neuron_input_lo[self.relu_unit_index[layer]]),
                     torch.from_numpy(
                         previous_neuron_input_up[self.relu_unit_index[layer]]),
-                    lp_relaxation=True)
+                    lp_relaxation=lp_relaxation)
             z_curr = z_next
 
         # Now optimize the bound on the neuron input as Wij @ z_curr + bij
@@ -322,30 +327,38 @@ class ReLUFreePattern:
         bij = self.model[2 * layer_index].bias[
             linear_output_row_index] if self.model[2*layer_index].bias is not\
             None else torch.tensor(0, dtype=self.dtype)
-        lp.setObjective([Wij], [z_curr],
-                        constant=bij,
-                        sense=gurobipy.GRB.MAXIMIZE)
-        lp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
-        lp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
-        lp.gurobi_model.optimize()
-        if lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
-            linear_output_up = lp.gurobi_model.ObjVal
-        elif lp.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
+        prog.setObjective([Wij], [z_curr],
+                          constant=bij,
+                          sense=gurobipy.GRB.MAXIMIZE)
+        prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
+        prog.gurobi_model.optimize()
+        # The value of the network input that gives the upper bound.
+        up_input_val = None
+        if prog.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+            linear_output_up = prog.gurobi_model.ObjVal
+            up_input_val = torch.tensor([v.x for v in network_input],
+                                        dtype=self.dtype)
+        elif prog.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
             linear_output_up = np.inf
-        elif lp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
+        elif prog.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
             linear_output_up = -np.inf
 
-        lp.setObjective([Wij], [z_curr],
-                        constant=bij,
-                        sense=gurobipy.GRB.MINIMIZE)
-        lp.gurobi_model.optimize()
-        if lp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
-            linear_output_lo = lp.gurobi_model.ObjVal
-        elif lp.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
+        prog.setObjective([Wij], [z_curr],
+                          constant=bij,
+                          sense=gurobipy.GRB.MINIMIZE)
+        prog.gurobi_model.optimize()
+        # The value of the network input that gives the lower bound.
+        lo_input_val = None
+        if prog.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+            linear_output_lo = prog.gurobi_model.ObjVal
+            lo_input_val = torch.tensor([v.x for v in network_input],
+                                        dtype=self.dtype)
+        elif prog.gurobi_model.status == gurobipy.GRB.Status.UNBOUNDED:
             linear_output_lo = -np.inf
-        elif lp.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
+        elif prog.gurobi_model.status == gurobipy.GRB.Status.INFEASIBLE:
             linear_output_lo = np.inf
-        return linear_output_lo, linear_output_up
+        return linear_output_lo, linear_output_up, lo_input_val, up_input_val
 
     def _compute_layer_bound(self,
                              x_lo,
@@ -376,14 +389,14 @@ class ReLUFreePattern:
                 for j in range(self.model[2 * layer_count].out_features):
                     neuron_index = self.relu_unit_index[layer_count][j]
                     z_pre_relu_lo[neuron_index], z_pre_relu_up[
-                        neuron_index] = \
-                        self._compute_linear_output_bound_by_lp(
+                        neuron_index], _, _ = \
+                        self._compute_linear_output_bound_by_optimization(
                             layer_count, j,
                             z_pre_relu_lo.detach().numpy(),
                             z_pre_relu_up.detach().numpy(),
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
-                            create_prog_callback)
+                            create_prog_callback, lp_relaxation=True)
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -423,13 +436,16 @@ class ReLUFreePattern:
                                                dtype=self.dtype)
                 for i in range(self.model[-1].out_features):
                     linear_output_lo[i], linear_output_up[
-                        i] = self._compute_linear_output_bound_by_lp(
-                            int((len(self.model) - 1) / 2), i,
-                            previous_neuron_input_lo.detach().numpy(),
-                            previous_neuron_input_up.detach().numpy(),
-                            network_input_lo.detach().numpy(),
-                            network_input_up.detach().numpy(),
-                            create_prog_callback)
+                        i], _, _ = \
+                            self._compute_linear_output_bound_by_optimization(
+                                int((len(self.model) - 1) / 2),
+                                i,
+                                previous_neuron_input_lo.detach().numpy(),
+                                previous_neuron_input_up.detach().numpy(),
+                                network_input_lo.detach().numpy(),
+                                network_input_up.detach().numpy(),
+                                create_prog_callback,
+                                lp_relaxation=True)
                 return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,
