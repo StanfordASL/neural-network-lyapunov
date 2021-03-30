@@ -901,7 +901,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
                                         rtol=1E-5)
 
 
-class TestComputeLinearOutputBoundByLp(unittest.TestCase):
+class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.relu_with_bias = utils.setup_relu((2, 5, 4, 3),
@@ -939,12 +939,27 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                              previous_neuron_input_lo,
                              previous_neuron_input_up, network_input_lo,
                              network_input_up, create_prog_callback,
-                             input_checker):
-        linear_output_lo, linear_output_up = \
-            dut._compute_linear_output_bound_by_lp(
+                             input_checker, lp_relaxation):
+        linear_output_lo, linear_output_up, lo_input_val, up_input_val = \
+            dut._compute_linear_output_bound_by_optimization(
                 layer_index, linear_output_row_index, previous_neuron_input_lo,
                 previous_neuron_input_up, network_input_lo, network_input_up,
-                create_prog_callback)
+                create_prog_callback, lp_relaxation)
+        truncated_network = torch.nn.Sequential(
+            *[dut.model[i] for i in range(2 * layer_index + 1)])
+        if not lp_relaxation:
+            if lo_input_val is not None:
+                # Now evaluat ethat linear layer output
+                self.assertAlmostEqual(
+                    linear_output_lo,
+                    truncated_network(lo_input_val)
+                    [linear_output_row_index].item())
+            if up_input_val is not None:
+                self.assertAlmostEqual(
+                    linear_output_up,
+                    truncated_network(up_input_val)
+                    [linear_output_row_index].item())
+
         # Now take many sample inputs, check if the linear output is within
         # the bounds.
         network_input_guesses = utils.uniform_sample_in_box(
@@ -964,7 +979,7 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                                      linear_output_up + 1E-6)
         np.testing.assert_array_less(linear_output_lo - 1E-6,
                                      linear_outputs.detach().numpy())
-        # Propagate the bounds through IA. The bounds from LP should be
+        # Propagate the bounds through IA. The bounds from MILP/LP should be
         # tighter than IA.
         bij = dut.model[2 * layer_index].bias[linear_output_row_index].reshape(
             (1, )) if dut.model[2 * layer_index].bias is not None else\
@@ -977,8 +992,8 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                 mip_utils.compute_range_by_IA(
                     Wij, bij, torch.from_numpy(network_input_lo),
                     torch.from_numpy(network_input_up))
-            # At the input layer, the LP bounds should be the same as the IA
-            # bounds, if there is no additional constraints on the network
+            # At the input layer, the MILP/LP bounds should be the same as the
+            # IA bounds, if there is no additional constraints on the network
             # input.
             if create_prog_callback is None:
                 self.assertAlmostEqual(linear_output_lo_ia[0].item(),
@@ -1008,7 +1023,7 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
         return linear_output_lo, linear_output_up
 
     def given_relu_test(self, relu, network_input_lo, network_input_up,
-                        create_prog_callback, input_checker):
+                        create_prog_callback, input_checker, lp_relaxation):
         dut = relu_to_optimization.ReLUFreePattern(relu, self.dtype)
         previous_neuron_input_lo = np.zeros((dut.num_relu_units, ))
         previous_neuron_input_up = np.zeros((dut.num_relu_units, ))
@@ -1020,7 +1035,8 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                     dut.relu_unit_index[0][i]] = self.linear_output_tester(
                         dut, 0, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
-                        network_input_up, create_prog_callback, input_checker)
+                        network_input_up, create_prog_callback, input_checker,
+                        lp_relaxation)
         # Now test the second layer.
         for i in range(self.relu_with_bias[2].out_features):
             previous_neuron_input_lo[
@@ -1028,7 +1044,8 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
                     dut.relu_unit_index[1][i]] = self.linear_output_tester(
                         dut, 1, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
-                        network_input_up, create_prog_callback, input_checker)
+                        network_input_up, create_prog_callback, input_checker,
+                        lp_relaxation)
 
     def test_relu_with_bias(self):
         def checker(x):
@@ -1036,18 +1053,22 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
 
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        self.given_relu_test(self.relu_with_bias,
-                             network_input_lo,
-                             network_input_up,
-                             create_prog_callback=None,
-                             input_checker=checker)
+        for lp_relaxation in (True, False):
+            self.given_relu_test(self.relu_with_bias,
+                                 network_input_lo,
+                                 network_input_up,
+                                 create_prog_callback=None,
+                                 input_checker=checker,
+                                 lp_relaxation=lp_relaxation)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
-        self.given_relu_test(self.relu_with_bias,
-                             network_input_lo,
-                             network_input_up,
-                             create_prog_callback=None,
-                             input_checker=checker)
+        for lp_relaxation in (True, False):
+            self.given_relu_test(self.relu_with_bias,
+                                 network_input_lo,
+                                 network_input_up,
+                                 create_prog_callback=None,
+                                 input_checker=checker,
+                                 lp_relaxation=lp_relaxation)
 
     def test_relu_with_bias_create_prog_callback(self):
         # Create a simple program with some constraints.
@@ -1067,8 +1088,10 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
 
         network_input_lo = np.array([0.1, -0.2])
         network_input_up = np.array([2., 1.])
-        self.given_relu_test(self.relu_with_bias, network_input_lo,
-                             network_input_up, create_prog_callback, checker)
+        for lp_relaxation in (True, False):
+            self.given_relu_test(self.relu_with_bias, network_input_lo,
+                                 network_input_up, create_prog_callback,
+                                 checker, lp_relaxation)
 
     def test_relu_no_bias(self):
         def checker(x):
@@ -1076,21 +1099,25 @@ class TestComputeLinearOutputBoundByLp(unittest.TestCase):
 
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        self.given_relu_test(self.relu_no_bias,
-                             network_input_lo,
-                             network_input_up,
-                             create_prog_callback=None,
-                             input_checker=checker)
+        for lp_relaxation in (True, False):
+            self.given_relu_test(self.relu_no_bias,
+                                 network_input_lo,
+                                 network_input_up,
+                                 create_prog_callback=None,
+                                 input_checker=checker,
+                                 lp_relaxation=lp_relaxation)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
-        self.given_relu_test(self.relu_no_bias,
-                             network_input_lo,
-                             network_input_up,
-                             create_prog_callback=None,
-                             input_checker=checker)
+        for lp_relaxation in (True, False):
+            self.given_relu_test(self.relu_no_bias,
+                                 network_input_lo,
+                                 network_input_up,
+                                 create_prog_callback=None,
+                                 input_checker=checker,
+                                 lp_relaxation=lp_relaxation)
 
 
-class TestComputeLayerBound(TestComputeLinearOutputBoundByLp):
+class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
     def bound_tester(self, relu_network, x_lo, x_up, method):
         dut = relu_to_optimization.ReLUFreePattern(relu_network, self.dtype)
         z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
@@ -1176,14 +1203,16 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByLp):
                                              dtype=self.dtype)
             for j in range(dut.model[-1].out_features):
                 output_lo_expected[j], output_up_expected[
-                    j] = dut._compute_linear_output_bound_by_lp(
-                        int((len(dut.model) - 1) / 2),
-                        j,
-                        z_pre_relu_lo.detach().numpy(),
-                        z_pre_relu_up.detach().numpy(),
-                        x_lo.detach().numpy(),
-                        x_up.detach().numpy(),
-                        create_prog_callback=None)
+                    j], _, _ = dut.\
+                        _compute_linear_output_bound_by_optimization(
+                            int((len(dut.model) - 1) / 2),
+                            j,
+                            z_pre_relu_lo.detach().numpy(),
+                            z_pre_relu_up.detach().numpy(),
+                            x_lo.detach().numpy(),
+                            x_up.detach().numpy(),
+                            create_prog_callback=None,
+                            lp_relaxation=True)
         np.testing.assert_allclose(output_lo.detach().numpy(),
                                    output_lo_expected.detach().numpy())
         np.testing.assert_allclose(output_up.detach().numpy(),
