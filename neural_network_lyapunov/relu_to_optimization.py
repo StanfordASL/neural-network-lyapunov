@@ -385,7 +385,16 @@ class ReLUFreePattern:
                     mip_utils.compute_range_by_IA(
                         self.model[2 * layer_count].weight, bias,
                         linear_layer_input_lo, linear_layer_input_up)
-            elif method == mip_utils.PropagateBoundsMethod.LP:
+            else:
+                if method == mip_utils.PropagateBoundsMethod.LP:
+                    lp_relaxation = True
+                elif method == mip_utils.PropagateBoundsMethod.MIP:
+                    lp_relaxation = False
+                else:
+                    raise Exception(
+                        "_compute_layer_bound: unknown bound propagation"
+                        + " method")
+
                 for j in range(self.model[2 * layer_count].out_features):
                     neuron_index = self.relu_unit_index[layer_count][j]
                     z_pre_relu_lo[neuron_index], z_pre_relu_up[
@@ -396,7 +405,7 @@ class ReLUFreePattern:
                             z_pre_relu_up.detach().numpy(),
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
-                            create_prog_callback, lp_relaxation=True)
+                            create_prog_callback, lp_relaxation)
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -429,7 +438,15 @@ class ReLUFreePattern:
                     mip_utils.propagate_bounds(
                         self.model[-1], linear_input_lo, linear_input_up)
                 return linear_output_lo, linear_output_up
-            elif method == mip_utils.PropagateBoundsMethod.LP:
+            else:
+                if method == mip_utils.PropagateBoundsMethod.LP:
+                    lp_relaxation = True
+                elif method == mip_utils.PropagateBoundsMethod.MIP:
+                    lp_relaxation = False
+                else:
+                    raise Exception(
+                        "_compute_network_output_bounds: unknown bound "
+                        + "propagate method.")
                 linear_output_lo = torch.empty((self.model[-1].out_features, ),
                                                dtype=self.dtype)
                 linear_output_up = torch.empty((self.model[-1].out_features, ),
@@ -445,7 +462,7 @@ class ReLUFreePattern:
                                 network_input_lo.detach().numpy(),
                                 network_input_up.detach().numpy(),
                                 create_prog_callback,
-                                lp_relaxation=True)
+                                lp_relaxation)
                 return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,

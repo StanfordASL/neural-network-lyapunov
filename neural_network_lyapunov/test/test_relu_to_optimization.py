@@ -1168,6 +1168,9 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
         z_pre_relu_lo_lp, z_pre_relu_up_lp, z_post_relu_lo_lp,\
             z_post_relu_up_lp = dut._compute_layer_bound(
                 x_lo, x_up, mip_utils.PropagateBoundsMethod.LP)
+        z_pre_relu_lo_mip, z_pre_relu_up_mip, z_post_relu_lo_mip,\
+            z_post_relu_up_mip = dut._compute_layer_bound(
+                x_lo, x_up, mip_utils.PropagateBoundsMethod.MIP)
         np.testing.assert_array_less(z_pre_relu_lo_ia.detach().numpy(),
                                      z_pre_relu_lo_lp.detach().numpy() + 1E-6)
         np.testing.assert_array_less(z_pre_relu_up_lp.detach().numpy(),
@@ -1176,6 +1179,15 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                                      z_post_relu_lo_lp.detach().numpy() + 1E-6)
         np.testing.assert_array_less(z_post_relu_up_lp.detach().numpy(),
                                      z_post_relu_up_ia.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_pre_relu_lo_lp.detach().numpy(),
+                                     z_pre_relu_lo_mip.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_pre_relu_up_mip.detach().numpy(),
+                                     z_pre_relu_up_lp.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(
+            z_post_relu_lo_lp.detach().numpy(),
+            z_post_relu_lo_mip.detach().numpy() + 1E-6)
+        np.testing.assert_array_less(z_post_relu_up_mip.detach().numpy(),
+                                     z_post_relu_up_lp.detach().numpy() + 1E-6)
 
     def test(self):
         self.network_tester(self.relu_with_bias)
@@ -1196,11 +1208,15 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                 mip_utils.propagate_bounds(
                     dut.model[-1], z_post_relu_lo[dut.relu_unit_index[-1]],
                     z_post_relu_up[dut.relu_unit_index[-1]])
-        elif method == mip_utils.PropagateBoundsMethod.LP:
+        else:
             output_lo_expected = torch.empty((dut.model[-1].out_features, ),
                                              dtype=self.dtype)
             output_up_expected = torch.empty((dut.model[-1].out_features, ),
                                              dtype=self.dtype)
+            if method == mip_utils.PropagateBoundsMethod.LP:
+                lp_relaxation = True
+            elif method == mip_utils.PropagateBoundsMethod.MIP:
+                lp_relaxation = False
             for j in range(dut.model[-1].out_features):
                 output_lo_expected[j], output_up_expected[
                     j], _, _ = dut.\
@@ -1212,7 +1228,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
                             create_prog_callback=None,
-                            lp_relaxation=True)
+                            lp_relaxation=lp_relaxation)
         np.testing.assert_allclose(output_lo.detach().numpy(),
                                    output_lo_expected.detach().numpy())
         np.testing.assert_allclose(output_up.detach().numpy(),

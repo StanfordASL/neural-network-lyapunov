@@ -120,6 +120,7 @@ def compute_range_by_IA(
 class PropagateBoundsMethod(enum.Enum):
     IA = 1
     LP = 2
+    MIP = 3
 
 
 def propagate_bounds(layer, input_lo, input_up):
