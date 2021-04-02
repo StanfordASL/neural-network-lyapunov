@@ -176,8 +176,11 @@ if __name__ == "__main__":
         model_dataset = generate_quadrotor_dynamics_data(dt)
 
     if args.train_forward_model:
-        model_dataset = torch.load(
-            dir_path + "/data/quadrotor_forward_dynamics_dataset_4.pt")
+        if args.load_dynamics_data:
+            model_dataset = torch.load(args.load_dynamics_data)
+        else:
+            model_dataset = torch.load(
+                dir_path + "/data/quadrotor_forward_dynamics_dataset_4.pt")
         forward_model_linear_layer_width = [
             10
         ] + args.forward_model_hidden_layer_width + [9]
@@ -240,8 +243,8 @@ if __name__ == "__main__":
     plant = quadrotor.Quadrotor(dtype)
     u_equilibrium = plant.hover_thrust * torch.ones((4, ), dtype=dtype)
     x_lo = torch.tensor([
-        -0.02, -0.02, -0.02, -0.02 * np.pi, -0.02 * np.pi, -0.02 * np.pi, -0.2,
-        -0.2, -0.2, -np.pi * 0.04, -np.pi * 0.04, -np.pi * 0.04
+        -0.04, -0.04, -0.04, -0.04 * np.pi, -0.04 * np.pi, -0.04 * np.pi, -0.2,
+        -0.2, -0.4, -np.pi * 0.08, -np.pi * 0.08, -np.pi * 0.08
     ],
                         dtype=dtype)
     x_up = -x_lo
@@ -279,19 +282,19 @@ if __name__ == "__main__":
                                                    plant.hover_thrust, dt)
     if args.train_adversarial:
         forward_system.network_bound_propagate_method =\
-            mip_utils.PropagateBoundsMethod.LP
+            mip_utils.PropagateBoundsMethod.MIP
     closed_loop_system = quadrotor_feedback_system.QuadrotorFeedbackSystem(
         forward_system, controller_relu,
         u_lo.detach().numpy(),
         u_up.detach().numpy())
     if args.train_adversarial:
         closed_loop_system.controller_network_bound_propagate_method =\
-            mip_utils.PropagateBoundsMethod.LP
+            mip_utils.PropagateBoundsMethod.MIP
     lyap = lyapunov.LyapunovDiscreteTimeHybridSystem(closed_loop_system,
                                                      lyapunov_relu)
     if args.train_adversarial:
         lyap.network_bound_propagate_method = \
-            mip_utils.PropagateBoundsMethod.LP
+            mip_utils.PropagateBoundsMethod.MIP
 
     if args.search_R:
         _, R_sigma, _ = np.linalg.svd(R.detach().numpy())
@@ -317,7 +320,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_params = {
         gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: True,
-        gurobipy.GRB.Param.TimeLimit: 900,
+        gurobipy.GRB.Param.TimeLimit: 1200,
         gurobipy.GRB.Param.MIPFocus: 1
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
