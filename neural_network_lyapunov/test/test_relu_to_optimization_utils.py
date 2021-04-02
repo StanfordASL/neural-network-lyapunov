@@ -11,13 +11,13 @@ import unittest
 import gurobipy
 
 
-class TestAddConstraintByNeuron(unittest.TestCase):
+class TestAddConstraintByNeuronBigM(unittest.TestCase):
     def constraint_test(self, Wij, bij, relu_layer, neuron_input_lo,
                         neuron_input_up):
         Ain_linear_input, Ain_neuron_output, Ain_binary, rhs_in,\
             Aeq_linear_input, Aeq_neuron_output, Aeq_binary, rhs_eq,\
             neuron_output_lo, neuron_output_up = \
-            relu_to_optimization_utils._add_constraint_by_neuron(
+            relu_to_optimization_utils._add_constraint_by_neuron_bigM(
                 Wij, bij, relu_layer, neuron_input_lo, neuron_input_up)
 
         neuron_output_lo_expected, neuron_output_up_expected =\
