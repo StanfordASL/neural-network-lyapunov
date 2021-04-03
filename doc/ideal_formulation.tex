@@ -1,0 +1,58 @@
+\documentclass{article}
+\usepackage{amsmath, amsfonts}
+\title{An ideal non-extended formulation for leaky ReLU}
+\begin{document}
+\maketitle
+\section{Objective}
+For a leaky ReLU unit
+\begin{subequations}
+\begin{align}
+	y = \max(c(w^Tx+b), w^Tx+b)\\
+	L \le x \le U\\
+	m^- \le w^Tx + b \le m^+
+\end{align}
+\end{subequations}
+where $0\le c < 1$, we will find an ideal non-extended formulation. Please refer to \cite{Anderson2020} for an explanation on the ideal formulation. In \cite{Anderson2020} they derived the ideal formulation for a ReLU neuron $y = \max(0, w^Tx+b)$, here we extend their approach to leaky ReLU neuron.
+
+\section{Big-M formulation}
+The big-M formulation is
+\begin{subequations}
+\begin{align}
+	y \ge c(w^Tx+b)\\
+	y \ge w^Tx+b\\
+    y \le c(w^Tx+b) + (1-c)m^+\beta\\
+    y \le w^Tx+b + (1-c)m^-(1-\beta)
+\end{align}
+\end{subequations}
+This formulation is not ideal, as explained in Fig 1 of \cite{Anderson2020}.
+
+\section{Ideal extended formulation}
+We consider an ideal extended formulation with new slack continuous variables
+\begin{subequations}
+\begin{align}
+	x = x^0 + x^1\\
+	y = y^0 + y^1\\
+	y^0 = c(w^Tx^0 + b(1-\beta))\\
+	y^1 = w^Tx^1 + b\beta\\
+	(m^--b)(1-\beta) \le w^Tx^0\le(m^+-b)(1-\beta)\\
+	(m^--b)\beta \le w^Tx^1\le(m^+-b)\beta
+\end{align}
+\end{subequations}
+This ideal formulation is extended as it introduces new slack variables $x^0, x^1, y^0, y^1$.
+
+\section{Ideal non-extended formulation}
+To derive the ideal non-extended formulation, we want to remove the slack variables $x^0, x^1, y^0, y^1$ in the ideal extended formulation. We first write $x^1, y^0, y^1$ as function of $x, \beta, x^0$
+\begin{subequations}
+\begin{align}
+	x^1 = x - x^0\\
+	y^0 = c(w^Tx^0 + b(1-\beta))\\
+	y^1 = w^Tx^1 + b\beta = w^Tx - w^Tx^0 + b\beta\\
+	y = y^0 + y^1 = w^Tx - (1-c)w^Tx^0 + cb + b(1-c)\beta
+\end{align}
+\end{subequations}
+
+\begin{thebibliography}{9}
+	\bibitem{Anderson2020}
+	Ross Anderson, Joey Huchette, Christian Tjandraatmadja and Juan Pablo Vielma \textit{Strong mixed-integer programming formulations for trained neural networks}, Mathematical Programming, 2020
+\end{thebibliography}
+\end{document}
