@@ -731,6 +731,7 @@ class TrainLyapunovReLU:
             # We keep a pool of adversarial samples.
             self.positivity_samples_pool_size = 10000
             self.derivative_samples_pool_size = 10000
+            self.adversarial_cluster_radius = np.inf
 
         def wandb_config(self):
             for attr in inspect.getmembers(self):
@@ -896,6 +897,13 @@ class TrainLyapunovReLU:
                 positivity_mip_adversarial = self.solve_positivity_mip()
             lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
                 derivative_mip_adversarial, _ = self.solve_derivative_mip()
+            if not np.isinf(options.adversarial_cluster_radius):
+                positivity_mip_adversarial = _cluster_adversarial_states(
+                    positivity_mip_adversarial,
+                    options.adversarial_cluster_radius)
+                derivative_mip_adversarial = _cluster_adversarial_states(
+                    derivative_mip_adversarial,
+                    options.adversarial_cluster_radius)
             positivity_state_samples_all = torch.cat(
                 (positivity_state_samples_all, positivity_mip_adversarial),
                 dim=0)
@@ -1021,3 +1029,25 @@ class TrainValueApproximator:
             instantaneous_cost_fun, discrete_time_flag, x_goal, pruner)
         return self.train_with_cost_to_go(network, x0_value_samples, V_lambda,
                                           x_equilibrium, R)
+
+
+def _cluster_adversarial_states(adversarial_states, cluster_radius):
+    """
+    The adversarial states generated from Gurobi often have clusters (some
+    adversarial states are very close to each other). We select only one
+    adversarial state from each cluster to remove the "duplicated" adversarial
+    states.
+    The adversarial states are in the descending order based on their MIP
+    objective values, namely adversarial_states[i] is more adversarial than
+    adversarial_states[i+1]. So we select the most adversarial state in each
+    cluster.
+    """
+    with torch.no_grad():
+        states_distance_squared = torch.sum(
+            (adversarial_states[1:] - adversarial_states[:-1])**2, dim=1)
+        clustered_adversarial_states = torch.cat(
+            (adversarial_states[0].reshape((1, -1)),
+             adversarial_states[1:][states_distance_squared >
+                                    cluster_radius**2]),
+            dim=0)
+        return clustered_adversarial_states

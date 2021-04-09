@@ -246,7 +246,7 @@ if __name__ == "__main__":
         -0.04, -0.04, -0.04, -0.04 * np.pi, -0.04 * np.pi, -0.04 * np.pi, -0.2,
         -0.2, -0.4, -np.pi * 0.08, -np.pi * 0.08, -np.pi * 0.08
     ],
-                        dtype=dtype)
+                        dtype=dtype) * 0.5
     x_up = -x_lo
     u_lo = torch.zeros((4, ), dtype=dtype)
     u_up = 3 * u_equilibrium
@@ -320,7 +320,7 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_mip_params = {
         gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: True,
-        gurobipy.GRB.Param.TimeLimit: 1200,
+        gurobipy.GRB.Param.TimeLimit: 900,
         gurobipy.GRB.Param.MIPFocus: 1
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
@@ -333,11 +333,12 @@ if __name__ == "__main__":
     if args.train_adversarial:
         options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
         options.num_batches = 10
-        options.num_epochs_per_mip = 5
+        options.num_epochs_per_mip = 30
         options.positivity_samples_pool_size = 50000
-        options.derivative_samples_pool_size = 100000
-        dut.lyapunov_positivity_mip_pool_solutions = 100
-        dut.lyapunov_derivative_mip_pool_solutions = 1000
+        options.derivative_samples_pool_size = 500000
+        options.adversarial_cluster_radius = 1E-5
+        dut.lyapunov_positivity_mip_pool_solutions = 1000
+        dut.lyapunov_derivative_mip_pool_solutions = 20000
         dut.add_positivity_adversarial_state = True
         dut.add_derivative_adversarial_state = True
         if args.training_set:
@@ -348,7 +349,7 @@ if __name__ == "__main__":
                 "derivative_state_samples_all"]
         else:
             positivity_state_samples_init = utils.uniform_sample_in_box(
-                x_lo, x_up, 1000)
+                x_lo, x_up, 50000)
             derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)
