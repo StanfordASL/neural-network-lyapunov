@@ -359,5 +359,21 @@ class TestTrainLyapunov(unittest.TestCase):
             self.assertLessEqual(loss, dut.convergence_tolerance)
 
 
+class TestClusterAdversarialStates(unittest.TestCase):
+    def test1(self):
+        dtype = torch.float64
+        x0 = torch.tensor([0.1, 0.2], dtype=dtype)
+        x1 = torch.tensor([0.5, 0.3], dtype=dtype)
+        x2 = torch.tensor([0.2, -0.5], dtype=dtype)
+        adversarial_states = torch.cat(
+            (x0, x0, x0, x1, x1, x1, x1, x2, x2, x2, x2)).reshape((-1, 2))
+        clustered_adversarial_states = \
+            train_lyapunov._cluster_adversarial_states(
+                adversarial_states, 1E-10)
+        np.testing.assert_allclose(
+            clustered_adversarial_states.detach().numpy(),
+            torch.cat((x0, x1, x2)).reshape((-1, 2)).detach().numpy())
+
+
 if __name__ == "__main__":
     unittest.main()

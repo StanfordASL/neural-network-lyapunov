@@ -75,10 +75,16 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
             controller_slack, controller_binary, u_lower_bound,\
                 u_upper_bound, controller_relu_input_lo,\
                 controller_relu_input_up =\
-                self._add_network_controller_mip_constraint(
+                self._add_network_controller_mip_constraint_given_relu_bound(
                     mip,
                     x_var,
                     u_var,
+                    controller_relu_input_lo,
+                    controller_relu_input_up,
+                    controller_network_input_lo,
+                    controller_network_input_up,
+                    controller_network_output_lo,
+                    controller_network_output_up,
                     controller_slack_var_name,
                     controller_binary_var_name,
                     lp_relaxation=False)
