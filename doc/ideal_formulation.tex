@@ -8,24 +8,20 @@ For a leaky ReLU unit
 \begin{subequations}
 \begin{align}
 	y = \max(c(w^Tx+b), w^Tx+b)\\
-	L \le x \le U\\
-	m^- \le w^Tx + b \le m^+\\
-	Px \le q
+	L \le x \le U
 \end{align}
 \end{subequations}
 where $0\le c < 1$, we will find an ideal non-extended formulation. Please refer to \cite{Anderson2020} for an explanation on the ideal formulation. In \cite{Anderson2020} they derived the ideal formulation for a ReLU neuron $y = \max(0, w^Tx+b)$, here we extend their approach to leaky ReLU neuron.
 
 \section{Big-M formulation}
-The big-M formulation is
+If we denote $m^+ = \sum_i \max(w_iU_i, w_iL_i) + b_i, m^- = \sum_i \min(w_iU_i, w_iL_i) + b_i$, then big-M formulation is
 \begin{subequations}
 \begin{align}
 	y \ge c(w^Tx+b)\\
 	y \ge w^Tx+b\\
     y \le c(w^Tx+b) + (1-c)m^+\beta\\
-    y \le w^Tx+b + (1-c)m^-(1-\beta)\\
+    y \le w^Tx+b - (1-c)m^-(1-\beta)\\
     L \le x \le U\\
-m^- \le w^Tx + b \le m^+\\
-Px \le q
 \end{align}
 \end{subequations}
 This formulation is not ideal, as explained in Fig 1 of \cite{Anderson2020}.
@@ -39,11 +35,7 @@ We consider an ideal extended formulation with new slack continuous variables
 	y^0 = c(w^Tx^0 + b(1-\beta)) \le 0\\
 	y^1 = w^Tx^1 + b\beta\ge 0\\
 	L(1-\beta) \le x^0 \le U(1-\beta)\\
-	L\beta \le x^1 \le U\beta\\
-	(m^--b)(1-\beta) \le w^Tx^0\le(m^+-b)(1-\beta)\\
-	(m^--b)\beta \le w^Tx^1\le(m^+-b)\beta\\
-	Px^0\le q(1-\beta)\\
-	Px^1\le q\beta
+	L\beta \le x^1 \le U\beta
 \end{align}
 \end{subequations}
 This ideal formulation is extended as it introduces new slack variables $x^0, x^1, y^0, y^1$.
@@ -60,7 +52,70 @@ To derive the ideal non-extended formulation, we want to remove the slack variab
 \end{subequations}
 Hence we can express $(1-c)w^1x^0_1$ as
 \begin{align}
-	(1-c)w_1x^0_1 = w^Tx - (1-c)\sum_{i>1}w_ix^0_i + cb  + b(1-c)\beta - y
+	(1-c)w_1x^0_1 = w^Tx - (1-c)\sum_{i>1}w_ix^0_i + cb  + b(1-c)\beta - y\label{eq:1_c_w1_x01}
+\end{align}
+We define 
+\begin{align}
+	\bar{L}_i = \begin{cases}L_i\text{ if } w_i > 0\\U_i\text{ if } w_i < 0\end{cases}
+	\bar{U}_i = \begin{cases}U_i\text{ if } w_i > 0\\L_i\text{ if } w_i < 0\end{cases}
+\end{align}
+We have
+\begin{subequations}
+\begin{align}
+	(1-c)w_1\bar{L}_1(1-\beta) \le (1-c)w_1x^0_1\le (1-c)w_1\bar{U}_1(1-\beta)\\
+	(1-c)w_1(x_1-\bar{U}_1\beta)\le (1-c)w_1x^0_1\le(1-c)w_1(x_1-\bar{L}_1\beta)
+\end{align}
+\end{subequations}
+replacing $(1-c)w_1x^0_1$ with the right-hand side of \eqref{eq:1_c_w1_x01} we get
+\begin{subequations}
+	\begin{align}
+		y \le w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{L}_1(1-\beta)-(1-c)\sum_{i>1}w_ix^0_i\\
+		y \le cw_1x_1 + \sum_{i>1}w_ix_i + cb + b(1-c)\beta + (1-c)w_1\bar{U}_1\beta - (1-c)\sum_{i>1}w_ix^0_i\\
+		y \ge w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{U}_1(1-\beta)-(1-c)\sum_{i>1}w_ix^0_i\\
+		y \ge cw_1x_1 + \sum_{i>1}w_ix_i + cb + b(1-c)\beta + (1-c)w_1\bar{L}_1\beta - (1-c)\sum_{i>1}w_ix^0_i
+	\end{align}
+\end{subequations}
+Now we proceed to get rid of $x^0_2$, we have
+\begin{align}
+	\begin{split}
+	\begin{cases}
+		w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{U}_1(1-\beta) - (1-c)\sum_{i>2}w_ix^0_i - y\\
+		cw_1x_1 + \sum_{i>1}w_ix_i + cb + b(1-c)\beta + (1-c)\bar{L}_1\beta - (1-c)\sum_{i>2}w_ix^0_i-y\\
+		(1-c)w_2\bar{L}_2(1-\beta)\\
+		(1-c)w_2(x_2-\bar{U}_2\beta)
+	\end{cases}\\
+	\le (1-c)w_wx^0_2\le\\
+	\begin{cases}
+		w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{L}_1(1-\beta) - (1-c)\sum_{i>2}w_ix^0_i - y\\
+		cw_1x_1 + \sum_{i>1}w_ix_i+cb+b(1-c)\beta + (1-c)\bar{U}_1\beta - (1-c)\sum_{i>2}w_ix^0_i-y\\
+		(1-c)w_2\bar{U}_2(1-\beta)\\
+		(1-c)w_2(x_2-\bar{L}_2\beta)
+	\end{cases}
+\end{split}
+\end{align}
+So we end up with the constraints
+\begin{subequations}
+\begin{align}
+	y\ge cb + b(1-c)\beta + \sum_{i\in\mathcal{I}}w_ix_i - (1-c)(1-\beta)\sum_{i\in\mathcal{I}}w_i\bar{U}_i + c\sum_{i\notin\mathcal{I}}w_ix_i + (1-c)\beta\sum_{i\notin\mathcal{I}}w_i\bar{L}_i \label{eq:leaky_relu_nonextended_ideal_ge}\\
+	y \le cb + b(1-c)\beta + \sum_{i\in\mathcal{I}}w_ix_i -(1-c)(1-\beta)\sum_{i\in\mathcal{I}}w_i\bar{L}_i + c\sum_{i\notin\mathcal{I}}w_ix_i + (1-c)\beta\sum_{i\notin\mathcal{I}}w_i\bar{U}_i \label{eq:leaky_relu_nonextended_ideal_le}
+\end{align}
+\end{subequations}
+where $\mathcal{I}$ is a subset of $\{1, 2, ..., n\}$. Moreover, \eqref{eq:leaky_relu_nonextended_ideal_ge} is redundant.
+
+In the end, we obtain the following non-extended ideal formulation
+\begin{subequations}
+\begin{align}
+	y \ge c(w^Tx+b)\label{eq:leaky_relu_nonextended_ideal1}\\
+	y \ge w^Tx+b\label{eq:leaky_relu_nonextended_ideal2}\\
+	\begin{split}
+		y \le cb + b(1-c)\beta + \sum_{i\in\mathcal{I}}\left(w_ix_i -(1-c)(1-\beta)w_i\bar{L}_i\right) +\\ \sum_{i\notin\mathcal{I}}\left(cw_ix_i + (1-c)\beta w_i\bar{U}_i\right)\label{eq:leaky_relu_nonextended_ideal3}
+	\end{split}\\
+	L\le x \le U\label{eq:leaky_relu_nonextended_ideal4}
+\end{align}
+\end{subequations}
+Notice that there are exponential number of subsets $\mathcal{I}$. To find $\mathcal{I}$, we consider to take a point $\hat{x}, \hat{y}, \hat{\beta}$ satisfying the constraints in the big-M formulation, with $\hat{\beta}$ being the continuous relaxation $0 \le \hat{\beta} \le 1$. Then we take $\mathcal{I}$ as
+\begin{align}
+	\mathcal{I} = \{i|(1-c)w_i\hat{x}_i \le (1-c)(1-\hat{\beta})w_i\bar{L}_i + (1-c)\hat{\beta}w_i\bar{U}_i\}
 \end{align}
 
 
@@ -80,7 +135,7 @@ We denote $m^+ = \sum_i \max(w_iL_i, w_iU_i), m^- = \sum_i \min(w_iL_i, w_iU_i)$
 	y \ge 0\\
 	y \ge w^Tx + b\\
 	y \le m^+\beta\\
-	y \le w^Tx+b + m^-(1-\beta)\\
+	y \le w^Tx+b - m^-(1-\beta)\\
 	L \le x \le U
 \end{align}
 \end{subequations}
