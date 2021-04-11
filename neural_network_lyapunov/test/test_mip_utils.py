@@ -7,6 +7,83 @@ import numpy as np
 import neural_network_lyapunov.utils as utils
 
 
+class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
+    def special_cases_tester(self, c):
+        dtype = torch.float64
+        w = torch.tensor([3., -2.], dtype=dtype)
+        b = torch.tensor(2., dtype=dtype)
+        lo = torch.tensor([-2., -3.], dtype=dtype)
+        up = torch.tensor([2., 4.], dtype=dtype)
+        # Test the case when the index set is empty.
+        # This should corresponds to
+        # y <= c*(wx + b) + (1-c) * max(w*x+b) * beta
+        (x_coeff, binary_coeff, y_coeff,
+         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
+             c, w, b, lo, up, set())
+        self.assertEqual(rhs.item(), c * b.item())
+        self.assertEqual(y_coeff.item(), 1.)
+        np.testing.assert_allclose(x_coeff.detach().numpy(),
+                                   -c * w.detach().numpy())
+        relu_input_lo, relu_input_up = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        self.assertAlmostEqual(binary_coeff.item(),
+                               -(1 - c) * relu_input_up[0].item())
+
+        # Test with index set equals to the whole set. This should corresponds
+        # to y <= w*x+b + (1-c) * relu_input_lo * beta + (c-1)*relu_input_lo
+        (x_coeff, binary_coeff, y_coeff,
+         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
+             c, w, b, lo, up, {0, 1})
+        self.assertEqual(rhs.item(), (b + (c - 1) * relu_input_lo).item())
+        self.assertEqual(y_coeff.item(), 1.)
+        np.testing.assert_allclose(x_coeff.detach().numpy(),
+                                   -w.detach().numpy())
+        np.testing.assert_allclose(binary_coeff.item(),
+                                   ((c - 1) * relu_input_lo).item())
+
+    def test_special_cases(self):
+        # Test ReLU
+        self.special_cases_tester(0.)
+        # Test leaky ReLU
+        self.special_cases_tester(0.1)
+
+    def general_case_tester(self, c):
+        dtype = torch.float64
+        w = torch.tensor([3., -2.], dtype=dtype)
+        b = torch.tensor(2., dtype=dtype)
+        lo = torch.tensor([-2., -3.], dtype=dtype)
+        up = torch.tensor([2., 4.], dtype=dtype)
+        # Test index set equals to {0}
+        (x_coeff, binary_coeff, y_coeff,
+         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
+             c, w, b, lo, up, {0})
+        self.assertEqual(y_coeff.item(), 1.)
+        self.assertAlmostEqual(rhs.item(),
+                               (b * c - (1 - c) * w[0] * lo[0]).item())
+        self.assertAlmostEqual(binary_coeff.item(),
+                               (-b * (1 - c) - (1 - c) * w[0] * lo[0] -
+                                (1 - c) * w[1] * lo[1]).item())
+        np.testing.assert_allclose(x_coeff.detach().numpy(),
+                                   np.array([-w[0], -c * w[1]]))
+
+        # Test index set equals to {1}
+        (x_coeff, binary_coeff, y_coeff,
+         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
+             c, w, b, lo, up, {1})
+        self.assertEqual(y_coeff.item(), 1.)
+        self.assertAlmostEqual(rhs.item(),
+                               (b * c - (1 - c) * w[1] * up[1]).item())
+        self.assertAlmostEqual(binary_coeff.item(),
+                               (-b * (1 - c) - (1 - c) * w[1] * up[1] -
+                                (1 - c) * w[0] * up[0]).item())
+        np.testing.assert_allclose(x_coeff.detach().numpy(),
+                                   np.array([-c * w[0], -w[1]]))
+
+    def test_general_case(self):
+        self.general_case_tester(0.)
+        self.general_case_tester(0.1)
+
+
 class TestComputeRangeByLP(unittest.TestCase):
     def test_x_bounds(self):
         # Test with only bounds on x.

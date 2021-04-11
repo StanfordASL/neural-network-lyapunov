@@ -5,6 +5,64 @@ import enum
 import warnings
 
 
+def strengthen_leaky_relu_mip_constraint(c: float, w: torch.Tensor,
+                                         b: torch.Tensor, lo: torch.Tensor,
+                                         up: torch.Tensor, indices: set):
+    """
+    We strengthen the big-M formulation of the leaky ReLU unit
+    y = max(c*wᵀx+b, wᵀx+b), lo <= x <= up
+    with the constraint
+    y <= bc + b(1-c)β + ∑ i∈ℑ (wᵢxᵢ−(1−c)(1−β)wᵢL̅ᵢ) + ∑i∉ℑ(cwᵢxᵢ+(1−c)βwᵢU̅ᵢ)
+    Refer to the pdf file from doc/ideal_formulation.tex for more details.
+    Note that this function should be called only when the input bounds to the
+    leaky ReLU unit includes 0, that we have to impose a mixed-integer linear
+    constraints with a binary variable to indicate the activeness of the
+    neuron.
+    @param c The negative slope of the leaky relu unit.
+    @param w A vector
+    @param b a scalar
+    @param lo The lower bound of x.
+    @param up The upper bound of x.
+    @param indices The set equals to the index set ℑ.
+    @return (x_coeff, binary_coeff, y_coeff, rhs) We return the constraint as
+    x_coeff * x + binary_coeff * β + y_coeff * y <= rhs
+    """
+    assert (isinstance(c, float))
+    assert (c >= 0 and c < 1)
+    assert (isinstance(w, torch.Tensor))
+    assert (len(w.shape) == 1)
+    assert (isinstance(b, torch.Tensor))
+    assert (len(b.shape) == 0)
+    assert (isinstance(lo, torch.Tensor))
+    assert (isinstance(up, torch.Tensor))
+    assert (lo.shape == w.shape)
+    assert (up.shape == lo.shape)
+    assert (isinstance(indices, set))
+    dtype = w.dtype
+    rhs = b * c
+    y_coeff = torch.tensor(1, dtype=dtype)
+    nx = w.shape[0]
+    not_indices = set(range(nx)) - indices
+    x_coeff = torch.zeros((nx, ), dtype=dtype)
+    binary_coeff = -b * (1 - c)
+    for i in indices:
+        if w[i] >= 0:
+            lo_bar_i = lo[i]
+        else:
+            lo_bar_i = up[i]
+        x_coeff[i] -= w[i]
+        rhs += -(1 - c) * w[i] * lo_bar_i
+        binary_coeff -= (1 - c) * w[i] * lo_bar_i
+    for i in not_indices:
+        if w[i] >= 0:
+            up_bar_i = up[i]
+        else:
+            up_bar_i = lo[i]
+        x_coeff[i] -= c * w[i]
+        binary_coeff -= (1 - c) * w[i] * up_bar_i
+    return (x_coeff, binary_coeff, y_coeff, rhs)
+
+
 def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
                         x_ub: np.ndarray, C: np.ndarray,
                         d: np.ndarray) -> (np.ndarray, np.ndarray):
@@ -29,8 +87,7 @@ def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
     if (C is None and d is None):
         warnings.warn(
             "Compute_range_by_lp with empty C*x<=d constraint. This is the "
-            "same as calling compute_range_by_IA"
-        )
+            "same as calling compute_range_by_IA")
 
     y_dim = A.shape[0]
     x_dim = A.shape[1]
