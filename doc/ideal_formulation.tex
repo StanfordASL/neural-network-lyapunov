@@ -115,9 +115,8 @@ In the end, we obtain the following non-extended ideal formulation
 \end{subequations}
 Notice that there are exponential number of subsets $\mathcal{I}$. To find $\mathcal{I}$, we consider to take a point $\hat{x}, \hat{y}, \hat{\beta}$ satisfying the constraints in the big-M formulation, with $\hat{\beta}$ being the continuous relaxation $0 \le \hat{\beta} \le 1$. Then we take $\mathcal{I}$ as
 \begin{align}
-	\mathcal{I} = \{i|(1-c)w_i\hat{x}_i \le (1-c)(1-\hat{\beta})w_i\bar{L}_i + (1-c)\hat{\beta}w_i\bar{U}_i\}
+	\mathcal{I} = \{i|w_i\hat{x}_i \le (1-\hat{\beta})w_i\bar{L}_i + \hat{\beta}w_i\bar{U}_i\}
 \end{align}
-
 
 
 \section{Appendix}
