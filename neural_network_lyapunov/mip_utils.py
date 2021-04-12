@@ -63,6 +63,27 @@ def strengthen_leaky_relu_mip_constraint(c: float, w: torch.Tensor,
     return (x_coeff, binary_coeff, y_coeff, rhs)
 
 
+def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
+                                 up: torch.Tensor, xhat, beta_hat):
+    """
+    Given a point (xhat, beta_hat, y_hat), find the index set ℑ that best
+    separates the point from the convex hull of integral solutions.
+    This index set is defined as
+    ℑ = {i | wᵢx̂ᵢ ≤ (1−β̂)wᵢL̅ᵢ +β̂wᵢU̅ᵢ}
+    For more details, refer to doc/ideal_formulation.tex
+    Notice that using this index set ℑ, the constrained computed from
+    strengthen_leaky_relu_mip_constraint() might not separate the point.
+    """
+    indices = set()
+    nx = w.shape[0]
+    for i in range(nx):
+        if w[i] >= 0 and xhat[i] <= (1 - beta_hat) * lo[i] + beta_hat * up[i]:
+            indices.add(i)
+        elif w[i] < 0 and xhat[i] > (1 - beta_hat) * up[i] + beta_hat * lo[i]:
+            indices.add(i)
+    return indices
+
+
 def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
                         x_ub: np.ndarray, C: np.ndarray,
                         d: np.ndarray) -> (np.ndarray, np.ndarray):

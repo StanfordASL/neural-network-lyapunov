@@ -4,6 +4,8 @@ import unittest
 
 import torch
 import numpy as np
+from itertools import chain, combinations
+
 import neural_network_lyapunov.utils as utils
 
 
@@ -82,6 +84,79 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
     def test_general_case(self):
         self.general_case_tester(0.)
         self.general_case_tester(0.1)
+
+
+class TestFindIndexSetToStrengthen(unittest.TestCase):
+    def maximal_separation_tester(self, c, w, b, lo, up, xhat, beta_hat):
+        indices = mip_utils.find_index_set_to_strengthen(
+            w, lo, up, xhat, beta_hat)
+        max_separation = -np.inf
+        max_separation_set = None
+        # Loop through all subsets of {0, 1, ..., nx-1}, make sure `indices`
+        # returns the maximal separation plane.
+        nx = w.shape[0]
+        for candidate_index in chain.from_iterable(
+                combinations(list(range(nx)), r) for r in range(nx + 1)):
+            x_coeff, binary_coeff, y_coeff, rhs = \
+                mip_utils.strengthen_leaky_relu_mip_constraint(
+                    c, w, b, lo, up, set(candidate_index))
+            # The exact value of y doesn't matter, as we only need to evaluate
+            # the right-hand side of the separation plane y <= foo(x, beta)
+            assert (y_coeff.item() == 1)
+            separation = x_coeff @ xhat + binary_coeff * beta_hat +\
+                y_coeff * 0 - rhs
+            if separation > max_separation:
+                max_separation = separation
+                max_separation_set = set(candidate_index)
+        self.assertSetEqual(indices, max_separation_set)
+
+    def test1(self):
+        dtype = torch.float64
+        self.maximal_separation_tester(c=0.1,
+                                       w=torch.tensor([2., -3.], dtype=dtype),
+                                       b=torch.tensor(-2., dtype=dtype),
+                                       lo=torch.tensor([-2., -4.],
+                                                       dtype=dtype),
+                                       up=torch.tensor([3., 1.], dtype=dtype),
+                                       xhat=torch.tensor([-2., 1.],
+                                                         dtype=dtype),
+                                       beta_hat=torch.tensor(0.3, dtype=dtype))
+
+    def test2(self):
+        dtype = torch.float64
+        self.maximal_separation_tester(c=0.1,
+                                       w=torch.tensor([2., -3.], dtype=dtype),
+                                       b=torch.tensor(-2., dtype=dtype),
+                                       lo=torch.tensor([-2., -4.],
+                                                       dtype=dtype),
+                                       up=torch.tensor([3., 1.], dtype=dtype),
+                                       xhat=torch.tensor([-2., -4.],
+                                                         dtype=dtype),
+                                       beta_hat=torch.tensor(0.8, dtype=dtype))
+
+    def test3(self):
+        dtype = torch.float64
+        self.maximal_separation_tester(c=0.1,
+                                       w=torch.tensor([2., -3.], dtype=dtype),
+                                       b=torch.tensor(2., dtype=dtype),
+                                       lo=torch.tensor([-2., -4.],
+                                                       dtype=dtype),
+                                       up=torch.tensor([3., 1.], dtype=dtype),
+                                       xhat=torch.tensor([3., -4.],
+                                                         dtype=dtype),
+                                       beta_hat=torch.tensor(0.8, dtype=dtype))
+
+    def test4(self):
+        dtype = torch.float64
+        self.maximal_separation_tester(c=0.1,
+                                       w=torch.tensor([2., -3.], dtype=dtype),
+                                       b=torch.tensor(2., dtype=dtype),
+                                       lo=torch.tensor([-2., -4.],
+                                                       dtype=dtype),
+                                       up=torch.tensor([3., 1.], dtype=dtype),
+                                       xhat=torch.tensor([3., 1.],
+                                                         dtype=dtype),
+                                       beta_hat=torch.tensor(0.8, dtype=dtype))
 
 
 class TestComputeRangeByLP(unittest.TestCase):
