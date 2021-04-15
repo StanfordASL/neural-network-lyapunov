@@ -19,29 +19,27 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
         # Test the case when the index set is empty.
         # This should corresponds to
         # y <= c*(wx + b) + (1-c) * max(w*x+b) * beta
-        (x_coeff, binary_coeff, y_coeff,
-         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
-             c, w, b, lo, up, set())
-        self.assertEqual(rhs.item(), c * b.item())
-        self.assertEqual(y_coeff.item(), 1.)
+        x_coeff, binary_coeff, constant = \
+            mip_utils.strengthen_leaky_relu_mip_constraint(
+                c, w, b, lo, up, set())
+        self.assertEqual(constant.item(), c * b.item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
-                                   -c * w.detach().numpy())
+                                   c * w.detach().numpy())
         relu_input_lo, relu_input_up = mip_utils.compute_range_by_IA(
             w.reshape((1, -1)), b.reshape((-1, )), lo, up)
         self.assertAlmostEqual(binary_coeff.item(),
-                               -(1 - c) * relu_input_up[0].item())
+                               (1 - c) * relu_input_up[0].item())
 
         # Test with index set equals to the whole set. This should corresponds
         # to y <= w*x+b + (1-c) * relu_input_lo * beta + (c-1)*relu_input_lo
-        (x_coeff, binary_coeff, y_coeff,
-         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
-             c, w, b, lo, up, {0, 1})
-        self.assertEqual(rhs.item(), (b + (c - 1) * relu_input_lo).item())
-        self.assertEqual(y_coeff.item(), 1.)
+        x_coeff, binary_coeff, constant = \
+            mip_utils.strengthen_leaky_relu_mip_constraint(
+                c, w, b, lo, up, {0, 1})
+        self.assertEqual(constant.item(), (b + (c - 1) * relu_input_lo).item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
-                                   -w.detach().numpy())
+                                   w.detach().numpy())
         np.testing.assert_allclose(binary_coeff.item(),
-                                   ((c - 1) * relu_input_lo).item())
+                                   ((1 - c) * relu_input_lo).item())
 
     def test_special_cases(self):
         # Test ReLU
@@ -56,30 +54,28 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
         lo = torch.tensor([-2., -3.], dtype=dtype)
         up = torch.tensor([2., 4.], dtype=dtype)
         # Test index set equals to {0}
-        (x_coeff, binary_coeff, y_coeff,
-         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
-             c, w, b, lo, up, {0})
-        self.assertEqual(y_coeff.item(), 1.)
-        self.assertAlmostEqual(rhs.item(),
+        x_coeff, binary_coeff, constant = \
+            mip_utils.strengthen_leaky_relu_mip_constraint(
+                c, w, b, lo, up, {0})
+        self.assertAlmostEqual(constant.item(),
                                (b * c - (1 - c) * w[0] * lo[0]).item())
         self.assertAlmostEqual(binary_coeff.item(),
-                               (-b * (1 - c) - (1 - c) * w[0] * lo[0] -
+                               (b * (1 - c) + (1 - c) * w[0] * lo[0] +
                                 (1 - c) * w[1] * lo[1]).item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
-                                   np.array([-w[0], -c * w[1]]))
+                                   np.array([w[0], c * w[1]]))
 
         # Test index set equals to {1}
-        (x_coeff, binary_coeff, y_coeff,
-         rhs) = mip_utils.strengthen_leaky_relu_mip_constraint(
-             c, w, b, lo, up, {1})
-        self.assertEqual(y_coeff.item(), 1.)
-        self.assertAlmostEqual(rhs.item(),
+        x_coeff, binary_coeff, constant = \
+            mip_utils.strengthen_leaky_relu_mip_constraint(
+                c, w, b, lo, up, {1})
+        self.assertAlmostEqual(constant.item(),
                                (b * c - (1 - c) * w[1] * up[1]).item())
         self.assertAlmostEqual(binary_coeff.item(),
-                               (-b * (1 - c) - (1 - c) * w[1] * up[1] -
+                               (b * (1 - c) + (1 - c) * w[1] * up[1] +
                                 (1 - c) * w[0] * up[0]).item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
-                                   np.array([-c * w[0], -w[1]]))
+                                   np.array([c * w[0], w[1]]))
 
     def test_general_case(self):
         self.general_case_tester(0.)
@@ -88,25 +84,25 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
 
 class TestFindIndexSetToStrengthen(unittest.TestCase):
     def maximal_separation_tester(self, c, w, b, lo, up, xhat, beta_hat):
+        # The maximal separated plane has the maximal violation of
+        # y <= bc + b(1-c)β + ∑ i∈ℑ (wᵢxᵢ−(1−c)(1−β)wᵢL̅ᵢ)
+        #      + ∑i∉ℑ(cwᵢxᵢ+(1−c)βwᵢU̅ᵢ)
+        # Namely the right-hand side should be minimized
         indices = mip_utils.find_index_set_to_strengthen(
             w, lo, up, xhat, beta_hat)
-        max_separation = -np.inf
+        min_rhs = np.inf
         max_separation_set = None
         # Loop through all subsets of {0, 1, ..., nx-1}, make sure `indices`
         # returns the maximal separation plane.
         nx = w.shape[0]
         for candidate_index in chain.from_iterable(
                 combinations(list(range(nx)), r) for r in range(nx + 1)):
-            x_coeff, binary_coeff, y_coeff, rhs = \
+            x_coeff, binary_coeff, constant = \
                 mip_utils.strengthen_leaky_relu_mip_constraint(
                     c, w, b, lo, up, set(candidate_index))
-            # The exact value of y doesn't matter, as we only need to evaluate
-            # the right-hand side of the separation plane y <= foo(x, beta)
-            assert (y_coeff.item() == 1)
-            separation = x_coeff @ xhat + binary_coeff * beta_hat +\
-                y_coeff * 0 - rhs
-            if separation > max_separation:
-                max_separation = separation
+            rhs = x_coeff @ xhat + binary_coeff * beta_hat + constant
+            if rhs < min_rhs:
+                min_rhs = rhs
                 max_separation_set = set(candidate_index)
         self.assertSetEqual(indices, max_separation_set)
 
@@ -157,6 +153,102 @@ class TestFindIndexSetToStrengthen(unittest.TestCase):
                                        xhat=torch.tensor([3., 1.],
                                                          dtype=dtype),
                                        beta_hat=torch.tensor(0.8, dtype=dtype))
+
+
+class TestComputeBetaRange(unittest.TestCase):
+    def empty_constraint_tester(self, c):
+        # Test when x_coeffs = beta_coeffs = constants = None
+        dtype = torch.float64
+        w = torch.tensor([2., -3.], dtype=dtype)
+        b = torch.tensor([-.5], dtype=dtype)
+        beta_range = mip_utils._compute_beta_range(
+            c, w, b, None, None, None, torch.tensor([-2, 3], dtype=dtype))
+        self.assertEqual(beta_range[0].item(), 0.)
+        self.assertEqual(beta_range[1].item(), 1.)
+
+    def test_empty_constraint(self):
+        self.empty_constraint_tester(0.)
+        self.empty_constraint_tester(0.1)
+
+    def nonempty_constraint_tester(self, c, w, b, lo, up, index_sets, xhat):
+        relu_input_lo, relu_input_up = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        assert (relu_input_lo[0].item() < 0)
+        assert (relu_input_up[0].item() > 0)
+        x_coeffs = []
+        beta_coeffs = []
+        constants = []
+        for index_set in index_sets:
+            x_coeff, beta_coeff, constant =\
+                mip_utils.strengthen_leaky_relu_mip_constraint(
+                    c, w, b, lo, up, index_set)
+            x_coeffs.append(x_coeff)
+            beta_coeffs.append(beta_coeff)
+            constants.append(constant)
+
+        beta_lo, beta_up = mip_utils._compute_beta_range(
+            c, w, b, x_coeffs, beta_coeffs, constants, xhat)
+        self.assertGreaterEqual(beta_lo.item(), 0)
+        self.assertLessEqual(beta_up.item(), 1)
+        self.assertGreaterEqual(beta_up.item(), beta_lo.item())
+        x_coeffs_torch = torch.cat([v.reshape((1, -1)) for v in x_coeffs],
+                                   dim=0)
+        beta_coeffs_torch = torch.stack(beta_coeffs)
+        constants_torch = torch.stack(constants)
+        lhs = torch.max(c * (w @ xhat + b), w @ xhat + b)
+        np.testing.assert_array_less(lhs.item() - 1E-6,
+                                     (x_coeffs_torch @ xhat +
+                                      beta_coeffs_torch * beta_up +
+                                      constants_torch).detach().numpy())
+        np.testing.assert_array_less(lhs.item() - 1E-6,
+                                     (x_coeffs_torch @ xhat +
+                                      beta_coeffs_torch * beta_lo +
+                                      constants_torch).detach().numpy())
+        np.testing.assert_array_less(
+            lhs.item() - 1E-6,
+            (x_coeffs_torch @ xhat + beta_coeffs_torch *
+             (beta_lo + beta_up) / 2 + constants_torch).detach().numpy())
+        # Make sure that if beta > beta_up, then it violates the constraints.
+        if beta_up.item() < 1:
+            self.assertFalse(
+                torch.all(x_coeffs_torch @ xhat + beta_coeffs_torch *
+                          (beta_up + 1E-5) + constants_torch >= lhs.item()))
+        if beta_lo.item() > 0:
+            self.assertFalse(
+                torch.all(x_coeffs_torch @ xhat + beta_coeffs_torch *
+                          (beta_lo - 1E-5) + constants_torch >= lhs.item()))
+
+    def test_nonempty_constraint1(self):
+        dtype = torch.float64
+        w = torch.tensor([2., -3.], dtype=dtype)
+        b = torch.tensor(-0.5, dtype=dtype)
+        lo = torch.tensor([-1., -2.], dtype=dtype)
+        up = torch.tensor([-0.5, 1.], dtype=dtype)
+        for c in (0., 0.1):
+            self.nonempty_constraint_tester(c, w, b, lo, up, [set()], lo)
+            self.nonempty_constraint_tester(c, w, b, lo, up, [set()], up)
+            self.nonempty_constraint_tester(
+                c, w, b, lo, up, [set(), {0}],
+                torch.tensor([lo[0], up[1]], dtype=dtype))
+            self.nonempty_constraint_tester(
+                c, w, b, lo, up, [set(), {0, 1}],
+                torch.tensor([lo[0], up[1]], dtype=dtype))
+
+    def test_nonempty_constraint2(self):
+        dtype = torch.float64
+        w = torch.tensor([2., -3., 1.5], dtype=dtype)
+        b = torch.tensor(-0.5, dtype=dtype)
+        lo = torch.tensor([-1., -2., 0.2], dtype=dtype)
+        up = torch.tensor([-0.5, 1., 0.5], dtype=dtype)
+        for c in (0., 0.1):
+            self.nonempty_constraint_tester(c, w, b, lo, up, [set()], lo)
+            self.nonempty_constraint_tester(c, w, b, lo, up, [set()], up)
+            self.nonempty_constraint_tester(
+                c, w, b, lo, up, [set(), {0}],
+                torch.tensor([lo[0], up[1], lo[2]], dtype=dtype))
+            self.nonempty_constraint_tester(
+                c, w, b, lo, up, [set(), {0, 1}],
+                torch.tensor([lo[0], up[1], up[2]], dtype=dtype))
 
 
 class TestComputeRangeByLP(unittest.TestCase):

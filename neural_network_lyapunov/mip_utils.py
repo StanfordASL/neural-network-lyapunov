@@ -25,7 +25,7 @@ def strengthen_leaky_relu_mip_constraint(c: float, w: torch.Tensor,
     @param up The upper bound of x.
     @param indices The set equals to the index set ℑ.
     @return (x_coeff, binary_coeff, y_coeff, rhs) We return the constraint as
-    x_coeff * x + binary_coeff * β + y_coeff * y <= rhs
+    y <= x_coeff * x + binary_coeff * β + constant
     """
     assert (isinstance(c, float))
     assert (c >= 0 and c < 1)
@@ -39,28 +39,27 @@ def strengthen_leaky_relu_mip_constraint(c: float, w: torch.Tensor,
     assert (up.shape == lo.shape)
     assert (isinstance(indices, set))
     dtype = w.dtype
-    rhs = b * c
-    y_coeff = torch.tensor(1, dtype=dtype)
+    constant = b * c
     nx = w.shape[0]
     not_indices = set(range(nx)) - indices
     x_coeff = torch.zeros((nx, ), dtype=dtype)
-    binary_coeff = -b * (1 - c)
+    binary_coeff = b * (1 - c)
     for i in indices:
         if w[i] >= 0:
             lo_bar_i = lo[i]
         else:
             lo_bar_i = up[i]
-        x_coeff[i] -= w[i]
-        rhs += -(1 - c) * w[i] * lo_bar_i
-        binary_coeff -= (1 - c) * w[i] * lo_bar_i
+        x_coeff[i] += w[i]
+        constant += -(1 - c) * w[i] * lo_bar_i
+        binary_coeff += (1 - c) * w[i] * lo_bar_i
     for i in not_indices:
         if w[i] >= 0:
             up_bar_i = up[i]
         else:
             up_bar_i = lo[i]
-        x_coeff[i] -= c * w[i]
-        binary_coeff -= (1 - c) * w[i] * up_bar_i
-    return (x_coeff, binary_coeff, y_coeff, rhs)
+        x_coeff[i] += c * w[i]
+        binary_coeff += (1 - c) * w[i] * up_bar_i
+    return (x_coeff, binary_coeff, constant)
 
 
 def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
@@ -82,6 +81,31 @@ def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
         elif w[i] < 0 and xhat[i] > (1 - beta_hat) * up[i] + beta_hat * lo[i]:
             indices.add(i)
     return indices
+
+
+def _compute_beta_range(c: float, w: torch.Tensor, b: torch.Tensor, x_coeffs,
+                        beta_coeffs, constants, xhat: torch.Tensor):
+    """
+    Compute the range of beta_hat, such that
+    max(c(w'*xhat+b), w'*xhat+b) <=
+        min(x_coeffs*xhat + beta_coeffs*beta_hat+constants).
+    Also beta_hat is in the range [0, 1].
+    returns beta_hat_lo, beta_hat_up
+    """
+    dtype = w.dtype
+    if x_coeffs is None and beta_coeffs is None and constants is None:
+        return torch.tensor(0, dtype=dtype), torch.tensor(1, dtype=dtype)
+    else:
+        lhs = torch.max(w @ xhat + b, c * (w @ xhat + b))
+        beta_lo = [torch.tensor(0, dtype=dtype)]
+        beta_up = [torch.tensor(1, dtype=dtype)]
+        for i in range(len(constants)):
+            bound = lhs - x_coeffs[i] @ xhat - constants[i]
+            if beta_coeffs[i] > 0:
+                beta_lo.append(bound / beta_coeffs[i])
+            elif beta_coeffs[i] < 0:
+                beta_up.append(bound / beta_coeffs[i])
+        return torch.max(torch.stack(beta_lo)), torch.min(torch.stack(beta_up))
 
 
 def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
