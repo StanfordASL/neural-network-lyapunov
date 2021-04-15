@@ -115,7 +115,68 @@ In the end, we obtain the following non-extended ideal formulation
 \end{subequations}
 Notice that there are exponential number of subsets $\mathcal{I}$. To find $\mathcal{I}$, we consider to take a point $\hat{x}, \hat{y}, \hat{\beta}$ satisfying the constraints in the big-M formulation, with $\hat{\beta}$ being the continuous relaxation $0 \le \hat{\beta} \le 1$. Then we take $\mathcal{I}$ as
 \begin{align}
-	\mathcal{I} = \{i|w_i\hat{x}_i \le (1-\hat{\beta})w_i\bar{L}_i + \hat{\beta}w_i\bar{U}_i\}
+	\mathcal{I} = \{i|w_i\hat{x}_i \le (1-\hat{\beta})w_i\bar{L}_i + \hat{\beta}w_i\bar{U}_i\}\label{eq:find_index_set}
+\end{align}
+
+We take an iterative procedure to strengthen the big-M formulation. Say in the current iterations, the strengthened big-M formulation already contains the constraint with $\mathcal{I}_1,\hdots, \mathcal{I}_k$, then for an $\hat{x}$ at the boundary of the box $L \le x \le U$, we first compute its range of $\hat{\beta}$ under the existing constraint
+\begin{align}
+	\max(c(w^T\hat{x}+b), w^T\hat{x}+b) \le cb + b(1-c)\hat{\beta} + \sum_{i\in\mathcal{I}_k}(w_ix_i - (1-c)(1-\hat{\beta})w_i\bar{L}_i) + \sum_{i\notin\mathcal{I}_k}(cw_ix_i+(1-c)\hat{\beta}w_i\bar{U}_i)
+\end{align}
+Then for each extreme $\hat{x},\hat{\beta}$, we compute the corresponding index set $\mathcal{I}$ from \eqref{eq:find_index_set}. We then decide whether to enforce this cutting plane, by whether this new cutting plane shrinks the righ-hand side of \eqref{eq:leaky_relu_nonextended_ideal3} at $\hat{x}, \hat{\beta}$.
+
+\section{Adding bounds on ReLU input}
+If the lower and upper bound of the ReLU input $m^+/m^-$ is not computed as $\max/\min_{L\le x\le U} w^Tx+b$ (for example, we compute the bounds by solving an LP/MIP), then the leaky ReLU constraint $y = \max(cw^Tx+b, w^Tx+b)$ has the following ideal extended formulation
+\begin{subequations}
+	\begin{align}
+	x = x^0 + x^1\\
+	y = y^0 + y^1\\
+	y^0 = c(w^Tx^0 + b(1-\beta))\le 0\\
+	y^1 = w^Tx^1+b\beta \ge 0\\
+	(m^--b)(1-\beta) \le w^Tx^0 \le(m^+-b)(1-\beta)\\
+	(m^--b)\beta\le w^Tx^1\le(m^+-b)\beta\\
+	L(1-\beta)\le x^0\le U(1-\beta)\\
+	L\beta\le x^1\le U\beta
+\end{align}
+\end{subequations}
+Hence we have the condition
+\begin{align}
+	\begin{split}
+	\begin{cases}
+		(1-c)(m^--b)(1-\beta) - (1-c)\sum_{i>1}w_ix^0_i\\
+		(1-c)w^Tx - (1-c)(m^+-b)\beta - (1-c)\sum_{i>1}w_ix^0_i\\
+		(1-c)w_1\bar{L}_1(1-\beta)\\
+		(1-c)w_1(x_1-\bar{U}_1\beta)
+	\end{cases}\\
+	\le (1-c)w_1x^0_1\le\\
+	\begin{cases}
+		(1-c)(m^+-b)(1-\beta) - (1-c)\sum_{i>1}w_ix^0_i\\
+		(1-c)w^Tx - (1-c)(m^--b)\beta - (1-c)\sum_{i>1}w_ix^0_i\\
+		(1-c)w_1\bar{U}_1(1-\beta)\\
+		(1-c)w_1(x_1-\bar{L}_1\beta)
+	\end{cases}
+\end{split}
+\end{align}
+Using the relationship
+\begin{align}
+	(1-c)w_1x^0_1 = w^Tx - (1-c)\sum_{i>1}w_ix^0_i + cb  + b(1-c)\beta - y\label{eq:1_c_w1_x01}
+\end{align}
+we get
+\begin{align}
+	\begin{split}
+	\begin{cases}
+		w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{U}_1(1-\beta)-(1-c)\sum_{i>1}w_ix^0_i\\
+		cw_1x_1 + \sum_{i>1}w_ix_i + cb + b(1-c)\beta + (1-c)w_1\bar{L}_1\beta - (1-c)\sum_{i>1}w_ix^0_i\\
+		w^Tx+b - (1-\beta)(1-c)m^+\\
+		c(w^Tx+b) + m^-\beta(1-c)
+	\end{cases}\\
+	\le y \le\\
+	\begin{cases}
+		w^Tx + cb + b(1-c)\beta - (1-c)w_1\bar{L}_1(1-\beta)-(1-c)\sum_{i>1}w_ix^0_i\\
+		cw_1x_1 + \sum_{i>1}w_ix_i + cb + b(1-c)\beta + (1-c)w_1\bar{U}_1\beta - (1-c)\sum_{i>1}w_ix^0_i\\
+		w^Tx+b - (1-\beta)(1-c)m^-\\
+		c(w^Tx+b) + m^+\beta(1-c)
+	\end{cases}
+\end{split}
 \end{align}
 
 
