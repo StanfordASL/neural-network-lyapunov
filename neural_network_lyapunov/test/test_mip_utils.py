@@ -5,11 +5,13 @@ import unittest
 import torch
 import numpy as np
 from itertools import chain, combinations
+import itertools
+import gurobipy
 
 import neural_network_lyapunov.utils as utils
 
 
-class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
+class TestStrengthenReLUMipWIndices(unittest.TestCase):
     def special_cases_tester(self, c):
         dtype = torch.float64
         w = torch.tensor([3., -2.], dtype=dtype)
@@ -20,7 +22,7 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
         # This should corresponds to
         # y <= c*(wx + b) + (1-c) * max(w*x+b) * beta
         x_coeff, binary_coeff, constant = \
-            mip_utils.strengthen_leaky_relu_mip_constraint(
+            mip_utils.strengthen_relu_mip_w_indices(
                 c, w, b, lo, up, set())
         self.assertEqual(constant.item(), c * b.item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
@@ -33,7 +35,7 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
         # Test with index set equals to the whole set. This should corresponds
         # to y <= w*x+b + (1-c) * relu_input_lo * beta + (c-1)*relu_input_lo
         x_coeff, binary_coeff, constant = \
-            mip_utils.strengthen_leaky_relu_mip_constraint(
+            mip_utils.strengthen_relu_mip_w_indices(
                 c, w, b, lo, up, {0, 1})
         self.assertEqual(constant.item(), (b + (c - 1) * relu_input_lo).item())
         np.testing.assert_allclose(x_coeff.detach().numpy(),
@@ -55,7 +57,7 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
         up = torch.tensor([2., 4.], dtype=dtype)
         # Test index set equals to {0}
         x_coeff, binary_coeff, constant = \
-            mip_utils.strengthen_leaky_relu_mip_constraint(
+            mip_utils.strengthen_relu_mip_w_indices(
                 c, w, b, lo, up, {0})
         self.assertAlmostEqual(constant.item(),
                                (b * c - (1 - c) * w[0] * lo[0]).item())
@@ -67,7 +69,7 @@ class TestStrengthenLeakyReLUMipConstraint(unittest.TestCase):
 
         # Test index set equals to {1}
         x_coeff, binary_coeff, constant = \
-            mip_utils.strengthen_leaky_relu_mip_constraint(
+            mip_utils.strengthen_relu_mip_w_indices(
                 c, w, b, lo, up, {1})
         self.assertAlmostEqual(constant.item(),
                                (b * c - (1 - c) * w[1] * up[1]).item())
@@ -98,7 +100,7 @@ class TestFindIndexSetToStrengthen(unittest.TestCase):
         for candidate_index in chain.from_iterable(
                 combinations(list(range(nx)), r) for r in range(nx + 1)):
             x_coeff, binary_coeff, constant = \
-                mip_utils.strengthen_leaky_relu_mip_constraint(
+                mip_utils.strengthen_relu_mip_w_indices(
                     c, w, b, lo, up, set(candidate_index))
             rhs = x_coeff @ xhat + binary_coeff * beta_hat + constant
             if rhs < min_rhs:
@@ -162,7 +164,7 @@ class TestComputeBetaRange(unittest.TestCase):
         w = torch.tensor([2., -3.], dtype=dtype)
         b = torch.tensor([-.5], dtype=dtype)
         beta_range = mip_utils._compute_beta_range(
-            c, w, b, None, None, None, torch.tensor([-2, 3], dtype=dtype))
+            c, w, b, [], [], [], torch.tensor([-2, 3], dtype=dtype))
         self.assertEqual(beta_range[0].item(), 0.)
         self.assertEqual(beta_range[1].item(), 1.)
 
@@ -180,7 +182,7 @@ class TestComputeBetaRange(unittest.TestCase):
         constants = []
         for index_set in index_sets:
             x_coeff, beta_coeff, constant =\
-                mip_utils.strengthen_leaky_relu_mip_constraint(
+                mip_utils.strengthen_relu_mip_w_indices(
                     c, w, b, lo, up, index_set)
             x_coeffs.append(x_coeff)
             beta_coeffs.append(beta_coeff)
@@ -249,6 +251,272 @@ class TestComputeBetaRange(unittest.TestCase):
             self.nonempty_constraint_tester(
                 c, w, b, lo, up, [set(), {0, 1}],
                 torch.tensor([lo[0], up[1], up[2]], dtype=dtype))
+
+
+class TestGetLinearInputVertices(unittest.TestCase):
+    def test1(self):
+        # Test with relu_input_lo, relu_input_up computed from interval
+        # arithmetics.
+        dtype = torch.float64
+        lo = torch.tensor([-1, -3], dtype=dtype)
+        up = torch.tensor([-0.5, 2], dtype=dtype)
+        w = torch.tensor([-2, 3.], dtype=dtype)
+        b = torch.tensor(0.4, dtype=dtype)
+        relu_input_lo_ia, relu_input_up_ia = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        vertices = mip_utils._get_linear_input_vertices(
+            lo, up, w, b, relu_input_lo_ia[0], relu_input_up_ia[0])
+        box_vertices = itertools.product(*[(lo[i], up[i]) for i in range(2)])
+        self.assertEqual(len(vertices), 4)
+        i = 0
+        for box_vertex in box_vertices:
+            vertex_expect = torch.stack(box_vertex)
+            np.testing.assert_allclose(vertices[i].detach().numpy(),
+                                       vertex_expect.detach().numpy())
+            i += 1
+
+    def test2(self):
+        # Test with relu_input_lo, relu_input_up tighter than that computed
+        # from interval arithmetics.
+        dtype = torch.float64
+        lo = torch.tensor([-1, -3], dtype=dtype)
+        up = torch.tensor([-0.5, 2], dtype=dtype)
+        w = torch.tensor([-2, 3.], dtype=dtype)
+        b = torch.tensor(0.4, dtype=dtype)
+        relu_input_lo_ia, relu_input_up_ia = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        vertices = mip_utils._get_linear_input_vertices(
+            lo, up, w, b, relu_input_lo_ia[0], relu_input_lo_ia[0] + 1E-5)
+        self.assertEqual(len(vertices), 1)
+        np.testing.assert_allclose(vertices[0], np.array([-0.5, -3]))
+
+
+class TestMaxYGivenLinearInput(unittest.TestCase):
+    def y_range_tester(self, c, w, b, x_coeffs, beta_coeffs, constants, x_hat):
+        y_max, beta_val = mip_utils._max_y_given_linear_input(
+            c, w, b, x_coeffs, beta_coeffs, constants, x_hat)
+        # First make sure that this y_max and beta_val satisfy the constraint
+        lhs = torch.max(c * (w @ x_hat + b), w @ x_hat + b).item()
+        self.assertGreaterEqual(y_max, lhs - 1E-6)
+        self.assertGreaterEqual(beta_val, 0)
+        self.assertLessEqual(beta_val, 1)
+        for x_coeff, beta_coeff, constant in zip(x_coeffs, beta_coeffs,
+                                                 constants):
+            self.assertLessEqual(
+                y_max,
+                (x_coeff @ x_hat + beta_coeff * beta_val + constant).item() +
+                1E-6)
+        x_coeffs_stack = torch.cat([v.reshape((1, -1)) for v in x_coeffs],
+                                   dim=0)
+        beta_coeffs_stack = torch.stack(beta_coeffs)
+        constants_stack = torch.stack(constants)
+        # Now sample many beta in the range [0, 1]. Either they violate the
+        # constraint, or the corresponding y is smaller than y_max.
+        for beta in np.linspace(0, 1, 51).tolist():
+            rhs = x_coeffs_stack @ x_hat + beta_coeffs_stack * beta +\
+                constants_stack
+            self.assertTrue(
+                torch.any(rhs < lhs) or torch.min(rhs).item() <= y_max)
+
+    def test1(self):
+        # Test when relu_input_lo, relu_input_up is computed from interval
+        # arithmetic of linear_input_lo and linear_input_up
+        dtype = torch.float64
+        c = 0.
+        w = torch.tensor([1, 1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([0, 0], dtype=dtype)
+        up = torch.tensor([1, 1], dtype=dtype)
+        relu_input_lo, relu_input_up = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        x_coeffs = []
+        beta_coeffs = []
+        constants = []
+        for index_set in (set(), {0, 1}):
+            x_coeff, beta_coeff, constant = \
+                mip_utils.strengthen_relu_mip_w_indices(
+                    c, w, b, lo, up, index_set)
+            x_coeffs.append(x_coeff)
+            beta_coeffs.append(beta_coeff)
+            constants.append(constant)
+
+        for x_hat in (torch.tensor([0, 0], dtype=dtype),
+                      torch.tensor([0, 1], dtype=dtype),
+                      torch.tensor([1, 0], dtype=dtype),
+                      torch.tensor([1, 1], dtype=dtype)):
+            self.y_range_tester(c, w, b, x_coeffs, beta_coeffs, constants,
+                                x_hat)
+        x_coeff, beta_coeff, constant = \
+            mip_utils.strengthen_relu_mip_w_indices(
+                c, w, b, lo, up, {0})
+        x_coeffs.append(x_coeff)
+        beta_coeffs.append(beta_coeff)
+        constants.append(constant)
+        for x_hat in (torch.tensor([0, 0], dtype=dtype),
+                      torch.tensor([0, 1], dtype=dtype),
+                      torch.tensor([1, 0], dtype=dtype),
+                      torch.tensor([1, 1], dtype=dtype)):
+            self.y_range_tester(c, w, b, x_coeffs, beta_coeffs, constants,
+                                x_hat)
+
+    def test2(self):
+        # Test when relu_input_lo, relu_input_up is tighter than those
+        # computed from interval arithmetic of linear_input_lo and
+        # linear_input_up
+        dtype = torch.float64
+        c = 0.1
+        w = torch.tensor([2, -1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([-1, 0.5], dtype=dtype)
+        up = torch.tensor([1.5, 1], dtype=dtype)
+        relu_input_lo_ia, relu_input_up_ia = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        relu_input_lo = 0.95 * relu_input_lo_ia[0] + 0.05 * relu_input_up_ia[0]
+        relu_input_up = 0.1 * relu_input_lo_ia[0] + 0.9 * relu_input_up_ia[0]
+        x_coeffs = [c * w, w]
+        beta_coeffs = [(1 - c) * relu_input_up, (1 - c) * relu_input_lo]
+        constants = [c * b, b - (1 - c) * relu_input_lo]
+
+        for x_hat in mip_utils._get_linear_input_vertices(
+                lo, up, w, b, relu_input_lo, relu_input_up):
+            if relu_input_lo <= w @ x_hat + b <= relu_input_up:
+                self.y_range_tester(c, w, b, x_coeffs, beta_coeffs, constants,
+                                    x_hat)
+        x_coeff, beta_coeff, constant = \
+            mip_utils.strengthen_relu_mip_w_indices(
+                c, w, b, lo, up, {0})
+        x_coeffs.append(x_coeff)
+        beta_coeffs.append(beta_coeff)
+        constants.append(constant)
+        for x_hat in mip_utils._get_linear_input_vertices(
+                lo, up, w, b, relu_input_lo, relu_input_up):
+            if relu_input_lo <= w @ x_hat + b <= relu_input_up:
+                self.y_range_tester(c, w, b, x_coeffs, beta_coeffs, constants,
+                                    x_hat)
+
+
+class TestStrengthenReLUMip(unittest.TestCase):
+    def strengthened_constraint_tester(self, c, w, b, lo, up, relu_input_lo,
+                                       relu_input_up):
+        # Make sure that after strengthening the constraint, the condition
+        # y = relu(w*x+b) is satisfied, and the vertices of the constrained
+        # polytopes are integral solutions.
+        x_coeffs, binary_coeffs, constants = mip_utils.strengthen_relu_mip(
+            c, w, b, lo, up, relu_input_lo, relu_input_up)
+        # Now setup an optimization problem with these constraints
+        prog = gurobipy.Model()
+        x = []
+        for i in range(w.shape[0]):
+            x.append(prog.addVar(lb=lo[i].item(), ub=up[i].item()))
+        beta = prog.addVar(lb=0., ub=1.)
+        y = prog.addVar()
+        # Add the lower bound constraint y >= c*(w'x+b), y >= w'x+b
+        prog.addLConstr(gurobipy.LinExpr([1] + (-w).detach().numpy().tolist(),
+                                         [y] + x),
+                        rhs=b.item(),
+                        sense=gurobipy.GRB.GREATER_EQUAL)
+        prog.addLConstr(gurobipy.LinExpr(
+            [1] + (-c * w).detach().numpy().tolist(), [y] + x),
+                        rhs=c * b.item(),
+                        sense=gurobipy.GRB.GREATER_EQUAL)
+        # Now add the constraint
+        # y <= c(wᵀx+b)+(1−c)m⁺β
+        # y <= wᵀx+b−(1−c)m⁻(1−β)
+        prog.addLConstr(gurobipy.LinExpr(
+            [1] + (-c * w).detach().numpy().tolist() +
+            [-(1 - c) * relu_input_up.item()], [y] + x + [beta]),
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        rhs=c * b.item())
+        prog.addLConstr(gurobipy.LinExpr([1] + (-w).detach().numpy().tolist() +
+                                         [-(1 - c) * relu_input_lo.item()],
+                                         [y] + x + [beta]),
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        rhs=(b - (1 - c) * relu_input_lo).item())
+        # Now add the strengthened constraints.
+        # y <= x_coeffs * x + beta_coeffs * beta + constants
+        for i in range(x_coeffs.shape[0]):
+            prog.addLConstr(gurobipy.LinExpr(
+                x_coeffs[i].detach().numpy().tolist() +
+                [binary_coeffs[i].item()] + [-1], x + [beta] + [y]),
+                            sense=gurobipy.GRB.GREATER_EQUAL,
+                            rhs=-constants[i].item())
+
+        # Now sample many different vector obj_coeff, and maximize
+        # obj_coeff * [x;y]. We check if the optimal solution is integral.
+        for _ in range(40):
+            obj_coeff = np.random.uniform(low=-1.,
+                                          high=1.,
+                                          size=(w.shape[0] + 1, ))
+            prog.setObjective(gurobipy.LinExpr(obj_coeff.tolist(), x + [y]),
+                              sense=gurobipy.GRB.MAXIMIZE)
+            prog.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            prog.optimize()
+            self.assertEqual(prog.status, gurobipy.GRB.Status.OPTIMAL)
+            self.assertTrue(np.abs(beta.x) < 1E-6 or np.abs(beta.x - 1) < 1E-6)
+
+        # Now sample many points satisfying
+        # lo <= x <= up
+        # relu_input_lo <= w'*x+b <= relu_input_up
+        # And check if (x, y) satisfies the strengthened constraint.
+        x_samples = utils.uniform_sample_in_box(lo, up, 100)
+        for i in range(x_samples.shape[0]):
+            if relu_input_lo <= w @ x_samples[i] + b <= relu_input_up:
+                for j in range(w.shape[0]):
+                    x[j].lb = x_samples[i, j].item()
+                    x[j].ub = x_samples[i, j].item()
+                y_val = torch.max(c * (w @ x_samples[i] + b),
+                                  w @ x_samples[i] + b)
+                y.lb = y_val.item()
+                y.ub = y_val.item()
+            prog.optimize()
+            self.assertEqual(prog.status, gurobipy.GRB.Status.OPTIMAL)
+
+    def test_2d_case1(self):
+        # The example given in Strong mixed-integer programming formulations
+        # for trained neural networks.
+        c = 0.
+        dtype = torch.float64
+        w = torch.tensor([1, 1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([0, 0], dtype=dtype)
+        up = torch.tensor([1, 1], dtype=dtype)
+        relu_input_lo_ia, relu_input_up_ia = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        relu_input_lo = relu_input_lo_ia[0]
+        relu_input_up = relu_input_up_ia[0]
+        x_coeffs, binary_coeffs, constants = mip_utils.strengthen_relu_mip(
+            c, w, b, lo, up, relu_input_lo, relu_input_up)
+        self.assertEqual(x_coeffs.shape, (2, 2))
+        self.strengthened_constraint_tester(c, w, b, lo, up, relu_input_lo,
+                                            relu_input_up)
+
+    def test_2d_case2(self):
+        # relu_input_lo and relu_input_up are tighter than those computed from
+        # interval arithematics.
+        c = 0.
+        dtype = torch.float64
+        w = torch.tensor([1, 1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([0, 0], dtype=dtype)
+        up = torch.tensor([1, 1], dtype=dtype)
+        relu_input_lo_ia, relu_input_up_ia = mip_utils.compute_range_by_IA(
+            w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+        relu_input_lo = torch.tensor(-0.6, dtype=dtype)
+        relu_input_up = relu_input_up_ia[0]
+        x_coeffs, binary_coeffs, constants = mip_utils.strengthen_relu_mip(
+            c, w, b, lo, up, relu_input_lo, relu_input_up)
+        self.assertEqual(x_coeffs.shape, (2, 2))
+        self.strengthened_constraint_tester(c, w, b, lo, up, relu_input_lo,
+                                            relu_input_up)
+
+        # Now tighten relu_input_lo further, such that the vertices
+        # [x, y] = [0, 1, 0], [1, 0, 0] are not in the admissible region.
+        relu_input_lo = torch.tensor(-0.45, dtype=dtype)
+        x_coeffs, binary_coeffs, constants = mip_utils.strengthen_relu_mip(
+            c, w, b, lo, up, relu_input_lo, relu_input_up)
+        self.assertEqual(x_coeffs.shape, (0, 2))
+        self.assertEqual(binary_coeffs.shape, (0,))
+        self.assertEqual(constants.shape, (0,))
 
 
 class TestComputeRangeByLP(unittest.TestCase):

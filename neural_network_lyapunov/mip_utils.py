@@ -3,11 +3,12 @@ import numpy as np
 import gurobipy
 import enum
 import warnings
+import itertools
 
 
-def strengthen_leaky_relu_mip_constraint(c: float, w: torch.Tensor,
-                                         b: torch.Tensor, lo: torch.Tensor,
-                                         up: torch.Tensor, indices: set):
+def strengthen_relu_mip_w_indices(c: float, w: torch.Tensor, b: torch.Tensor,
+                                  lo: torch.Tensor, up: torch.Tensor,
+                                  indices: set):
     """
     We strengthen the big-M formulation of the leaky ReLU unit
     y = max(c*wᵀx+b, wᵀx+b), lo <= x <= up
@@ -71,7 +72,7 @@ def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
     ℑ = {i | wᵢx̂ᵢ ≤ (1−β̂)wᵢL̅ᵢ +β̂wᵢU̅ᵢ}
     For more details, refer to doc/ideal_formulation.tex
     Notice that using this index set ℑ, the constrained computed from
-    strengthen_leaky_relu_mip_constraint() might not separate the point.
+    strengthen_relu_mip_w_indices() might not separate the point.
     """
     indices = set()
     nx = w.shape[0]
@@ -83,29 +84,186 @@ def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
     return indices
 
 
+def _get_linear_input_vertices(lo, up, w, b, relu_input_lo, relu_input_up):
+    """
+    For the region
+    lo <= x <= up
+    relu_input_lo <= w*x+b <= relu_input_up
+    return all the vertices of the box lo <= x <= up if the vertex also
+    satisfies relu_input-lo <= w*x+b <= relu_input-up
+    """
+    assert isinstance(lo, torch.Tensor)
+    assert isinstance(up, torch.Tensor)
+    assert (len(lo.shape) == 1)
+    assert (lo.shape == up.shape)
+    assert (lo.shape == w.shape)
+    assert isinstance(relu_input_lo, torch.Tensor)
+    assert isinstance(relu_input_up, torch.Tensor)
+    linear_input_bounds = [(lo[i], up[i]) for i in range(lo.shape[0])]
+    box_vertices = itertools.product(*linear_input_bounds)
+    relu_input_lo_ia, relu_input_up_ia = compute_range_by_IA(
+        w.reshape((1, -1)), b.reshape((-1, )), lo, up)
+    vertices = []
+    if relu_input_lo == relu_input_lo_ia[
+            0] and relu_input_up == relu_input_up_ia[0]:
+        for vertex in box_vertices:
+            vertices.append(torch.stack(vertex))
+        return vertices
+    assert (relu_input_lo >= relu_input_lo_ia[0])
+    assert (relu_input_up <= relu_input_up_ia[0])
+    vertices = []
+    for vertex in box_vertices:
+        relu_input_vertex = w @ torch.stack(vertex) + b
+        if relu_input_lo <= relu_input_vertex <= relu_input_up:
+            vertices.append(torch.stack(vertex))
+    return vertices
+
+
 def _compute_beta_range(c: float, w: torch.Tensor, b: torch.Tensor, x_coeffs,
-                        beta_coeffs, constants, xhat: torch.Tensor):
+                        binary_coeffs, constants, xhat: torch.Tensor):
     """
     Compute the range of beta_hat, such that
     max(c(w'*xhat+b), w'*xhat+b) <=
-        min(x_coeffs*xhat + beta_coeffs*beta_hat+constants).
+        min(x_coeffs*xhat + binary_coeffs*beta_hat+constants).
     Also beta_hat is in the range [0, 1].
     returns beta_hat_lo, beta_hat_up
     """
     dtype = w.dtype
-    if x_coeffs is None and beta_coeffs is None and constants is None:
-        return torch.tensor(0, dtype=dtype), torch.tensor(1, dtype=dtype)
+    lhs = torch.max(w @ xhat + b, c * (w @ xhat + b))
+    beta_lo = [torch.tensor(0, dtype=dtype)]
+    beta_up = [torch.tensor(1, dtype=dtype)]
+    for i in range(len(constants)):
+        bound = lhs - x_coeffs[i] @ xhat - constants[i]
+        if binary_coeffs[i] > 0:
+            beta_lo.append(bound / binary_coeffs[i])
+        elif binary_coeffs[i] < 0:
+            beta_up.append(bound / binary_coeffs[i])
+    return torch.max(torch.stack(beta_lo)), torch.min(torch.stack(beta_up))
+
+
+def _max_y_given_linear_input(c: float, w: torch.Tensor, b: torch.Tensor,
+                              x_coeffs, beta_coeffs, constants,
+                              x_hat) -> (float, np.ndarray):
+    """
+    For the constraint
+    c(w'*x_hat+b) <= y
+    w'*x_hat+b <= y
+    y <= x_coeffs * x_hat + beta_coeffs * beta + constants
+    0 <= beta <= 1
+    Find the maximal value of y, together with the value beta that gives the
+    maximal value of y.
+    returns (y_max, beta_val) Notice that y_max and beta_val aren't torch
+    tensors, hence we cannot do automatic differentiation on these two.
+    """
+    prog = gurobipy.Model()
+    y_lower = torch.max(c * (w @ x_hat + b), w @ x_hat + b)
+    y = prog.addVar(lb=y_lower.item())
+    beta = prog.addVar(lb=0., ub=1.)
+    prog.setObjective(gurobipy.LinExpr([1.], [y]), sense=gurobipy.GRB.MAXIMIZE)
+    for i in range(len(x_coeffs)):
+        prog.addLConstr(gurobipy.LinExpr([1., -beta_coeffs[i].item()],
+                                         [y, beta]),
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        rhs=(x_coeffs[i] @ x_hat + constants[i]).item())
+    prog.setParam(gurobipy.GRB.Param.OutputFlag, False)
+    prog.optimize()
+    assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+    beta_val = beta.x
+    y_max = y.x
+    return (y_max, beta_val)
+
+
+def strengthen_relu_mip(c: float, w: torch.Tensor, b: torch.Tensor,
+                        lo: torch.Tensor, up: torch.Tensor, relu_input_lo,
+                        relu_input_up):
+    """
+    For the (leaky) ReLU unit y = max(c*(wᵀx+b), wᵀx+b), strengthen its big-M
+    formulation, by adding the constraint
+    y <= bc + b(1-c)β + ∑ i∈ℑ (wᵢxᵢ−(1−c)(1−β)wᵢL̅ᵢ) + ∑i∉ℑ(cwᵢxᵢ+(1−c)βwᵢU̅ᵢ)
+    if this additional constraint tightens the existing mixed-integer linear
+    constraints. ℑ is a subset of {1, 2, ..., nx}.
+    We start with just the constraint
+    y >= c*(wᵀx+b)
+    y >= wᵀx+b
+    y <= c(wᵀx+b)+(1−c)m⁺β
+    y <= wᵀx+b−(1−c)m⁻(1−β)
+    L <= x <= U
+    0 <= β <= 1
+    we loop through each vertex of the box L <= x <= U, compute the bound of β
+    given the existing constraints (by calling _compute_beta_range()), and then
+    find the corresponding index set through find_index_set_to_strengthen(). If
+    the generated constraint reduces the upper bound of y at that x_hat and
+    beta_hat, then we add the constraint.
+    Refer to the documentation in doc/ideal_formulation.tex for more details.
+    @param c The negative slope of the leaky ReLU unit.
+    @param w The linear coefficient of the linear layer, a 1D vector.
+    @param b The bias of the linear layer, A 0-D tensor.
+    @param lo The lower bound of the linear input, L in the documentation
+    above.
+    @param up The upper bound of the linear input, U in the documentation
+    above.
+    @param relu_input_lo The lower bound of the ReLU input, m⁻ in the
+    documentation above.
+    @param relu_input_up The upper bound of the ReLU input, m⁺ in the
+    documentation above.
+    @retun x_coeffs, binary_coeffs, constants. The strengthened constraints in
+    the form of
+    y <= x_coeffs * x + binary_coeffs * beta + constants
+    """
+    assert (relu_input_lo < 0)
+    assert (relu_input_up > 0)
+    assert (isinstance(lo, torch.Tensor))
+    assert (isinstance(up, torch.Tensor))
+    assert (len(lo.shape) == 1)
+    assert (lo.shape == up.shape)
+    assert (isinstance(relu_input_lo, torch.Tensor))
+    assert (isinstance(relu_input_up, torch.Tensor))
+    assert (len(relu_input_lo.shape) == 0)
+    assert (len(relu_input_up.shape) == 0)
+    # Before strengthening, we already have two constraint to bound the upper
+    # value of y as
+    # y <= c(wᵀx+b)+(1−c)m⁺β
+    # y <= wᵀx+b−(1−c)m⁻(1−β)
+    x_coeffs_exist = [c * w, w]
+    binary_coeffs_exist = [(1 - c) * relu_input_up, (1 - c) * relu_input_lo]
+    constants_exist = [c * b, b - (1 - c) * relu_input_lo]
+    dtype = w.dtype
+    x_coeffs = []
+    binary_coeffs = []
+    constants = []
+    for x_hat in _get_linear_input_vertices(lo, up, w, b, relu_input_lo,
+                                            relu_input_up):
+        beta_lo, beta_up = _compute_beta_range(
+            c, w, b, x_coeffs_exist + x_coeffs,
+            binary_coeffs_exist + binary_coeffs, constants_exist + constants,
+            x_hat)
+        for beta_hat in (beta_lo, beta_up):
+            indices = find_index_set_to_strengthen(w, lo, up, x_hat, beta_hat)
+            x_coeff, binary_coeff, constant = strengthen_relu_mip_w_indices(
+                c, w, b, lo, up, indices)
+            # Now evaluate the right-hand side at x_hat, beta_hat
+            y_upper_bound = torch.min(
+                torch.stack([
+                    x_coeffs_exist[i] @ x_hat +
+                    binary_coeffs_exist[i] * beta_hat + constants_exist[i]
+                    for i in range(len(x_coeffs_exist))
+                ] + [
+                    x_coeffs[i] @ x_hat + binary_coeffs[i] * beta_hat +
+                    constants[i] for i in range(len(x_coeffs))
+                ]))
+            y_upper_bound_new = x_coeff @ x_hat + binary_coeff * beta_hat +\
+                constant
+            if y_upper_bound_new < y_upper_bound - 1E-6:
+                x_coeffs.append(x_coeff)
+                binary_coeffs.append(binary_coeff)
+                constants.append(constant)
+    if len(x_coeffs) > 0:
+        return torch.cat(
+            [v.reshape((1, -1)) for v in x_coeffs],
+            dim=0), torch.stack(binary_coeffs), torch.stack(constants)
     else:
-        lhs = torch.max(w @ xhat + b, c * (w @ xhat + b))
-        beta_lo = [torch.tensor(0, dtype=dtype)]
-        beta_up = [torch.tensor(1, dtype=dtype)]
-        for i in range(len(constants)):
-            bound = lhs - x_coeffs[i] @ xhat - constants[i]
-            if beta_coeffs[i] > 0:
-                beta_lo.append(bound / beta_coeffs[i])
-            elif beta_coeffs[i] < 0:
-                beta_up.append(bound / beta_coeffs[i])
-        return torch.max(torch.stack(beta_lo)), torch.min(torch.stack(beta_up))
+        return torch.empty((0, w.shape[0]), dtype=dtype), torch.empty(
+            (0, ), dtype=dtype), torch.empty((0, ), dtype=dtype)
 
 
 def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
