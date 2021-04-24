@@ -175,13 +175,14 @@ def _max_y_given_linear_input(c: float, w: torch.Tensor, b: torch.Tensor,
 
 def strengthen_relu_mip(c: float, w: torch.Tensor, b: torch.Tensor,
                         lo: torch.Tensor, up: torch.Tensor, relu_input_lo,
-                        relu_input_up):
+                        relu_input_up, selective: bool):
     """
     For the (leaky) ReLU unit y = max(c*(wᵀx+b), wᵀx+b), strengthen its big-M
     formulation, by adding the constraint
     y <= bc + b(1-c)β + ∑ i∈ℑ (wᵢxᵢ−(1−c)(1−β)wᵢL̅ᵢ) + ∑i∉ℑ(cwᵢxᵢ+(1−c)βwᵢU̅ᵢ)
     if this additional constraint tightens the existing mixed-integer linear
-    constraints. ℑ is a subset of {1, 2, ..., nx}.
+    constraints. ℑ is a subset of {1, 2, ..., n}, where n is the dimension of x
+
     We start with just the constraint
     y >= c*(wᵀx+b)
     y >= wᵀx+b
@@ -189,6 +190,7 @@ def strengthen_relu_mip(c: float, w: torch.Tensor, b: torch.Tensor,
     y <= wᵀx+b−(1−c)m⁻(1−β)
     L <= x <= U
     0 <= β <= 1
+
     we loop through each vertex of the box L <= x <= U, compute the bound of β
     given the existing constraints (by calling _compute_beta_range()), and then
     find the corresponding index set through find_index_set_to_strengthen(). If
@@ -206,6 +208,11 @@ def strengthen_relu_mip(c: float, w: torch.Tensor, b: torch.Tensor,
     documentation above.
     @param relu_input_up The upper bound of the ReLU input, m⁺ in the
     documentation above.
+    @param selective If set to false, then add all 2ⁿ-2 number of additional
+    linear constraints, each constraint correspond to an index set ℑ, that ℑ
+    is a subset of {1, 2, ..., n} except the empty set and the whole set. If
+    set to False, then we only add the linear constraint by choosing the most
+    violated additional constraint, evaluated at certain point of (x̂, ŷ, β̂).
     @retun x_coeffs, binary_coeffs, constants. The strengthened constraints in
     the form of
     y <= x_coeffs * x + binary_coeffs * beta + constants
@@ -231,32 +238,45 @@ def strengthen_relu_mip(c: float, w: torch.Tensor, b: torch.Tensor,
     x_coeffs = []
     binary_coeffs = []
     constants = []
-    for x_hat in _get_linear_input_vertices(lo, up, w, b, relu_input_lo,
-                                            relu_input_up):
-        beta_lo, beta_up = _compute_beta_range(
-            c, w, b, x_coeffs_exist + x_coeffs,
-            binary_coeffs_exist + binary_coeffs, constants_exist + constants,
-            x_hat)
-        for beta_hat in (beta_lo, beta_up):
-            indices = find_index_set_to_strengthen(w, lo, up, x_hat, beta_hat)
+    if not selective:
+        nx = w.shape[0]
+        for candidate_index in itertools.chain.from_iterable(
+                itertools.combinations(list(range(nx)), r)
+                for r in range(1, nx)):
             x_coeff, binary_coeff, constant = strengthen_relu_mip_w_indices(
-                c, w, b, lo, up, indices)
-            # Now evaluate the right-hand side at x_hat, beta_hat
-            y_upper_bound = torch.min(
-                torch.stack([
-                    x_coeffs_exist[i] @ x_hat +
-                    binary_coeffs_exist[i] * beta_hat + constants_exist[i]
-                    for i in range(len(x_coeffs_exist))
-                ] + [
-                    x_coeffs[i] @ x_hat + binary_coeffs[i] * beta_hat +
-                    constants[i] for i in range(len(x_coeffs))
-                ]))
-            y_upper_bound_new = x_coeff @ x_hat + binary_coeff * beta_hat +\
-                constant
-            if y_upper_bound_new < y_upper_bound - 1E-6:
-                x_coeffs.append(x_coeff)
-                binary_coeffs.append(binary_coeff)
-                constants.append(constant)
+                c, w, b, lo, up, set(candidate_index))
+            x_coeffs.append(x_coeff)
+            binary_coeffs.append(binary_coeff)
+            constants.append(constant)
+    else:
+        for x_hat in _get_linear_input_vertices(lo, up, w, b, relu_input_lo,
+                                                relu_input_up):
+            beta_lo, beta_up = _compute_beta_range(
+                c, w, b, x_coeffs_exist + x_coeffs,
+                binary_coeffs_exist + binary_coeffs,
+                constants_exist + constants, x_hat)
+            for beta_hat in (beta_lo, beta_up):
+                indices = find_index_set_to_strengthen(w, lo, up, x_hat,
+                                                       beta_hat)
+                x_coeff, binary_coeff, constant =\
+                    strengthen_relu_mip_w_indices(
+                        c, w, b, lo, up, indices)
+                # Now evaluate the right-hand side at x_hat, beta_hat
+                y_upper_bound = torch.min(
+                    torch.stack([
+                        x_coeffs_exist[i] @ x_hat +
+                        binary_coeffs_exist[i] * beta_hat + constants_exist[i]
+                        for i in range(len(x_coeffs_exist))
+                    ] + [
+                        x_coeffs[i] @ x_hat + binary_coeffs[i] * beta_hat +
+                        constants[i] for i in range(len(x_coeffs))
+                    ]))
+                y_upper_bound_new = x_coeff @ x_hat + binary_coeff * beta_hat\
+                    + constant
+                if y_upper_bound_new < y_upper_bound - 1E-6:
+                    x_coeffs.append(x_coeff)
+                    binary_coeffs.append(binary_coeff)
+                    constants.append(constant)
     if len(x_coeffs) > 0:
         return torch.cat(
             [v.reshape((1, -1)) for v in x_coeffs],
