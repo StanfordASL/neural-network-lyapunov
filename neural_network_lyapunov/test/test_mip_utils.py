@@ -157,6 +157,92 @@ class TestFindIndexSetToStrengthen(unittest.TestCase):
                                        beta_hat=torch.tensor(0.8, dtype=dtype))
 
 
+class TestStrengthenReLUMipGivenPts(unittest.TestCase):
+    def test1(self):
+        dtype = torch.float64
+        c = 0.
+        w = torch.tensor([1, 1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([0, 0], dtype=dtype)
+        up = torch.tensor([1, 1], dtype=dtype)
+        linear_inputs = [
+            torch.tensor([0, 1], dtype=dtype),
+            torch.tensor([1, 0], dtype=dtype)
+        ]
+        relu_outputs = [
+            torch.tensor(0.25, dtype=dtype),
+            torch.tensor(0.25, dtype=dtype)
+        ]
+        relu_activations = [
+            torch.tensor(0.5, dtype=dtype),
+            torch.tensor(0.5, dtype=dtype)
+        ]
+        x_coeffs, binary_coeffs, constants = \
+            mip_utils.strengthen_relu_mip_given_pts(
+                c, w, b, lo, up, linear_inputs, relu_outputs, relu_activations)
+        self.assertEqual(x_coeffs.shape, (2, 2))
+        self.assertEqual(binary_coeffs.shape, (2, ))
+        self.assertEqual(constants.shape, (2, ))
+        for i in range(2):
+            # Each additional constraint should rule out each point.
+            self.assertGreater(
+                relu_outputs[i], x_coeffs[i] @ linear_inputs[i] +
+                binary_coeffs[i] * relu_activations[i] + constants[i])
+            # The point should pass (x, y, beta) = ([0, 0], 0, 0) and
+            # ([1, 1], 0.5, 1)
+            self.assertAlmostEqual(constants[i].item(), 0)
+            self.assertAlmostEqual(
+                (x_coeffs[i] @ torch.tensor([1, 1], dtype=dtype) +
+                 binary_coeffs[i] * 1 + constants[i]).item(), 0.5)
+        # additional constraint 1 should pass (x, y, beta) = [0, 1], 0, 0
+        self.assertAlmostEqual(
+            (x_coeffs[0] @ torch.tensor([0, 1], dtype=dtype) +
+             constants[0]).item(), 0)
+        # additional constraint 2 should pass (x, y, beta) = [1, 0], 0, 0
+        self.assertAlmostEqual(
+            (x_coeffs[1] @ torch.tensor([1, 0], dtype=dtype) +
+             constants[1]).item(), 0)
+        for i in range(2):
+            x_coeff_expected, binary_coeff_expected, constant_expected =\
+                mip_utils.strengthen_relu_mip_w_indices(
+                    c, w, b, lo, up,
+                    mip_utils.find_index_set_to_strengthen(
+                        w, lo, up, linear_inputs[i], relu_activations[i]))
+            np.testing.assert_allclose(x_coeffs[i].detach().numpy(),
+                                       x_coeff_expected.detach().numpy())
+            self.assertEqual(binary_coeffs[i].item(),
+                             binary_coeff_expected.item())
+            self.assertEqual(constants[i].item(), constant_expected.item())
+
+    def test2(self):
+        # This test adds no additional constraint, since the candidate
+        # constraint is not violated at the evaluation point.
+        dtype = torch.float64
+        c = 0.
+        w = torch.tensor([1, 1], dtype=dtype)
+        b = torch.tensor(-1.5, dtype=dtype)
+        lo = torch.tensor([0, 0], dtype=dtype)
+        up = torch.tensor([1, 1], dtype=dtype)
+        linear_inputs = [
+            torch.tensor([0, 1], dtype=dtype),
+            torch.tensor([1, 0], dtype=dtype)
+        ]
+        relu_outputs = [
+            torch.tensor(0., dtype=dtype),
+            torch.tensor(0., dtype=dtype)
+        ]
+        relu_activations = [
+            torch.tensor(0., dtype=dtype),
+            torch.tensor(0., dtype=dtype)
+        ]
+        x_coeffs, binary_coeffs, constants = \
+            mip_utils.strengthen_relu_mip_given_pts(
+                c, w, b, lo, up, linear_inputs, relu_outputs, relu_activations)
+        self.assertIsNone(x_coeffs)
+        self.assertIsNone(binary_coeffs)
+        self.assertIsNone(constants)
+
+
 class TestComputeBetaRange(unittest.TestCase):
     def empty_constraint_tester(self, c):
         # Test when x_coeffs = beta_coeffs = constants = None
@@ -531,7 +617,7 @@ class TestStrengthenReLUMip(unittest.TestCase):
                 self.assertAlmostEqual(y.x,
                                        torch.max(c * (w @ x_samples[i] + b),
                                                  w @ x_samples[i] + b).item(),
-                                       places=5)
+                                       places=7)
 
     def test_2d_case1(self):
         # The example given in Strong mixed-integer programming formulations
