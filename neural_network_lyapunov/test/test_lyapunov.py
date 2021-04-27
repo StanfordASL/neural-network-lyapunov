@@ -47,8 +47,7 @@ def setup_relu(dtype, params=None):
     else:
         linear3.weight.data = params[25:29].clone().reshape((1, 4))
         linear3.bias.data = params[29].clone().reshape((1))
-    relu1 = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(), linear3,
-                          nn.ReLU())
+    relu1 = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(), linear3)
     assert (not relu1.forward(torch.tensor([0, 0], dtype=dtype)).item() == 0)
     return relu1
 
@@ -679,7 +678,7 @@ class TestLyapunovHybridSystem(unittest.TestCase):
         linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
         linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
         lyapunov_relu1 = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(),
-                                       linear3, nn.ReLU())
+                                       linear3)
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(
             self.system1, lyapunov_relu1)
 
@@ -1689,7 +1688,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         linear3.weight.data = weight_tensor[18:].clone().reshape((1, 4))
         linear3.bias.data = bias_tensor[7:].clone()
         lyapunov_relu1 = nn.Sequential(linear1, nn.ReLU(), linear2,
-                                       nn.LeakyReLU(0.1), linear3, nn.ReLU())
+                                       nn.LeakyReLU(0.1), linear3)
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, lyapunov_relu1)
         R_torch = torch.from_numpy(R).reshape((3, 2))
 

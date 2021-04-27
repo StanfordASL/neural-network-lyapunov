@@ -35,19 +35,13 @@ class TestReLU(unittest.TestCase):
         self.linear3.bias.data = torch.tensor([-10], dtype=self.dtype)
         self.linear3_no_bias = nn.Linear(4, 1, bias=False)
         self.linear3_no_bias.weight.data = self.linear3.weight.data.clone()
-        # Model with a ReLU unit in the output layer
-        self.model1 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
-                                    nn.ReLU(), self.linear3, nn.ReLU())
-        # Model without a ReLU unit in the output layer
+        # Model with ReLU units
         self.model2 = nn.Sequential(self.linear1, nn.ReLU(), self.linear2,
                                     nn.ReLU(), self.linear3)
 
-        # Model with leaky ReLU with a leaky ReLU unit in the output layer.
+        # Model with leaky ReLU units.
         self.leaky_relus =\
-            [nn.LeakyReLU(0.1), nn.LeakyReLU(0.2), nn.LeakyReLU(0.01)]
-        self.model3 = nn.Sequential(self.linear1, self.leaky_relus[0],
-                                    self.linear2, self.leaky_relus[1],
-                                    self.linear3, self.leaky_relus[2])
+            [nn.LeakyReLU(0.1), nn.LeakyReLU(0.2)]
         # Model with leaky ReLU with no ReLU unit in the output layer.
         self.model4 = nn.Sequential(self.linear1, self.leaky_relus[0],
                                     self.linear2, self.leaky_relus[1],
@@ -64,26 +58,6 @@ class TestReLU(unittest.TestCase):
         self.model7 = nn.Sequential(self.linear1, self.leaky_relus[0],
                                     self.linear2)
 
-    def test_compute_relu_activation_pattern1(self):
-        x = torch.tensor([-6, 4], dtype=self.dtype)
-        activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
-            self.model1, x)
-        self.assertEqual(len(activation_pattern), 3)
-        self.assertEqual(len(activation_pattern[0]), 3)
-        self.assertEqual(len(activation_pattern[1]), 4)
-        self.assertEqual(len(activation_pattern[2]), 1)
-        x_linear1 = self.linear1.forward(x)
-        x_relu1 = nn.ReLU().forward(x_linear1)
-        for i in range(3):
-            self.assertEqual(x_linear1[i] >= 0, activation_pattern[0][i])
-        x_linear2 = self.linear2.forward(x_relu1)
-        for i in range(4):
-            self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
-        x_relu2 = nn.ReLU().forward(x_linear2)
-        x_linear3 = self.linear3.forward(x_relu2)
-        self.assertEqual(len(activation_pattern[2]), 1)
-        self.assertEqual(x_linear3[0] >= 0, activation_pattern[2][0])
-
     def test_compute_relu_activation_pattern2(self):
         x = torch.tensor([-6, 4], dtype=self.dtype)
         activation_pattern = relu_to_optimization.ComputeReLUActivationPattern(
@@ -98,31 +72,6 @@ class TestReLU(unittest.TestCase):
         x_linear2 = self.linear2.forward(x_relu1)
         for i in range(4):
             self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
-
-    def test_compute_relu_activation_pattern3(self):
-        # Test with leaky relu.
-        def test_fun(x):
-            activation_pattern = relu_to_optimization.\
-                ComputeReLUActivationPattern(self.model3, x)
-            self.assertEqual(len(activation_pattern), 3)
-            self.assertEqual(len(activation_pattern[0]), 3)
-            self.assertEqual(len(activation_pattern[1]), 4)
-            self.assertEqual(len(activation_pattern[2]), 1)
-            x_linear1 = self.linear1.forward(x)
-            x_relu1 = self.leaky_relus[0].forward(x_linear1)
-            for i in range(3):
-                self.assertEqual(x_linear1[i] >= 0, activation_pattern[0][i])
-            x_linear2 = self.linear2.forward(x_relu1)
-            for i in range(4):
-                self.assertEqual(x_linear2[i] >= 0, activation_pattern[1][i])
-            x_relu2 = self.leaky_relus[1].forward(x_linear2)
-            x_linear3 = self.linear3.forward(x_relu2)
-            self.assertEqual(x_linear3[0] >= 0, activation_pattern[2][0])
-
-        test_fun(torch.tensor([-1, 2], dtype=self.dtype))
-        test_fun(torch.tensor([-1, 3], dtype=self.dtype))
-        test_fun(torch.tensor([4, 3], dtype=self.dtype))
-        test_fun(torch.tensor([-10, -4], dtype=self.dtype))
 
     def test_compute_all_relu_activation_patterns(self):
         linear1 = nn.Linear(2, 3)
@@ -184,13 +133,6 @@ class TestReLU(unittest.TestCase):
                          [[False, True, True], [False, False, False]])
 
     def test_relu_activation_binary_to_pattern(self):
-        for model in (self.model1, self.model3):
-            activation_pattern = \
-                relu_to_optimization.relu_activation_binary_to_pattern(
-                    model, np.array([1, 1, 0, 0, 1, 0, 0, 1]))
-            self.assertEqual(
-                activation_pattern,
-                [[True, True, False], [False, True, False, False], [True]])
         for model in (self.model2, self.model4):
             activation_pattern = \
                 relu_to_optimization.relu_activation_binary_to_pattern(
@@ -242,8 +184,7 @@ class TestReLU(unittest.TestCase):
                             torch.all(
                                 torch.le(P @ (x_sample.reshape((-1, 1))), q)))
 
-        for model in (self.model1, self.model2, self.model3, self.model4,
-                      self.model5):
+        for model in (self.model2, self.model4, self.model5):
             test_relu_given_activation_pattern_util(
                 self, model, torch.tensor([-6, 4], dtype=self.dtype))
             test_relu_given_activation_pattern_util(
@@ -255,21 +196,9 @@ class TestReLU(unittest.TestCase):
             test_relu_given_activation_pattern_util(
                 self, model, torch.tensor([-10, -20], dtype=self.dtype))
 
-    def test_relu_free_pattern_constructor1(self):
-        relu_free_pattern = relu_to_optimization.ReLUFreePattern(
-            self.model1, self.dtype)
-        self.assertTrue(relu_free_pattern.last_layer_is_relu)
-        self.assertEqual(len(relu_free_pattern.relu_unit_index), 3)
-        self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
-        self.assertListEqual(relu_free_pattern.relu_unit_index[1],
-                             [3, 4, 5, 6])
-        self.assertListEqual(relu_free_pattern.relu_unit_index[2], [7])
-        self.assertEqual(relu_free_pattern.num_relu_units, 8)
-
     def test_relu_free_pattern_constructor2(self):
         relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             self.model2, self.dtype)
-        self.assertFalse(relu_free_pattern.last_layer_is_relu)
         self.assertEqual(len(relu_free_pattern.relu_unit_index), 2)
         self.assertListEqual(relu_free_pattern.relu_unit_index[0], [0, 1, 2])
         self.assertListEqual(relu_free_pattern.relu_unit_index[1],
@@ -467,9 +396,7 @@ class TestReLU(unittest.TestCase):
                 test_input_x(x_random)
 
         for method in list(mip_utils.PropagateBoundsMethod):
-            test_model(self.model1, method)
             test_model(self.model2, method)
-            test_model(self.model3, method)
             test_model(self.model4, method)
             test_model(self.model5, method)
             test_model(self.model6, method)
@@ -525,14 +452,8 @@ class TestReLU(unittest.TestCase):
                     params_list.append(layer.bias)
         torch.autograd.gradcheck(compute_loss, params_list, atol=1e-6)
 
-    def test_relu_free_pattern_output_constraint_gradient1(self):
-        self.relu_free_pattern_output_constraint_gradient_tester(self.model1)
-
     def test_relu_free_pattern_output_constraint_gradient2(self):
         self.relu_free_pattern_output_constraint_gradient_tester(self.model2)
-
-    def test_relu_free_pattern_output_constraint_gradient3(self):
-        self.relu_free_pattern_output_constraint_gradient_tester(self.model3)
 
     def test_relu_free_pattern_output_constraint_gradient4(self):
         self.relu_free_pattern_output_constraint_gradient_tester(self.model4)
@@ -545,22 +466,6 @@ class TestReLU(unittest.TestCase):
 
     def test_relu_free_pattern_output_constraint_gradient7(self):
         self.relu_free_pattern_output_constraint_gradient_tester(self.model7)
-
-    def test_compute_alpha_index1(self):
-        relu_free_pattern = relu_to_optimization.\
-            ReLUFreePattern(self.model1, self.dtype)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 0, 0)), 0)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 1, 0)), 1)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 2, 0)), 2)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((0, 3, 0)), 3)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 0, 0)), 4)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 1, 0)), 5)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 2, 0)), 6)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((1, 3, 0)), 7)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 0, 0)), 8)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 1, 0)), 9)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 2, 0)), 10)
-        self.assertEqual(relu_free_pattern.compute_alpha_index((2, 3, 0)), 11)
 
     def test_compute_alpha_index2(self):
         relu_free_pattern = relu_to_optimization.\
@@ -590,12 +495,8 @@ class TestReLU(unittest.TestCase):
             # unit active at each layer. Compute the gradient of the ReLU
             # network network for each activation path through
             # ReLUGivenActivationPattern(), and compare the result aginst M.
-            if relu_free_pattern.last_layer_is_relu:
-                activation_pattern = [[False, False, False],
-                                      [False, False, False, False], [True]]
-            else:
-                activation_pattern = [[False, False, False],
-                                      [False, False, False, False]]
+            activation_pattern = [[False, False, False],
+                                  [False, False, False, False]]
             precision = 1E-10
             for i0 in range(3):
                 activation_pattern[0] = [False, False, False]
@@ -606,13 +507,8 @@ class TestReLU(unittest.TestCase):
                     (g, _, _, _) =\
                         relu_to_optimization.ReLUGivenActivationPattern(
                         model, 2, activation_pattern, self.dtype)
-                    if (relu_free_pattern.last_layer_is_relu):
-                        alpha_index = relu_free_pattern.compute_alpha_index(
-                            (i0, i1, 0))
-
-                    else:
-                        alpha_index = relu_free_pattern.compute_alpha_index(
-                            (i0, i1))
+                    alpha_index = relu_free_pattern.compute_alpha_index(
+                        (i0, i1))
                     self.assertTrue(
                         torch.all(
                             torch.abs(M[alpha_index] -
@@ -626,9 +522,6 @@ class TestReLU(unittest.TestCase):
                         1.
                     beta_value[relu_free_pattern.relu_unit_index[1][i1]][0] =\
                         1.
-                    if (relu_free_pattern.last_layer_is_relu):
-                        beta_value[relu_free_pattern.relu_unit_index[2]
-                                   [0]][0] = 1.
                     self.assertTrue(
                         torch.all(B1 @ alpha_value + B2 @ beta_value -
                                   d < precision))
@@ -643,7 +536,6 @@ class TestReLU(unittest.TestCase):
                         torch.all(B1 @ alpha_value + B2 @ beta_value -
                                   d < precision))
 
-        test_model(self.model1)
         test_model(self.model2)
 
     def test_output_gradient_times_vector(self):
@@ -725,8 +617,7 @@ class TestReLU(unittest.TestCase):
                                                  z_expected.detach().numpy())
 
         # Check for different models and inputs.
-        for model in (self.model1, self.model2, self.model3, self.model4,
-                      self.model5):
+        for model in (self.model2, self.model4, self.model5):
             test_model(model, torch.tensor([1.5, 2.], dtype=self.dtype),
                        torch.tensor([0., 0.], dtype=self.dtype),
                        torch.tensor([-1., -2.], dtype=self.dtype),
@@ -772,12 +663,11 @@ class TestReLU(unittest.TestCase):
                              dtype=self.dtype)
             x = torch.from_numpy(np.random.normal(0, 1,
                                                   (2, ))).type(self.dtype)
-            test_model(self.model1, x, y, y_lo, y_up)
             test_model(self.model2, x, y, y_lo, y_up)
 
     def test_set_activation_warmstart(self):
         x = torch.tensor([1, 2], dtype=self.dtype)
-        for model in [self.model1, self.model2, self.model3]:
+        for model in [self.model2]:
             pattern = relu_to_optimization.ComputeReLUActivationPattern(
                 model, x)
             pattern_flat = []
@@ -1198,7 +1088,6 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
         dut = relu_to_optimization.ReLUFreePattern(network, self.dtype)
         # I do not want to test when the last layer is relu. We don't use that
         # in practice.
-        assert (not dut.last_layer_is_relu)
         z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up =\
             dut._compute_layer_bound(x_lo, x_up, method)
         output_lo, output_up = dut._compute_network_output_bounds(

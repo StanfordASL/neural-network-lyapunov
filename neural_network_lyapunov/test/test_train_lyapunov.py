@@ -29,7 +29,7 @@ def setup_lyapunov_relu():
     linear3.weight.data = torch.tensor([[-.4, .5, -.6, 0.3]], dtype=dtype)
     linear3.bias.data = torch.tensor([-0.9], dtype=dtype)
     relu1 = nn.Sequential(linear1, nn.LeakyReLU(0.1), linear2,
-                          nn.LeakyReLU(0.1), linear3, nn.LeakyReLU(0.1))
+                          nn.LeakyReLU(0.1), linear3)
     return relu1
 
 
