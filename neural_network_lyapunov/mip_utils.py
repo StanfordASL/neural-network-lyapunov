@@ -84,6 +84,47 @@ def find_index_set_to_strengthen(w: torch.Tensor, lo: torch.Tensor,
     return indices
 
 
+def strengthen_relu_mip_given_pts(c: float, w: torch.Tensor, b: torch.Tensor,
+                                  lo: torch.Tensor, up: torch.Tensor,
+                                  linear_inputs: list, relu_outputs: list,
+                                  relu_activations: list):
+    """
+    Strengthen the big-M formulation of the leaky ReLU function
+    y = max(c * (w'x+b), w'x+b)
+    with some facets in the ideal formulation.
+    This approach is described in Strong mixed programming formulations for
+    trained neural networks.
+    Given a list of (x̂, ŷ, β̂) (namely the linear layer input, the relu
+    output, and activation), find the most violated constraint in the ideal
+    formulation, and add that constraint if it is violated.
+    """
+    assert (isinstance(linear_inputs, list))
+    assert (isinstance(relu_outputs, list))
+    assert (isinstance(relu_activations, list))
+    assert (len(linear_inputs) == len(relu_outputs))
+    assert (len(linear_inputs) == len(relu_activations))
+    x_coeffs = []
+    binary_coeffs = []
+    constants = []
+    for (xhat, yhat, beta_hat) in zip(linear_inputs, relu_outputs,
+                                      relu_activations):
+        indices = find_index_set_to_strengthen(w, lo, up, xhat, beta_hat)
+        x_coeff, binary_coeff, constant = strengthen_relu_mip_w_indices(
+            c, w, b, lo, up, indices)
+        assert (x_coeff.shape == (w.shape[0], ))
+        if yhat > x_coeff @ xhat + binary_coeff * beta_hat + constant:
+            # This constraint is violated.
+            x_coeffs.append(x_coeff.reshape((1, -1)))
+            binary_coeffs.append(binary_coeff)
+            constants.append(constant)
+    if len(x_coeffs) > 0:
+        return torch.cat(
+            x_coeffs,
+            dim=0), torch.stack(binary_coeffs), torch.stack(constants)
+    else:
+        return None, None, None
+
+
 def _get_linear_input_vertices(lo, up, w, b, relu_input_lo, relu_input_up):
     """
     For the region
