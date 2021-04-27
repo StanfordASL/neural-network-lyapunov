@@ -110,10 +110,8 @@ def relu_activation_binary_to_pattern(relu_network, activation_binary):
     assert (isinstance(activation_binary, np.ndarray))
     assert (np.all(
         np.logical_or(activation_binary == 1, activation_binary == 0)))
-    last_layer_is_relu = isinstance(relu_network[-1], nn.ReLU) or\
-        isinstance(relu_network[-1], nn.LeakyReLU)
-    num_relu_layers = int(len(relu_network) / 2) if last_layer_is_relu else\
-        int((len(relu_network) - 1) / 2)
+    assert (isinstance(relu_network[-1], nn.Linear))
+    num_relu_layers = int((len(relu_network) - 1) / 2)
     total_relu_units = np.sum(
         np.array([
             relu_network[2 * i].out_features for i in range(num_relu_layers)
@@ -234,6 +232,7 @@ class ReLUFreePattern:
         self.num_relu_units = 0
         self.dtype = dtype
         layer_count = 0
+        assert (isinstance(model[-1], nn.Linear))
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 self.relu_unit_index.append(
@@ -241,19 +240,18 @@ class ReLUFreePattern:
                         range(self.num_relu_units,
                               self.num_relu_units + layer.weight.shape[0])))
                 self.num_relu_units += layer.weight.shape[0]
-                self.last_layer_is_relu = False
                 if layer_count == 0:
                     self.x_size = layer.weight.shape[1]
                 layer_count += 1
-            elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
-                self.last_layer_is_relu = True
+            elif (isinstance(layer, nn.ReLU)
+                  or isinstance(layer, nn.LeakyReLU)):
+                pass
             else:
                 raise Exception("Only accept linear or relu layer")
 
-        if not self.last_layer_is_relu:
-            # The last linear layer is not connected to a ReLU layer.
-            self.num_relu_units -= len(self.relu_unit_index[-1])
-            self.relu_unit_index = self.relu_unit_index[:-1]
+        # The last linear layer is not connected to a ReLU layer.
+        self.num_relu_units -= len(self.relu_unit_index[-1])
+        self.relu_unit_index = self.relu_unit_index[:-1]
 
     def _compute_linear_output_bound_by_optimization(
         self, layer_index, linear_output_row_index,
@@ -392,8 +390,8 @@ class ReLUFreePattern:
                     lp_relaxation = False
                 else:
                     raise Exception(
-                        "_compute_layer_bound: unknown bound propagation"
-                        + " method")
+                        "_compute_layer_bound: unknown bound propagation" +
+                        " method")
 
                 for j in range(self.model[2 * layer_count].out_features):
                     neuron_index = self.relu_unit_index[layer_count][j]
@@ -422,48 +420,41 @@ class ReLUFreePattern:
                                        network_input_up,
                                        method,
                                        create_prog_callback=None):
-        if self.last_layer_is_relu:
-            output_lo, output_up = mip_utils.propagate_bounds(
-                self.model[-1],
+        if method == mip_utils.PropagateBoundsMethod.IA:
+            linear_input_lo, linear_input_up = mip_utils.propagate_bounds(
+                self.model[-2],
                 previous_neuron_input_lo[self.relu_unit_index[-1]],
                 previous_neuron_input_up[self.relu_unit_index[-1]])
-            return output_lo, output_up
+            linear_output_lo, linear_output_up = \
+                mip_utils.propagate_bounds(
+                    self.model[-1], linear_input_lo, linear_input_up)
+            return linear_output_lo, linear_output_up
         else:
-            if method == mip_utils.PropagateBoundsMethod.IA:
-                linear_input_lo, linear_input_up = mip_utils.propagate_bounds(
-                    self.model[-2],
-                    previous_neuron_input_lo[self.relu_unit_index[-1]],
-                    previous_neuron_input_up[self.relu_unit_index[-1]])
-                linear_output_lo, linear_output_up = \
-                    mip_utils.propagate_bounds(
-                        self.model[-1], linear_input_lo, linear_input_up)
-                return linear_output_lo, linear_output_up
+            if method == mip_utils.PropagateBoundsMethod.LP:
+                lp_relaxation = True
+            elif method == mip_utils.PropagateBoundsMethod.MIP:
+                lp_relaxation = False
             else:
-                if method == mip_utils.PropagateBoundsMethod.LP:
-                    lp_relaxation = True
-                elif method == mip_utils.PropagateBoundsMethod.MIP:
-                    lp_relaxation = False
-                else:
-                    raise Exception(
-                        "_compute_network_output_bounds: unknown bound "
-                        + "propagate method.")
-                linear_output_lo = torch.empty((self.model[-1].out_features, ),
-                                               dtype=self.dtype)
-                linear_output_up = torch.empty((self.model[-1].out_features, ),
-                                               dtype=self.dtype)
-                for i in range(self.model[-1].out_features):
-                    linear_output_lo[i], linear_output_up[
-                        i], _, _ = \
-                            self._compute_linear_output_bound_by_optimization(
-                                int((len(self.model) - 1) / 2),
-                                i,
-                                previous_neuron_input_lo.detach().numpy(),
-                                previous_neuron_input_up.detach().numpy(),
-                                network_input_lo.detach().numpy(),
-                                network_input_up.detach().numpy(),
-                                create_prog_callback,
-                                lp_relaxation)
-                return linear_output_lo, linear_output_up
+                raise Exception(
+                    "_compute_network_output_bounds: unknown bound " +
+                    "propagate method.")
+            linear_output_lo = torch.empty((self.model[-1].out_features, ),
+                                           dtype=self.dtype)
+            linear_output_up = torch.empty((self.model[-1].out_features, ),
+                                           dtype=self.dtype)
+            for i in range(self.model[-1].out_features):
+                linear_output_lo[i], linear_output_up[
+                    i], _, _ = \
+                        self._compute_linear_output_bound_by_optimization(
+                            int((len(self.model) - 1) / 2),
+                            i,
+                            previous_neuron_input_lo.detach().numpy(),
+                            previous_neuron_input_up.detach().numpy(),
+                            network_input_lo.detach().numpy(),
+                            network_input_up.detach().numpy(),
+                            create_prog_callback,
+                            lp_relaxation)
+            return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,
                                         x_lo, x_up):
@@ -551,29 +542,17 @@ class ReLUFreePattern:
                 eq_constr_count += Aeq_z_curr.shape[0]
 
         mip_constr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-        # Now set the output
-        if self.last_layer_is_relu:
-            # If last layer is relu, then the output is the last chunk of z.
-            mip_constr_return.Aout_slack = torch.zeros(
-                (self.model[-2].out_features, self.num_relu_units),
-                dtype=self.dtype)
-            mip_constr_return.Aout_slack[:, self.relu_unit_index[-1]] =\
-                torch.eye(self.model[-2].out_features, dtype=self.dtype)
+        # The output is the last linear layer applied on the last chunk of z.
+        mip_constr_return.Aout_slack = torch.zeros(
+            (self.model[-1].out_features, self.num_relu_units),
+            dtype=self.dtype)
+        mip_constr_return.Aout_slack[:, self.relu_unit_index[-1]] = \
+            self.model[-1].weight.clone()
+        if self.model[-1].bias is None:
             mip_constr_return.Cout = torch.zeros(
-                (self.model[-2].out_features, ), dtype=self.dtype)
+                (self.model[-1].out_features, ), dtype=self.dtype)
         else:
-            # If last layer is not ReLU, then the output is the last linear
-            # layer applied on the last chunk of z.
-            mip_constr_return.Aout_slack = torch.zeros(
-                (self.model[-1].out_features, self.num_relu_units),
-                dtype=self.dtype)
-            mip_constr_return.Aout_slack[:, self.relu_unit_index[-1]] = \
-                self.model[-1].weight.clone()
-            if self.model[-1].bias is None:
-                mip_constr_return.Cout = torch.zeros(
-                    (self.model[-1].out_features, ), dtype=self.dtype)
-            else:
-                mip_constr_return.Cout = self.model[-1].bias.clone()
+            mip_constr_return.Cout = self.model[-1].bias.clone()
 
         mip_constr_return.Ain_input = Ain_input[:ineq_constr_count]
         mip_constr_return.Ain_slack = Ain_slack[:ineq_constr_count]
@@ -835,20 +814,6 @@ class ReLUFreePattern:
                 raise Exception("output_gradient: currently only " +
                                 "supports linear and ReLU layers.")
 
-        if self.last_layer_is_relu:
-            # Now append 0 to the end of the beta index (the last layer has
-            # only one ReLU unit, so its index is always 0).
-            queue_size = layer_linear_unit_gradients.qsize()
-            last_layer_linear_unit_gradient_count = 0
-            while (last_layer_linear_unit_gradient_count < queue_size):
-                last_layer_linear_unit_gradient =\
-                    layer_linear_unit_gradients.get()
-                last_layer_linear_unit_gradient_count += 1
-                linear_unit_gradient = LinearUnitGradient(
-                    last_layer_linear_unit_gradient.activated_relu_indices +
-                    (0, ), last_layer_linear_unit_gradient.gradient)
-                layer_linear_unit_gradients.put(linear_unit_gradient)
-
         # Now loop through layer_linear_unit_gradients, fill in the matrix M,
         # and add the linear equality constraint B1 * α + B2 * β ≤ d
         M = torch.empty((num_alpha, self.x_size), dtype=self.dtype)
@@ -929,13 +894,10 @@ class ReLUFreePattern:
         zi_up = vector_upper
         ineq_count = 0
         a_out = torch.zeros(self.num_relu_units, dtype=self.dtype)
-        if self.last_layer_is_relu:
-            a_out[self.relu_unit_index[-1]] = 1
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
-                if layer_count == len(self.relu_unit_index) and not\
-                        self.last_layer_is_relu:
+                if layer_count == len(self.relu_unit_index):
                     # If this is the last linear layer, and this linear layer
                     # is the output layer, then we set a_out. Otherwise, we
                     # append inequality constraints.
