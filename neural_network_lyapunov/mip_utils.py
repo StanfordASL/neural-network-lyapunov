@@ -92,8 +92,8 @@ def strengthen_relu_mip_given_pts(c: float, w: torch.Tensor, b: torch.Tensor,
     Strengthen the big-M formulation of the leaky ReLU function
     y = max(c * (w'x+b), w'x+b)
     with some facets in the ideal formulation.
-    This approach is described in Strong mixed programming formulations for
-    trained neural networks.
+    This approach is described in Strong mixed integer programming formulations
+    for trained neural networks.
     Given a list of (x̂, ŷ, β̂) (namely the linear layer input, the relu
     output, and activation), find the most violated constraint in the ideal
     formulation, and add that constraint if it is violated.
