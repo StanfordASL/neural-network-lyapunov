@@ -684,6 +684,227 @@ class TestReLU(unittest.TestCase):
             for i in range(len(z)):
                 self.assertEqual(bool(z[i].start), pattern_flat[i])
 
+    def test_strengthen_mip_at_point1(self):
+        # The un-strengthened LP relaxation has an optimal integral solution,
+        # so calling strengthen function should return None
+        dut = relu_to_optimization.ReLUFreePattern(self.model2, self.dtype)
+        nn_input_lo = torch.tensor([-1, -2], dtype=self.dtype)
+        nn_input_up = torch.tensor([1, 1.5], dtype=self.dtype)
+        mip_cnstr_return, _, _, z_post_relu_lo, z_post_relu_up, _, _ = \
+            dut.output_constraint(
+                nn_input_lo, nn_input_up, mip_utils.PropagateBoundsMethod.IA)
+        # Now set-up an LP to find a solution, that satisfies the linear
+        # relaxation of the MIP.
+        prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x = prog.addVars(self.model2[0].in_features, lb=-gurobipy.GRB.INFINITY)
+        nn_out = prog.addVars(self.model2[-1].out_features,
+                              lb=-gurobipy.GRB.INFINITY)
+        slack, activation = prog.add_mixed_integer_linear_constraints(
+            mip_cnstr_return,
+            x,
+            nn_out,
+            "s",
+            "beta",
+            "",
+            "",
+            "",
+            lp_relaxation=True)
+        # Optimize an arbitrary cost.
+        prog.setObjective(
+            [torch.ones(
+                (self.model2[-1].out_features, ), dtype=self.dtype)], [nn_out],
+            constant=0.,
+            sense=gurobipy.GRB.MAXIMIZE)
+        prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.gurobi_model.optimize()
+        self.assertEqual(prog.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        x_sol = torch.tensor([v.x for v in x], dtype=self.dtype)
+        slack_sol = torch.tensor([v.x for v in slack], dtype=self.dtype)
+        activation_sol = torch.tensor([v.x for v in activation],
+                                      dtype=self.dtype)
+        # Make sure that the activation variable has integral value.
+        # If not, we will abort this test.
+        for v in activation:
+            assert (np.abs(v.x) < 1E-6 or np.abs(v.x - 1) < 1E-6)
+        point = (torch.cat((x_sol, slack_sol)), activation_sol)
+        linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
+        linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
+        Ain_input, Ain_slack, Ain_binary, rhs_in = \
+            dut._strengthen_mip_at_point(
+                point, linear_inputs_lo, linear_inputs_up)
+        self.assertIsNone(Ain_input)
+        self.assertIsNone(Ain_slack)
+        self.assertIsNone(Ain_binary)
+        self.assertIsNone(rhs_in)
+
+    def strengthen_mip_at_point_tester(self, model, nn_input_lo, nn_input_up,
+                                       method: mip_utils.PropagateBoundsMethod,
+                                       cost_coeff_output):
+        """
+        1. First formulate an LP relaxation of the MIP for the network.
+        2. Solve this LP relaxation. Make sure the solution is non-integral.
+        3. Strengthen the big-M formulation at the solution in step 2.
+        4. Solve this strengthened LP again. Make sure the objective is better.
+        5. Sample many feasible solution of the network, make sure they still
+           satisfies the strengthened formulation.
+        """
+        dut = relu_to_optimization.ReLUFreePattern(model, self.dtype)
+        mip_cnstr_return, _, _, z_post_relu_lo, z_post_relu_up, _, _ = \
+            dut.output_constraint(nn_input_lo, nn_input_up, method)
+        # Now set-up an LP to find a solution, that satisfies the linear
+        # relaxation of the MIP.
+        prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x = prog.addVars(model[0].in_features, lb=-gurobipy.GRB.INFINITY)
+        nn_out = prog.addVars(model[-1].out_features,
+                              lb=-gurobipy.GRB.INFINITY)
+        slack, activation = prog.add_mixed_integer_linear_constraints(
+            mip_cnstr_return,
+            x,
+            nn_out,
+            "s",
+            "beta",
+            "",
+            "",
+            "",
+            lp_relaxation=True)
+        # Optimize an arbitrary cost.
+        prog.setObjective([cost_coeff_output], [nn_out],
+                          constant=0.,
+                          sense=gurobipy.GRB.MAXIMIZE)
+        prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.gurobi_model.optimize()
+        self.assertEqual(prog.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        lp_obj = prog.gurobi_model.ObjVal
+        x_sol = torch.tensor([v.x for v in x], dtype=self.dtype)
+        slack_sol = torch.tensor([v.x for v in slack], dtype=self.dtype)
+        activation_sol = torch.tensor([v.x for v in activation],
+                                      dtype=self.dtype)
+        # This LP should have non-integral optimal solutions. Abort this test
+        # if the solution is integral.
+        assert (torch.any(torch.abs(activation_sol) > 1E-6)
+                or torch.any(torch.abs(activation_sol - 1) > 1E-6))
+        pt = (torch.cat((x_sol, slack_sol)), activation_sol)
+        linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
+        linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
+        Ain_input, Ain_slack, Ain_binary, rhs_in = \
+            dut._strengthen_mip_at_point(
+                pt, linear_inputs_lo, linear_inputs_up)
+        self.assertIsNotNone(Ain_input)
+        self.assertIsNotNone(Ain_slack)
+        self.assertIsNotNone(Ain_binary)
+        self.assertIsNotNone(rhs_in)
+        # I "think" the number of strengthend constraints equal to the number
+        # of non-integral activations at the LP solution, this should be true
+        # at least for LP constructed with bounds from interval arithmetics.
+        if (method == mip_utils.PropagateBoundsMethod.IA):
+            self.assertEqual(
+                Ain_input.shape[0],
+                torch.sum(
+                    torch.logical_and(
+                        torch.abs(activation_sol) > 1E-6,
+                        torch.abs(activation_sol - 1) > 1E-6)))
+        prog.addMConstrs([Ain_input, Ain_slack, Ain_binary],
+                         [x, slack, activation],
+                         sense=gurobipy.GRB.LESS_EQUAL,
+                         b=rhs_in)
+        prog.gurobi_model.optimize()
+        self.assertEqual(prog.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        strengthen_lp_obj = prog.gurobi_model.ObjVal
+        self.assertLess(strengthen_lp_obj, lp_obj)
+
+        # Now sample many neural network inputs. Make sure the slack variables
+        # and the binary variables computed from these inputs all satisfy the
+        # newly strengthened constraints.
+        num_samples = 1000
+        nn_input_samples = utils.uniform_sample_in_box(nn_input_lo,
+                                                       nn_input_up,
+                                                       num_samples)
+        slack_samples = []
+        activation_samples = []
+        linear_layer_input = nn_input_samples
+        with torch.no_grad():
+            for layer_count in range(len(dut.relu_unit_index)):
+                linear_layer_output = model[2 *
+                                            layer_count](linear_layer_input)
+                relu_layer_activation = (linear_layer_output >= 0).double()
+                relu_layer_output = model[2 * layer_count +
+                                          1](linear_layer_output)
+                slack_samples.append(relu_layer_output.clone())
+                activation_samples.append(relu_layer_activation.clone())
+                linear_layer_input = relu_layer_output
+        slack_samples = torch.cat(slack_samples, dim=1)
+        activation_samples = torch.cat(activation_samples, dim=1)
+        np.testing.assert_array_less(
+            (Ain_input @ (nn_input_samples.T) + Ain_slack @ (slack_samples.T) +
+             Ain_binary @ (activation_samples.T)).detach().numpy(),
+            rhs_in.reshape((-1, 1)).repeat(
+                (1, num_samples)).detach().numpy() + 1E-6)
+
+    def test_strengthen_mip_at_point2(self):
+        # Test a leaky ReLU model
+        model = utils.setup_relu((2, 4, 5, 3),
+                                 params=None,
+                                 negative_slope=0.1,
+                                 bias=True,
+                                 dtype=self.dtype)
+        model[0].weight.data = torch.tensor(
+            [[1, -1], [0, 2], [2, -1], [-2, -3]], dtype=self.dtype)
+        model[0].bias.data = torch.tensor([0.5, 1., -2., -1.],
+                                          dtype=self.dtype)
+        model[2].weight.data = torch.tensor(
+            [[0.5, 1.5, -0.5, -1], [-1, 2., 3., 0.5], [-1.5, 2.5, 0.5, -2],
+             [0.5, -0.5, -1, 2.], [1.5, 2., 2.5, -1]],
+            dtype=self.dtype)
+        model[2].bias.data = torch.tensor([0.5, -0.5, -1., 2.5, -1],
+                                          dtype=self.dtype)
+        model[4].weight.data = torch.tensor(
+            [[1., -2., -3., 0.5, -1.], [0.5, -1., 0.5, 1.5, -1],
+             [1.5, -0.5, -1., -2., 0.5]],
+            dtype=self.dtype)
+        model[4].bias.data = torch.tensor([-1., -2., 1.5], dtype=self.dtype)
+
+        nn_input_lo = torch.tensor([-1., -3.], dtype=self.dtype)
+        nn_input_up = torch.tensor([2., -1.], dtype=self.dtype)
+
+        cost_coeff_output = torch.ones((model[-1].out_features, ),
+                                       dtype=self.dtype)
+        for method in mip_utils.PropagateBoundsMethod:
+            self.strengthen_mip_at_point_tester(
+                model, nn_input_lo, nn_input_up, method, cost_coeff_output)
+
+    def test_strengthen_mip_at_point3(self):
+        # Test another leaky ReLU model
+        model = utils.setup_relu((2, 4, 5, 3),
+                                 params=None,
+                                 negative_slope=0.1,
+                                 bias=True,
+                                 dtype=self.dtype)
+        model[0].weight.data = torch.tensor(
+            [[1, -3], [1, 2], [2, -4], [-2, -3]], dtype=self.dtype)
+        model[0].bias.data = torch.tensor([1.5, 1., -2., -1.],
+                                          dtype=self.dtype)
+        model[2].weight.data = torch.tensor(
+            [[0.5, 1.5, -0.5, -1], [-1, 2.5, 3., 0.5], [-1.5, 2.5, 0.5, -2],
+             [0.5, -0.5, -1, 2.], [1.5, 2.5, 2.5, -1]],
+            dtype=self.dtype)
+        model[2].bias.data = torch.tensor([1.5, -2.5, -1., 2.5, -1],
+                                          dtype=self.dtype)
+        model[4].weight.data = torch.tensor(
+            [[1., -2., -3., 1.5, -1.], [1.5, -1., 0.5, 1.5, -1],
+             [1.5, -2.5, -1., -2., 0.5]],
+            dtype=self.dtype)
+        model[4].bias.data = torch.tensor([-1.5, -2., 1.5], dtype=self.dtype)
+
+        nn_input_lo = torch.tensor([1., -3.], dtype=self.dtype)
+        nn_input_up = torch.tensor([3., 1.], dtype=self.dtype)
+
+        cost_coeff_output = -torch.ones((model[-1].out_features, ),
+                                        dtype=self.dtype)
+
+        for method in mip_utils.PropagateBoundsMethod:
+            self.strengthen_mip_at_point_tester(
+                model, nn_input_lo, nn_input_up, method, cost_coeff_output)
+
 
 class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
     """

@@ -228,6 +228,8 @@ class ReLUFreePattern:
         # changed outside of ReLUFreePattern class, self.model would also
         # change accordingly.
         self.model = model
+        # self.relu_unit_index[i][j] records the index of the j'th unit on
+        # the i'th ReLU layer.
         self.relu_unit_index = []
         self.num_relu_units = 0
         self.dtype = dtype
@@ -252,6 +254,96 @@ class ReLUFreePattern:
         # The last linear layer is not connected to a ReLU layer.
         self.num_relu_units -= len(self.relu_unit_index[-1])
         self.relu_unit_index = self.relu_unit_index[:-1]
+
+        # A list of pair (linear_inputs, relu_activations). These points will
+        # be used to strengthen the big-M formulation of the ReLU unit (See
+        # Strong mixed-integer programming formulations for trained neural
+        # networks). linear_inputs is a 1D torch tensor containing the inputs
+        # to each linear layer. relu_activations is a 1D torch tensor
+        # containing the activation of each ReLU unit.
+        self.strengthen_pts = []
+
+    def _strengthen_mip_at_point(self, pt: tuple,
+                                 linear_inputs_lo: torch.Tensor,
+                                 linear_inputs_up: torch.Tensor):
+        """
+        Given a point (linear_inputs, relu_activations), strengthen the big-M
+        formulation by adding the constraints with the most violation evaluated
+        at this point. Check Strong mixed-integer programming formulations for
+        trained neural networks.
+        """
+        linear_inputs = pt[0]
+        relu_activations = pt[1]
+
+        Ain_input = []
+        Ain_slack = []
+        Ain_binary = []
+        rhs_in = []
+
+        # Go through each layer and each unit, strengthen the big-M
+        # formulation for that unit.
+        linear_input_count = 0
+        for relu_layer_count in range(len(self.relu_unit_index)):
+            linear_layer = self.model[2 * relu_layer_count]
+            relu_layer = self.model[2 * relu_layer_count + 1]
+            negative_slope = relu_layer.negative_slope if isinstance(
+                relu_layer, torch.nn.LeakyReLU) else 0.
+            assert (len(self.relu_unit_index[relu_layer_count]) ==
+                    linear_layer.out_features)
+            linear_input_indices = np.arange(
+                linear_input_count,
+                linear_input_count + linear_layer.in_features).tolist()
+            linear_input_count += linear_layer.in_features
+            linear_input = linear_inputs[linear_input_indices]
+            linear_input_lo = linear_inputs_lo[linear_input_indices]
+            linear_input_up = linear_inputs_up[linear_input_indices]
+            for j in range(len(self.relu_unit_index[relu_layer_count])):
+                beta_hat = relu_activations[
+                    self.relu_unit_index[relu_layer_count][j]]
+                w = linear_layer.weight.data[j]
+                b = linear_layer.bias.data[
+                    j] if linear_layer.bias is not None else torch.tensor(
+                        0, dtype=self.dtype)
+                index_set = mip_utils.find_index_set_to_strengthen(
+                    w, linear_input_lo, linear_input_up, linear_input,
+                    beta_hat)
+                x_coeff, binary_coeff, constant = \
+                    mip_utils.strengthen_relu_mip_w_indices(
+                        negative_slope, w, b, linear_input_lo,
+                        linear_input_up, index_set)
+                assert (x_coeff.shape == (len(linear_input_indices), ))
+                relu_output = linear_inputs[linear_input_count + j]
+                if relu_output > x_coeff @ linear_input +\
+                        binary_coeff * beta_hat + constant + 1E-12:
+                    # This additional constraint is violated, append it to
+                    # existing constraints, add the constraint relu_output -
+                    # x_coeff * linear_input - binary_coeff * relu_activation
+                    # <= constant
+                    slack_coeff = torch.zeros((self.num_relu_units, ),
+                                              dtype=self.dtype)
+                    slack_coeff[self.relu_unit_index[relu_layer_count][j]] = 1.
+                    if relu_layer_count == 0:
+                        # This is the input layer.
+                        Ain_input.append(-x_coeff.reshape((1, -1)))
+                    else:
+                        # This is not the input layer.
+                        Ain_input.append(
+                            torch.zeros((1, self.model[0].in_features),
+                                        dtype=self.dtype))
+                        slack_coeff[self.relu_unit_index[relu_layer_count -
+                                                         1]] = -x_coeff
+                    Ain_slack.append(slack_coeff.reshape((1, -1)))
+                    binary_all_coeff = torch.zeros((1, self.num_relu_units),
+                                                   dtype=self.dtype)
+                    binary_all_coeff[0, self.relu_unit_index[relu_layer_count]
+                                     [j]] = -binary_coeff
+                    Ain_binary.append(binary_all_coeff)
+                    rhs_in.append(constant)
+        if len(Ain_input) == 0:
+            return None, None, None, None
+        return torch.cat(Ain_input, dim=0), torch.cat(
+            Ain_slack, dim=0), torch.cat(Ain_binary, dim=0),\
+            torch.stack(rhs_in)
 
     def _compute_linear_output_bound_by_optimization(
         self, layer_index, linear_output_row_index,
