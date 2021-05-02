@@ -255,17 +255,9 @@ class ReLUFreePattern:
         self.num_relu_units -= len(self.relu_unit_index[-1])
         self.relu_unit_index = self.relu_unit_index[:-1]
 
-        # A list of pair (linear_inputs, relu_activations). These points will
-        # be used to strengthen the big-M formulation of the ReLU unit (See
-        # Strong mixed-integer programming formulations for trained neural
-        # networks). linear_inputs is a 1D torch tensor containing the inputs
-        # to each linear layer. relu_activations is a 1D torch tensor
-        # containing the activation of each ReLU unit.
-        self.strengthen_pts = []
-
-    def _strengthen_mip_at_point(self, pt: tuple,
-                                 linear_inputs_lo: torch.Tensor,
-                                 linear_inputs_up: torch.Tensor):
+    def strengthen_mip_at_point(self, pt: tuple,
+                                linear_inputs_lo: torch.Tensor,
+                                linear_inputs_up: torch.Tensor):
         """
         Given a point (linear_inputs, relu_activations), strengthen the big-M
         formulation by adding the constraints with the most violation evaluated

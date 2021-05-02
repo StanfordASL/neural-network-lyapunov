@@ -594,10 +594,9 @@ class TestFeedbackSystem(unittest.TestCase):
                             lb=-gurobipy.GRB.INFINITY,
                             vtype=gurobipy.GRB.CONTINUOUS,
                             name="u")
-        controller_slack, controller_binary, u_lower_bound, u_upper_bound =\
-            dut._add_controller_mip_constraint(mip, x_var, u_var, "slack",
-                                               "binary", lp_relaxation=False)
-        for v in controller_binary:
+        controller_mip_cnstr_return = dut._add_controller_mip_constraint(
+            mip, x_var, u_var, "slack", "binary", lp_relaxation=False)
+        for v in controller_mip_cnstr_return.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Now add constraint on x_var = x_val
         mip.addMConstrs([torch.eye(dut.x_dim, dtype=torch.float64)], [x_var],
@@ -620,18 +619,19 @@ class TestFeedbackSystem(unittest.TestCase):
                               lb=-gurobipy.GRB.INFINITY,
                               vtype=gurobipy.GRB.CONTINUOUS,
                               name="u")
-        controller_slack_lp, controller_binary_lp, u_lower_bound_lp,\
-            u_upper_bound_lp = dut._add_controller_mip_constraint(
-                lp, x_var_lp, u_var_lp, "slack", "binary", lp_relaxation=True)
+        controller_mip_cnstr_return_lp = dut._add_controller_mip_constraint(
+            lp, x_var_lp, u_var_lp, "slack", "binary", lp_relaxation=True)
         self.assertEqual(len(lp.zeta), 0)
-        for v in controller_binary_lp:
+        for v in controller_mip_cnstr_return_lp.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
             self.assertEqual(v.lb, 0.)
             self.assertEqual(v.ub, 1.)
-        np.testing.assert_allclose(u_lower_bound.detach().numpy(),
-                                   u_lower_bound_lp.detach().numpy())
-        np.testing.assert_allclose(u_upper_bound.detach().numpy(),
-                                   u_upper_bound_lp.detach().numpy())
+        np.testing.assert_allclose(
+            controller_mip_cnstr_return.u_lower_bound.detach().numpy(),
+            controller_mip_cnstr_return_lp.u_lower_bound.detach().numpy())
+        np.testing.assert_allclose(
+            controller_mip_cnstr_return.u_upper_bound.detach().numpy(),
+            controller_mip_cnstr_return_lp.u_upper_bound.detach().numpy())
 
     def test_add_controller_mip_constraint(self):
         """

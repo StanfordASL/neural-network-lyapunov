@@ -730,7 +730,7 @@ class TestReLU(unittest.TestCase):
         linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
         linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
         Ain_input, Ain_slack, Ain_binary, rhs_in = \
-            dut._strengthen_mip_at_point(
+            dut.strengthen_mip_at_point(
                 point, linear_inputs_lo, linear_inputs_up)
         self.assertIsNone(Ain_input)
         self.assertIsNone(Ain_slack)
@@ -787,7 +787,7 @@ class TestReLU(unittest.TestCase):
         linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
         linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
         Ain_input, Ain_slack, Ain_binary, rhs_in = \
-            dut._strengthen_mip_at_point(
+            dut.strengthen_mip_at_point(
                 pt, linear_inputs_lo, linear_inputs_up)
         self.assertIsNotNone(Ain_input)
         self.assertIsNotNone(Ain_slack)
