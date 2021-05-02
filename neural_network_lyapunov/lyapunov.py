@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 from enum import Enum
+import collections
 
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
@@ -897,7 +898,19 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                               gurobipy.GRB.MAXIMIZE)
         else:
             raise Exception("unknown eps_type")
-        return (milp, x, beta, gamma, x_next, s, z, z_next, beta_next)
+        LyapDerivMilpReturn = collections.namedtuple("LyapDerivMilpReturn", [
+            "milp", "x", "beta", "gamma", "x_next", "s", "z", "z_next",
+            "beta_next"
+        ])
+        return LyapDerivMilpReturn(milp=milp,
+                                   x=x,
+                                   beta=beta,
+                                   gamma=gamma,
+                                   x_next=x_next,
+                                   s=s,
+                                   z=z,
+                                   z_next=z_next,
+                                   beta_next=beta_next)
 
     def lyapunov_derivative_loss_at_samples(self,
                                             V_lambda,

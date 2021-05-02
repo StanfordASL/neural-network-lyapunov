@@ -172,7 +172,7 @@ def create_mip(lyap, x_equilibrium, V_lambda, V_epsilon, R_options,
                                                V_epsilon,
                                                eps_type,
                                                R=R_options.R(),
-                                               fixed_R=R_options.fixed_R)[0]
+                                               fixed_R=R_options.fixed_R).milp
     return mip
 
 

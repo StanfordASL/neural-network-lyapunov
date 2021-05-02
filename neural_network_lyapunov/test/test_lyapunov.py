@@ -1151,11 +1151,19 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         # Test if the MILP solution satisfies x_next = f(x) and the objective
         # value is v_next - v + dv_epsilon * v.
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, relu)
-        (milp, x, beta, gamma, x_next, s, z, z_next, beta_next) =\
-            dut.lyapunov_derivative_as_milp(
-                x_equilibrium, V_lambda, dV_epsilon, eps_type, R=R,
-                fixed_R=fixed_R, xbar_indices=xbar_indices,
-                xhat_indices=xhat_indices)
+        milp_return = dut.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            dV_epsilon,
+            eps_type,
+            R=R,
+            fixed_R=fixed_R,
+            xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices)
+        milp = milp_return.milp
+        x = milp_return.x
+        gamma = milp_return.gamma
+        x_next = milp_return.x_next
         # First solve this MILP. The solution has to satisfy that
         # x_next = Ai * x + g_i where i is the active mode inferred from
         # gamma.
@@ -1567,12 +1575,17 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         # If we set lyapunov_lower to be v_upper + 1, the problem should be
         # infeasible.
         dV_epsilon = 0.01
-        (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_derivative_as_milp(
-                x_equilibrium, V_lambda, dV_epsilon,
-                lyapunov.ConvergenceEps.ExpLower, R=R, fixed_R=True,
-                lyapunov_lower=v_upper + 1, lyapunov_upper=v_upper + 2,
-                xbar_indices=xbar_indices, xhat_indices=xhat_indices)
+        milp = dut.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            dV_epsilon,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            fixed_R=True,
+            lyapunov_lower=v_upper + 1,
+            lyapunov_upper=v_upper + 2,
+            xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices).milp
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
         milp.gurobi_model.optimize()
@@ -1580,12 +1593,17 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                          gurobipy.GRB.Status.INFEASIBLE)
         # If we set lyapunov_upper to be v_lower - 1, the problem should be
         # infeasible.
-        (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_derivative_as_milp(
-                x_equilibrium, V_lambda, dV_epsilon,
-                lyapunov.ConvergenceEps.ExpLower, R=R, fixed_R=True,
-                lyapunov_lower=v_lower - 2, lyapunov_upper=v_lower - 1,
-                xbar_indices=xbar_indices, xhat_indices=xhat_indices)
+        milp = dut.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            dV_epsilon,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            fixed_R=True,
+            lyapunov_lower=v_lower - 2,
+            lyapunov_upper=v_lower - 1,
+            xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices).milp
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, 0)
         milp.gurobi_model.optimize()
@@ -1598,12 +1616,17 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         # smaller than milp optimal.
         lyapunov_lower = 0.9 * v_lower + 0.1 * v_upper
         lyapunov_upper = 0.1 * v_lower + 0.9 * v_upper
-        (milp, _, _, _, _, _, _, _, _) =\
-            dut.lyapunov_derivative_as_milp(
-                x_equilibrium, V_lambda, dV_epsilon,
-                lyapunov.ConvergenceEps.ExpLower, R=R, fixed_R=True,
-                lyapunov_lower=lyapunov_lower, lyapunov_upper=lyapunov_upper,
-                xbar_indices=xbar_indices, xhat_indices=xhat_indices)
+        milp = dut.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            dV_epsilon,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            fixed_R=True,
+            lyapunov_lower=lyapunov_lower,
+            lyapunov_upper=lyapunov_upper,
+            xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices).milp
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.optimize()
         self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
@@ -1703,7 +1726,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                                                       eps_type,
                                                       R=R_torch,
                                                       fixed_R=fixed_R)
-        milp = milp_return[0]
+        milp = milp_return.milp
 
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.optimize()
@@ -2058,19 +2081,21 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             x_sol2 = torch.tensor([var.X for var in x], dtype=self.dtype)
             np.testing.assert_allclose(x_sol1.detach().numpy(),
                                        x_sol2.detach().numpy())
-            (milp, x, _, _, _, _, _, _, _) = dut.lyapunov_derivative_as_milp(
+            milp_return = dut.lyapunov_derivative_as_milp(
                 x_equilibrium,
                 V_lambda,
                 V_epsilon,
                 lyapunov.ConvergenceEps.ExpLower,
                 R=R,
                 fixed_R=True)
+            milp = milp_return.milp
+            x = milp_return.x
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
             self.assertTrue(
                 milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
             x_sol3 = torch.tensor([var.X for var in x], dtype=self.dtype)
-            (milp, x, _, _, _, _, _, _, _) = dut.lyapunov_derivative_as_milp(
+            milp_return = dut.lyapunov_derivative_as_milp(
                 x_equilibrium,
                 V_lambda,
                 V_epsilon,
@@ -2078,6 +2103,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 R=R,
                 fixed_R=True,
                 x_warmstart=x_sol3)
+            milp = milp_return.milp
+            x = milp_return.x
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize(cb)
             self.assertTrue(

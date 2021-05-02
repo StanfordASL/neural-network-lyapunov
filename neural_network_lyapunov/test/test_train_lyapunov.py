@@ -149,7 +149,7 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                 self.dut.lyapunov_derivative_eps_type,
                 R=self.R_options.R(),
                 fixed_R=True)
-            mip = derivative_return[0]
+            mip = derivative_return.milp
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
@@ -160,7 +160,7 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                 if i < mip.gurobi_model.SolCount and\
                         mip.gurobi_model.PoolObjVal > 0:
                     np.testing.assert_allclose(
-                        np.array([v.xn for v in derivative_return[1]]),
+                        np.array([v.xn for v in derivative_return.x]),
                         derivative_mip_adversarial[i].detach().numpy())
 
 
@@ -281,7 +281,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
                 lyapunov.ConvergenceEps.ExpLower, R=R_options.R(),
                 fixed_R=R_options.fixed_R, lyapunov_lower=None,
                 lyapunov_upper=None)
-        lyapunov_derivative_mip = lyapunov_derivative_mip_return[0]
+        lyapunov_derivative_mip = lyapunov_derivative_mip_return.milp
         lyapunov_derivative_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
         lyapunov_derivative_mip.gurobi_model.setParam(

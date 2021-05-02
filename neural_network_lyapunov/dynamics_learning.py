@@ -141,8 +141,8 @@ class DynamicsLearning:
             lyapunov.ConvergenceEps.ExpLower,
             R=self.opt.R,
             fixed_R=True)
-        lyap_der_mip = lyap_der_mip_[0]
-        x_var = lyap_der_mip_[1]
+        lyap_der_mip = lyap_der_mip_.milp
+        x_var = lyap_der_mip_.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -170,8 +170,8 @@ class DynamicsLearning:
             lyapunov.ConvergenceEps.ExpUpper,
             R=self.opt.R,
             fixed_R=True)
-        lyap_der_mip = lyap_der_mip_[0]
-        x_var = lyap_der_mip_[1]
+        lyap_der_mip = lyap_der_mip_.milp
+        x_var = lyap_der_mip_.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -266,8 +266,8 @@ class DynamicsLearning:
                 lyapunov.ConvergenceEps.ExpLower,
                 R=self.opt.R,
                 fixed_R=True)
-        lyap_der_mip = lyap_der_mip_return[0]
-        x_var = lyap_der_mip_return[1]
+        lyap_der_mip = lyap_der_mip_return.milp
+        x_var = lyap_der_mip_return.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -306,8 +306,8 @@ class DynamicsLearning:
                 lyapunov.ConvergenceEps.ExpUpper,
                 R=self.opt.R,
                 fixed_R=True)
-        lyap_der_mip = lyap_der_mip_return[0]
-        x_var = lyap_der_mip_return[1]
+        lyap_der_mip = lyap_der_mip_return.milp
+        x_var = lyap_der_mip_return.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
