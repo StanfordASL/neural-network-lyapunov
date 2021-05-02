@@ -99,7 +99,7 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
         u_var = mip.addVars(2, lb=-gurobipy.GRB.INFINITY, name="u")
 
         controller_slack, controller_binary, u_lower_bound, u_upper_bound, \
-            controller_pre_relu_lo, controller_pre_relu_up =\
+            controller_pre_relu_lo, controller_pre_relu_up, _, _ =\
             self.dut._add_network_controller_mip_constraint(
                 mip, x_var, u_var, "controlelr_slack", "controller_binary",
                 lp_relaxation=False)
@@ -132,8 +132,7 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
         mip = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         x_var = mip.addVars(3, lb=-gurobipy.GRB.INFINITY, name="x")
         u_var = mip.addVars(2, lb=-gurobipy.GRB.INFINITY, name="u")
-        controller_slack, controller_binary, u_lower_bound, u_upper_bound,\
-            controller_pre_relu_lo, controller_pre_relu_up =\
+        network_controller_mip_cnstr_return = \
             self.dut._add_network_controller_mip_constraint(
                 mip,
                 x_var,
@@ -148,13 +147,17 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
                              0.,
                              sense=gurobipy.GRB.MAXIMIZE)
             mip.gurobi_model.optimize()
-            self.assertLessEqual(mip.gurobi_model.ObjVal, u_upper_bound[i])
+            self.assertLessEqual(
+                mip.gurobi_model.ObjVal,
+                network_controller_mip_cnstr_return.u_upper_bound[i])
             mip.setObjective([torch.tensor([1.], dtype=self.dtype)],
                              [[u_var[i]]],
                              0.,
                              sense=gurobipy.GRB.MINIMIZE)
             mip.gurobi_model.optimize()
-            self.assertGreaterEqual(mip.gurobi_model.ObjVal, u_lower_bound[i])
+            self.assertGreaterEqual(
+                mip.gurobi_model.ObjVal,
+                network_controller_mip_cnstr_return.u_lower_bound[i])
 
 
 if __name__ == "__main__":

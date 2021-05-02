@@ -1453,6 +1453,31 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 xbar_indices=xbar_indices,
                 xhat_indices=xhat_indices)
 
+    def test_lyapunov_derivative_as_milp5(self):
+        # Test with lp_relaxation=True, make sure the program contains no
+        # binary variables.
+        torch.manual_seed(0)
+        lyap_relu = utils.setup_relu((3, 5, 1),
+                                     params=None,
+                                     negative_slope=0.1,
+                                     bias=True,
+                                     dtype=self.dtype)
+        system = setup_relu_dyn_3d(self.dtype)
+        V_lambda = 0.5
+        dV_epsilon = 0.3
+        R = torch.tensor([[0.5, 0.1, -0.7], [-0.2, 0.4, 0.3], [0.9, 1.2, 1.2]],
+                         dtype=self.dtype)
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(system, lyap_relu)
+        lp, x, beta, gamma, x_next, s, z, z_next, beta_next = \
+            dut.lyapunov_derivative_as_milp(
+                system.x_equilibrium, V_lambda, dV_epsilon,
+                lyapunov.ConvergenceEps.ExpLower, R=R, fixed_R=True,
+                lp_relaxation=True)
+        for v in beta + gamma + beta_next:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+        self.assertEqual(lp.gurobi_model.numbinvars, 0)
+        self.assertEqual(lp.gurobi_model.numintvars, 0)
+
     def lyapunov_derivative_as_milp_bounded_tester(self, system, lyapunov_relu,
                                                    x_equilibrium, V_lambda, R,
                                                    xbar_indices, xhat_indices):
