@@ -287,7 +287,7 @@ class TrainLyapunovReLU:
                 x_warmstart=self.lyapunov_derivative_last_x_adv,
                 xbar_indices=self.xbar_indices,
                 xhat_indices=self.xhat_indices)
-        lyapunov_derivative_mip = lyapunov_derivative_as_milp_return[0]
+        lyapunov_derivative_mip = lyapunov_derivative_as_milp_return.milp
         for param, val in self.lyapunov_derivative_mip_params.items():
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)
         if (self.lyapunov_derivative_mip_pool_solutions > 1):
@@ -306,15 +306,15 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip.gurobi_model.ObjVal
 
         relu_zeta_val = np.array(
-            [np.round(v.x) for v in lyapunov_derivative_as_milp_return[2]])
+            [np.round(v.x) for v in lyapunov_derivative_as_milp_return.beta])
         if self.output_flag:
             print("lyapunov derivative MIP Relu activation: "
                   f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
             print("adversarial x " +
-                  f"{[v.x for v in lyapunov_derivative_as_milp_return[1]]}")
+                  f"{[v.x for v in lyapunov_derivative_as_milp_return.x]}")
         if self.lyapunov_derivative_mip_warmstart:
             self.lyapunov_derivative_last_x_adv = torch.tensor(
-                [v.x for v in lyapunov_derivative_as_milp_return[1]],
+                [v.x for v in lyapunov_derivative_as_milp_return.x],
                 dtype=dtype)
         # Return the solution of the MILP as adversarial states.
         derivative_mip_adversarial = []
@@ -330,14 +330,15 @@ class TrainLyapunovReLU:
                     self.add_adversarial_state_only
                     and lyapunov_derivative_mip.gurobi_model.PoolObjVal > 0):
                 derivative_mip_adversarial.append(
-                    [v.xn for v in lyapunov_derivative_as_milp_return[1]])
+                    [v.xn for v in lyapunov_derivative_as_milp_return.x])
 
                 if (isinstance(
                         self.lyapunov_hybrid_system.system,
                         hybrid_linear_system.AutonomousHybridLinearSystem)):
                     derivative_mip_adversarial_mode = np.argwhere(
                         np.array([
-                            v.xn for v in lyapunov_derivative_as_milp_return[3]
+                            v.xn
+                            for v in lyapunov_derivative_as_milp_return.gamma
                         ]) > 0.99)[0][0]
                     derivative_mip_adversarial_next.append(
                         self.lyapunov_hybrid_system.system.step_forward(
@@ -1046,8 +1047,7 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
         states_distance_squared = torch.sum(
             (adversarial_states[1:] - adversarial_states[:-1])**2, dim=1)
         clustered_adversarial_states = torch.cat(
-            (adversarial_states[0].reshape((1, -1)),
-             adversarial_states[1:][states_distance_squared >
-                                    cluster_radius**2]),
+            (adversarial_states[0].reshape((1, -1)), adversarial_states[1:][
+                states_distance_squared > cluster_radius**2]),
             dim=0)
         return clustered_adversarial_states

@@ -74,7 +74,7 @@ def compute_milp_cost_given_relu(system, x_equilibrium, relu_layer_width,
             R=None,
             fixed_R=True,
             lyapunov_lower=None,
-            lyapunov_upper=None)[0]
+            lyapunov_upper=None).milp
     milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     milp.gurobi_model.optimize()
     objective = milp.compute_objective_from_mip_data_and_solution(

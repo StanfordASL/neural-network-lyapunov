@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 import queue
+import collections
 
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -646,7 +647,9 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
-        return (milp, x, relu_beta, gamma)
+        LyapDerivMilpReturn = collections.namedtuple(
+            "LyapDerivMilpReturn", ["milp", "x", "beta", "gamma"])
+        return LyapDerivMilpReturn(milp=milp, x=x, beta=relu_beta, gamma=gamma)
 
     def lyapunov_derivative_as_milp(self,
                                     x_equilibrium,
@@ -815,7 +818,9 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             epsilon * b_relu_out - epsilon * relu_x_equilibrium.squeeze(),
             gurobipy.GRB.MAXIMIZE)
 
-        return (milp, x, relu_beta, gamma)
+        LyapDerivMilpReturn = collections.namedtuple(
+            "LyapDerivMilpReturn", ["milp", "x", "beta", "gamma"])
+        return LyapDerivMilpReturn(milp=milp, x=x, beta=relu_beta, gamma=gamma)
 
     def lyapunov_derivative_loss_at_samples(self,
                                             V_lambda,
