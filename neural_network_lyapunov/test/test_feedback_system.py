@@ -175,6 +175,49 @@ class TestFeedbackSystem(unittest.TestCase):
             u_equilibrium, torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype),
             np.array([0., 0.]), np.array([10., 20.]))
 
+    def test_strengthen_controller_mip_constraint(self):
+        # This is a behavior test. We only make sure the strengthened
+        # constraint gives tighter constraint, but we don't check if the
+        # coefficients/bounds of the strengthened constraint is correct.
+        x_equilibrium = torch.tensor([0.5, 0.2, 0.1], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.2, -0.3], dtype=self.dtype)
+        forward_system = self.construct_relu_forward_system_given_equilibrium(
+            x_equilibrium, u_equilibrium)
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x_var = milp.addVars(forward_system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        u_var = milp.addVars(forward_system.u_dim, lb=-gurobipy.GRB.INFINITY)
+        dut = feedback_system.FeedbackSystem(
+            forward_system, self.controller_network1, x_equilibrium,
+            u_equilibrium,
+            forward_system.u_lo.detach().numpy(),
+            forward_system.u_up.detach().numpy())
+        mip_cnstr_return = dut._add_controller_mip_constraint(
+            milp, x_var, u_var, "s", "b", lp_relaxation=True)
+        # Now solve this MIP with an arbitrary cost.
+        milp.setObjective(
+            [torch.ones((forward_system.u_dim, ), dtype=self.dtype)], [u_var],
+            constant=0.,
+            sense=gurobipy.GRB.MAXIMIZE)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp.gurobi_model.optimize()
+        self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        obj_val = milp.gurobi_model.ObjVal
+        # This solution should be non-integral.
+        binary_sol = np.array([v.x for v in mip_cnstr_return.binary])
+        assert (np.logical_or(np.any(np.abs(binary_sol) > 1E-6),
+                              np.any(np.abs(binary_sol - 1) > 1E-6)))
+        num_ineq = len(milp.rhs_in)
+        dut.strengthen_controller_mip_constraint(milp, x_var,
+                                                 mip_cnstr_return.slack,
+                                                 mip_cnstr_return.binary,
+                                                 mip_cnstr_return.post_relu_lo,
+                                                 mip_cnstr_return.post_relu_up)
+        # Check if new inequality constraints are added.
+        self.assertGreater(len(milp.rhs_in), num_ineq)
+        milp.gurobi_model.optimize()
+        # Make sure we get smaller objective with the strengthened constraint.
+        self.assertGreater(obj_val, milp.gurobi_model.ObjVal)
+
     def construct_relu_forward_system_given_equilibrium(
             self, x_equilibrium, u_equilibrium):
         forward_network_params = torch.tensor([

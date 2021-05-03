@@ -298,6 +298,49 @@ class FeedbackSystem:
                                                  post_relu_lo=None,
                                                  post_relu_up=None)
 
+    def strengthen_controller_mip_constraint(
+            self, mip: gurobi_torch_mip.GurobiTorchMIP, x_var: list,
+            controller_slack: list, controller_binary: list,
+            controller_post_relu_lo, controller_post_relu_up):
+        """
+        Given the variables x_var, controller_slack, controller_binary (and the
+        value of these variables stored inside x_var, controller_slack,
+        controller_binary), we strengthen the controller mip constraint by
+        adding the most violated ideal constraint at the value stored inside
+        x_var, controller_slack and controller_binary.
+        Note that after calling this function, @param mip might get changed, it
+        will contain the strengthened constraint if that constraint is violated
+        at the values in x_var, controller_slack, controller_binary.
+        """
+        assert (isinstance(self.controller_network, torch.nn.Sequential))
+        assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(x_var, list))
+        assert (isinstance(controller_slack, list))
+        assert (isinstance(controller_binary, list))
+        assert (isinstance(controller_post_relu_lo, torch.Tensor))
+        assert (isinstance(controller_post_relu_up, torch.Tensor))
+        linear_inputs = torch.tensor([v.x for v in x_var] +
+                                     [v.x for v in controller_slack],
+                                     dtype=mip.dtype)
+        relu_activations = torch.tensor([v.x for v in controller_binary],
+                                        dtype=mip.dtype)
+        linear_inputs_lo = torch.cat(
+            (torch.from_numpy(self.forward_system.x_lo_all),
+             controller_post_relu_lo))
+        linear_inputs_up = torch.cat(
+            (torch.from_numpy(self.forward_system.x_up_all),
+             controller_post_relu_up))
+        Ain_x, Ain_slack, Ain_binary, rhs_in = \
+            self.controller_relu_free_pattern.strengthen_mip_at_point(
+                (linear_inputs, relu_activations), linear_inputs_lo,
+                linear_inputs_up)
+        if Ain_x is not None:
+            mip.addMConstrs([Ain_x, Ain_slack, Ain_binary],
+                            [x_var, controller_slack, controller_binary],
+                            b=rhs_in,
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            name="controller relu")
+
     def add_dynamics_mip_constraint(self, mip, x_var, x_next_var, u_var_name,
                                     forward_slack_var_name,
                                     forward_binary_var_name,
