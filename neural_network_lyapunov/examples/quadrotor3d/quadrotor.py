@@ -311,11 +311,10 @@ class QuadrotorWithPixhawkReLUSystem:
             self.u_lo, additional_u_lo)
         u_up = self.u_up if additional_u_up is None else torch.min(
             self.u_up, additional_u_up)
-        mip_cnstr_result, _, _, _, _, _, _ = self.dynamics_relu_free_pattern.\
-            output_constraint(
-                    torch.cat((self.x_lo[3:6], u_lo)),
-                    torch.cat((self.x_up[3:6], u_up)),
-                    mip_utils.PropagateBoundsMethod.IA)
+        mip_cnstr_result = self.dynamics_relu_free_pattern.output_constraint(
+            torch.cat((self.x_lo[3:6], u_lo)),
+            torch.cat((self.x_up[3:6], u_up)),
+            mip_utils.PropagateBoundsMethod.IA)
         # First add mip_cnstr_result, but don't impose the constraint on the
         # output of the network (we will impose the constraint separately)
         vel_curr = x_var[6:9]

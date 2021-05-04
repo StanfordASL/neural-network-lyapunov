@@ -102,9 +102,8 @@ def verify_control_lyapunov(model, x_lo, x_up):
         + Ain4.to_dense().detach().numpy() * alpha\
         + Ain5.to_dense().detach().numpy() * beta\
         <= rhs.squeeze()
-    (mip_constr_return,  _, _, _, _, _, _) =\
-        verifier.relu_free_pattern.output_constraint(
-            x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
+    mip_constr_return = verifier.relu_free_pattern.output_constraint(
+        x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
     z = cp.Variable(mip_constr_return.Ain_slack.shape[1])
     constraints = [
         constraint1,

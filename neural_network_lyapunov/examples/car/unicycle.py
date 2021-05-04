@@ -223,10 +223,9 @@ class UnicycleReLUModel:
             network_input_lo = torch.stack((self.x_lo[2], u_lo[0]))
             network_input_up = torch.stack((self.x_up[2], u_up[0]))
             network_input_size = 2
-        mip_cnstr_result, _, _, _, _, _, _ = \
-            self.dynamics_relu_free_pattern.output_constraint(
-                network_input_lo, network_input_up,
-                method=mip_utils.PropagateBoundsMethod.LP)
+        mip_cnstr_result = self.dynamics_relu_free_pattern.output_constraint(
+            network_input_lo, network_input_up,
+            method=mip_utils.PropagateBoundsMethod.LP)
         # First add mip_cnstr_result. But don't impose the constraint on the
         # output of the network (we will impose the output constraint
         # afterwards inside this function)
@@ -398,11 +397,10 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
                 (self.x_lo[2], torch.tensor(0, dtype=self.dtype)))
             network_input_zero_vel_up = torch.stack(
                 (self.x_up[2], torch.tensor(0, dtype=self.dtype)))
-        mip_cnstr_result, _, _, _, _, _, _ = \
-            self.dynamics_relu_free_pattern.output_constraint(
-                network_input_lo, network_input_up,
-                method=mip_utils.PropagateBoundsMethod.LP)
-        mip_cnstr_result_zero_vel, _, _, _, _, _, _ = \
+        mip_cnstr_result = self.dynamics_relu_free_pattern.output_constraint(
+            network_input_lo, network_input_up,
+            method=mip_utils.PropagateBoundsMethod.LP)
+        mip_cnstr_result_zero_vel = \
             self.dynamics_relu_free_pattern.output_constraint(
                 network_input_zero_vel_lo, network_input_zero_vel_up,
                 method=mip_utils.PropagateBoundsMethod.LP)

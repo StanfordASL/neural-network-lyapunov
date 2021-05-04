@@ -54,7 +54,7 @@ class ModelBounds:
         @param x_up: upper bound for the input to the neural net (x0)
         @return Q1, Q2, q1, q2, k, G0, G1, G2, h, A0, A1, A2, b
         """
-        relu_output_return, _, _, _, _, _, _ = self.relu_opt.output_constraint(
+        relu_output_return = self.relu_opt.output_constraint(
             x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
         (Ain1, Ain2, Ain3, rhs_in, Aeq1, Aeq2, Aeq3, rhs_eq, Q1_val, Q2_val,
          Q3_val, q1_val, q2_val, q3_val, c) = self.traj_opt
