@@ -50,8 +50,7 @@ class TestQuadrotorFeedbackSystem(unittest.TestCase):
         x_next_var = mip.addVars(12,
                                  lb=-gurobipy.GRB.INFINITY,
                                  ub=gurobipy.GRB.INFINITY)
-        u_var, forward_slack, controller_slack, forward_binary,\
-            controller_binary =\
+        u_var, forward_dynamics_return, controller_mip_cnstr_return = \
             self.closed_loop_system.add_dynamics_mip_constraint(
                 mip, x_var, x_next_var, "u", "forward_slack",
                 "forward_binary", "controller_slack", "controller_binary")

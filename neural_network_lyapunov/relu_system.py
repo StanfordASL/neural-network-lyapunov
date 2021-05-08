@@ -1,5 +1,6 @@
 import torch
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.mip_utils as mip_utils
 import gurobipy
@@ -111,7 +112,7 @@ class AutonomousReLUSystemGivenEquilibrium:
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
-                self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
             self.x_equilibrium
 
@@ -177,7 +178,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
-                self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium)
         if result.Aout_input is None:
             result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
@@ -195,6 +196,34 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         assert (isinstance(x_start, torch.Tensor))
         return self.dynamics_relu(x_start) - \
             self.dynamics_relu(self.x_equilibrium) + x_start
+
+
+class ReLUDynamicsConstraintReturn(
+        hybrid_linear_system.DynamicsConstraintReturn):
+    def __init__(self, slack, binary):
+        super(ReLUDynamicsConstraintReturn, self).__init__(slack, binary)
+        self.nn_input_lo = None
+        self.nn_input_up = None
+        self.nn_output_lo = None
+        self.nn_output_up = None
+        self.relu_input_lo = None
+        self.relu_input_up = None
+        self.relu_output_lo = None
+        self.relu_output_up = None
+
+    def from_mip_cnstr_return(self, mip_cnstr_return: relu_to_optimization.
+                              ReLUMixedIntegerConstraintsReturn):
+        assert (isinstance(
+            mip_cnstr_return,
+            relu_to_optimization.ReLUMixedIntegerConstraintsReturn))
+        self.nn_input_lo = mip_cnstr_return.nn_input_lo
+        self.nn_input_up = mip_cnstr_return.nn_input_up
+        self.nn_output_lo = mip_cnstr_return.nn_output_lo
+        self.nn_output_up = mip_cnstr_return.nn_output_up
+        self.relu_input_lo = mip_cnstr_return.relu_input_lo
+        self.relu_input_up = mip_cnstr_return.relu_input_up
+        self.relu_output_lo = mip_cnstr_return.relu_output_lo
+        self.relu_output_up = mip_cnstr_return.relu_output_up
 
 
 class ReLUSystem:
@@ -371,7 +400,7 @@ class ReLUSystemGivenEquilibrium:
         xu_lo = torch.cat((self.x_lo, u_lo))
         xu_up = torch.cat((self.x_up, u_up))
         result = self.dynamics_relu_free_pattern.output_constraint(
-                xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
+            xu_lo, xu_up, mip_utils.PropagateBoundsMethod.IA)
         result.Aout_slack = result.Aout_slack.reshape((self.x_dim, -1))
         result.Cout = result.Cout.reshape((-1))
         result.Cout += -self.dynamics_relu(
@@ -737,7 +766,9 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
                         b=torch.zeros((self.nv), dtype=self.dtype),
                         sense=gurobipy.GRB.EQUAL,
                         name="update_q_next")
-        return forward_slack, forward_binary
+        ret = ReLUDynamicsConstraintReturn(forward_slack, forward_binary)
+        ret.from_mip_cnstr_return(mip_cnstr_result)
+        return ret
 
 
 def _add_dynamics_mip_constraints(mip,
@@ -758,4 +789,6 @@ def _add_dynamics_mip_constraints(mip,
         mip_cnstr, x_var + u_var, x_next_var, slack_var_name, binary_var_name,
         "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
         "relu_forward_dynamics_output")
-    return slack, binary
+    ret = ReLUDynamicsConstraintReturn(slack, binary)
+    ret.from_mip_cnstr_return(mip_cnstr)
+    return ret

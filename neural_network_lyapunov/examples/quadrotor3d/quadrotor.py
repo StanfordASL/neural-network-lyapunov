@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import gurobipy
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.geometry_transform as geometry_transform
 import neural_network_lyapunov.mip_utils as mip_utils
 
@@ -357,7 +358,10 @@ class QuadrotorWithPixhawkReLUSystem:
                         b=torch.zeros((3, ), dtype=self.dtype),
                         sense=gurobipy.GRB.EQUAL,
                         name="update_pos_next")
-        return forward_slack, forward_binary
+        ret = relu_system.ReLUDynamicsConstraintReturn(
+            forward_slack, forward_binary)
+        ret.from_mip_cnstr_return(mip_cnstr_result)
+        return ret
 
 
 class QuadrotorReLUSystem:
@@ -512,7 +516,10 @@ class QuadrotorReLUSystem:
                         b=torch.zeros((3, ), dtype=self.dtype),
                         sense=gurobipy.GRB.EQUAL,
                         name="update_pos")
-        return forward_slack, forward_binary
+        ret = relu_system.ReLUDynamicsConstraintReturn(
+            forward_slack, forward_binary)
+        ret.from_mip_cnstr_return(mip_cnstr_result)
+        return ret
 
     def add_dynamics_constraint(self,
                                 mip,

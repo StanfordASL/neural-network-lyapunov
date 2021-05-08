@@ -187,8 +187,12 @@ def check_add_dynamics_constraint(dut, x_val, u_val, atol=0, rtol=1E-7):
     x_next = mip.addVars(dut.x_dim,
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS)
-    forward_slack, forward_binary = dut.add_dynamics_constraint(
+    dynamics_constraint_return = dut.add_dynamics_constraint(
         mip, x, x_next, u, "s", "gamma")
+    forward_slack = dynamics_constraint_return.slack
+    forward_binary = dynamics_constraint_return.binary
+    assert(isinstance(forward_slack, list))
+    assert(isinstance(forward_binary, list))
     mip.addMConstrs([torch.eye(dut.x_dim, dtype=dut.dtype)], [x],
                     b=x_val,
                     sense=gurobipy.GRB.EQUAL)

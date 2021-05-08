@@ -67,7 +67,7 @@ class TestFeedbackSystem(unittest.TestCase):
                               lb=-gurobipy.GRB.INFINITY,
                               vtype=gurobipy.GRB.CONTINUOUS,
                               name="x_next")
-        u, forward_slack, controller_slack, forward_binary, controller_binary\
+        u, forward_dynamics_return, controller_mip_cnstr_return\
             = dut.add_dynamics_mip_constraint(
                 milp, x, x_next, "u", "forward_s", "forward_binary",
                 "controller_s", "controller_binary")
@@ -207,11 +207,9 @@ class TestFeedbackSystem(unittest.TestCase):
         assert (np.logical_or(np.any(np.abs(binary_sol) > 1E-6),
                               np.any(np.abs(binary_sol - 1) > 1E-6)))
         num_ineq = len(milp.rhs_in)
-        dut.strengthen_controller_mip_constraint(milp, x_var,
-                                                 mip_cnstr_return.slack,
-                                                 mip_cnstr_return.binary,
-                                                 mip_cnstr_return.post_relu_lo,
-                                                 mip_cnstr_return.post_relu_up)
+        dut.strengthen_controller_mip_constraint(
+            milp, x_var, mip_cnstr_return.slack, mip_cnstr_return.binary,
+            mip_cnstr_return.relu_output_lo, mip_cnstr_return.relu_output_up)
         # Check if new inequality constraints are added.
         self.assertGreater(len(milp.rhs_in), num_ineq)
         milp.gurobi_model.optimize()

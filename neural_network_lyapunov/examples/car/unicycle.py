@@ -4,6 +4,7 @@ import scipy.integrate
 
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.mip_utils as mip_utils
 
 import gurobipy
@@ -261,7 +262,10 @@ class UnicycleReLUModel:
                        sense=gurobipy.GRB.EQUAL,
                        rhs=0.,
                        name="unicycle_theta_dynamics")
-        return forward_slack, forward_binary
+        ret = relu_system.ReLUDynamicsConstraintReturn(
+            forward_slack, forward_binary)
+        ret.from_mip_cnstr_return(mip_cnstr_result)
+        return ret
 
 
 class UnicycleReLUZeroVelModel(UnicycleReLUModel):

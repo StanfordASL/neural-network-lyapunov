@@ -59,7 +59,8 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                 self.forward_system.x_lo_all)
             controller_network_input_up = torch.from_numpy(
                 self.forward_system.x_up_all)
-            controller_relu_input_lo, controller_relu_input_up, _, _ =\
+            controller_relu_input_lo, controller_relu_input_up,\
+                controller_relu_output_lo, controller_relu_output_up =\
                 self.controller_relu_free_pattern._compute_layer_bound(
                     controller_network_input_lo,
                     controller_network_input_up,
@@ -88,6 +89,16 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     controller_slack_var_name,
                     controller_binary_var_name,
                     lp_relaxation=False)
+            controller_mip_cnstr_return = \
+                feedback_system.ControllerMipConstraintReturn(
+                    slack=controller_slack,
+                    binary=controller_binary,
+                    u_lower_bound=u_lower_bound,
+                    u_upper_bound=u_upper_bound,
+                    relu_input_lo=controller_relu_input_lo,
+                    relu_input_up=controller_relu_input_up,
+                    relu_output_lo=controller_relu_output_lo,
+                    relu_output_up=controller_relu_output_up)
 
             # Now compute the bounds on the ReLU units of the forward
             # dynamic network through LP.
@@ -124,11 +135,10 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     9:12] + u_var_lp
                 return prog, forward_network_input_var
 
-            forward_slack, forward_binary = \
+            forward_dynamics_return = \
                 self.forward_system.add_dynamics_constraint(
                     mip, x_var, x_next_var, u_var, forward_slack_var_name,
                     forward_binary_var_name, additional_u_lo=u_lower_bound,
                     additional_u_up=u_upper_bound,
                     create_lp_prog_callback=create_prog_callback)
-            return u_var, forward_slack, controller_slack, forward_binary,\
-                controller_binary
+            return u_var, forward_dynamics_return, controller_mip_cnstr_return
