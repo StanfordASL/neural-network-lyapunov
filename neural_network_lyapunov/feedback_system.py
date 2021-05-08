@@ -12,7 +12,6 @@ between x[n], x[n+1] and u[n] with mixed-integer linear constraints.
 
 import torch
 import numpy as np
-import collections
 
 import gurobipy
 
@@ -22,6 +21,19 @@ import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.compute_xhat as compute_xhat
+
+
+class ControllerMipConstraintReturn:
+    def __init__(self, slack, binary, u_lower_bound, u_upper_bound,
+                 relu_input_lo, relu_input_up, relu_output_lo, relu_output_up):
+        self.slack = slack
+        self.binary = binary
+        self.u_lower_bound = u_lower_bound
+        self.u_upper_bound = u_upper_bound
+        self.relu_input_lo = relu_input_lo
+        self.relu_input_up = relu_input_up
+        self.relu_output_lo = relu_output_lo
+        self.relu_output_up = relu_output_up
 
 
 class FeedbackSystem:
@@ -197,11 +209,6 @@ class FeedbackSystem:
                 controller_pre_relu_lo, controller_pre_relu_up,
                 network_input_lo, network_input_up,
                 self.controller_network_bound_propagate_method)
-        NetworkControllerMipConstrReturn = collections.namedtuple(
-            "NetworkControllerMipConstrReturn", [
-                "slack", "binary", "u_lower_bound", "u_upper_bound",
-                "pre_relu_lo", "pre_relu_up", "post_relu_lo", "post_relu_up"
-            ])
 
         controller_slack, controller_binary, u_lower_bound, u_upper_bound,\
             controller_pre_relu_lo, controller_pre_relu_up =\
@@ -211,15 +218,15 @@ class FeedbackSystem:
                 network_output_lo, network_output_up,
                 controller_slack_var_name, controller_binary_var_name,
                 lp_relaxation)
-        return NetworkControllerMipConstrReturn(
+        return ControllerMipConstraintReturn(
             slack=controller_slack,
             binary=controller_binary,
             u_lower_bound=u_lower_bound,
             u_upper_bound=u_upper_bound,
-            pre_relu_lo=controller_pre_relu_lo,
-            pre_relu_up=controller_pre_relu_up,
-            post_relu_lo=controller_post_relu_lo,
-            post_relu_up=controller_post_relu_up)
+            relu_input_lo=controller_pre_relu_lo,
+            relu_input_up=controller_pre_relu_up,
+            relu_output_lo=controller_post_relu_lo,
+            relu_output_up=controller_post_relu_up)
 
     def _add_linear_controller_mip_constraint(self, mip, x_var, u_var,
                                               lp_relaxation: bool):
@@ -270,11 +277,6 @@ class FeedbackSystem:
                                        controller_slack_var_name,
                                        controller_binary_var_name,
                                        lp_relaxation: bool):
-        ControllerMipConstraintReturn = collections.namedtuple(
-            "ControllerMipConstraintReturn", [
-                "slack", "binary", "u_lower_bound", "u_upper_bound",
-                "post_relu_lo", "post_relu_up"
-            ])
         if isinstance(self.controller_network, torch.nn.Sequential):
             nn_controller_mip_cnstr_return = \
                 self._add_network_controller_mip_constraint(
@@ -285,8 +287,10 @@ class FeedbackSystem:
                 binary=nn_controller_mip_cnstr_return.binary,
                 u_lower_bound=nn_controller_mip_cnstr_return.u_lower_bound,
                 u_upper_bound=nn_controller_mip_cnstr_return.u_upper_bound,
-                post_relu_lo=nn_controller_mip_cnstr_return.post_relu_lo,
-                post_relu_up=nn_controller_mip_cnstr_return.post_relu_up)
+                relu_input_lo=nn_controller_mip_cnstr_return.relu_input_lo,
+                relu_input_up=nn_controller_mip_cnstr_return.relu_input_up,
+                relu_output_lo=nn_controller_mip_cnstr_return.relu_output_lo,
+                relu_output_up=nn_controller_mip_cnstr_return.relu_output_up)
         elif isinstance(self.controller_network, torch.nn.Linear):
             controller_slack, controller_binary, u_lower_bound, u_upper_bound\
                 = self._add_linear_controller_mip_constraint(
@@ -295,8 +299,10 @@ class FeedbackSystem:
                                                  binary=controller_binary,
                                                  u_lower_bound=u_lower_bound,
                                                  u_upper_bound=u_upper_bound,
-                                                 post_relu_lo=None,
-                                                 post_relu_up=None)
+                                                 relu_input_lo=None,
+                                                 relu_input_up=None,
+                                                 relu_output_lo=None,
+                                                 relu_output_up=None)
 
     def strengthen_controller_mip_constraint(
             self, mip: gurobi_torch_mip.GurobiTorchMIP, x_var: list,
@@ -358,15 +364,14 @@ class FeedbackSystem:
                 controller_binary_var_name, lp_relaxation=False)
 
         # Now add the forward dynamics constraint
-        forward_slack, forward_binary = \
+        forward_dynamics_return = \
             self.forward_system.add_dynamics_constraint(
                 mip, x_var, x_next_var, u, forward_slack_var_name,
                 forward_binary_var_name,
                 additional_u_lo=controller_mip_cnstr_return.u_lower_bound,
                 additional_u_up=controller_mip_cnstr_return.u_upper_bound)
 
-        return u, forward_slack, controller_mip_cnstr_return.slack,\
-            forward_binary, controller_mip_cnstr_return.binary
+        return u, forward_dynamics_return, controller_mip_cnstr_return
 
     def compute_u(self, x):
         """

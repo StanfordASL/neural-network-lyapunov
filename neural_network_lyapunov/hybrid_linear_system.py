@@ -13,6 +13,15 @@ from neural_network_lyapunov.utils import (
 )
 
 
+class DynamicsConstraintReturn:
+    """
+    The return from add_dynamics_constraint()
+    """
+    def __init__(self, slack, binary):
+        self.slack = slack
+        self.binary = binary
+
+
 class HybridLinearSystem:
     """
     This system models the hybrid linear system
@@ -252,7 +261,7 @@ class HybridLinearSystem:
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
             binary_var_name, "hybrid_linear_dynamics_ineq",
             "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output")
-        return slack, binary
+        return DynamicsConstraintReturn(slack, binary)
 
     def mode(self, x_start, u_start):
         """

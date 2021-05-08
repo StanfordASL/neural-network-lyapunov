@@ -98,11 +98,12 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
         x_var = mip.addVars(3, lb=x_val, ub=x_val, name="x")
         u_var = mip.addVars(2, lb=-gurobipy.GRB.INFINITY, name="u")
 
-        controller_slack, controller_binary, u_lower_bound, u_upper_bound, \
-            controller_pre_relu_lo, controller_pre_relu_up, _, _ =\
+        controller_mip_cnstr_return = \
             self.dut._add_network_controller_mip_constraint(
                 mip, x_var, u_var, "controlelr_slack", "controller_binary",
                 lp_relaxation=False)
+        u_lower_bound = controller_mip_cnstr_return.u_lower_bound
+        u_upper_bound = controller_mip_cnstr_return.u_upper_bound
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         mip.gurobi_model.optimize()
         if torch.all(x_val <= self.x_up) and torch.all(x_val >= self.x_lo):

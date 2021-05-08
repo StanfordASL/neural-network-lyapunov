@@ -89,12 +89,14 @@ class LyapunovHybridLinearSystem:
             return s, gamma
 
         elif isinstance(self.system, feedback_system.FeedbackSystem):
-            u, forward_slack, controller_slack, forward_binary,\
-                controller_binary = self.system.add_dynamics_mip_constraint(
+            u, forward_dynamics_return, controller_mip_cnstr_return = \
+                self.system.add_dynamics_mip_constraint(
                     milp, x, x_next, "u", "forward_s", "forward_binary",
                     "controller_s", "controller_binary")
-            slack = u + forward_slack + controller_slack
-            binary = forward_binary + controller_binary
+            slack = u + forward_dynamics_return.slack +\
+                controller_mip_cnstr_return.slack
+            binary = forward_dynamics_return.binary + \
+                controller_mip_cnstr_return.binary
             return slack, binary
         else:
             raise (NotImplementedError)
@@ -118,9 +120,9 @@ class LyapunovHybridLinearSystem:
         assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
         assert (isinstance(x, list))
         mip_constr_return = self.lyapunov_relu_free_pattern.output_constraint(
-             torch.from_numpy(self.system.x_lo_all),
-             torch.from_numpy(self.system.x_up_all),
-             self.network_bound_propagate_method)
+            torch.from_numpy(self.system.x_lo_all),
+            torch.from_numpy(self.system.x_up_all),
+            self.network_bound_propagate_method)
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
             mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "", lp_relaxation)
