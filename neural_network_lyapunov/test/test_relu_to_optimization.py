@@ -211,18 +211,18 @@ class TestReLU(unittest.TestCase):
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
-            (mip_constr_return,
-                z_pre_relu_lo, z_pre_relu_up, z_post_relu_lo, z_post_relu_up,
-                output_lo, output_up)\
-                = relu_free_pattern.output_constraint(x_lo, x_up, method)
+            mip_constr_return = relu_free_pattern.output_constraint(
+                x_lo, x_up, method)
             self.assertIsNone(mip_constr_return.Aout_input)
             self.assertIsNone(mip_constr_return.Aout_binary)
-            # print("z_pre_relu_lo:{}\nz_pre_relu_up:{}".format(
-            #    z_pre_relu_lo, z_pre_relu_up))
-            num_z_pre_relu_lo_positive = np.sum(
-                [z_pre_relu_lo_i >= 0 for z_pre_relu_lo_i in z_pre_relu_lo])
-            num_z_pre_relu_up_negative = np.sum(
-                [z_pre_relu_up_i <= 0 for z_pre_relu_up_i in z_pre_relu_up])
+            num_z_pre_relu_lo_positive = np.sum([
+                z_pre_relu_lo_i >= 0
+                for z_pre_relu_lo_i in mip_constr_return.relu_input_lo
+            ])
+            num_z_pre_relu_up_negative = np.sum([
+                z_pre_relu_up_i <= 0
+                for z_pre_relu_up_i in mip_constr_return.relu_input_up
+            ])
             num_ineq = (relu_free_pattern.num_relu_units -
                         num_z_pre_relu_lo_positive - num_z_pre_relu_up_negative
                         ) * 4 + 4 + (num_z_pre_relu_lo_positive +
@@ -250,9 +250,9 @@ class TestReLU(unittest.TestCase):
                     output_torch = relu_free_pattern.model(x)
                     np.testing.assert_array_less(
                         output_torch.detach().numpy(),
-                        output_up.detach().numpy() + 1E-6)
+                        mip_constr_return.nn_output_up.detach().numpy() + 1E-6)
                     np.testing.assert_array_less(
-                        output_lo.detach().numpy() - 1E-6,
+                        mip_constr_return.nn_output_lo.detach().numpy() - 1E-6,
                         output_torch.detach().numpy())
                 # Now formulate an optimization problem, with fixed input,
                 # search for z and beta. There should be only one solution.
@@ -265,15 +265,13 @@ class TestReLU(unittest.TestCase):
                     con.append(
                         mip_constr_return.Ain_input.detach().numpy() @ x_np +
                         mip_constr_return.Ain_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Ain_binary.detach().numpy() @
-                        beta_var
+                        mip_constr_return.Ain_binary.detach().numpy() @ beta_var  # noqa
                         <= mip_constr_return.rhs_in.squeeze().detach().numpy())
                 if mip_constr_return.rhs_eq.shape[0] != 0:
                     con.append(
                         mip_constr_return.Aeq_input.detach().numpy() @ x_np +
                         mip_constr_return.Aeq_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Aeq_binary.detach().numpy() @
-                        beta_var
+                        mip_constr_return.Aeq_binary.detach().numpy() @ beta_var  # noqa
                         == mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
@@ -315,9 +313,11 @@ class TestReLU(unittest.TestCase):
                     relu_free_pattern.compute_relu_unit_outputs_and_activation(
                     x)
                 z_post_relu_up_numpy =\
-                    np.array([zi.detach().numpy() for zi in z_post_relu_up])
+                    np.array([zi.detach().numpy() for zi in
+                              mip_constr_return.relu_output_up])
                 z_post_relu_lo_numpy =\
-                    np.array([zi.detach().numpy() for zi in z_post_relu_lo])
+                    np.array([zi.detach().numpy() for zi in
+                              mip_constr_return.relu_output_lo])
                 np.testing.assert_array_less(z.squeeze().detach().numpy(),
                                              z_post_relu_up_numpy + 1E-10)
                 np.testing.assert_array_less(z_post_relu_lo_numpy - 1E-10,
@@ -423,9 +423,8 @@ class TestReLU(unittest.TestCase):
                 model, self.dtype)
             x_lo = torch.tensor([-1, -2], dtype=self.dtype)
             x_up = torch.tensor([2, 3], dtype=self.dtype)
-            mip_constr_return, _, _, _, _, _, _ = \
-                relu_free_pattern.output_constraint(
-                    x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
+            mip_constr_return = relu_free_pattern.output_constraint(
+                x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
             # This function compute the sum of all the return terms. If any of
             # the term has a wrong gradient, the gradient of the sum will also
             # be wrong.
@@ -690,9 +689,8 @@ class TestReLU(unittest.TestCase):
         dut = relu_to_optimization.ReLUFreePattern(self.model2, self.dtype)
         nn_input_lo = torch.tensor([-1, -2], dtype=self.dtype)
         nn_input_up = torch.tensor([1, 1.5], dtype=self.dtype)
-        mip_cnstr_return, _, _, z_post_relu_lo, z_post_relu_up, _, _ = \
-            dut.output_constraint(
-                nn_input_lo, nn_input_up, mip_utils.PropagateBoundsMethod.IA)
+        mip_cnstr_return = dut.output_constraint(
+            nn_input_lo, nn_input_up, mip_utils.PropagateBoundsMethod.IA)
         # Now set-up an LP to find a solution, that satisfies the linear
         # relaxation of the MIP.
         prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
@@ -727,8 +725,10 @@ class TestReLU(unittest.TestCase):
         for v in activation:
             assert (np.abs(v.x) < 1E-6 or np.abs(v.x - 1) < 1E-6)
         point = (torch.cat((x_sol, slack_sol)), activation_sol)
-        linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
-        linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
+        linear_inputs_lo = torch.cat(
+            (mip_cnstr_return.nn_input_lo, mip_cnstr_return.relu_output_lo))
+        linear_inputs_up = torch.cat(
+            (mip_cnstr_return.nn_input_up, mip_cnstr_return.relu_output_up))
         Ain_input, Ain_slack, Ain_binary, rhs_in = \
             dut.strengthen_mip_at_point(
                 point, linear_inputs_lo, linear_inputs_up)
@@ -749,7 +749,7 @@ class TestReLU(unittest.TestCase):
            satisfies the strengthened formulation.
         """
         dut = relu_to_optimization.ReLUFreePattern(model, self.dtype)
-        mip_cnstr_return, _, _, z_post_relu_lo, z_post_relu_up, _, _ = \
+        mip_cnstr_return = \
             dut.output_constraint(nn_input_lo, nn_input_up, method)
         # Now set-up an LP to find a solution, that satisfies the linear
         # relaxation of the MIP.
@@ -784,8 +784,10 @@ class TestReLU(unittest.TestCase):
         assert (torch.any(torch.abs(activation_sol) > 1E-6)
                 or torch.any(torch.abs(activation_sol - 1) > 1E-6))
         pt = (torch.cat((x_sol, slack_sol)), activation_sol)
-        linear_inputs_lo = torch.cat((nn_input_lo, z_post_relu_lo))
-        linear_inputs_up = torch.cat((nn_input_up, z_post_relu_up))
+        linear_inputs_lo = torch.cat(
+            (mip_cnstr_return.nn_input_lo, mip_cnstr_return.relu_output_lo))
+        linear_inputs_up = torch.cat(
+            (mip_cnstr_return.nn_input_up, mip_cnstr_return.relu_output_up))
         Ain_input, Ain_slack, Ain_binary, rhs_in = \
             dut.strengthen_mip_at_point(
                 pt, linear_inputs_lo, linear_inputs_up)
@@ -869,8 +871,9 @@ class TestReLU(unittest.TestCase):
         cost_coeff_output = torch.ones((model[-1].out_features, ),
                                        dtype=self.dtype)
         for method in mip_utils.PropagateBoundsMethod:
-            self.strengthen_mip_at_point_tester(
-                model, nn_input_lo, nn_input_up, method, cost_coeff_output)
+            self.strengthen_mip_at_point_tester(model, nn_input_lo,
+                                                nn_input_up, method,
+                                                cost_coeff_output)
 
     def test_strengthen_mip_at_point3(self):
         # Test another leaky ReLU model
@@ -898,12 +901,13 @@ class TestReLU(unittest.TestCase):
         nn_input_lo = torch.tensor([1., -3.], dtype=self.dtype)
         nn_input_up = torch.tensor([3., 1.], dtype=self.dtype)
 
-        cost_coeff_output = -torch.ones((model[-1].out_features, ),
-                                        dtype=self.dtype)
+        cost_coeff_output = -torch.ones(
+            (model[-1].out_features, ), dtype=self.dtype)
 
         for method in mip_utils.PropagateBoundsMethod:
-            self.strengthen_mip_at_point_tester(
-                model, nn_input_lo, nn_input_up, method, cost_coeff_output)
+            self.strengthen_mip_at_point_tester(model, nn_input_lo,
+                                                nn_input_up, method,
+                                                cost_coeff_output)
 
 
 class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
@@ -923,7 +927,7 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
             utils.network_zero_grad(network)
             dut = relu_to_optimization.ReLUFreePattern(network,
                                                        params_torch.dtype)
-            mip_return, _, _, _, _, _, _ = dut.output_constraint(
+            mip_return = dut.output_constraint(
                 x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
             entry = getattr(mip_return, mip_entry_name)
 
@@ -958,8 +962,8 @@ class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
         utils.update_relu_params(network, network_param)
         dut = relu_to_optimization.ReLUFreePattern(network,
                                                    network_param.dtype)
-        mip_return, _, _, _, _, _, _ = dut.output_constraint(
-            x_lo, x_up, mip_utils.PropagateBoundsMethod.IA)
+        mip_return = dut.output_constraint(x_lo, x_up,
+                                           mip_utils.PropagateBoundsMethod.IA)
 
         def test_entry(entry_name):
             entry = getattr(mip_return, entry_name)

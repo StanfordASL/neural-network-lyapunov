@@ -117,11 +117,10 @@ class LyapunovHybridLinearSystem:
         """
         assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
         assert (isinstance(x, list))
-        mip_constr_return, _, _, _, _, _, _ = \
-            self.lyapunov_relu_free_pattern.output_constraint(
-                 torch.from_numpy(self.system.x_lo_all),
-                 torch.from_numpy(self.system.x_up_all),
-                 self.network_bound_propagate_method)
+        mip_constr_return = self.lyapunov_relu_free_pattern.output_constraint(
+             torch.from_numpy(self.system.x_lo_all),
+             torch.from_numpy(self.system.x_up_all),
+             self.network_bound_propagate_method)
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
             mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "", lp_relaxation)

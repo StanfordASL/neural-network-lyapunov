@@ -211,6 +211,20 @@ def ReLUGivenActivationPattern(model_relu, x_size, activation_pattern, dtype):
     return (g, h, P, q)
 
 
+class ReLUMixedIntegerConstraintsReturn(
+        gurobi_torch_mip.MixedIntegerConstraintsReturn):
+    def __init__(self):
+        super(ReLUMixedIntegerConstraintsReturn, self).__init__()
+        self.nn_input_lo = None
+        self.nn_input_up = None
+        self.nn_output_lo = None
+        self.nn_output_up = None
+        self.relu_input_lo = None
+        self.relu_input_up = None
+        self.relu_output_lo = None
+        self.relu_output_up = None
+
+
 class ReLUFreePattern:
     """
     The output of ReLU network is a piecewise linear function of the input.
@@ -625,7 +639,7 @@ class ReLUFreePattern:
                        Aeq_z_curr.shape[0]] = rhs_eq_layer
                 eq_constr_count += Aeq_z_curr.shape[0]
 
-        mip_constr_return = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        mip_constr_return = ReLUMixedIntegerConstraintsReturn()
         # The output is the last linear layer applied on the last chunk of z.
         mip_constr_return.Aout_slack = torch.zeros(
             (self.model[-1].out_features, self.num_relu_units),
@@ -646,6 +660,10 @@ class ReLUFreePattern:
         mip_constr_return.Aeq_slack = Aeq_slack[:eq_constr_count]
         mip_constr_return.Aeq_binary = Aeq_binary[:eq_constr_count]
         mip_constr_return.rhs_eq = rhs_eq[:eq_constr_count]
+        mip_constr_return.nn_input_lo = x_lo
+        mip_constr_return.nn_input_up = x_up
+        mip_constr_return.relu_input_lo = z_pre_relu_lo
+        mip_constr_return.relu_input_up = z_pre_relu_up
         return mip_constr_return
 
     def output_constraint(self, x_lo, x_up,
@@ -720,8 +738,15 @@ class ReLUFreePattern:
             z_pre_relu_lo, z_pre_relu_up, x_lo, x_up, method)
         mip_constr_return = self._output_constraint_given_bounds(
             z_pre_relu_lo, z_pre_relu_up, x_lo, x_up)
-        return (mip_constr_return, z_pre_relu_lo, z_pre_relu_up,
-                z_post_relu_lo, z_post_relu_up, output_lo, output_up)
+        mip_constr_return.nn_input_lo = x_lo
+        mip_constr_return.nn_input_up = x_up
+        mip_constr_return.nn_output_lo = output_lo
+        mip_constr_return.nn_output_up = output_up
+        mip_constr_return.relu_input_lo = z_pre_relu_lo
+        mip_constr_return.relu_input_up = z_pre_relu_up
+        mip_constr_return.relu_output_lo = z_post_relu_lo
+        mip_constr_return.relu_output_up = z_post_relu_up
+        return mip_constr_return
 
     def compute_relu_unit_outputs_and_activation(self, x):
         """

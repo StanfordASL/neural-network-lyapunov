@@ -176,11 +176,9 @@ class AccelerationCarReLUModel:
             (self.x_lo[2], self.x_lo[3], u_lo[0], u_lo[1]))
         network_input_up = torch.stack(
             (self.x_up[2], self.x_up[3], u_up[0], u_up[1]))
-        mip_cnstr_result, _, _, _, _, _, _ = \
-            self.dynamics_relu_free_pattern.output_constraint(
-                network_input_lo,
-                network_input_up,
-                method=mip_utils.PropagateBoundsMethod.LP)
+        mip_cnstr_result = self.dynamics_relu_free_pattern.output_constraint(
+            network_input_lo, network_input_up,
+            method=mip_utils.PropagateBoundsMethod.LP)
         # First add mip_cnstr_result. But don't impose the constraint on the
         # output of the network (we will impose the output constraint
         # afterwards inside this function)
