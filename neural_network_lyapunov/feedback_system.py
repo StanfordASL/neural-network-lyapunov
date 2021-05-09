@@ -17,6 +17,7 @@ import gurobipy
 
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
@@ -24,8 +25,9 @@ import neural_network_lyapunov.compute_xhat as compute_xhat
 
 
 class ControllerMipConstraintReturn:
-    def __init__(self, slack, binary, u_lower_bound, u_upper_bound,
+    def __init__(self, nn_input, slack, binary, u_lower_bound, u_upper_bound,
                  relu_input_lo, relu_input_up, relu_output_lo, relu_output_up):
+        self.nn_input = nn_input
         self.slack = slack
         self.binary = binary
         self.u_lower_bound = u_lower_bound
@@ -219,6 +221,7 @@ class FeedbackSystem:
                 controller_slack_var_name, controller_binary_var_name,
                 lp_relaxation)
         return ControllerMipConstraintReturn(
+            nn_input=x_var,
             slack=controller_slack,
             binary=controller_binary,
             u_lower_bound=u_lower_bound,
@@ -283,6 +286,7 @@ class FeedbackSystem:
                     mip, x_var, u_var, controller_slack_var_name,
                     controller_binary_var_name, lp_relaxation)
             return ControllerMipConstraintReturn(
+                nn_input=x_var,
                 slack=nn_controller_mip_cnstr_return.slack,
                 binary=nn_controller_mip_cnstr_return.binary,
                 u_lower_bound=nn_controller_mip_cnstr_return.u_lower_bound,
@@ -295,7 +299,8 @@ class FeedbackSystem:
             controller_slack, controller_binary, u_lower_bound, u_upper_bound\
                 = self._add_linear_controller_mip_constraint(
                     mip, x_var, u_var, lp_relaxation)
-            return ControllerMipConstraintReturn(slack=controller_slack,
+            return ControllerMipConstraintReturn(nn_input=None,
+                                                 slack=controller_slack,
                                                  binary=controller_binary,
                                                  u_lower_bound=u_lower_bound,
                                                  u_upper_bound=u_upper_bound,
@@ -351,7 +356,8 @@ class FeedbackSystem:
                                     forward_slack_var_name,
                                     forward_binary_var_name,
                                     controller_slack_var_name,
-                                    controller_binary_var_name):
+                                    controller_binary_var_name,
+                                    lp_relaxation=False):
         assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
         u = mip.addVars(self.forward_system.u_dim,
                         lb=-gurobipy.GRB.INFINITY,
@@ -361,7 +367,7 @@ class FeedbackSystem:
         controller_mip_cnstr_return = \
             self._add_controller_mip_constraint(
                 mip, x_var, u, controller_slack_var_name,
-                controller_binary_var_name, lp_relaxation=False)
+                controller_binary_var_name, lp_relaxation)
 
         # Now add the forward dynamics constraint
         forward_dynamics_return = \
@@ -369,9 +375,72 @@ class FeedbackSystem:
                 mip, x_var, x_next_var, u, forward_slack_var_name,
                 forward_binary_var_name,
                 additional_u_lo=controller_mip_cnstr_return.u_lower_bound,
-                additional_u_up=controller_mip_cnstr_return.u_upper_bound)
+                additional_u_up=controller_mip_cnstr_return.u_upper_bound,
+                lp_relaxation=lp_relaxation)
 
         return u, forward_dynamics_return, controller_mip_cnstr_return
+
+    def strengthen_dynamics_constraint(
+            self,
+            mip: gurobi_torch_mip.GurobiTorchMIP,
+            forward_dynamics_return:
+            hybrid_linear_system.DynamicsConstraintReturn,
+            controller_mip_cnstr_return: ControllerMipConstraintReturn):
+        """
+        Strengthen the MIP constraint on system dynamics.
+        For ReLU network, we can strengthen its MIP constraint (derived from
+        big-M technique), by adding the mostly violated ideal constraint
+        evaluated at a point.
+        @param forward_dynamics_return Returned from
+        add_dynamics_mip_constraint()
+        @param controller_mip_cnstr_return: Returned from
+        add_dynamics_mip_constraint()
+        """
+        assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(forward_dynamics_return,
+                           hybrid_linear_system.DynamicsConstraintReturn))
+        assert (isinstance(controller_mip_cnstr_return,
+                           ControllerMipConstraintReturn))
+        if (isinstance(forward_dynamics_return,
+                       relu_system.ReLUDynamicsConstraintReturn)):
+            # Value of the inputs to each linear layer in the forward dynamics
+            # network.
+            forward_nn_linear_inputs = torch.tensor(
+                [v.x for v in forward_dynamics_return.nn_input] +
+                [v.x for v in forward_dynamics_return.slack],
+                dtype=mip.dtype)
+            forward_relu_activations = torch.tensor(
+                [v.x for v in forward_dynamics_return.binary], dtype=mip.dtype)
+            forward_nn_linear_inputs_lo = torch.cat(
+                (forward_dynamics_return.nn_input_lo,
+                 forward_dynamics_return.relu_output_lo))
+            forward_nn_linear_inputs_up = torch.cat(
+                (forward_dynamics_return.nn_input_up,
+                 forward_dynamics_return.relu_output_up))
+            Ain_forward_nn_input, Ain_forward_slack, Ain_forward_binary,\
+                rhs_in_forward = self.forward_system.\
+                dynamics_relu_free_pattern.strengthen_mip_at_point(
+                    (forward_nn_linear_inputs, forward_relu_activations),
+                    forward_nn_linear_inputs_lo, forward_nn_linear_inputs_up)
+            if Ain_forward_nn_input is not None:
+                mip.addMConstrs([
+                    Ain_forward_nn_input, Ain_forward_slack, Ain_forward_binary
+                ], [
+                    forward_dynamics_return.nn_input,
+                    forward_dynamics_return.slack,
+                    forward_dynamics_return.binary
+                ],
+                                b=rhs_in_forward,
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                name="forward relu strengthened")
+
+        if (controller_mip_cnstr_return.nn_input is not None):
+            self.strengthen_controller_mip_constraint(
+                mip, controller_mip_cnstr_return.nn_input,
+                controller_mip_cnstr_return.slack,
+                controller_mip_cnstr_return.binary,
+                controller_mip_cnstr_return.relu_output_lo,
+                controller_mip_cnstr_return.relu_output_up)
 
     def compute_u(self, x):
         """

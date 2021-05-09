@@ -91,6 +91,7 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     lp_relaxation=False)
             controller_mip_cnstr_return = \
                 feedback_system.ControllerMipConstraintReturn(
+                    nn_input=x_var,
                     slack=controller_slack,
                     binary=controller_binary,
                     u_lower_bound=u_lower_bound,

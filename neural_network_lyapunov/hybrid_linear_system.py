@@ -250,7 +250,8 @@ class HybridLinearSystem:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         if additional_u_lo is not None or additional_u_up is not None:
             warnings.warn(
                 "hybrid linear system don't accept additional u_lo and u_up " +
@@ -260,7 +261,8 @@ class HybridLinearSystem:
         slack, binary = mip.add_mixed_integer_linear_constraints(
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
             binary_var_name, "hybrid_linear_dynamics_ineq",
-            "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output")
+            "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output",
+            lp_relaxation)
         return DynamicsConstraintReturn(slack, binary)
 
     def mode(self, x_start, u_start):

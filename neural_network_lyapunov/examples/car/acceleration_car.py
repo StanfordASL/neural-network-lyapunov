@@ -158,7 +158,8 @@ class AccelerationCarReLUModel:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
@@ -188,7 +189,7 @@ class AccelerationCarReLUModel:
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "acceleration_car_forward_dynamics_ineq",
-                "acceleration_car_forward_dynamics_eq", None)
+                "acceleration_car_forward_dynamics_eq", None, lp_relaxation)
         # Now add the constraint on the network output
         # pos[n+1] - pos[n] = ϕ(theta[n], vel[n], theta_dot[n], accel[n])
         #                    - ϕ(0, 0, 0, 0)
@@ -219,5 +220,5 @@ class AccelerationCarReLUModel:
                        name="acceleration_car_theta_dynamics")
         ret = relu_system.ReLUDynamicsConstraintReturn(
             forward_slack, forward_binary)
-        ret.from_mip_cnstr_return(mip_cnstr_result)
+        ret.from_mip_cnstr_return(mip_cnstr_result, input_vars)
         return ret

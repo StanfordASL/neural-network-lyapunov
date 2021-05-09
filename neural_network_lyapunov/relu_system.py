@@ -202,6 +202,7 @@ class ReLUDynamicsConstraintReturn(
         hybrid_linear_system.DynamicsConstraintReturn):
     def __init__(self, slack, binary):
         super(ReLUDynamicsConstraintReturn, self).__init__(slack, binary)
+        self.nn_input = None
         self.nn_input_lo = None
         self.nn_input_up = None
         self.nn_output_lo = None
@@ -212,10 +213,12 @@ class ReLUDynamicsConstraintReturn(
         self.relu_output_up = None
 
     def from_mip_cnstr_return(self, mip_cnstr_return: relu_to_optimization.
-                              ReLUMixedIntegerConstraintsReturn):
+                              ReLUMixedIntegerConstraintsReturn,
+                              nn_input: list):
         assert (isinstance(
             mip_cnstr_return,
             relu_to_optimization.ReLUMixedIntegerConstraintsReturn))
+        self.nn_input = nn_input
         self.nn_input_lo = mip_cnstr_return.nn_input_lo
         self.nn_input_up = mip_cnstr_return.nn_input_up
         self.nn_output_lo = mip_cnstr_return.nn_output_lo
@@ -319,11 +322,12 @@ class ReLUSystem:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up)
+                                             additional_u_up, lp_relaxation)
 
 
 class ReLUSystemGivenEquilibrium:
@@ -430,11 +434,12 @@ class ReLUSystemGivenEquilibrium:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up)
+                                             additional_u_up, lp_relaxation)
 
 
 class ReLUSecondOrderSystemGivenEquilibrium:
@@ -588,11 +593,12 @@ class ReLUSecondOrderSystemGivenEquilibrium:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up)
+                                             additional_u_up, lp_relaxation)
 
 
 class ReLUSecondOrderResidueSystemGivenEquilibrium:
@@ -711,7 +717,8 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         u_lo = self.u_lo if additional_u_lo is None else torch.max(
             self.u_lo, additional_u_lo)
         u_up = self.u_up if additional_u_up is None else torch.min(
@@ -728,7 +735,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "residue_forward_dynamics_ineq",
-                "residue_forward_dynamics_eq", None)
+                "residue_forward_dynamics_eq", None, lp_relaxation)
         # We want to impose the constraint
         # v[n+1] = v[n] + ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
         #        = v[n] + Aout_slack * s + Cout - ϕ(x̅*, u*)
@@ -767,7 +774,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
                         sense=gurobipy.GRB.EQUAL,
                         name="update_q_next")
         ret = ReLUDynamicsConstraintReturn(forward_slack, forward_binary)
-        ret.from_mip_cnstr_return(mip_cnstr_result)
+        ret.from_mip_cnstr_return(mip_cnstr_result, input_vars)
         return ret
 
 
@@ -779,16 +786,18 @@ def _add_dynamics_mip_constraints(mip,
                                   slack_var_name,
                                   binary_var_name,
                                   additional_u_lo: torch.Tensor = None,
-                                  additional_u_up: torch.Tensor = None):
+                                  additional_u_up: torch.Tensor = None,
+                                  lp_relaxation=False):
     u_lo = relu_system.u_lo if additional_u_lo is None else torch.max(
         relu_system.u_lo, additional_u_lo)
     u_up = relu_system.u_up if additional_u_up is None else torch.min(
         relu_system.u_up, additional_u_up)
     mip_cnstr = relu_system.mixed_integer_constraints(u_lo, u_up)
+    input_vars = x_var + u_var
     slack, binary = mip.add_mixed_integer_linear_constraints(
-        mip_cnstr, x_var + u_var, x_next_var, slack_var_name, binary_var_name,
+        mip_cnstr, input_vars, x_next_var, slack_var_name, binary_var_name,
         "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
-        "relu_forward_dynamics_output")
+        "relu_forward_dynamics_output", lp_relaxation)
     ret = ReLUDynamicsConstraintReturn(slack, binary)
-    ret.from_mip_cnstr_return(mip_cnstr)
+    ret.from_mip_cnstr_return(mip_cnstr, input_vars)
     return ret

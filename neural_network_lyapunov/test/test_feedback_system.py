@@ -216,6 +216,47 @@ class TestFeedbackSystem(unittest.TestCase):
         # Make sure we get smaller objective with the strengthened constraint.
         self.assertGreater(obj_val, milp.gurobi_model.ObjVal)
 
+    def test_strengthen_dynamics_constraint(self):
+        x_equilibrium = torch.tensor([0.5, 0.2, 0.1], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.2, -0.3], dtype=self.dtype)
+        forward_system = self.construct_relu_forward_system_given_equilibrium(
+            x_equilibrium, u_equilibrium)
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x_var = milp.addVars(forward_system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        dut = feedback_system.FeedbackSystem(
+            forward_system, self.controller_network1, x_equilibrium,
+            u_equilibrium,
+            forward_system.u_lo.detach().numpy(),
+            forward_system.u_up.detach().numpy())
+        x_next_var = milp.addVars(forward_system.x_dim,
+                                  lb=-gurobipy.GRB.INFINITY)
+        u_var, forward_dynamics_return, controller_mip_cnstr_return = \
+            dut.add_dynamics_mip_constraint(
+                milp, x_var, x_next_var, "u", "forward_slack",
+                "forward_binary", "controller_slack", "controller_binary",
+                lp_relaxation=True)
+        self.assertEqual(len(forward_dynamics_return.nn_input),
+                         forward_system.x_dim + forward_system.u_dim)
+        for v in forward_dynamics_return.binary:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+        for vi in controller_mip_cnstr_return.binary:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+        # Now solve this MIP with an arbitrary cost.
+        milp.setObjective(
+            [torch.ones(
+                (forward_system.x_dim, ), dtype=self.dtype)], [x_next_var],
+            constant=0.,
+            sense=gurobipy.GRB.MAXIMIZE)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp.gurobi_model.optimize()
+        self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        milp_objective = milp.gurobi_model.ObjVal
+        dut.strengthen_dynamics_constraint(milp, forward_dynamics_return,
+                                           controller_mip_cnstr_return)
+        # Now solve the MILP again with strengthened constraint.
+        milp.gurobi_model.optimize()
+        self.assertLess(milp.gurobi_model.ObjVal, milp_objective)
+
     def construct_relu_forward_system_given_equilibrium(
             self, x_equilibrium, u_equilibrium):
         forward_network_params = torch.tensor([
