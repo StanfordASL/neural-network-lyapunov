@@ -300,7 +300,8 @@ class QuadrotorWithPixhawkReLUSystem:
                                 slack_var_name,
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None):
+                                additional_u_up: torch.Tensor = None,
+                                lp_relaxation=False):
         """
         Add the dynamic constraint
         pos[n+1] = pos[n] + (v[n] + v[n+1]) * dt / 2
@@ -325,7 +326,7 @@ class QuadrotorWithPixhawkReLUSystem:
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "quadrotor_forward_dynamics_ineq",
-                "quadrotor_forward_dynamics_eq", None)
+                "quadrotor_forward_dynamics_eq", None, lp_relaxation)
         # Impose the constraint
         # [vel[n+1], rpy[n+1]] = [vel[n], rpy[n]] + ϕ(rpy[n], u[n])
         #                       - ϕ(0, u*)
@@ -360,7 +361,7 @@ class QuadrotorWithPixhawkReLUSystem:
                         name="update_pos_next")
         ret = relu_system.ReLUDynamicsConstraintReturn(
             forward_slack, forward_binary)
-        ret.from_mip_cnstr_return(mip_cnstr_result)
+        ret.from_mip_cnstr_return(mip_cnstr_result, input_vars)
         return ret
 
 
@@ -473,7 +474,7 @@ class QuadrotorReLUSystem:
     def _add_dynamics_constraint_given_relu_bounds(
             self, mip, x_var, x_next_var, u_var, slack_var_name,
             binary_var_name, relu_input_lo, relu_input_up, network_input_lo,
-            network_input_up):
+            network_input_up, lp_relaxation):
         mip_cnstr_result = self.dynamics_relu_free_pattern._output_constraint_given_bounds(  # noqa
             relu_input_lo, relu_input_up, network_input_lo, network_input_up)
         # First add mip_cnstr_result, but don't impose the constraint on the
@@ -483,7 +484,7 @@ class QuadrotorReLUSystem:
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "quadrotor_dynamics_ineq",
-                "quadrotor_dynamics_eq", None)
+                "quadrotor_dynamics_eq", None, lp_relaxation)
         # Impose the constraint
         # (rpy[n+1], pos_dot[n+1]-pos_dot[n], angular_vel[n+1])
         # = ϕ(rpy[n], angular_vel[n], thrust[n]) - ϕ(0, 0, hover_thrust)
@@ -518,7 +519,7 @@ class QuadrotorReLUSystem:
                         name="update_pos")
         ret = relu_system.ReLUDynamicsConstraintReturn(
             forward_slack, forward_binary)
-        ret.from_mip_cnstr_return(mip_cnstr_result)
+        ret.from_mip_cnstr_return(mip_cnstr_result, input_vars)
         return ret
 
     def add_dynamics_constraint(self,
@@ -530,7 +531,8 @@ class QuadrotorReLUSystem:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                create_lp_prog_callback=None):
+                                create_lp_prog_callback=None,
+                                lp_relaxation=False):
         """
         Add the dynamics constraints
         pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt
@@ -560,4 +562,5 @@ class QuadrotorReLUSystem:
 
         return self._add_dynamics_constraint_given_relu_bounds(
             mip, x_var, x_next_var, u_var, slack_var_name, binary_var_name,
-            relu_input_lo, relu_input_up, network_input_lo, network_input_up)
+            relu_input_lo, relu_input_up, network_input_lo, network_input_up,
+            lp_relaxation)
