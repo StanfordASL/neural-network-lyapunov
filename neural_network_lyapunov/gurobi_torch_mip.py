@@ -48,6 +48,16 @@ class MixedIntegerConstraintsReturn:
         self.binary_lo = None
 
 
+"""
+binary relaxed variables. This variable is registered as continuous
+variable in the range of [0, 1] in Gurobi, but GurobiTorchMIP regards
+it as part of zeta (the binary variables). This type is used in first
+relaxing the MIP to LP, and then we will change this variable to binary
+variable to solve the MIP.
+"""
+BINARYRELAX = 'BR'
+
+
 class GurobiTorchMIP:
     """
     This class will be used in computing the gradient of an MIP optimal cost
@@ -105,10 +115,20 @@ class GurobiTorchMIP:
         assert (isinstance(ub, torch.Tensor))
         assert (lb.shape == (num_vars, ))
         assert (ub.shape == (num_vars, ))
+        if vtype == BINARYRELAX:
+            # Register the variable in gurobi as a continuous variable in the
+            # range of [0, 1]
+            var_lb = torch.max(torch.tensor(0., dtype=self.dtype), lb)
+            var_ub = torch.min(torch.tensor(1., dtype=self.dtype), ub)
+            gurobi_vtype = gurobipy.GRB.CONTINUOUS
+        else:
+            var_lb = lb
+            var_ub = ub
+            gurobi_vtype = vtype
         new_vars = self.gurobi_model.addVars(num_vars,
-                                             lb=lb,
-                                             ub=ub,
-                                             vtype=vtype,
+                                             lb=var_lb,
+                                             ub=var_ub,
+                                             vtype=gurobi_vtype,
                                              name=name)
         self.gurobi_model.update()
         if vtype == gurobipy.GRB.CONTINUOUS:
@@ -138,7 +158,10 @@ class GurobiTorchMIP:
                     self.Aeq_r_col.append(num_existing_r + i)
                     self.Aeq_r_val.append(torch.tensor(1, dtype=self.dtype))
                     self.rhs_eq.append(lb[i])
-        elif vtype == gurobipy.GRB.BINARY:
+        elif vtype == gurobipy.GRB.BINARY or vtype == BINARYRELAX:
+            # If the variable is binary_relax, then we append it to zeta,
+            # which records its coefficient so that later we will
+            # differentiate the MIP solution with these coefficients.
             num_existing_zeta = len(self.zeta_indices)
             self.zeta.extend([new_vars[i] for i in range(num_vars)])
             for i in range(num_vars):
@@ -655,6 +678,9 @@ class GurobiTorchMIP:
         increase by 10 steps at most. If the objectives still don't match,
         throw an exception.
         """
+        # Each variable in zeta should be a binary variable.
+        for v in self.zeta:
+            assert (v.vtype == gurobipy.GRB.BINARY)
         assert (solution_number >= 0
                 and solution_number < self.gurobi_model.solCount)
         assert (self.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL
@@ -695,6 +721,16 @@ class GurobiTorchMIP:
             else:
                 objective_match = True
                 return objective
+
+    def remove_binary_relaxation(self):
+        """
+        Loop through all the variables in self.zeta, if the variable is not
+        registered as a binary variable in gurobi, then set its vtype to
+        BINARY.
+        """
+        for v in self.zeta:
+            if v.vtype == gurobipy.GRB.CONTINUOUS:
+                v.vtype = gurobipy.GRB.BINARY
 
 
 class GurobiTorchMILP(GurobiTorchMIP):

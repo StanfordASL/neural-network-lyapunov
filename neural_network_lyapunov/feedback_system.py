@@ -192,6 +192,9 @@ class FeedbackSystem:
         u_lower_bound, u_upper_bound = _add_input_saturation_constraint(
             prog, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
             u_pre_sat_lo, u_pre_sat_up, self.dtype, lp_relaxation)
+        # Note that controller_binary only contains the binary variables in
+        # the relu network. It doesn't contain the binary variables in the
+        # saturation block.
         return controller_slack, controller_binary, u_lower_bound,\
             u_upper_bound, controller_pre_relu_lo, controller_pre_relu_up
 

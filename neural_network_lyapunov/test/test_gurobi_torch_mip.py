@@ -172,6 +172,55 @@ class TestGurobiTorchMIP(unittest.TestCase):
         self.assertEqual(len(dut.Aeq_zeta_col), 0)
         self.assertEqual(len(dut.Aeq_zeta_val), 0)
 
+    def test_addVars4(self):
+        # Test addVars with vtype = BINARYRELAX
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x = dut.addVars(2,
+                        lb=-gurobipy.GRB.INFINITY,
+                        vtype=gurobi_torch_mip.BINARYRELAX,
+                        name="x")
+        self.assertEqual(len(x), 2)
+        self.assertEqual(
+            dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumBinVars), 0)
+        self.assertEqual(dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumVars),
+                         2)
+        for i in range(2):
+            self.assertEqual(x[i].lb, 0.)
+            self.assertEqual(x[i].ub, 1.)
+            self.assertEqual(x[i].vtype, gurobipy.GRB.CONTINUOUS)
+        # Now check if x is registered in zeta
+        self.assertEqual(len(dut.zeta), 2)
+        self.assertEqual(len(dut.r), 0)
+
+        # Now add binary_relax variable with specified bounds.
+        y = dut.addVars(3, lb=0.5, ub=0.6, vtype=gurobi_torch_mip.BINARYRELAX)
+        self.assertEqual(dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumVars),
+                         5)
+        self.assertEqual(
+            dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumBinVars), 0)
+        for i in range(3):
+            self.assertEqual(y[i].lb, 0.5)
+            self.assertEqual(y[i].ub, 0.6)
+            self.assertEqual(y[i].vtype, gurobipy.GRB.CONTINUOUS)
+        # Now check if y is registered in zeta
+        self.assertEqual(len(dut.zeta), 5)
+        self.assertEqual(len(dut.r), 0)
+
+        # Now add a constraint on x and y. I should expect to see coefficients
+        # on zeta.
+        dut.addLConstr(
+            [torch.ones((2, ), dtype=dtype),
+             torch.ones((3, ), dtype=dtype)], [x, y],
+            rhs=1.,
+            sense=gurobipy.GRB.EQUAL)
+        self.assertEqual(len(dut.Aeq_r_row), 0)
+        self.assertEqual(len(dut.Aeq_r_col), 0)
+        self.assertEqual(len(dut.Aeq_r_val), 0)
+        self.assertEqual(len(dut.Aeq_zeta_row), 5)
+        self.assertEqual(len(dut.Aeq_zeta_col), 5)
+        self.assertEqual(len(dut.Aeq_zeta_val), 5)
+
     def test_addLConstr(self):
         dut = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
         x = dut.addVars(2, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
@@ -908,6 +957,22 @@ class TestGurobiTorchMIP(unittest.TestCase):
         ]
         self.assertEqual(mip.Ain_r_col[:4],
                          binary_relax_indices + binary_relax_indices)
+
+    def test_remove_binary_relaxation(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x = dut.addVars(2, vtype=gurobi_torch_mip.BINARYRELAX)
+        dut.addVars(3, vtype=gurobipy.GRB.CONTINUOUS)
+        self.assertEqual(
+            dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumBinVars), 0)
+        for i in range(2):
+            self.assertEqual(x[i].vtype, gurobipy.GRB.CONTINUOUS)
+        dut.remove_binary_relaxation()
+        dut.gurobi_model.update()
+        self.assertEqual(
+            dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumBinVars), 2)
+        for i in range(2):
+            self.assertEqual(x[i].vtype, gurobipy.GRB.BINARY)
 
 
 class TestGurobiTorchMILP(unittest.TestCase):
