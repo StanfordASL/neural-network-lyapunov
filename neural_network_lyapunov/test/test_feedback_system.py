@@ -192,7 +192,12 @@ class TestFeedbackSystem(unittest.TestCase):
             forward_system.u_lo.detach().numpy(),
             forward_system.u_up.detach().numpy())
         mip_cnstr_return = dut._add_controller_mip_constraint(
-            milp, x_var, u_var, "s", "b", lp_relaxation=True)
+            milp,
+            x_var,
+            u_var,
+            "s",
+            "b",
+            binary_var_type=gurobi_torch_mip.BINARYRELAX)
         # Now solve this MIP with an arbitrary cost.
         milp.setObjective(
             [torch.ones((forward_system.u_dim, ), dtype=self.dtype)], [u_var],
@@ -234,7 +239,7 @@ class TestFeedbackSystem(unittest.TestCase):
             dut.add_dynamics_mip_constraint(
                 milp, x_var, x_next_var, "u", "forward_slack",
                 "forward_binary", "controller_slack", "controller_binary",
-                lp_relaxation=True)
+                binary_var_type=gurobi_torch_mip.BINARYRELAX)
         self.assertEqual(len(forward_dynamics_return.nn_input),
                          forward_system.x_dim + forward_system.u_dim)
         for v in forward_dynamics_return.binary:
@@ -677,7 +682,12 @@ class TestFeedbackSystem(unittest.TestCase):
                             vtype=gurobipy.GRB.CONTINUOUS,
                             name="u")
         controller_mip_cnstr_return = dut._add_controller_mip_constraint(
-            mip, x_var, u_var, "slack", "binary", lp_relaxation=False)
+            mip,
+            x_var,
+            u_var,
+            "slack",
+            "binary",
+            binary_var_type=gurobipy.GRB.BINARY)
         for v in controller_mip_cnstr_return.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Now add constraint on x_var = x_val
@@ -691,7 +701,7 @@ class TestFeedbackSystem(unittest.TestCase):
         u_val_expected = dut.compute_u(x_val)
         np.testing.assert_allclose(u_val, u_val_expected.detach().numpy())
 
-        # Now test with lp_relaxation=True
+        # Now test with binary_var_type=BINARYRELAX
         lp = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
         x_var_lp = lp.addVars(dut.x_dim,
                               lb=-gurobipy.GRB.INFINITY,
@@ -702,7 +712,12 @@ class TestFeedbackSystem(unittest.TestCase):
                               vtype=gurobipy.GRB.CONTINUOUS,
                               name="u")
         controller_mip_cnstr_return_lp = dut._add_controller_mip_constraint(
-            lp, x_var_lp, u_var_lp, "slack", "binary", lp_relaxation=True)
+            lp,
+            x_var_lp,
+            u_var_lp,
+            "slack",
+            "binary",
+            binary_var_type=gurobipy.GRB.CONTINUOUS)
         self.assertEqual(len(lp.zeta), 0)
         for v in controller_mip_cnstr_return_lp.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
@@ -764,7 +779,8 @@ class TestAddInputSaturationConstraint(unittest.TestCase):
         u_lower_bound, u_upper_bound = \
             feedback_system._add_input_saturation_constraint(
                 mip, u_var, u_pre_sat, u_lower_limit, u_upper_limit,
-                u_pre_sat_lo, u_pre_sat_up, dtype, lp_relaxation=False)
+                u_pre_sat_lo, u_pre_sat_up, dtype,
+                binary_var_type=gurobipy.GRB.BINARY)
         for i in range(u_dim):
             self.assertEqual(
                 u_lower_bound[i].item(),
@@ -794,14 +810,15 @@ class TestAddInputSaturationConstraint(unittest.TestCase):
                     u_val[j] = u_lower_limit[j]
             np.testing.assert_allclose(np.array([v.x for v in u_var]), u_val)
 
-        # Now test lp_relaxation=True
+        # Now test binary_var_type=CONTINUOUS
         lp = gurobi_torch_mip.GurobiTorchMIP(dtype)
         u_var_lp = lp.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
         u_pre_sat_lp = lp.addVars(u_dim, lb=-gurobipy.GRB.INFINITY)
         u_lower_bound_lp, u_upper_bound_lp = \
             feedback_system._add_input_saturation_constraint(
                 lp, u_var_lp, u_pre_sat_lp, u_lower_limit, u_upper_limit,
-                u_pre_sat_lo, u_pre_sat_up, dtype, lp_relaxation=True)
+                u_pre_sat_lo, u_pre_sat_up, dtype,
+                binary_var_type=gurobipy.GRB.CONTINUOUS)
         self.assertEqual(len(lp.zeta), 0)
         np.testing.assert_allclose(u_lower_bound.detach().numpy(),
                                    u_lower_bound_lp.detach().numpy())

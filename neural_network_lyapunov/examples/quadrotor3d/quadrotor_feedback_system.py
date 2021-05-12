@@ -88,7 +88,7 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     controller_network_output_up,
                     controller_slack_var_name,
                     controller_binary_var_name,
-                    lp_relaxation=False)
+                    binary_var_type=gurobipy.GRB.BINARY)
             controller_mip_cnstr_return = \
                 feedback_system.ControllerMipConstraintReturn(
                     nn_input=x_var,
@@ -122,16 +122,16 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                                         vtype=gurobipy.GRB.CONTINUOUS)
                 if self.controller_network_bound_propagate_method ==\
                         mip_utils.PropagateBoundsMethod.LP:
-                    lp_relaxation1 = True
+                    binary_var_type1 = gurobipy.GRB.CONTINUOUS
                 elif self.controller_network_bound_propagate_method ==\
                         mip_utils.PropagateBoundsMethod.MIP:
-                    lp_relaxation1 = False
+                    binary_var_type1 = gurobipy.GRB.BINARY
                 self._add_network_controller_mip_constraint_given_relu_bound(
                     prog, x_var_lp, u_var_lp, controller_relu_input_lo,
                     controller_relu_input_up, controller_network_input_lo,
                     controller_network_input_up, controller_network_output_lo,
                     controller_network_output_up, "controller_slack",
-                    "controller_binary_relax", lp_relaxation1)
+                    "controller_binary_relax", binary_var_type1)
                 forward_network_input_var = x_var_lp[3:6] + x_var_lp[
                     9:12] + u_var_lp
                 return prog, forward_network_input_var

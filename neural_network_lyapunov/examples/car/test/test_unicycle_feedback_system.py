@@ -101,7 +101,7 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
         controller_mip_cnstr_return = \
             self.dut._add_network_controller_mip_constraint(
                 mip, x_var, u_var, "controlelr_slack", "controller_binary",
-                lp_relaxation=False)
+                binary_var_type=gurobipy.GRB.BINARY)
         u_lower_bound = controller_mip_cnstr_return.u_lower_bound
         u_upper_bound = controller_mip_cnstr_return.u_upper_bound
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
@@ -140,7 +140,7 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
                 u_var,
                 "controller_slack",
                 "controller_binary",
-                lp_relaxation=False)
+                binary_var_type=gurobipy.GRB.BINARY)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         for i in range(2):
             mip.setObjective([torch.tensor([1.], dtype=self.dtype)],

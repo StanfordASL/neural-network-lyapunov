@@ -77,7 +77,7 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
                 output_up = compute_xhat._compute_network_at_xhat(
                     mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
                     x_lb, x_ub, mip_utils.PropagateBoundsMethod.IA,
-                    lp_relaxation=False)
+                    binary_var_type=gurobipy.GRB.BINARY)
 
             # Now fix x_var to x_val, and check the solution ϕ(x̂)
             x_val = torch.tensor([-1.2, 0.5, -0.8], dtype=dtype)
@@ -111,7 +111,7 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
         tester(xhat_indices=[0, 2])
         tester(xhat_indices=[0])
 
-    def test_with_lp_relaxation(self):
+    def test_with_binary_as_continuous(self):
         dtype = torch.float64
         mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
         x_var = mip.addVars(3, lb=-gurobipy.GRB.INFINITY)
@@ -130,7 +130,7 @@ class TestComputeNetworkAtXhat(unittest.TestCase):
             output_up = compute_xhat._compute_network_at_xhat(
                 mip, x_var, x_equilibrium, relu_free_pattern, xhat_indices,
                 x_lb, x_ub, mip_utils.PropagateBoundsMethod.IA,
-                lp_relaxation=True)
+                gurobipy.GRB.CONTINUOUS)
         self.assertEqual(len(mip.zeta), 0)
 
 

@@ -62,14 +62,19 @@ class LyapunovHybridLinearSystem:
         self.network_bound_propagate_method = \
             mip_utils.PropagateBoundsMethod.IA
 
-    def add_system_constraint(self, milp, x, x_next, *, lp_relaxation=False):
+    def add_system_constraint(self,
+                              milp,
+                              x,
+                              x_next,
+                              *,
+                              binary_var_type=gurobipy.GRB.BINARY):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         Add the constraint and variables to write the hybrid linear system
         dynamics as mixed-integer linear constraints.
-        @param lp_relaxation Relax the binary variable to continuous variable
-        within [0, 1].
+        @param binary_var_type Refer to GurobiTorchMIP.addVars for more
+        details.
         """
         if isinstance(
             self.system, hybrid_linear_system.AutonomousHybridLinearSystem)\
@@ -85,7 +90,7 @@ class LyapunovHybridLinearSystem:
             s, gamma = milp.add_mixed_integer_linear_constraints(
                 mip_cnstr_return, x, x_next, "s", "gamma",
                 "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
-                "hybrid_output_dynamics", lp_relaxation)
+                "hybrid_output_dynamics", binary_var_type)
             return s, gamma
 
         elif isinstance(self.system, feedback_system.FeedbackSystem):
@@ -107,7 +112,7 @@ class LyapunovHybridLinearSystem:
                                         slack_name="relu_z",
                                         binary_var_name="relu_beta",
                                         *,
-                                        lp_relaxation=False):
+                                        binary_var_type=gurobipy.GRB.BINARY):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -125,7 +130,7 @@ class LyapunovHybridLinearSystem:
             self.network_bound_propagate_method)
         relu_z, relu_beta = milp.add_mixed_integer_linear_constraints(
             mip_constr_return, x, None, slack_name, binary_var_name,
-            "milp_relu_ineq", "milp_relu_eq", "", lp_relaxation)
+            "milp_relu_ineq", "milp_relu_eq", "", binary_var_type)
         return (relu_z, relu_beta, mip_constr_return.Aout_slack.squeeze(),
                 mip_constr_return.Cout.squeeze())
 
@@ -139,7 +144,7 @@ class LyapunovHybridLinearSystem:
                                       binary_var_name="alpha",
                                       fixed_R=True,
                                       xbar_indices=None,
-                                      lp_relaxation=False):
+                                      binary_var_type=gurobipy.GRB.BINARY):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
@@ -172,16 +177,11 @@ class LyapunovHybridLinearSystem:
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name=slack_name)
-        if lp_relaxation:
-            alpha = milp.addVars(s_dim,
-                                 lb=0.,
-                                 ub=1.,
-                                 vtype=gurobipy.GRB.CONTINUOUS,
-                                 name=binary_var_name)
-        else:
-            alpha = milp.addVars(s_dim,
-                                 vtype=gurobipy.GRB.BINARY,
-                                 name=binary_var_name)
+        alpha = milp.addVars(s_dim,
+                             lb=0.,
+                             ub=1.,
+                             vtype=binary_var_type,
+                             name=binary_var_name)
 
         s_lb, s_ub = mip_utils.compute_range_by_IA(
             R, -R @ x_equilibrium[xbar_indices],
@@ -465,7 +465,8 @@ class LyapunovHybridLinearSystem:
                     mip, x_var, x_equilibrium, self.lyapunov_relu_free_pattern,
                     xhat_indices, torch.from_numpy(self.system.x_lo_all),
                     torch.from_numpy(self.system.x_up_all),
-                    self.network_bound_propagate_method, lp_relaxation=False)
+                    self.network_bound_propagate_method,
+                    binary_var_type=gurobipy.GRB.BINARY)
             relu_xhat_coeff = [relu_xhat_aout.squeeze()]
             relu_xhat_var = [relu_xhat_slack]
             relu_xhat_constant = relu_xhat_cout.squeeze()
@@ -683,7 +684,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                     x_warmstart=None,
                                     xbar_indices=None,
                                     xhat_indices=None,
-                                    lp_relaxation=False):
+                                    binary_var_type=gurobipy.GRB.BINARY):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x̂) + λ|R*(x̅-x̅*)|₁, where x* is the equilibrium
@@ -768,7 +769,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         s, gamma = self.add_system_constraint(milp,
                                               x,
                                               x_next,
-                                              lp_relaxation=lp_relaxation)
+                                              binary_var_type=binary_var_type)
         # warmstart the binary variables
         if x_warmstart is not None and (
                 isinstance(self.system, relu_system.AutonomousReLUSystem)
@@ -785,7 +786,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
         (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(
-            milp, x, lp_relaxation=lp_relaxation)
+            milp, x, binary_var_type=binary_var_type)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -808,7 +809,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             binary_var_name="beta_x_norm",
             fixed_R=fixed_R,
             xbar_indices=xbar_indices,
-            lp_relaxation=lp_relaxation)
+            binary_var_type=binary_var_type)
         # Now add the mixed-integer linear constraint to represent
         # |R*(x̅[n+1] - x̅*)|₁. To do so, we introduce the slack variable
         # s_x_next_norm, beta_x_next_norm.
@@ -822,7 +823,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             binary_var_name="beta_x_next_norm",
             fixed_R=fixed_R,
             xbar_indices=xbar_indices,
-            lp_relaxation=lp_relaxation)
+            binary_var_type=binary_var_type)
 
         # Compute ϕ(x̂[n])
         if xhat_indices is not None and xhat_indices != list(
@@ -833,7 +834,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                     xhat_indices, torch.from_numpy(self.system.x_lo_all),
                     torch.from_numpy(self.system.x_up_all),
                     self.network_bound_propagate_method,
-                    lp_relaxation=lp_relaxation)
+                    binary_var_type)
             relu_xhat_var = [slack_hat]
             relu_xhat_coeff = [a_out_hat.squeeze()]
             relu_xhat_constant = b_out_hat.squeeze()
@@ -844,7 +845,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                     torch.from_numpy(self.system.x_lo_all),
                     torch.from_numpy(self.system.x_up_all),
                     self.network_bound_propagate_method,
-                    lp_relaxation=lp_relaxation)
+                    binary_var_type)
             relu_xhat_next_var = [slack_hat_next]
             if x_warmstart is not None:
                 xhat_warmstart = compute_xhat._get_xhat_val(
@@ -871,10 +872,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
-        (z_next, beta_next, _,
-         _) = self.add_lyap_relu_output_constraint(milp,
-                                                   x_next,
-                                                   lp_relaxation=lp_relaxation)
+        (z_next, beta_next, _, _) = self.add_lyap_relu_output_constraint(
+            milp, x_next, binary_var_type=binary_var_type)
 
         # warmstart the binary variables
         if x_warmstart is not None:

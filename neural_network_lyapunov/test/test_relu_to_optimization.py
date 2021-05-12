@@ -265,13 +265,15 @@ class TestReLU(unittest.TestCase):
                     con.append(
                         mip_constr_return.Ain_input.detach().numpy() @ x_np +
                         mip_constr_return.Ain_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Ain_binary.detach().numpy() @ beta_var  # noqa
+                        mip_constr_return.Ain_binary.detach().numpy()
+                        @ beta_var  # noqa
                         <= mip_constr_return.rhs_in.squeeze().detach().numpy())
                 if mip_constr_return.rhs_eq.shape[0] != 0:
                     con.append(
                         mip_constr_return.Aeq_input.detach().numpy() @ x_np +
                         mip_constr_return.Aeq_slack.detach().numpy() @ z_var +
-                        mip_constr_return.Aeq_binary.detach().numpy() @ beta_var  # noqa
+                        mip_constr_return.Aeq_binary.detach().numpy()
+                        @ beta_var  # noqa
                         == mip_constr_return.rhs_eq.squeeze().detach().numpy())
                 objective = cp.Minimize(0.)
                 prob = cp.Problem(objective, con)
@@ -706,7 +708,7 @@ class TestReLU(unittest.TestCase):
             "",
             "",
             "",
-            lp_relaxation=True)
+            binary_var_type=gurobi_torch_mip.BINARYRELAX)
         # Optimize an arbitrary cost.
         prog.setObjective(
             [torch.ones(
@@ -766,7 +768,7 @@ class TestReLU(unittest.TestCase):
             "",
             "",
             "",
-            lp_relaxation=True)
+            binary_var_type=gurobi_torch_mip.BINARYRELAX)
         # Optimize an arbitrary cost.
         prog.setObjective([cost_coeff_output], [nn_out],
                           constant=0.,
@@ -1054,17 +1056,17 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
                              previous_neuron_input_lo,
                              previous_neuron_input_up, network_input_lo,
                              network_input_up, create_prog_callback,
-                             input_checker, lp_relaxation):
+                             input_checker, binary_var_type):
         linear_output_lo, linear_output_up, lo_input_val, up_input_val = \
             dut._compute_linear_output_bound_by_optimization(
                 layer_index, linear_output_row_index, previous_neuron_input_lo,
                 previous_neuron_input_up, network_input_lo, network_input_up,
-                create_prog_callback, lp_relaxation)
+                create_prog_callback, binary_var_type)
         truncated_network = torch.nn.Sequential(
             *[dut.model[i] for i in range(2 * layer_index + 1)])
-        if not lp_relaxation:
+        if binary_var_type == gurobipy.GRB.BINARY:
             if lo_input_val is not None:
-                # Now evaluat ethat linear layer output
+                # Now evaluate that linear layer output
                 self.assertAlmostEqual(
                     linear_output_lo,
                     truncated_network(lo_input_val)
@@ -1138,7 +1140,7 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
         return linear_output_lo, linear_output_up
 
     def given_relu_test(self, relu, network_input_lo, network_input_up,
-                        create_prog_callback, input_checker, lp_relaxation):
+                        create_prog_callback, input_checker, binary_var_type):
         dut = relu_to_optimization.ReLUFreePattern(relu, self.dtype)
         previous_neuron_input_lo = np.zeros((dut.num_relu_units, ))
         previous_neuron_input_up = np.zeros((dut.num_relu_units, ))
@@ -1151,7 +1153,7 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
                         dut, 0, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
                         network_input_up, create_prog_callback, input_checker,
-                        lp_relaxation)
+                        binary_var_type)
         # Now test the second layer.
         for i in range(self.relu_with_bias[2].out_features):
             previous_neuron_input_lo[
@@ -1160,7 +1162,7 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
                         dut, 1, i, previous_neuron_input_lo,
                         previous_neuron_input_up, network_input_lo,
                         network_input_up, create_prog_callback, input_checker,
-                        lp_relaxation)
+                        binary_var_type)
 
     def test_relu_with_bias(self):
         def checker(x):
@@ -1168,22 +1170,24 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
 
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        for lp_relaxation in (True, False):
+        for binary_var_type in (gurobipy.GRB.BINARY, gurobipy.GRB.CONTINUOUS,
+                                gurobi_torch_mip.BINARYRELAX):
             self.given_relu_test(self.relu_with_bias,
                                  network_input_lo,
                                  network_input_up,
                                  create_prog_callback=None,
                                  input_checker=checker,
-                                 lp_relaxation=lp_relaxation)
+                                 binary_var_type=binary_var_type)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
-        for lp_relaxation in (True, False):
+        for binary_var_type in (gurobipy.GRB.BINARY, gurobipy.GRB.CONTINUOUS,
+                                gurobi_torch_mip.BINARYRELAX):
             self.given_relu_test(self.relu_with_bias,
                                  network_input_lo,
                                  network_input_up,
                                  create_prog_callback=None,
                                  input_checker=checker,
-                                 lp_relaxation=lp_relaxation)
+                                 binary_var_type=binary_var_type)
 
     def test_relu_with_bias_create_prog_callback(self):
         # Create a simple program with some constraints.
@@ -1203,10 +1207,11 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
 
         network_input_lo = np.array([0.1, -0.2])
         network_input_up = np.array([2., 1.])
-        for lp_relaxation in (True, False):
+        for binary_var_type in (gurobipy.GRB.BINARY, gurobipy.GRB.CONTINUOUS,
+                                gurobi_torch_mip.BINARYRELAX):
             self.given_relu_test(self.relu_with_bias, network_input_lo,
                                  network_input_up, create_prog_callback,
-                                 checker, lp_relaxation)
+                                 checker, binary_var_type)
 
     def test_relu_no_bias(self):
         def checker(x):
@@ -1214,22 +1219,24 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
 
         network_input_lo = np.array([-2., -3.])
         network_input_up = np.array([-1., 2.])
-        for lp_relaxation in (True, False):
+        for binary_var_type in (gurobipy.GRB.BINARY, gurobipy.GRB.CONTINUOUS,
+                                gurobi_torch_mip.BINARYRELAX):
             self.given_relu_test(self.relu_no_bias,
                                  network_input_lo,
                                  network_input_up,
                                  create_prog_callback=None,
                                  input_checker=checker,
-                                 lp_relaxation=lp_relaxation)
+                                 binary_var_type=binary_var_type)
         network_input_lo = np.array([3., 5.])
         network_input_up = np.array([3.1, 10.])
-        for lp_relaxation in (True, False):
+        for binary_var_type in (gurobipy.GRB.CONTINUOUS, gurobipy.GRB.BINARY,
+                                gurobi_torch_mip.BINARYRELAX):
             self.given_relu_test(self.relu_no_bias,
                                  network_input_lo,
                                  network_input_up,
                                  create_prog_callback=None,
                                  input_checker=checker,
-                                 lp_relaxation=lp_relaxation)
+                                 binary_var_type=binary_var_type)
 
 
 class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
@@ -1328,9 +1335,9 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
             output_up_expected = torch.empty((dut.model[-1].out_features, ),
                                              dtype=self.dtype)
             if method == mip_utils.PropagateBoundsMethod.LP:
-                lp_relaxation = True
+                binary_var_type = gurobi_torch_mip.BINARYRELAX
             elif method == mip_utils.PropagateBoundsMethod.MIP:
-                lp_relaxation = False
+                binary_var_type = gurobipy.GRB.BINARY
             for j in range(dut.model[-1].out_features):
                 output_lo_expected[j], output_up_expected[
                     j], _, _ = dut.\
@@ -1342,7 +1349,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
                             create_prog_callback=None,
-                            lp_relaxation=lp_relaxation)
+                            binary_var_type=binary_var_type)
         np.testing.assert_allclose(output_lo.detach().numpy(),
                                    output_lo_expected.detach().numpy())
         np.testing.assert_allclose(output_up.detach().numpy(),

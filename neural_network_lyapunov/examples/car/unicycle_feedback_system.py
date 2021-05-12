@@ -60,7 +60,7 @@ class UnicycleFeedbackSystem(feedback_system.FeedbackSystem):
             controller_pre_relu_up, network_input_lo, network_input_up,
             controller_network_output_lo, controller_network_output_up,
             controller_slack_var_name, controller_binary_var_name,
-            lp_relaxation: bool):
+            binary_var_type):
         assert (isinstance(self.controller_network, torch.nn.Sequential))
         controller_mip_cnstr = self.controller_relu_free_pattern.\
             _output_constraint_given_bounds(
@@ -72,7 +72,7 @@ class UnicycleFeedbackSystem(feedback_system.FeedbackSystem):
             prog.add_mixed_integer_linear_constraints(
                 controller_mip_cnstr, x_var, None,
                 controller_slack_var_name, controller_binary_var_name,
-                "controller_ineq", "controller_eq", "", lp_relaxation)
+                "controller_ineq", "controller_eq", "", binary_var_type)
 
         # Write the part |Rᵤ*[p_x, p_y]|₁ = sum s
         Ru = self.Ru_options.R()
@@ -160,7 +160,7 @@ class UnicycleFeedbackSystem(feedback_system.FeedbackSystem):
         u_lower_bound, u_upper_bound = \
             feedback_system._add_input_saturation_constraint(
                 prog, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
-                u_pre_sat_lo, u_pre_sat_up, self.dtype, lp_relaxation)
+                u_pre_sat_lo, u_pre_sat_up, self.dtype, binary_var_type)
         return controller_slack, controller_binary, u_lower_bound,\
             u_upper_bound, controller_pre_relu_lo, controller_pre_relu_up
 

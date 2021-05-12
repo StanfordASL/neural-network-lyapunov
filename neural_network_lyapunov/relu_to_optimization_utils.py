@@ -150,26 +150,22 @@ def _add_constraint_to_program_by_layer(prog: gurobi_torch_mip.GurobiTorchMIP,
                                         relu_layer, linear_input_var: list,
                                         relu_input_lo: torch.Tensor,
                                         relu_input_up: torch.Tensor,
-                                        lp_relaxation: bool):
+                                        binary_var_type):
     """
     Add the constraint on output = relu(W * input + b).
     @param linear_layer
-    @param lp_relaxation If lp_relaxation is false, then this is added as
-    mixed-integer linear constraints. Otherwise we relax the binary variable to
-    continuous variable within [0, 1].
+    @param binary_var_type The variable type for the binary variable. Check
+    GurobiTorchMIP.addVars() for more details.
     """
     assert (isinstance(prog, gurobi_torch_mip.GurobiTorchMIP))
     assert (isinstance(relu_input_lo, torch.Tensor))
     assert (isinstance(relu_input_up, torch.Tensor))
     relu_output_var = prog.addVars(linear_layer.out_features,
                                    lb=-gurobipy.GRB.INFINITY)
-    if lp_relaxation:
-        relu_activation_var = prog.addVars(linear_layer.out_features,
-                                           lb=0.,
-                                           ub=1.)
-    else:
-        relu_activation_var = prog.addVars(linear_layer.out_features,
-                                           vtype=gurobipy.GRB.BINARY)
+    relu_activation_var = prog.addVars(linear_layer.out_features,
+                                       lb=0.,
+                                       ub=1.,
+                                       vtype=binary_var_type)
     for j in range(linear_layer.out_features):
         bij = torch.tensor(
             0., dtype=linear_layer.weight.dtype

@@ -61,7 +61,7 @@ def _compute_network_at_xhat(
         mip: gurobi_torch_mip.GurobiTorchMIP, x_var: list, x_equilibrium,
         relu_free_pattern: relu_to_optimization.ReLUFreePattern,
         xhat_indices: list, x_lb: torch.Tensor, x_ub: torch.Tensor,
-        method: mip_utils.PropagateBoundsMethod, lp_relaxation: bool):
+        method: mip_utils.PropagateBoundsMethod, binary_var_type):
     """
     Add the mixed-integer linear constraints between ϕ(x̂) and x, where
     x̂[i] = x*[i] if i is in xhat_indices, otherwise x̂[i] = x[i].
@@ -79,7 +79,6 @@ def _compute_network_at_xhat(
                        relu_to_optimization.ReLUFreePattern))
     assert (isinstance(xhat_indices, list))
     assert (isinstance(method, mip_utils.PropagateBoundsMethod))
-    assert (isinstance(lp_relaxation, bool))
     xhat = [var for var in x_var]
     xhat_lb = x_lb.clone()
     xhat_ub = x_ub.clone()
@@ -95,7 +94,7 @@ def _compute_network_at_xhat(
         xhat_lb, xhat_ub, method)
     relu_z, relu_beta = mip.add_mixed_integer_linear_constraints(
         mip_cnstr_return, xhat, None, "relu_xhat_slack", "relu_xhat_binary",
-        "relu_xhat_ineq", "relu_xhat_eq", "", lp_relaxation)
+        "relu_xhat_ineq", "relu_xhat_eq", "", binary_var_type)
     return (relu_z, relu_beta, mip_cnstr_return.Aout_slack,
             mip_cnstr_return.Cout, xhat, mip_cnstr_return.nn_output_lo,
             mip_cnstr_return.nn_output_up)
