@@ -921,7 +921,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
                            torch.tensor([1, 6], dtype=dtype), [-4, -1], [1, 6])
 
     def test_add_mixed_integer_linear_constraints7(self):
-        # Test lp_relaxation=True
+        # Test binary_var_type=CONTINUOUS
         mip_constr_return, dtype = \
             self.setup_mixed_integer_constraints_return()
         mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
@@ -936,7 +936,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
             "ineq",
             "eq",
             "out",
-            lp_relaxation=True)
+            binary_var_type=gurobipy.GRB.CONTINUOUS)
         self.assertEqual(len(binary_relax), 2)
         for v in binary_relax:
             self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
@@ -957,6 +957,40 @@ class TestGurobiTorchMIP(unittest.TestCase):
         ]
         self.assertEqual(mip.Ain_r_col[:4],
                          binary_relax_indices + binary_relax_indices)
+
+    def test_add_mixed_integer_linear_constraints8(self):
+        # Test binary_var_type=BINARYRELAX
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        input_vars = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+        output_vars = mip.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        slack, binary_relax = mip.add_mixed_integer_linear_constraints(
+            mip_constr_return,
+            input_vars,
+            output_vars,
+            "slack",
+            "binary_relax",
+            "ineq",
+            "eq",
+            "out",
+            binary_var_type=gurobi_torch_mip.BINARYRELAX)
+        self.assertEqual(len(binary_relax), 2)
+        for v in binary_relax:
+            self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
+            self.assertEqual(v.lb, 0)
+            self.assertEqual(v.ub, 1)
+        self.assertEqual(len(mip.r), 2 + 1 + 3)
+        self.assertEqual(len(mip.zeta), 2)
+        self.assertEqual(len(mip.Ain_zeta_row), 4)
+        self.assertEqual(len(mip.Ain_zeta_col), 4)
+        self.assertEqual(len(mip.Ain_zeta_val), 4)
+        # Include both the equality constraint in mip_cnstr_return, and also
+        # the equality constraint for output = Aout_input * input +
+        # Aout_binary * binary + Aout_slack * slack
+        self.assertEqual(len(mip.Aeq_zeta_row), 4)
+        self.assertEqual(len(mip.Aeq_zeta_col), 4)
+        self.assertEqual(len(mip.Aeq_zeta_val), 4)
 
     def test_remove_binary_relaxation(self):
         dtype = torch.float64

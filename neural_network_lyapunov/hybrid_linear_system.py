@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import cvxpy as cp
+import gurobipy
 from scipy.integrate import solve_ivp
 import warnings
 
@@ -251,7 +252,7 @@ class HybridLinearSystem:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         if additional_u_lo is not None or additional_u_up is not None:
             warnings.warn(
                 "hybrid linear system don't accept additional u_lo and u_up " +
@@ -262,7 +263,7 @@ class HybridLinearSystem:
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
             binary_var_name, "hybrid_linear_dynamics_ineq",
             "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output",
-            lp_relaxation)
+            binary_var_type)
         return DynamicsConstraintReturn(slack, binary)
 
     def mode(self, x_start, u_start):

@@ -367,7 +367,7 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         """
         Add the dynamic constraints a mixed-integer linear constraints. Refer
         to relu_system.py for the common API.
@@ -427,13 +427,13 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "unicycle_forward_dynamics_ineq",
-                "unicycle_forward_dyamics_eq", None, lp_relaxation)
+                "unicycle_forward_dyamics_eq", None, binary_var_type)
         forward_slack_zero_vel, forward_binary_zero_vel = \
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result_zero_vel, input_vars_zero_vel, None,
                 slack_var_name + "zero_vel", binary_var_name + "zero_vel",
                 "unicycle_forward_dynamics_zero_vel_ineq",
-                "unicycle_forward_dynamics_zero_vel_eq", None, lp_relaxation)
+                "unicycle_forward_dynamics_zero_vel_eq", None, binary_var_type)
         # Now add the constraint on the output of the network, that
         # [delta_pos_x, delta_pos_y] =
         # ϕ(θ[n], vel[n], θ_dot[n])−ϕ(θ[n], 0, θ_dot[n])

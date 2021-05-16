@@ -473,7 +473,7 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
             upper_limit,
             input_lower_bound,
             input_upper_bound,
-            lp_relaxation=False)
+            binary_var_type=gurobipy.GRB.BINARY)
         for v in beta:
             self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Set input value
@@ -485,7 +485,7 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
         self.assertEqual(mip.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
         self.assertAlmostEqual(y.x, y_val)
 
-        # Now test the case when lp_relaxation=True.
+        # Now test the case when binary_var_type=CONTINUOUS
         lp = gurobi_torch_mip.GurobiTorchMILP(torch.float64)
         x_lp = lp.addVars(1,
                           lb=-gurobipy.GRB.INFINITY,
@@ -501,7 +501,7 @@ class TestAddSaturationAsMixedIntegerConstraint(unittest.TestCase):
             upper_limit,
             input_lower_bound,
             input_upper_bound,
-            lp_relaxation=True)
+            binary_var_type=gurobipy.GRB.CONTINUOUS)
         for v in beta_relax:
             self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
             self.assertEqual(v.lb, 0.)

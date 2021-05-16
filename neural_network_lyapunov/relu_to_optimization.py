@@ -352,10 +352,10 @@ class ReLUFreePattern:
             torch.stack(rhs_in)
 
     def _compute_linear_output_bound_by_optimization(
-        self, layer_index, linear_output_row_index,
-        previous_neuron_input_lo: np.ndarray,
-        previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
-        network_input_up: np.ndarray, create_prog_callback, lp_relaxation: bool
+            self, layer_index, linear_output_row_index,
+            previous_neuron_input_lo: np.ndarray,
+            previous_neuron_input_up: np.ndarray, network_input_lo: np.ndarray,
+            network_input_up: np.ndarray, create_prog_callback, binary_var_type
     ) -> Tuple[float, float, torch.Tensor, torch.Tensor]:
         """
         Compute the range of a linear layer output.
@@ -415,7 +415,7 @@ class ReLUFreePattern:
                         previous_neuron_input_lo[self.relu_unit_index[layer]]),
                     torch.from_numpy(
                         previous_neuron_input_up[self.relu_unit_index[layer]]),
-                    lp_relaxation=lp_relaxation)
+                    binary_var_type=binary_var_type)
             z_curr = z_next
 
         # Now optimize the bound on the neuron input as Wij @ z_curr + bij
@@ -483,9 +483,9 @@ class ReLUFreePattern:
                         linear_layer_input_lo, linear_layer_input_up)
             else:
                 if method == mip_utils.PropagateBoundsMethod.LP:
-                    lp_relaxation = True
+                    binary_var_type = gurobi_torch_mip.BINARYRELAX
                 elif method == mip_utils.PropagateBoundsMethod.MIP:
-                    lp_relaxation = False
+                    binary_var_type = gurobipy.GRB.BINARY
                 else:
                     raise Exception(
                         "_compute_layer_bound: unknown bound propagation" +
@@ -501,7 +501,7 @@ class ReLUFreePattern:
                             z_pre_relu_up.detach().numpy(),
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
-                            create_prog_callback, lp_relaxation)
+                            create_prog_callback, binary_var_type)
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -529,9 +529,9 @@ class ReLUFreePattern:
             return linear_output_lo, linear_output_up
         else:
             if method == mip_utils.PropagateBoundsMethod.LP:
-                lp_relaxation = True
+                binary_var_type = gurobi_torch_mip.BINARYRELAX
             elif method == mip_utils.PropagateBoundsMethod.MIP:
-                lp_relaxation = False
+                binary_var_type = gurobipy.GRB.BINARY
             else:
                 raise Exception(
                     "_compute_network_output_bounds: unknown bound " +
@@ -551,7 +551,7 @@ class ReLUFreePattern:
                             network_input_lo.detach().numpy(),
                             network_input_up.detach().numpy(),
                             create_prog_callback,
-                            lp_relaxation)
+                            binary_var_type)
             return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,

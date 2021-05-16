@@ -341,7 +341,8 @@ class TestAddConstraintToProgramByLayer(unittest.TestCase):
         relu_output_var, binary_relax = \
             relu_to_optimization_utils._add_constraint_to_program_by_layer(
                 prog, linear_layer, relu_layer, linear_input_var,
-                relu_input_lo, relu_input_up, lp_relaxation=True)
+                relu_input_lo, relu_input_up,
+                binary_var_type=gurobipy.GRB.CONTINUOUS)
         self.assertEqual(len(relu_output_var), linear_layer.out_features)
         self.assertEqual(len(binary_relax), linear_layer.out_features)
         for i in range(linear_layer.out_features):
@@ -410,7 +411,7 @@ class TestAddConstraintToProgramByLayer(unittest.TestCase):
     def add_mip_constraint_tester(self, linear_layer, relu_layer,
                                   relu_input_lo, relu_input_up):
         """
-        Test _add_constraint_to_program_by_layer with lp_relaxation=False.
+        Test _add_constraint_to_program_by_layer with binary_var_type=BINARY
         """
         mip = gurobi_torch_mip.GurobiTorchMIP(torch.float64)
         linear_input_var = mip.addVars(linear_layer.in_features,
@@ -423,7 +424,7 @@ class TestAddConstraintToProgramByLayer(unittest.TestCase):
                 linear_input_var,
                 relu_input_lo,
                 relu_input_up,
-                lp_relaxation=False)
+                binary_var_type=gurobipy.GRB.BINARY)
         # Now fix the linear layer input input to many values and solve
         # MIP. If the ReLU input is within the bound, then the MIP
         # solution should be the same as evaluating the layers at the

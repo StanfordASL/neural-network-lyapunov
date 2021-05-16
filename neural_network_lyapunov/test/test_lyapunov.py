@@ -1462,8 +1462,8 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                 xhat_indices=xhat_indices)
 
     def test_lyapunov_derivative_as_milp5(self):
-        # Test with lp_relaxation=True, make sure the program contains no
-        # binary variables.
+        # Test with binary_var_type=BINARYRELAX, make sure the program
+        # contains no binary variables.
         torch.manual_seed(0)
         lyap_relu = utils.setup_relu((3, 5, 1),
                                      params=None,
@@ -1480,7 +1480,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             dut.lyapunov_derivative_as_milp(
                 system.x_equilibrium, V_lambda, dV_epsilon,
                 lyapunov.ConvergenceEps.ExpLower, R=R, fixed_R=True,
-                lp_relaxation=True)
+                binary_var_type=gurobi_torch_mip.BINARYRELAX)
         for v in beta + gamma + beta_next:
             self.assertEqual(v.vtype, gurobipy.GRB.CONTINUOUS)
         self.assertEqual(lp.gurobi_model.numbinvars, 0)
@@ -1551,7 +1551,7 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                     torch.from_numpy(system.x_lo_all),
                     torch.from_numpy(system.x_up_all),
                     mip_utils.PropagateBoundsMethod.IA,
-                    lp_relaxation=False)
+                    binary_var_type=gurobipy.GRB.BINARY)
             relu_xhat_var = [relu_xhat_slack]
             relu_xhat_coeff = [relu_xhat_a_out.squeeze()]
             relu_xhat_constant = relu_xhat_c_out.squeeze()

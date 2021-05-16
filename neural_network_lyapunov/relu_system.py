@@ -323,11 +323,11 @@ class ReLUSystem:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up, lp_relaxation)
+                                             additional_u_up, binary_var_type)
 
 
 class ReLUSystemGivenEquilibrium:
@@ -435,11 +435,11 @@ class ReLUSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up, lp_relaxation)
+                                             additional_u_up, binary_var_type)
 
 
 class ReLUSecondOrderSystemGivenEquilibrium:
@@ -594,11 +594,11 @@ class ReLUSecondOrderSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
-                                             additional_u_up, lp_relaxation)
+                                             additional_u_up, binary_var_type)
 
 
 class ReLUSecondOrderResidueSystemGivenEquilibrium:
@@ -710,7 +710,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         return [self.step_forward(x, u)]
 
     def add_dynamics_constraint(self,
-                                mip,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
                                 x_var,
                                 x_next_var,
                                 u_var,
@@ -718,7 +718,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                lp_relaxation=False):
+                                binary_var_type=gurobipy.GRB.BINARY):
         u_lo = self.u_lo if additional_u_lo is None else torch.max(
             self.u_lo, additional_u_lo)
         u_up = self.u_up if additional_u_up is None else torch.min(
@@ -735,7 +735,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
             mip.add_mixed_integer_linear_constraints(
                 mip_cnstr_result, input_vars, None, slack_var_name,
                 binary_var_name, "residue_forward_dynamics_ineq",
-                "residue_forward_dynamics_eq", None, lp_relaxation)
+                "residue_forward_dynamics_eq", None, binary_var_type)
         # We want to impose the constraint
         # v[n+1] = v[n] + ϕ(x̅[n], u[n]) − ϕ(x̅*, u*)
         #        = v[n] + Aout_slack * s + Cout - ϕ(x̅*, u*)
@@ -787,7 +787,7 @@ def _add_dynamics_mip_constraints(mip,
                                   binary_var_name,
                                   additional_u_lo: torch.Tensor = None,
                                   additional_u_up: torch.Tensor = None,
-                                  lp_relaxation=False):
+                                  binary_var_type=gurobipy.GRB.BINARY):
     u_lo = relu_system.u_lo if additional_u_lo is None else torch.max(
         relu_system.u_lo, additional_u_lo)
     u_up = relu_system.u_up if additional_u_up is None else torch.min(
@@ -797,7 +797,7 @@ def _add_dynamics_mip_constraints(mip,
     slack, binary = mip.add_mixed_integer_linear_constraints(
         mip_cnstr, input_vars, x_next_var, slack_var_name, binary_var_name,
         "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
-        "relu_forward_dynamics_output", lp_relaxation)
+        "relu_forward_dynamics_output", binary_var_type)
     ret = ReLUDynamicsConstraintReturn(slack, binary)
     ret.from_mip_cnstr_return(mip_cnstr, input_vars)
     return ret

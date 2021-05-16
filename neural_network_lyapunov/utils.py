@@ -233,7 +233,7 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
                                                lower_limit, upper_limit,
                                                input_lower_bound,
                                                input_upper_bound,
-                                               lp_relaxation: bool):
+                                               binary_var_type):
     """
     For a saturation block
     y = upper_limit if x >= upper_limit
@@ -252,9 +252,9 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
     lower_limit, then we know that the output is always lower_limit, hence the
     output function is not piecewise linear, and we don't need binary
     variables.
-    @param lp_relaxation Set to False to add the binary variables. Set to True
-    to add continuous variable with bound [0, 1] as relaxation for the binary
-    variables.
+    @param binary_var_type The variable type for binary variable. Could be
+    gurobipy.GRB.BINARY, gurobipy.GRB.CONTINUOUS or
+    gurobi_torch_mip.BINARYRELAX.
     @return binary_variables If no binary variable is introduced, then return
     an empty list. If the input bounds cover only the lower limit, then we
     return [b_lower]; If the input bounds cover only the upper limit, then we
@@ -301,17 +301,11 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
         # A_x*(x - lower_limit) + A_y*(y-lower_limit) + A_beta*(1-beta) <= rhs
         # Equivalently
         # A_x*x + A_y*y - A_beta*beta <= rhs - A_beta + (A_x+A_y) * lower_limit
-        if lp_relaxation:
-            beta = mip.addVars(1,
-                               lb=0.,
-                               ub=1.,
-                               vtype=gurobipy.GRB.CONTINUOUS,
-                               name="saturation_lower")
-        else:
-            beta = mip.addVars(1,
-                               lb=-gurobipy.GRB.INFINITY,
-                               vtype=gurobipy.GRB.BINARY,
-                               name="saturation_lower")
+        beta = mip.addVars(1,
+                           lb=0.,
+                           ub=1.,
+                           vtype=binary_var_type,
+                           name="saturation_lower")
         mip.addMConstrs([
             A_x.reshape((-1, 1)),
             A_y.reshape((-1, 1)), -A_beta.reshape((-1, 1))
@@ -329,17 +323,11 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
         # A_x*(upper_limit-x)+A_y*(upper_limit-y)+A_beta*(1-beta)<=rhs
         # Equilvalently
         # -A_x*x -A_y*y - A_beta*beta <= rhs-A_beta - (A_x+A_y)*upper_limit
-        if lp_relaxation:
-            beta = mip.addVars(1,
-                               lb=0.,
-                               ub=1.,
-                               vtype=gurobipy.GRB.CONTINUOUS,
-                               name="saturation_upper")
-        else:
-            beta = mip.addVars(1,
-                               lb=-gurobipy.GRB.INFINITY,
-                               vtype=gurobipy.GRB.BINARY,
-                               name="saturation_upper")
+        beta = mip.addVars(1,
+                           lb=0.,
+                           ub=1.,
+                           vtype=binary_var_type,
+                           name="saturation_upper")
         mip.addMConstrs([
             -A_x.reshape((-1, 1)), -A_y.reshape((-1, 1)), -A_beta.reshape(
                 (-1, 1))
@@ -361,17 +349,11 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
                         name="saturation_slack")
         # beta[0] is active when the lower limit is saturated.
         # beta[1] is active when the upper limit is saturated.
-        if lp_relaxation:
-            beta = mip.addVars(2,
-                               lb=0.,
-                               ub=1.,
-                               vtype=gurobipy.GRB.CONTINUOUS,
-                               name="saturation_binary_relax")
-        else:
-            beta = mip.addVars(2,
-                               lb=-gurobipy.GRB.INFINITY,
-                               vtype=gurobipy.GRB.BINARY,
-                               name="saturation_binary")
+        beta = mip.addVars(2,
+                           lb=0.,
+                           ub=1.,
+                           vtype=binary_var_type,
+                           name="saturation_binary")
         # The two binary variables cannot be both active.
         mip.addLConstr([torch.tensor([1, 1], dtype=torch.float64)], [beta],
                        rhs=1.,
