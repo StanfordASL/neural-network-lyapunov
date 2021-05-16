@@ -318,9 +318,9 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_epsilon = 0.001
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     dut.lyapunov_derivative_mip_params = {
-        gurobipy.GRB.Attr.MIPGap: 1.,
+        # gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: True,
-        gurobipy.GRB.Param.TimeLimit: 900,
+        # gurobipy.GRB.Param.TimeLimit: 900,
         gurobipy.GRB.Param.MIPFocus: 1
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)

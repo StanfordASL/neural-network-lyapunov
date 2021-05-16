@@ -534,7 +534,9 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name="x")
-        s, gamma = self.add_system_constraint(milp, x, None)
+        system_constraint_return = self.add_system_constraint(milp, x, None)
+        s = system_constraint_return.slack
+        gamma = system_constraint_return.binary
 
         # V̇ = ∂V/∂x(∑ᵢ Aᵢsᵢ + gᵢγᵢ)
         #   = ∑ᵢ(∂ReLU(x)/∂x*Aᵢsᵢ + ∂ReLU(x)/∂x*gᵢγᵢ
@@ -729,7 +731,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                             lb=-gurobipy.GRB.INFINITY,
                             vtype=gurobipy.GRB.CONTINUOUS,
                             name="xdot")
-        s, gamma = self.add_system_constraint(milp, x, xdot)
+        system_constraint_return = self.add_system_constraint(milp, x, xdot)
+        gamma = system_constraint_return.binary
 
         # V̇ = ∂V/∂x * ẋ
         #   = ∂ReLU(x)/∂x*ẋ + λ*sign(x-x*) *ẋ
