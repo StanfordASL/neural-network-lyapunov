@@ -31,6 +31,18 @@ class ConvergenceEps(Enum):
     Asymp = 3
 
 
+class SystemConstraintReturn:
+    """
+    Return from LyapunovHybridLinearSystem.add_system_constraint()
+    """
+    def __init__(self, slack, binary):
+        self.slack = slack
+        self.binary = binary
+        # These returns are for feedback systems.
+        self.forward_dynamics_return = None
+        self.controller_mip_cnstr_return = None
+
+
 class LyapunovHybridLinearSystem:
     """
     This is the super class of LyapunovDiscreteTimeHybridSystem and
@@ -91,18 +103,21 @@ class LyapunovHybridLinearSystem:
                 mip_cnstr_return, x, x_next, "s", "gamma",
                 "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
                 "hybrid_output_dynamics", binary_var_type)
-            return s, gamma
+            return SystemConstraintReturn(s, gamma)
 
         elif isinstance(self.system, feedback_system.FeedbackSystem):
             u, forward_dynamics_return, controller_mip_cnstr_return = \
                 self.system.add_dynamics_mip_constraint(
                     milp, x, x_next, "u", "forward_s", "forward_binary",
-                    "controller_s", "controller_binary")
+                    "controller_s", "controller_binary", binary_var_type)
             slack = u + forward_dynamics_return.slack +\
                 controller_mip_cnstr_return.slack
             binary = forward_dynamics_return.binary + \
                 controller_mip_cnstr_return.binary
-            return slack, binary
+            ret = SystemConstraintReturn(slack, binary)
+            ret.forward_dynamics_return = forward_dynamics_return
+            ret.controller_mip_cnstr_return = controller_mip_cnstr_return
+            return ret
         else:
             raise (NotImplementedError)
 
@@ -766,10 +781,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                          name="x")
 
         # x is the variable x[n]
-        s, gamma = self.add_system_constraint(milp,
-                                              x,
-                                              x_next,
-                                              binary_var_type=binary_var_type)
+        system_constraint_return = self.add_system_constraint(
+            milp, x, x_next, binary_var_type=binary_var_type)
+        s = system_constraint_return.slack
+        gamma = system_constraint_return.binary
         # warmstart the binary variables
         if x_warmstart is not None and (
                 isinstance(self.system, relu_system.AutonomousReLUSystem)
@@ -923,17 +938,19 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             raise Exception("unknown eps_type")
         LyapDerivMilpReturn = collections.namedtuple("LyapDerivMilpReturn", [
             "milp", "x", "beta", "gamma", "x_next", "s", "z", "z_next",
-            "beta_next"
+            "beta_next", "system_constraint_return"
         ])
-        return LyapDerivMilpReturn(milp=milp,
-                                   x=x,
-                                   beta=beta,
-                                   gamma=gamma,
-                                   x_next=x_next,
-                                   s=s,
-                                   z=z,
-                                   z_next=z_next,
-                                   beta_next=beta_next)
+        return LyapDerivMilpReturn(
+            milp=milp,
+            x=x,
+            beta=beta,
+            gamma=gamma,
+            x_next=x_next,
+            s=s,
+            z=z,
+            z_next=z_next,
+            beta_next=beta_next,
+            system_constraint_return=system_constraint_return)
 
     def strengthen_lyapunov_derivative_as_milp(self,
                                                x_equilibrium,
@@ -954,14 +971,45 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         The MILP from lyapunov_derivative_as_milp uses the big-M formulation.
         We can strengthen this MILP formulation with the following algorithm:
         1. First construct the LP relaxation of the MILP.
-        2. Solve this LP to optimality.
-        3. For each neural network, strengthen its LP relaxation with the most
-           violated ideal constraint evaluated at the LP solution.
-        4. Go to step 2, repeat the process for num_strengthen_pts times.
+        2. Repeat for num_strengthen_pts:
+            3. Solve this LP to optimality.
+            4. For each neural network, strengthen its LP relaxation with the
+               most violated ideal constraint evaluated at the LP solution.
         5. In the LP relaxation, changed the relaxed continuous variables back
            to binary variables.
         """
-        pass
+        # Step 1, create the LP relaxation.
+        lyap_deriv_lp_return = self.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            epsilon,
+            epsilon_type,
+            R=R,
+            fixed_R=fixed_R,
+            lyapunov_lower=lyapunov_lower,
+            lyapunov_upper=lyapunov_upper,
+            x_warmstart=x_warmstart,
+            xbar_indices=xbar_indices,
+            binary_var_type=gurobi_torch_mip.BINARYRELAX)
+        for _ in range(num_strengthen_pts):
+            # Step 3, solve the LP relaxation.
+            lyap_deriv_lp_return.milp.gurobi_model.setParam(
+                gurobipy.GRB.Param.OutputFlag, False)
+            lyap_deriv_lp_return.milp.gurobi_model.optimize()
+            assert (lyap_deriv_lp_return.milp.gurobi_model.status ==
+                    gurobipy.GRB.Status.OPTIMAL)
+            # Step 4, strengthen each neural network:
+            # For the moment, only strengthen the dynamics constraints of the
+            # feedback system.
+            if (isinstance(self.system, feedback_system.FeedbackSystem)):
+                self.system.strengthen_dynamics_constraint(
+                    lyap_deriv_lp_return.milp, lyap_deriv_lp_return.
+                    system_constraint_return.forward_dynamics_return,
+                    lyap_deriv_lp_return.system_constraint_return.
+                    controller_mip_cnstr_return)
+        # Step 5 remove binary relaxation.
+        lyap_deriv_lp_return.milp.remove_binary_relaxation()
+        return lyap_deriv_lp_return
 
     def lyapunov_derivative_loss_at_samples(self,
                                             V_lambda,

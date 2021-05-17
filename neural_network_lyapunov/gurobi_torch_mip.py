@@ -729,6 +729,7 @@ class GurobiTorchMIP:
         for v in self.zeta:
             if v.vtype == gurobipy.GRB.CONTINUOUS:
                 v.vtype = gurobipy.GRB.BINARY
+        self.gurobi_model.update()
 
 
 class GurobiTorchMILP(GurobiTorchMIP):

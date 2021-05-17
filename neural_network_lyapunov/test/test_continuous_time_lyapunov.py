@@ -226,7 +226,9 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(system.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_system_constraint(milp, x, None)
+            system_constraint_return = dut.add_system_constraint(milp, x, None)
+            s = system_constraint_return.slack
+            gamma = system_constraint_return.binary
             (_, beta, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             if Aisi_flag:
                 (z, cost_z_coeff) = dut.add_relu_gradient_times_Aisi(
@@ -310,7 +312,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(system.x_dim,
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_system_constraint(milp, x, xdot)
+            dut.add_system_constraint(milp, x, xdot)
             (_, beta, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta, system.dx_lower, system.dx_upper)
@@ -376,7 +378,9 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(system.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_system_constraint(milp, x, None)
+            system_constraint_return = dut.add_system_constraint(milp, x, None)
+            s = system_constraint_return.slack
+            gamma = system_constraint_return.binary
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
             if Aisi_flag:
@@ -483,7 +487,8 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(system.x_dim,
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS)
-            s, gamma = dut.add_system_constraint(milp, x, xdot)
+            system_constraint_return = dut.add_system_constraint(milp, x, xdot)
+            gamma = system_constraint_return.binary
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)
             (z, z_coeff, xdot_coeff) = dut.add_sign_state_error_times_xdot(
