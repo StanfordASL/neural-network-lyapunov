@@ -385,8 +385,8 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
             dut = lyapunov.LyapunovHybridLinearSystem(system, relu)
-            (z, beta, a_out,
-             b_out) = dut.add_lyap_relu_output_constraint(milp, x)
+            z, beta, a_out, b_out, lyap_relu_x_mip_cnstr_ret = \
+                dut.add_lyap_relu_output_constraint(milp, x)
             for i in range(system.x_dim):
                 milp.addLConstr([torch.tensor([1.], dtype=self.dtype)],
                                 [[x[i]]],
@@ -543,8 +543,8 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             x = milp.addVars(system.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
-            (relu_z, _, a_relu,
-             b_relu) = dut.add_lyap_relu_output_constraint(milp, x)
+            relu_z, _, a_relu, b_relu, _ = \
+                dut.add_lyap_relu_output_constraint(milp, x)
             (s, _) = dut.add_state_error_l1_constraint(milp,
                                                        x_equilibrium,
                                                        x,
@@ -1859,8 +1859,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
         strengthened_milp.milp.gurobi_model.optimize()
         assert (strengthened_milp.milp.gurobi_model.status ==
                 gurobipy.GRB.Status.OPTIMAL)
-        self.assertEqual(strengthened_milp.milp.gurobi_model.ObjVal,
-                         unstrengthened_milp.milp.gurobi_model.ObjVal)
+        self.assertAlmostEqual(strengthened_milp.milp.gurobi_model.ObjVal,
+                               unstrengthened_milp.milp.gurobi_model.ObjVal,
+                               places=10)
         # Now sample many states, evaluate lyapunov derivative. It should
         # match with the milp objective.
         x_samples = utils.uniform_sample_in_box(

@@ -147,7 +147,7 @@ class LyapunovHybridLinearSystem:
             mip_constr_return, x, None, slack_name, binary_var_name,
             "milp_relu_ineq", "milp_relu_eq", "", binary_var_type)
         return (relu_z, relu_beta, mip_constr_return.Aout_slack.squeeze(),
-                mip_constr_return.Cout.squeeze())
+                mip_constr_return.Cout.squeeze(), mip_constr_return)
 
     def add_state_error_l1_constraint(self,
                                       milp,
@@ -355,7 +355,8 @@ class LyapunovHybridLinearSystem:
                          name="x")
         # z is the slack variable to write the output of ReLU network as mixed
         # integer constraints.
-        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(milp, x)
+        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
+            milp, x)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -555,7 +556,8 @@ class LyapunovHybridLinearSystem:
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name="x[n]")
 
-        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(milp, x)
+        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
+            milp, x)
 
         # Now add the constraint that x is on the boundary of the box
         # x_lo <= x <= x_up
@@ -800,8 +802,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         # ReLU(x[n]).
         # z is the slack variable to write the output of ReLU(x[n]) with mixed
         # integer linear constraints.
-        (z, beta, a_out, b_out) = self.add_lyap_relu_output_constraint(
-            milp, x, binary_var_type=binary_var_type)
+        z, beta, a_out, b_out, lyap_relu_x_mip_cnstr_ret = \
+            self.add_lyap_relu_output_constraint(
+                milp, x, binary_var_type=binary_var_type)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -887,8 +890,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         # Now write the ReLU output ReLU(x[n+1]) as mixed integer linear
         # constraints
-        (z_next, beta_next, _, _) = self.add_lyap_relu_output_constraint(
-            milp, x_next, binary_var_type=binary_var_type)
+        z_next, beta_next, _, _, lyap_relu_x_next_mip_cnstr_ret = \
+            self.add_lyap_relu_output_constraint(
+                milp, x_next, binary_var_type=binary_var_type)
 
         # warmstart the binary variables
         if x_warmstart is not None:
@@ -938,7 +942,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             raise Exception("unknown eps_type")
         LyapDerivMilpReturn = collections.namedtuple("LyapDerivMilpReturn", [
             "milp", "x", "beta", "gamma", "x_next", "s", "z", "z_next",
-            "beta_next", "system_constraint_return"
+            "beta_next", "system_constraint_return",
+            "lyap_relu_x_mip_cnstr_ret", "lyap_relu_x_next_mip_cnstr_ret"
         ])
         return LyapDerivMilpReturn(
             milp=milp,
@@ -950,7 +955,9 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             z=z,
             z_next=z_next,
             beta_next=beta_next,
-            system_constraint_return=system_constraint_return)
+            system_constraint_return=system_constraint_return,
+            lyap_relu_x_mip_cnstr_ret=lyap_relu_x_mip_cnstr_ret,
+            lyap_relu_x_next_mip_cnstr_ret=lyap_relu_x_next_mip_cnstr_ret)
 
     def strengthen_lyapunov_derivative_as_milp(self,
                                                x_equilibrium,
@@ -999,14 +1006,25 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             assert (lyap_deriv_lp_return.milp.gurobi_model.status ==
                     gurobipy.GRB.Status.OPTIMAL)
             # Step 4, strengthen each neural network:
-            # For the moment, only strengthen the dynamics constraints of the
-            # feedback system.
+            # Strengthen the ReLU network in lyapunov function.
+            self.lyapunov_relu_free_pattern.strengthen_relu_mip_at_solution(
+                lyap_deriv_lp_return.milp,
+                lyap_deriv_lp_return.x, lyap_deriv_lp_return.z,
+                lyap_deriv_lp_return.beta,
+                lyap_deriv_lp_return.lyap_relu_x_mip_cnstr_ret)
+            self.lyapunov_relu_free_pattern.strengthen_relu_mip_at_solution(
+                lyap_deriv_lp_return.milp,
+                lyap_deriv_lp_return.x_next, lyap_deriv_lp_return.z_next,
+                lyap_deriv_lp_return.beta_next,
+                lyap_deriv_lp_return.lyap_relu_x_next_mip_cnstr_ret)
+            # Strengthen the ReLU network in dynamics constraint.
             if (isinstance(self.system, feedback_system.FeedbackSystem)):
                 self.system.strengthen_dynamics_constraint(
                     lyap_deriv_lp_return.milp, lyap_deriv_lp_return.
                     system_constraint_return.forward_dynamics_return,
                     lyap_deriv_lp_return.system_constraint_return.
                     controller_mip_cnstr_return)
+
         # Step 5 remove binary relaxation.
         lyap_deriv_lp_return.milp.remove_binary_relaxation()
         return lyap_deriv_lp_return
@@ -1285,8 +1303,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                              [x_next],
                              sense=gurobipy.GRB.LESS_EQUAL,
                              b=torch.from_numpy(-self.system.x_lo_all))
-        (z, beta, a_out,
-         b_out) = self.add_lyap_relu_output_constraint(milp, x_curr)
+        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
+            milp, x_curr)
 
         # Now add the constraint that x is outside of the box
         # x_lo <= x <= x_up but within the region

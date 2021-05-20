@@ -548,7 +548,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         # We first get the mixed-integer linear constraint, which encode the
         # activation of beta and the network input.
-        (relu_z, relu_beta, a_relu_out, b_relu_out) = \
+        (relu_z, relu_beta, a_relu_out, b_relu_out, _) = \
             self.add_lyap_relu_output_constraint(milp, x)
 
         # for each mode, we want to compute ∂V/∂x*Aᵢsᵢ, ∂V/∂x*gᵢγᵢ.
@@ -743,7 +743,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         # We first get the mixed-integer linear constraint, which encode the
         # activation of beta and the network input.
-        (relu_z, relu_beta, a_relu_out, b_relu_out) = \
+        (relu_z, relu_beta, a_relu_out, b_relu_out, _) = \
             self.add_lyap_relu_output_constraint(milp, x)
 
         # warmstart the binary variables
