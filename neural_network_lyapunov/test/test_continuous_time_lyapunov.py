@@ -229,7 +229,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             system_constraint_return = dut.add_system_constraint(milp, x, None)
             s = system_constraint_return.slack
             gamma = system_constraint_return.binary
-            (_, beta, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
+            (_, beta, _, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             if Aisi_flag:
                 (z, cost_z_coeff) = dut.add_relu_gradient_times_Aisi(
                     milp, s, beta)
@@ -313,7 +313,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS)
             dut.add_system_constraint(milp, x, xdot)
-            (_, beta, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
+            (_, beta, _, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta, system.dx_lower, system.dx_upper)
             milp.addMConstrs([torch.eye(system.x_dim, dtype=system.dtype)],

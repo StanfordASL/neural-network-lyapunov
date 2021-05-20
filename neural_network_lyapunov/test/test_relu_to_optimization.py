@@ -911,6 +911,97 @@ class TestReLU(unittest.TestCase):
                                                 nn_input_up, method,
                                                 cost_coeff_output)
 
+    def test_strengthen_relu_mip_at_solution(self):
+        # Test a leaky ReLU model
+        model = utils.setup_relu((2, 4, 5, 3),
+                                 params=None,
+                                 negative_slope=0.1,
+                                 bias=True,
+                                 dtype=self.dtype)
+        model[0].weight.data = torch.tensor(
+            [[1, -1], [0, 2], [2, -1], [-2, -3]], dtype=self.dtype)
+        model[0].bias.data = torch.tensor([0.5, 1., -2., -1.],
+                                          dtype=self.dtype)
+        model[2].weight.data = torch.tensor(
+            [[0.5, 1.5, -0.5, -1], [-1, 2., 3., 0.5], [-1.5, 2.5, 0.5, -2],
+             [0.5, -0.5, -1, 2.], [1.5, 2., 2.5, -1]],
+            dtype=self.dtype)
+        model[2].bias.data = torch.tensor([0.5, -0.5, -1., 2.5, -1],
+                                          dtype=self.dtype)
+        model[4].weight.data = torch.tensor(
+            [[1., -2., -3., 0.5, -1.], [0.5, -1., 0.5, 1.5, -1],
+             [1.5, -0.5, -1., -2., 0.5]],
+            dtype=self.dtype)
+        model[4].bias.data = torch.tensor([-1., -2., 1.5], dtype=self.dtype)
+
+        dut = relu_to_optimization.ReLUFreePattern(model, self.dtype)
+
+        nn_input_lo = torch.tensor([-1., -3.], dtype=self.dtype)
+        nn_input_up = torch.tensor([2., -1.], dtype=self.dtype)
+
+        for method in list(mip_utils.PropagateBoundsMethod):
+            mip_cnstr_return = dut.output_constraint(nn_input_lo, nn_input_up,
+                                                     method)
+            lp_relax = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            lp_x = lp_relax.addVars(2, lb=-gurobipy.GRB.INFINITY)
+            lp_y = lp_relax.addVars(3, lb=-gurobipy.GRB.INFINITY)
+            lp_slack, lp_binary = \
+                lp_relax.add_mixed_integer_linear_constraints(
+                    mip_cnstr_return,
+                    lp_x,
+                    lp_y,
+                    "s",
+                    "b",
+                    "ineq",
+                    "eq",
+                    "output",
+                    binary_var_type=gurobi_torch_mip.BINARYRELAX)
+            # Add an arbitrary cost.
+            cost_coeff = torch.tensor([1., 2., 3.], dtype=self.dtype)
+            lp_relax.setObjective([cost_coeff], [lp_y],
+                                  constant=0.,
+                                  sense=gurobipy.GRB.MINIMIZE)
+            lp_relax.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                           False)
+            lp_relax.gurobi_model.optimize()
+            assert (
+                lp_relax.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            unstrengthened_lp_relax_cost = lp_relax.gurobi_model.ObjVal
+            dut.strengthen_relu_mip_at_solution(lp_relax, lp_x, lp_slack,
+                                                lp_binary, mip_cnstr_return)
+            lp_relax.gurobi_model.optimize()
+            assert (
+                lp_relax.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            self.assertGreater(lp_relax.gurobi_model.ObjVal,
+                               unstrengthened_lp_relax_cost)
+
+            mip = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            mip_x = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+            mip_y = mip.addVars(3, lb=-gurobipy.GRB.INFINITY)
+            mip_slack, mip_binary = mip.add_mixed_integer_linear_constraints(
+                mip_cnstr_return,
+                mip_x,
+                mip_y,
+                "s",
+                "b",
+                "ineq",
+                "eq",
+                "output",
+                binary_var_type=gurobipy.GRB.BINARY)
+            mip.setObjective([cost_coeff], [mip_y],
+                             constant=0.,
+                             sense=gurobipy.GRB.MINIMIZE)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            mip.gurobi_model.optimize()
+            assert (mip.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            unstrengthened_mip_cost = mip.gurobi_model.ObjVal
+            dut.strengthen_relu_mip_at_solution(mip, mip_x, mip_slack,
+                                                mip_binary, mip_cnstr_return)
+            mip.gurobi_model.optimize()
+            assert (mip.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(mip.gurobi_model.ObjVal,
+                                   unstrengthened_mip_cost)
+
 
 class TestReLUFreePatternOutputConstraintGradient(unittest.TestCase):
     """

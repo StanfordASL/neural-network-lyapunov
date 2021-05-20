@@ -351,6 +351,46 @@ class ReLUFreePattern:
             Ain_slack, dim=0), torch.cat(Ain_binary, dim=0),\
             torch.stack(rhs_in)
 
+    def strengthen_relu_mip_at_solution(
+            self, prog: gurobi_torch_mip.GurobiTorchMIP, x_var: list,
+            slack_var: list, binary_var: list,
+            relu_mip_cnstr_return: ReLUMixedIntegerConstraintsReturn):
+        """
+        We typically strengthen the big-M MIP formulation of the ReLU network
+        with the following idea:
+        1. Relax the binary variables to continuous variables within [0, 1].
+        2. Solve this LP relaxation to optimality.
+        3. Find the most violated constraint in the ideal formulation,
+           evaluated at the solution from step 2. Add that constraint to the
+           program.
+        4. Go to step 2, loop for several iterations.
+        This function implements step 3 of this algorithm.
+        """
+        assert (isinstance(prog, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(x_var, list))
+        assert (isinstance(slack_var, list))
+        assert (isinstance(binary_var, list))
+        assert (isinstance(relu_mip_cnstr_return,
+                           ReLUMixedIntegerConstraintsReturn))
+        linear_inputs = torch.tensor([v.x for v in x_var] +
+                                     [v.x for v in slack_var],
+                                     dtype=prog.dtype)
+        relu_activations = torch.tensor([v.x for v in binary_var],
+                                        dtype=prog.dtype)
+        linear_inputs_lo = torch.cat((relu_mip_cnstr_return.nn_input_lo,
+                                      relu_mip_cnstr_return.relu_output_lo))
+        linear_inputs_up = torch.cat((relu_mip_cnstr_return.nn_input_up,
+                                      relu_mip_cnstr_return.relu_output_up))
+        Ain_x, Ain_slack, Ain_binary, rhs_in = self.strengthen_mip_at_point(
+            (linear_inputs, relu_activations), linear_inputs_lo,
+            linear_inputs_up)
+        if Ain_x is not None:
+            prog.addMConstrs([Ain_x, Ain_slack, Ain_binary],
+                             [x_var, slack_var, binary_var],
+                             b=rhs_in,
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             name="relu strengthened")
+
     def _compute_linear_output_bound_by_optimization(
             self, layer_index, linear_output_row_index,
             previous_neuron_input_lo: np.ndarray,
