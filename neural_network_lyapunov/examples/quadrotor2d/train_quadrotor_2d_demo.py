@@ -12,6 +12,7 @@ import neural_network_lyapunov.r_options as r_options
 import torch
 import numpy as np
 import scipy.integrate
+import gurobipy
 import argparse
 import os
 
@@ -382,14 +383,14 @@ if __name__ == "__main__":
         dut.add_derivative_adversarial_state = True
         dut.add_positivity_adversarial_state = True
         forward_system.network_bound_propagate_method =\
-            mip_utils.PropagateBoundsMethod.LP
+            mip_utils.PropagateBoundsMethod.MIP
         dut.lyapunov_hybrid_system.network_bound_propagate_method =\
-            mip_utils.PropagateBoundsMethod.LP
+            mip_utils.PropagateBoundsMethod.MIP
         closed_loop_system.controller_network_bound_propagate_method =\
-            mip_utils.PropagateBoundsMethod.LP
-        # dut.lyapunov_derivative_mip_params = {
-        #     gurobipy.GRB.Param.OutputFlag: True
-        # }
+            mip_utils.PropagateBoundsMethod.MIP
+        dut.lyapunov_derivative_mip_params = {
+            gurobipy.GRB.Param.OutputFlag: False
+        }
         if args.training_set:
             training_set_data = torch.load(args.training_set)
             positivity_state_samples_init = training_set_data[
