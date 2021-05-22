@@ -178,10 +178,14 @@ class TrainLyapunovReLU:
         # networks" by Ross Anderson et.al.
         self.derivative_mip_num_strengthen_pts = 0
 
-    def sample_loss(self, positivity_state_samples, derivative_state_samples,
+    def sample_loss(self,
+                    positivity_state_samples,
+                    derivative_state_samples,
                     derivative_state_samples_next,
                     lyapunov_positivity_sample_cost_weight,
-                    lyapunov_derivative_sample_cost_weight):
+                    lyapunov_derivative_sample_cost_weight,
+                    positivity_sample_repeatition=None,
+                    derivative_sample_repeatition=None):
         """
         Compute the cost as the summation of
         1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
@@ -209,7 +213,8 @@ class TrainLyapunovReLU:
                     margin=self.lyapunov_positivity_sample_margin,
                     xbar_indices=self.xbar_indices,
                     xhat_indices=self.xhat_indices,
-                    reduction=self.sample_loss_reduction)
+                    reduction=self.sample_loss_reduction,
+                    weight=positivity_sample_repeatition)
         else:
             positivity_sample_loss = torch.tensor(0., dtype=dtype)
         if lyapunov_derivative_sample_cost_weight != 0 and\
@@ -224,7 +229,8 @@ class TrainLyapunovReLU:
                     margin=self.lyapunov_derivative_sample_margin,
                     xbar_indices=self.xbar_indices,
                     xhat_indices=self.xhat_indices,
-                    reduction=self.sample_loss_reduction)
+                    reduction=self.sample_loss_reduction,
+                    weight=derivative_sample_repeatition)
         else:
             derivative_sample_loss = torch.tensor(0., dtype=dtype)
 
@@ -647,8 +653,7 @@ class TrainLyapunovReLU:
             if lyapunov_positivity_mip_cost < \
                 self.lyapunov_positivity_convergence_tol and\
                     lyapunov_derivative_mip_cost < best_derivative_mip_cost:
-                best_training_params = [p.clone()  # noqa
-                                        for p in training_params]  # noqa
+                best_training_params = [p.clone() for p in training_params]  # noqa
                 best_derivative_mip_cost = lyapunov_derivative_mip_cost
             loss.backward()
             optimizer.step()
@@ -793,6 +798,8 @@ class TrainLyapunovReLU:
 
     def _batch_descent_on_samples(self, positivity_state_samples_all,
                                   derivative_state_samples_all, optimizer,
+                                  positivity_state_repeatition,
+                                  derivative_state_repeatition,
                                   options: AdversarialTrainingOptions):
         """
         Give the samples, divide the samples to small batches, and run several
@@ -807,7 +814,9 @@ class TrainLyapunovReLU:
                 derivative_state_samples_all,
                 derivative_state_samples_next_all,
                 self.lyapunov_positivity_sample_cost_weight,
-                self.lyapunov_derivative_sample_cost_weight)
+                self.lyapunov_derivative_sample_cost_weight,
+                positivity_state_repeatition,
+                derivative_state_repeatition)
         best_loss = positivity_sample_initial_loss +\
             derivative_sample_initial_loss
         best_training_params = self._get_current_training_params()
@@ -817,9 +826,9 @@ class TrainLyapunovReLU:
                   "derivative_sample_loss " +
                   f"{derivative_sample_initial_loss.item()}")
         positivity_dataset = torch.utils.data.TensorDataset(
-            positivity_state_samples_all)
+            positivity_state_samples_all, positivity_state_repeatition)
         derivative_dataset = torch.utils.data.TensorDataset(
-            derivative_state_samples_all)
+            derivative_state_samples_all, derivative_state_repeatition)
         # TODO(hongkai.dai): currently by using batch_size, I don't guarantee
         # to get options.num_batches batches in the dataset. Write a customized
         # loader later.
@@ -839,8 +848,10 @@ class TrainLyapunovReLU:
             for i in range(
                     np.min((len(positivity_loader), len(derivative_loader)))):
                 optimizer.zero_grad()
-                positivity_state_batch = next(it_positivity_samples)[0]
-                derivative_state_batch = next(it_derivative_samples)[0]
+                positivity_state_batch, positivity_state_repeatition_batch =\
+                    next(it_positivity_samples)
+                derivative_state_batch, derivative_state_repeatition_batch =\
+                    next(it_derivative_samples)
                 derivative_state_next_batch = \
                     self.lyapunov_hybrid_system.system.step_forward(
                         derivative_state_batch)
@@ -849,7 +860,9 @@ class TrainLyapunovReLU:
                         positivity_state_batch, derivative_state_batch,
                         derivative_state_next_batch,
                         self.lyapunov_positivity_sample_cost_weight,
-                        self.lyapunov_derivative_sample_cost_weight)
+                        self.lyapunov_derivative_sample_cost_weight,
+                        positivity_state_repeatition_batch,
+                        derivative_state_repeatition_batch)
                 batch_loss = positivity_sample_loss +\
                     derivative_sample_loss
                 batch_loss.backward()
@@ -864,7 +877,9 @@ class TrainLyapunovReLU:
                     derivative_state_samples_all,
                     derivative_state_samples_next_all,
                     self.lyapunov_positivity_sample_cost_weight,
-                    self.lyapunov_derivative_sample_cost_weight)
+                    self.lyapunov_derivative_sample_cost_weight,
+                    positivity_state_repeatition,
+                    derivative_state_repeatition)
             if self.output_flag:
                 print(f"epoch {epoch}, positivity_sample_loss " +
                       f"{positivity_sample_epoch_loss.item()}, " +
@@ -905,6 +920,12 @@ class TrainLyapunovReLU:
         train_start_time = time.time()
         positivity_state_samples_all = positivity_state_samples_init.clone()
         derivative_state_samples_all = derivative_state_samples_init.clone()
+        positivity_state_repeatition = torch.ones(
+            (positivity_state_samples_all.shape[0], ),
+            dtype=positivity_state_samples_all.dtype)
+        derivative_state_repeatition = torch.ones(
+            (derivative_state_samples_all.shape[0], ),
+            dtype=derivative_state_samples_all.dtype)
         training_params = self._training_params()
         if self.optimizer == "Adam":
             optimizer = torch.optim.Adam(training_params,
@@ -921,26 +942,49 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
                 derivative_mip_adversarial, _ = self.solve_derivative_mip()
             if not np.isinf(options.adversarial_cluster_radius):
-                positivity_mip_adversarial = _cluster_adversarial_states(
-                    positivity_mip_adversarial,
-                    options.adversarial_cluster_radius)
-                derivative_mip_adversarial = _cluster_adversarial_states(
-                    derivative_mip_adversarial,
-                    options.adversarial_cluster_radius)
+                positivity_mip_adversarial,\
+                    positivity_mip_adversarial_repeatition =\
+                    _cluster_adversarial_states(
+                        positivity_mip_adversarial,
+                        options.adversarial_cluster_radius)
+                derivative_mip_adversarial,\
+                    derivative_mip_adversarial_repeatition =\
+                    _cluster_adversarial_states(
+                        derivative_mip_adversarial,
+                        options.adversarial_cluster_radius)
+            else:
+                positivity_mip_adversarial_repeatition = torch.ones(
+                    (positivity_mip_adversarial.shape[0], ),
+                    dtype=positivity_mip_adversarial.dtype)
+                derivative_mip_adversarial_repeatition = torch.ones(
+                    (derivative_mip_adversarial.shape[0], ),
+                    dtype=derivative_mip_adversarial.dtype)
             positivity_state_samples_all = torch.cat(
                 (positivity_state_samples_all, positivity_mip_adversarial),
                 dim=0)
             derivative_state_samples_all = torch.cat(
                 (derivative_state_samples_all, derivative_mip_adversarial),
                 dim=0)
+            positivity_state_repeatition = torch.cat(
+                (positivity_state_repeatition,
+                 positivity_mip_adversarial_repeatition),
+                dim=0)
+            derivative_state_repeatition = torch.cat(
+                (derivative_state_repeatition,
+                 derivative_mip_adversarial_repeatition),
+                dim=0)
             if positivity_state_samples_all.shape[
                     0] > options.positivity_samples_pool_size:
                 positivity_state_samples_all = positivity_state_samples_all[
                     -options.positivity_samples_pool_size:, :]
+                positivity_state_repeatition = positivity_state_repeatition[
+                    -options.positivity_samples_pool_size:]
             if derivative_state_samples_all.shape[
                     0] > options.derivative_samples_pool_size:
                 derivative_state_samples_all = derivative_state_samples_all[
                     -options.derivative_samples_pool_size:, :]
+                derivative_state_repeatition = derivative_state_repeatition[
+                    -options.derivative_samples_pool_size:]
             if self.output_flag:
                 print(f"Iter {iter_count}, positivity cost " +
                       f"{lyapunov_positivity_mip_obj}, " + "derivative_cost " +
@@ -960,10 +1004,14 @@ class TrainLyapunovReLU:
             # Now do gradient descent on the adversarial states.
             self._batch_descent_on_samples(positivity_state_samples_all,
                                            derivative_state_samples_all,
-                                           optimizer, options)
+                                           optimizer,
+                                           positivity_state_repeatition,
+                                           derivative_state_repeatition,
+                                           options)
             iter_count += 1
         return False, positivity_state_samples_all,\
-            derivative_state_samples_all
+            derivative_state_samples_all, positivity_state_repeatition,\
+            derivative_state_repeatition
 
 
 class TrainValueApproximator:
@@ -1072,4 +1120,12 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
             (adversarial_states[0].reshape((1, -1)), adversarial_states[1:][
                 states_distance_squared > cluster_radius**2]),
             dim=0)
-        return clustered_adversarial_states
+        new_adversarial_state_index = np.arange(
+            adversarial_states.shape[0] -
+            1)[states_distance_squared > cluster_radius**2] + 1
+        repeatition = np.diff(new_adversarial_state_index)
+        repeatition = np.insert(repeatition, 0, new_adversarial_state_index[0])
+        repeatition = np.append(
+            repeatition,
+            adversarial_states.shape[0] - new_adversarial_state_index[-1])
+        return clustered_adversarial_states, repeatition

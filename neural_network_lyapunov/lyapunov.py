@@ -408,7 +408,8 @@ class LyapunovHybridLinearSystem:
                                             margin=0.,
                                             xbar_indices=None,
                                             xhat_indices=None,
-                                            reduction="mean"):
+                                            reduction="mean",
+                                            weight=None):
         """
         We will sample a state xⁱ, and we would like the Lyapunov function to
         be larger than 0 at xⁱ. Hence we define the loss as
@@ -426,6 +427,10 @@ class LyapunovHybridLinearSystem:
         samples, if reduction="max", we use the max loss among all samples, if
         reduction="4norm", we use the 4-norm on the loss vector for all
         samples.
+        @param weight If set to None, then we use uniform weight of 1 for
+        every sample. Otherwise weight should be a vector of the same length
+        as the number of samples, whereh weight[i] is the weight of
+        state_samples[i].
         """
         assert (isinstance(state_samples, torch.Tensor))
         assert (state_samples.shape[1] == self.system.x_dim)
@@ -449,8 +454,14 @@ class LyapunovHybridLinearSystem:
                 p=1,
                 dim=0)
         if reduction == "mean":
-            return torch.nn.HingeEmbeddingLoss(margin=margin)(
-                loss, torch.tensor(-1.).to(state_samples.device))
+            if weight is not None:
+                assert (weight.shape == (state_samples.shape[0],))
+                return torch.mean(weight * torch.nn.HingeEmbeddingLoss(
+                        margin=margin, reduction="none")(
+                    loss, torch.tensor(-1).to(state_samples.device)))
+            else:
+                return torch.nn.HingeEmbeddingLoss(margin=margin)(
+                    loss, torch.tensor(-1.).to(state_samples.device))
         elif reduction == "max":
             return torch.max(
                 torch.nn.HingeEmbeddingLoss(margin=margin, reduction="none")(
@@ -1042,7 +1053,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                             margin=0.,
                                             xbar_indices=None,
                                             xhat_indices=None,
-                                            reduction="mean"):
+                                            reduction="mean",
+                                            weight=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -1066,6 +1078,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         loss.
         @param reduction If reduction=mean, then use the mean loss, otherwise
         use the max over all samples.
+        @param weight If set to None, then we use uniform weight of 1 for
+        every sample. Otherwise weight should be a vector of the same length
+        as the number of samples, whereh weight[i] is the weight of
+        state_samples[i].
         @return loss The loss
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n]) + margin, 0))
         """
@@ -1092,7 +1108,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             margin=margin,
             xbar_indices=xbar_indices,
             xhat_indices=xhat_indices,
-            reduction=reduction)
+            reduction=reduction,
+            weight=weight)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -1107,7 +1124,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             margin=0.,
             xbar_indices=None,
             xhat_indices=None,
-            reduction="mean"):
+            reduction="mean",
+            weight=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -1134,6 +1152,10 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         then the loss is with respect to the upper bound
         @param margin We might want to shift the margin for the Lyapunov
         loss.
+        @param weight If set to None, then we use uniform weight of 1 for
+        every sample. Otherwise weight should be a vector of the same length
+        as the number of samples, whereh weight[i] is the weight of
+        state_samples[i].
         @return loss The loss
         mean(max(V(x̅ⁱ[n+1]) - V(x̅ⁱ[n]) + ε*V(x̅ⁱ[n]) + margin, 0))
         """
@@ -1163,6 +1185,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                  R=R,
                                  xbar_indices=xbar_indices,
                                  xhat_indices=xhat_indices)
+
         if eps_type == ConvergenceEps.ExpLower:
             hinge_loss_all = torch.nn.HingeEmbeddingLoss(
                 margin=margin,
@@ -1187,7 +1210,11 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         else:
             raise Exception("Unknown eps_type")
         if reduction == "mean":
-            return torch.mean(hinge_loss_all)
+            if weight is None:
+                return torch.mean(hinge_loss_all)
+            else:
+                assert (weight.shape == (state_samples.shape[0],))
+                return torch.mean(weight * hinge_loss_all)
         elif reduction == "max":
             return torch.max(hinge_loss_all)
         elif reduction == "4norm":

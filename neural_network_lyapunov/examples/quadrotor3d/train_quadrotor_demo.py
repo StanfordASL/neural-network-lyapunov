@@ -353,7 +353,7 @@ if __name__ == "__main__":
                 "derivative_state_samples_all"]
         else:
             positivity_state_samples_init = utils.uniform_sample_in_box(
-                x_lo, x_up, 50000)
+                x_lo, x_up, 500)
             derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)

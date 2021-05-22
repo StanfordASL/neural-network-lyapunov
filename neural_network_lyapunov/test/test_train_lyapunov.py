@@ -186,7 +186,8 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
         self.dut.add_derivative_adversarial_state = True
         self.dut.max_iterations = 1
         self.dut.output_flag = False
-        result, positivity_state_samples, derivative_state_samples = \
+        result, positivity_state_samples, derivative_state_samples,\
+            positivity_state_repeatition, derivative_state_repeatition = \
             self.dut.train_adversarial(
                 positivity_state_samples_init, derivative_state_samples_init,
                 options)
@@ -196,6 +197,10 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
         self.assertEqual(derivative_state_samples.shape,
                          (derivative_state_samples_init.shape[0] +
                           self.dut.lyapunov_derivative_mip_pool_solutions, 2))
+        self.assertEqual(positivity_state_repeatition.shape,
+                         (positivity_state_samples.shape[0],))
+        self.assertEqual(derivative_state_repeatition.shape,
+                         (derivative_state_samples.shape[0],))
 
 
 class TestTrainLyapunovReLU(unittest.TestCase):
@@ -367,12 +372,13 @@ class TestClusterAdversarialStates(unittest.TestCase):
         x2 = torch.tensor([0.2, -0.5], dtype=dtype)
         adversarial_states = torch.cat(
             (x0, x0, x0, x1, x1, x1, x1, x2, x2, x2, x2)).reshape((-1, 2))
-        clustered_adversarial_states = \
+        clustered_adversarial_states, repeatition = \
             train_lyapunov._cluster_adversarial_states(
                 adversarial_states, 1E-10)
         np.testing.assert_allclose(
             clustered_adversarial_states.detach().numpy(),
             torch.cat((x0, x1, x2)).reshape((-1, 2)).detach().numpy())
+        np.testing.assert_array_equal(repeatition, np.array([3, 4, 4]))
 
 
 if __name__ == "__main__":

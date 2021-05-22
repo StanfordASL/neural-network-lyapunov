@@ -836,7 +836,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                             margin=0.,
                                             xbar_indices=None,
                                             xhat_indices=None,
-                                            reduction="mean"):
+                                            reduction="mean",
+                                            weight=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
@@ -888,7 +889,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             eps_type,
             R=R,
             margin=margin,
-            reduction=reduction)
+            reduction=reduction,
+            weight=weight)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -903,7 +905,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             margin=0.,
             xbar_indices=None,
             xhat_indices=None,
-            reduction="mean"):
+            reduction="mean",
+            weight=None):
         """
         We will sample states x̅ⁱ, i=1,...N, and we would like the Lyapunov
         function to decrease on these sampled states x̅ⁱ. We denote l(x) as the
