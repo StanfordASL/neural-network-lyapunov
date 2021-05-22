@@ -971,7 +971,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                                lyapunov_lower=None,
                                                lyapunov_upper=None,
                                                x_warmstart=None,
-                                               xbar_indices=None):
+                                               xbar_indices=None,
+                                               xhat_indices=None):
         """
         Strengthen the MILP for verifying Lyapunov derivative condition.
 
@@ -997,6 +998,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             lyapunov_upper=lyapunov_upper,
             x_warmstart=x_warmstart,
             xbar_indices=xbar_indices,
+            xhat_indices=xhat_indices,
             binary_var_type=gurobi_torch_mip.BINARYRELAX)
         for _ in range(num_strengthen_pts):
             # Step 3, solve the LP relaxation.

@@ -111,6 +111,30 @@ class TestQuadrotorFeedbackSystem(unittest.TestCase):
         for i in range(x_samples.shape[0]):
             self.add_dynamics_mip_constraint_tester(x_samples[i])
 
+    def test_add_dynamics_mip_constraint_binaryrelax(self):
+        mip = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        self.closed_loop_system.forward_system.network_bound_propagate_method\
+            = mip_utils.PropagateBoundsMethod.MIP
+        self.closed_loop_system.controller_network_bound_propagate_method\
+            = mip_utils.PropagateBoundsMethod.MIP
+        x_var = mip.addVars(self.closed_loop_system.x_dim,
+                            lb=-gurobipy.GRB.INFINITY)
+        x_next_var = mip.addVars(self.closed_loop_system.x_dim,
+                                 lb=-gurobipy.GRB.INFINITY)
+        u_var, forward_dynamics_return, controller_mip_cnstr_return =\
+            self.closed_loop_system.add_dynamics_mip_constraint(
+                mip,
+                x_var,
+                x_next_var,
+                "u",
+                "forward_s",
+                "forward_binary",
+                "controller_s",
+                "controller_binary",
+                binary_var_type=gurobi_torch_mip.BINARYRELAX)
+        self.assertEqual(
+            mip.gurobi_model.getAttr(gurobipy.GRB.Attr.NumBinVars), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

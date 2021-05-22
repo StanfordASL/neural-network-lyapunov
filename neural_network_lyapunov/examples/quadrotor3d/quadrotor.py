@@ -473,7 +473,8 @@ class QuadrotorReLUSystem:
 
     def _add_dynamics_constraint_given_relu_bounds(
             self, mip, x_var, x_next_var, u_var, slack_var_name,
-            binary_var_name, relu_input_lo, relu_input_up, network_input_lo,
+            binary_var_name, relu_input_lo, relu_input_up, relu_output_lo,
+            relu_output_up, network_input_lo,
             network_input_up, binary_var_type):
         mip_cnstr_result = self.dynamics_relu_free_pattern._output_constraint_given_bounds(  # noqa
             relu_input_lo, relu_input_up, network_input_lo, network_input_up)
@@ -520,6 +521,8 @@ class QuadrotorReLUSystem:
         ret = relu_system.ReLUDynamicsConstraintReturn(
             forward_slack, forward_binary)
         ret.from_mip_cnstr_return(mip_cnstr_result, input_vars)
+        ret.relu_output_lo = relu_output_lo
+        ret.relu_output_up = relu_output_up
         return ret
 
     def add_dynamics_constraint(self,
@@ -554,7 +557,7 @@ class QuadrotorReLUSystem:
         network_input_lo = torch.cat((self.x_lo[3:6], self.x_lo[9:12], u_lo))
         network_input_up = torch.cat((self.x_up[3:6], self.x_up[9:12], u_up))
 
-        relu_input_lo, relu_input_up, _, _ =\
+        relu_input_lo, relu_input_up, relu_output_lo, relu_output_up =\
             self.dynamics_relu_free_pattern._compute_layer_bound(
                 network_input_lo, network_input_up,
                 self.network_bound_propagate_method,
@@ -562,5 +565,5 @@ class QuadrotorReLUSystem:
 
         return self._add_dynamics_constraint_given_relu_bounds(
             mip, x_var, x_next_var, u_var, slack_var_name, binary_var_name,
-            relu_input_lo, relu_input_up, network_input_lo, network_input_up,
-            binary_var_type)
+            relu_input_lo, relu_input_up, relu_output_lo, relu_output_up,
+            network_input_lo, network_input_up, binary_var_type)

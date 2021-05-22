@@ -168,6 +168,8 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="path to the training set for adversarial training.")
+    parser.add_argument(
+        "--derivative_mip_num_strengthen_pts", type=int, default=0)
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -325,6 +327,8 @@ if __name__ == "__main__":
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
     dut.output_flag = True
+    dut.derivative_mip_num_strengthen_pts = \
+        args.derivative_mip_num_strengthen_pts
     if args.train_on_samples:
         dut.train_lyapunov_on_samples(state_samples_all,
                                       num_epochs=args.pretrain_num_epochs,

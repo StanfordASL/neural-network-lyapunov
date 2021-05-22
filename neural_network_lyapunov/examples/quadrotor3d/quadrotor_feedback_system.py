@@ -24,7 +24,8 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                                     forward_slack_var_name,
                                     forward_binary_var_name,
                                     controller_slack_var_name,
-                                    controller_binary_var_name):
+                                    controller_binary_var_name,
+                                    binary_var_type=gurobipy.GRB.BINARY):
         """
         Overloads add_dynamics_mip_constraint in the FeedbackSystem class
         When propagating the bounds through LP, we form a big LP containing
@@ -40,7 +41,8 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                              mip, x_var, x_next_var, u_var_name,
                              forward_slack_var_name, forward_binary_var_name,
                              controller_slack_var_name,
-                             controller_binary_var_name)
+                             controller_binary_var_name,
+                             binary_var_type)
         else:
             assert (self.forward_system.network_bound_propagate_method
                     in (mip_utils.PropagateBoundsMethod.LP,
@@ -88,7 +90,7 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     controller_network_output_up,
                     controller_slack_var_name,
                     controller_binary_var_name,
-                    binary_var_type=gurobipy.GRB.BINARY)
+                    binary_var_type=binary_var_type)
             controller_mip_cnstr_return = \
                 feedback_system.ControllerMipConstraintReturn(
                     nn_input=x_var,
@@ -141,5 +143,6 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     mip, x_var, x_next_var, u_var, forward_slack_var_name,
                     forward_binary_var_name, additional_u_lo=u_lower_bound,
                     additional_u_up=u_upper_bound,
-                    create_lp_prog_callback=create_prog_callback)
+                    create_lp_prog_callback=create_prog_callback,
+                    binary_var_type=binary_var_type)
             return u_var, forward_dynamics_return, controller_mip_cnstr_return

@@ -172,6 +172,12 @@ class TrainLyapunovReLU:
         # loss across all samples if sample_loss_reduction="max".
         self.sample_loss_reduction = "mean"
 
+        # Number of strengthening points in the Lyapunov derivative MILP. We
+        # can strengthen the big-M formulation of this MILP, using the idea
+        # in "Strong mixed-integer programming formulations for trained neural
+        # networks" by Ross Anderson et.al.
+        self.derivative_mip_num_strengthen_pts = 0
+
     def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
                     lyapunov_positivity_sample_cost_weight,
@@ -278,15 +284,30 @@ class TrainLyapunovReLU:
 
     def solve_derivative_mip(self):
         dtype = self.lyapunov_hybrid_system.system.dtype
-        lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
-            lyapunov_derivative_as_milp(
-                self.x_equilibrium, self.V_lambda,
-                self.lyapunov_derivative_epsilon,
-                self.lyapunov_derivative_eps_type, R=self.R_options.R(),
-                fixed_R=self.R_options.fixed_R,
-                x_warmstart=self.lyapunov_derivative_last_x_adv,
-                xbar_indices=self.xbar_indices,
-                xhat_indices=self.xhat_indices)
+        if self.derivative_mip_num_strengthen_pts == 0:
+            lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
+                lyapunov_derivative_as_milp(
+                    self.x_equilibrium, self.V_lambda,
+                    self.lyapunov_derivative_epsilon,
+                    self.lyapunov_derivative_eps_type, R=self.R_options.R(),
+                    fixed_R=self.R_options.fixed_R,
+                    x_warmstart=self.lyapunov_derivative_last_x_adv,
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
+        else:
+            assert (self.derivative_mip_num_strengthen_pts > 0)
+            lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
+                strengthen_lyapunov_derivative_as_milp(
+                    self.x_equilibrium,
+                    self.V_lambda,
+                    self.lyapunov_derivative_epsilon,
+                    self.lyapunov_derivative_eps_type,
+                    self.derivative_mip_num_strengthen_pts,
+                    R=self.R_options.R(),
+                    fixed_R=self.R_options.fixed_R,
+                    x_warmstart=self.lyapunov_derivative_last_x_adv,
+                    xbar_indices=self.xbar_indices,
+                    xhat_indices=self.xhat_indices)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return.milp
         for param, val in self.lyapunov_derivative_mip_params.items():
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)
@@ -626,7 +647,8 @@ class TrainLyapunovReLU:
             if lyapunov_positivity_mip_cost < \
                 self.lyapunov_positivity_convergence_tol and\
                     lyapunov_derivative_mip_cost < best_derivative_mip_cost:
-                best_training_params = [p.clone() for p in training_params]  # noqa
+                best_training_params = [p.clone()  # noqa
+                                        for p in training_params]  # noqa
                 best_derivative_mip_cost = lyapunov_derivative_mip_cost
             loss.backward()
             optimizer.step()
