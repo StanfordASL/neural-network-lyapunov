@@ -170,6 +170,8 @@ if __name__ == "__main__":
         help="path to the training set for adversarial training.")
     parser.add_argument(
         "--derivative_mip_num_strengthen_pts", type=int, default=0)
+    parser.add_argument(
+        "--derivative_mip_strengthen_binary", action="store_true")
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -334,6 +336,8 @@ if __name__ == "__main__":
                                       num_epochs=args.pretrain_num_epochs,
                                       batch_size=50)
     dut.enable_wandb = args.enable_wandb
+    dut.derivative_mip_strengthen_binary = \
+        args.derivative_mip_strengthen_binary
     if args.train_adversarial:
         options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
         options.num_batches = 10

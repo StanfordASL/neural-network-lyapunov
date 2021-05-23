@@ -178,6 +178,11 @@ class TrainLyapunovReLU:
         # networks" by Ross Anderson et.al.
         self.derivative_mip_num_strengthen_pts = 0
 
+        # Whether to add strengthening constraints for binary variables. Doing
+        # this strengthening might be computational expensive (it could
+        # require solving some MIPs).
+        self.derivative_mip_strengthen_binary = False
+
     def sample_loss(self,
                     positivity_state_samples,
                     derivative_state_samples,
@@ -314,6 +319,10 @@ class TrainLyapunovReLU:
                     x_warmstart=self.lyapunov_derivative_last_x_adv,
                     xbar_indices=self.xbar_indices,
                     xhat_indices=self.xhat_indices)
+        if self.derivative_mip_strengthen_binary:
+            self.lyapunov_hybrid_system.\
+                strengthen_lyapunov_derivative_milp_binary(
+                    lyapunov_derivative_as_milp_return)
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return.milp
         for param, val in self.lyapunov_derivative_mip_params.items():
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)
