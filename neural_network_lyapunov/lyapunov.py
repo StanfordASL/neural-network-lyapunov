@@ -455,10 +455,10 @@ class LyapunovHybridLinearSystem:
                 dim=0)
         if reduction == "mean":
             if weight is not None:
-                assert (weight.shape == (state_samples.shape[0],))
+                assert (weight.shape == (state_samples.shape[0], ))
                 return torch.mean(weight * torch.nn.HingeEmbeddingLoss(
-                        margin=margin, reduction="none")(
-                    loss, torch.tensor(-1).to(state_samples.device)))
+                    margin=margin, reduction="none")(loss, torch.tensor(-1).to(
+                        state_samples.device)))
             else:
                 return torch.nn.HingeEmbeddingLoss(margin=margin)(
                     loss, torch.tensor(-1.).to(state_samples.device))
@@ -970,6 +970,66 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             lyap_relu_x_mip_cnstr_ret=lyap_relu_x_mip_cnstr_ret,
             lyap_relu_x_next_mip_cnstr_ret=lyap_relu_x_next_mip_cnstr_ret)
 
+    def strengthen_lyapunov_derivative_milp_binary(
+            self, lyap_deriv_milp_return):
+        """
+        Given an MILP that verifies the Lyapunov derivative condition, we want
+        to strengthen this MILP formulation, by putting constraints on its
+        binary variables. Specifically, we check if the binary variable
+        (beta_next) for the Lyapunov network computing V(x_next) and the
+        binary variable beta for the Lyapunov network computing V(x) should be
+        both active or both inactive. We do so by adding the constraint
+        beta(i) + beta_next(i) = 1. If the MILP is infeasible with this
+        constraint, then it means beta(i) and beta_next(i) have to be both
+        active or both inactive, hence we strengthen the MILP by adding the
+        constraint beta(i) = beta_next(i)
+        @param lyap_deriv_milp_return [in/out] The return from
+        lyapunov_derivative_as_milp() function.
+        """
+        assert (len(lyap_deriv_milp_return.beta) == len(
+            lyap_deriv_milp_return.beta_next))
+        for i in range(len(lyap_deriv_milp_return.beta)):
+            # beta[i] and beta_next[i] can both take value 0 and 1.
+            if lyap_deriv_milp_return.lyap_relu_x_mip_cnstr_ret.\
+                relu_input_lo[i] < 0 and\
+                lyap_deriv_milp_return.lyap_relu_x_mip_cnstr_ret.\
+                relu_input_up[i] > 0 and\
+                lyap_deriv_milp_return.lyap_relu_x_next_mip_cnstr_ret.\
+                relu_input_lo[i] < 0 and\
+                lyap_deriv_milp_return.lyap_relu_x_next_mip_cnstr_ret.\
+                    relu_input_up[i] > 0:
+                gurobi_cnstr = lyap_deriv_milp_return.milp.gurobi_model.\
+                    addConstr(lyap_deriv_milp_return.beta[i] +
+                              lyap_deriv_milp_return.beta_next[i] == 1)
+                lyap_deriv_milp_return.milp.gurobi_model.setParam(
+                    gurobipy.GRB.Param.OutputFlag, False)
+                lyap_deriv_milp_return.milp.gurobi_model.setParam(
+                    gurobipy.GRB.Param.DualReductions, False)
+                # Terminate once it finds a single solution.
+                lyap_deriv_milp_return.milp.gurobi_model.setParam(
+                    gurobipy.GRB.Param.SolutionLimit, 1)
+                lyap_deriv_milp_return.milp.gurobi_model.optimize()
+                if lyap_deriv_milp_return.milp.gurobi_model.status ==\
+                        gurobipy.GRB.Status.INFEASIBLE:
+                    # beta[i] and beta_next[i] must be both active or both
+                    # inactive. Add constraint beta[i] = beta_next[i]
+                    print(f"add constraint beta[{i}] = beta_next[{i}]")
+                    lyap_deriv_milp_return.milp.addLConstr(
+                        [
+                            torch.tensor(
+                                [1, -1],
+                                dtype=lyap_deriv_milp_return.milp.dtype)
+                        ], [[
+                            lyap_deriv_milp_return.beta[i],
+                            lyap_deriv_milp_return.beta_next[i]
+                        ]],
+                        sense=gurobipy.GRB.EQUAL,
+                        rhs=0.)
+                lyap_deriv_milp_return.milp.gurobi_model.remove(gurobi_cnstr)
+        # Rest the solution limit to default value.
+        lyap_deriv_milp_return.milp.gurobi_model.setParam(
+            gurobipy.GRB.Param.SolutionLimit, gurobipy.GRB.MAXINT)
+
     def strengthen_lyapunov_derivative_as_milp(self,
                                                x_equilibrium,
                                                V_lambda,
@@ -1021,14 +1081,12 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             # Step 4, strengthen each neural network:
             # Strengthen the ReLU network in lyapunov function.
             self.lyapunov_relu_free_pattern.strengthen_relu_mip_at_solution(
-                lyap_deriv_lp_return.milp,
-                lyap_deriv_lp_return.x, lyap_deriv_lp_return.z,
-                lyap_deriv_lp_return.beta,
+                lyap_deriv_lp_return.milp, lyap_deriv_lp_return.x,
+                lyap_deriv_lp_return.z, lyap_deriv_lp_return.beta,
                 lyap_deriv_lp_return.lyap_relu_x_mip_cnstr_ret)
             self.lyapunov_relu_free_pattern.strengthen_relu_mip_at_solution(
-                lyap_deriv_lp_return.milp,
-                lyap_deriv_lp_return.x_next, lyap_deriv_lp_return.z_next,
-                lyap_deriv_lp_return.beta_next,
+                lyap_deriv_lp_return.milp, lyap_deriv_lp_return.x_next,
+                lyap_deriv_lp_return.z_next, lyap_deriv_lp_return.beta_next,
                 lyap_deriv_lp_return.lyap_relu_x_next_mip_cnstr_ret)
             # Strengthen the ReLU network in dynamics constraint.
             if (isinstance(self.system, feedback_system.FeedbackSystem)):
@@ -1213,7 +1271,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             if weight is None:
                 return torch.mean(hinge_loss_all)
             else:
-                assert (weight.shape == (state_samples.shape[0],))
+                assert (weight.shape == (state_samples.shape[0], ))
                 return torch.mean(weight * hinge_loss_all)
         elif reduction == "max":
             return torch.max(hinge_loss_all)

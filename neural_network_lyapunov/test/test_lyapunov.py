@@ -1843,6 +1843,73 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             system, lyapunov_relu, x_equilibrium, V_lambda, R, xbar_indices,
             xhat_indices)
 
+    def strengthen_lyapunov_derivative_milp_binary_tester(
+            self, dut, V_lambda, deriv_eps, eps_type, R):
+        lyap_deriv_milp_return = dut.lyapunov_derivative_as_milp(
+            dut.system.x_equilibrium,
+            V_lambda,
+            deriv_eps,
+            eps_type,
+            R=R,
+            fixed_R=True)
+        lyap_deriv_milp_return.milp.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        lyap_deriv_milp_return.milp.gurobi_model.optimize()
+        unstrengthend_cost = lyap_deriv_milp_return.milp.gurobi_model.ObjVal
+        dut.strengthen_lyapunov_derivative_milp_binary(lyap_deriv_milp_return)
+        lyap_deriv_milp_return.milp.gurobi_model.optimize()
+        self.assertEqual(lyap_deriv_milp_return.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        self.assertAlmostEqual(unstrengthend_cost,
+                               lyap_deriv_milp_return.milp.gurobi_model.ObjVal)
+        # Now fix the input x to many different values, solve the MILP again.
+        # The problem should be feasible.
+        x_samples = utils.uniform_sample_in_box(
+            torch.from_numpy(dut.system.x_lo_all),
+            torch.from_numpy(dut.system.x_up_all), 50)
+        assert (eps_type == lyapunov.ConvergenceEps.ExpLower)
+        for i in range(x_samples.shape[0]):
+            lyap_deriv_value = dut.lyapunov_derivative(
+                x_samples[i],
+                dut.system.x_equilibrium,
+                V_lambda,
+                deriv_eps,
+                R=R)
+            for j in range(dut.system.x_dim):
+                lyap_deriv_milp_return.x[j].lb = x_samples[i, j]
+                lyap_deriv_milp_return.x[j].ub = x_samples[i, j]
+            lyap_deriv_milp_return.milp.gurobi_model.optimize()
+            x_sample_next = dut.system.step_forward(x_samples[i])
+            if torch.all(
+                    x_sample_next <= torch.from_numpy(dut.system.x_up_all)
+            ) and torch.all(
+                    x_sample_next >= torch.from_numpy(dut.system.x_lo_all)):
+                self.assertEqual(
+                    lyap_deriv_milp_return.milp.gurobi_model.status,
+                    gurobipy.GRB.Status.OPTIMAL)
+                self.assertAlmostEqual(
+                    lyap_deriv_milp_return.milp.gurobi_model.ObjVal,
+                    lyap_deriv_value[0].item())
+            else:
+                self.assertEqual(
+                    lyap_deriv_milp_return.milp.gurobi_model.status,
+                    gurobipy.GRB.Status.INFEASIBLE)
+
+    def test_strengthen_lyapunov_derivative_milp_binary(self):
+        dtype = torch.float64
+        closed_loop_system, lyap_relu = \
+            setup_relu_feedback_system_and_lyapunov(dtype)
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(
+            closed_loop_system, lyap_relu)
+        V_lambda = 0.5
+        deriv_eps = 0.001
+        eps_type = lyapunov.ConvergenceEps.ExpLower
+        R = torch.tensor([[0.5, 0.1, 0, 0], [0.1, 0.2, 0, 0], [0, 0, 1, 0],
+                          [0.1, 1, 1.2, 1]],
+                         dtype=dtype)
+        self.strengthen_lyapunov_derivative_milp_binary_tester(
+            dut, V_lambda, deriv_eps, eps_type, R)
+
     def strengthen_lyapunov_derivative_as_milp_tester(self, dut, V_lambda,
                                                       deriv_eps, eps_type, R,
                                                       num_strengthen_pts):
@@ -2279,9 +2346,9 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                         grad_expected[i].detach().numpy(),
                         atol=1e-15)
                 # Test loss with weight.
-                weight = torch.rand((len(x_samples),), dtype=self.dtype)
-                self.assertAlmostEqual(torch.mean(weight * torch.cat(
-                    loss_expected)).item(),
+                weight = torch.rand((len(x_samples), ), dtype=self.dtype)
+                self.assertAlmostEqual(
+                    torch.mean(weight * torch.cat(loss_expected)).item(),
                     dut.lyapunov_derivative_loss_at_samples(
                         V_lambda,
                         epsilon,
