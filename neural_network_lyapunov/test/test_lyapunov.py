@@ -832,6 +832,19 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                     margin=margin,
                     reduction="4norm").item())
 
+            # Test with weight
+            weight = torch.rand((x_samples.shape[0], ))
+            self.assertAlmostEqual(
+                torch.mean(weight * losses).item(),
+                dut.lyapunov_positivity_loss_at_samples(x_equilibrium,
+                                                        x_samples,
+                                                        V_lambda,
+                                                        epsilon,
+                                                        R=R,
+                                                        margin=margin,
+                                                        reduction="mean",
+                                                        weight=weight).item())
+
         test_fun(torch.tensor([[0, 0]], dtype=self.dtype))
         test_fun(torch.tensor([[0, 0], [0, 1]], dtype=self.dtype))
         test_fun(
@@ -2265,6 +2278,20 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
                         grad[i].detach().numpy(),
                         grad_expected[i].detach().numpy(),
                         atol=1e-15)
+                # Test loss with weight.
+                weight = torch.rand((len(x_samples),), dtype=self.dtype)
+                self.assertAlmostEqual(torch.mean(weight * torch.cat(
+                    loss_expected)).item(),
+                    dut.lyapunov_derivative_loss_at_samples(
+                        V_lambda,
+                        epsilon,
+                        torch.stack(x_samples),
+                        x_equilibrium,
+                        eps_type,
+                        R=R,
+                        margin=margin,
+                        reduction="mean",
+                        weight=weight).item())
 
     def test_lyapunov_derivative_loss_at_samples_partial_state(self):
         torch.manual_seed(0)
