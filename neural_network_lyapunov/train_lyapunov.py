@@ -1124,8 +1124,12 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
             adversarial_states.shape[0] -
             1)[states_distance_squared > cluster_radius**2] + 1
         repeatition = np.diff(new_adversarial_state_index)
-        repeatition = np.insert(repeatition, 0, new_adversarial_state_index[0])
-        repeatition = np.append(
-            repeatition,
-            adversarial_states.shape[0] - new_adversarial_state_index[-1])
+        if repeatition.shape == (0,):
+            repeatition = np.array([adversarial_states.shape[0]])
+        else:
+            repeatition = np.insert(
+                repeatition, 0, new_adversarial_state_index[0])
+            repeatition = np.append(
+                repeatition,
+                adversarial_states.shape[0] - new_adversarial_state_index[-1])
         return clustered_adversarial_states, repeatition

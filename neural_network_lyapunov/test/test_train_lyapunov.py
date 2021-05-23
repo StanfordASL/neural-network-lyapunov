@@ -380,6 +380,15 @@ class TestClusterAdversarialStates(unittest.TestCase):
             torch.cat((x0, x1, x2)).reshape((-1, 2)).detach().numpy())
         np.testing.assert_array_equal(repeatition, np.array([3, 4, 4]))
 
+        adversarial_states = torch.cat((x0, x0, x0)).reshape((-1, 2))
+        clustered_adversarial_states, repeatition = \
+            train_lyapunov._cluster_adversarial_states(
+                adversarial_states, 1E-10)
+        np.testing.assert_allclose(
+            clustered_adversarial_states.detach().numpy(),
+            x0.reshape((-1, 2)).detach().numpy())
+        np.testing.assert_array_equal(repeatition, np.array([3]))
+
 
 if __name__ == "__main__":
     unittest.main()
