@@ -202,7 +202,7 @@ if __name__ == "__main__":
     if args.load_forward_model:
         forward_model = torch.load(args.load_forward_model)
 
-    lyapunov_relu = utils.setup_relu((12, 14, 10, 1),
+    lyapunov_relu = utils.setup_relu((12, 14, 8, 4, 1),
                                      params=None,
                                      negative_slope=0.1,
                                      bias=True,
@@ -228,7 +228,7 @@ if __name__ == "__main__":
         V_lambda = lyapunov_data["V_lambda"]
         R = lyapunov_data["R"]
 
-    controller_relu = utils.setup_relu((12, 12, 8, 4),
+    controller_relu = utils.setup_relu((12, 8, 6, 4),
                                        params=None,
                                        negative_slope=0.01,
                                        bias=True,
@@ -250,7 +250,7 @@ if __name__ == "__main__":
         -0.04, -0.04, -0.04, -0.04 * np.pi, -0.04 * np.pi, -0.04 * np.pi, -0.2,
         -0.2, -0.4, -np.pi * 0.08, -np.pi * 0.08, -np.pi * 0.08
     ],
-                        dtype=dtype) * 0.5
+                        dtype=dtype) * 5
     x_up = -x_lo
     u_lo = torch.zeros((4, ), dtype=dtype)
     u_up = 3 * u_equilibrium
@@ -325,7 +325,7 @@ if __name__ == "__main__":
         # gurobipy.GRB.Attr.MIPGap: 1.,
         gurobipy.GRB.Param.OutputFlag: True,
         # gurobipy.GRB.Param.TimeLimit: 900,
-        gurobipy.GRB.Param.MIPFocus: 1
+        # gurobipy.GRB.Param.MIPFocus: 1
     }
     state_samples_all = utils.uniform_sample_in_box(x_lo, x_up, 10000)
     dut.output_flag = True
@@ -344,9 +344,9 @@ if __name__ == "__main__":
         options.num_epochs_per_mip = 30
         options.positivity_samples_pool_size = 50000
         options.derivative_samples_pool_size = 500000
-        options.adversarial_cluster_radius = 1E-5
-        dut.lyapunov_positivity_mip_pool_solutions = 1000
-        dut.lyapunov_derivative_mip_pool_solutions = 20000
+        options.adversarial_cluster_radius = np.inf
+        dut.lyapunov_positivity_mip_pool_solutions = 100
+        dut.lyapunov_derivative_mip_pool_solutions = 1500
         dut.add_positivity_adversarial_state = True
         dut.add_derivative_adversarial_state = True
         if args.training_set:
@@ -357,7 +357,7 @@ if __name__ == "__main__":
                 "derivative_state_samples_all"]
         else:
             positivity_state_samples_init = utils.uniform_sample_in_box(
-                x_lo, x_up, 500)
+                x_lo, x_up, 200)
             derivative_state_samples_init = positivity_state_samples_init
         result = dut.train_adversarial(positivity_state_samples_init,
                                        derivative_state_samples_init, options)

@@ -322,7 +322,7 @@ class TrainLyapunovReLU:
         if self.derivative_mip_strengthen_binary:
             self.lyapunov_hybrid_system.\
                 strengthen_lyapunov_derivative_milp_binary(
-                    lyapunov_derivative_as_milp_return)
+                    lyapunov_derivative_as_milp_return, {"TimeLimit": 60})
         lyapunov_derivative_mip = lyapunov_derivative_as_milp_return.milp
         for param, val in self.lyapunov_derivative_mip_params.items():
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)

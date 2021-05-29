@@ -1878,18 +1878,21 @@ class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
             for j in range(dut.system.x_dim):
                 lyap_deriv_milp_return.x[j].lb = x_samples[i, j]
                 lyap_deriv_milp_return.x[j].ub = x_samples[i, j]
+            lyap_deriv_milp_return.milp.gurobi_model.setParam(
+                gurobipy.GRB.Param.DualReductions, False)
             lyap_deriv_milp_return.milp.gurobi_model.optimize()
             x_sample_next = dut.system.step_forward(x_samples[i])
             if torch.all(
                     x_sample_next <= torch.from_numpy(dut.system.x_up_all)
             ) and torch.all(
                     x_sample_next >= torch.from_numpy(dut.system.x_lo_all)):
-                self.assertEqual(
-                    lyap_deriv_milp_return.milp.gurobi_model.status,
-                    gurobipy.GRB.Status.OPTIMAL)
-                self.assertAlmostEqual(
-                    lyap_deriv_milp_return.milp.gurobi_model.ObjVal,
-                    lyap_deriv_value[0].item())
+                if lyap_deriv_value[0].item() >= 0:
+                    self.assertEqual(
+                        lyap_deriv_milp_return.milp.gurobi_model.status,
+                        gurobipy.GRB.Status.OPTIMAL)
+                    self.assertAlmostEqual(
+                        lyap_deriv_milp_return.milp.gurobi_model.ObjVal,
+                        lyap_deriv_value[0].item())
             else:
                 self.assertEqual(
                     lyap_deriv_milp_return.milp.gurobi_model.status,

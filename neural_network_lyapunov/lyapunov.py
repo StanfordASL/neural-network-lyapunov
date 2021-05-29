@@ -971,7 +971,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             lyap_relu_x_next_mip_cnstr_ret=lyap_relu_x_next_mip_cnstr_ret)
 
     def strengthen_lyapunov_derivative_milp_binary(
-            self, lyap_deriv_milp_return):
+            self, lyap_deriv_milp_return, gurobi_options=None):
         """
         Given an MILP that verifies the Lyapunov derivative condition, we want
         to strengthen this MILP formulation, by putting constraints on its
@@ -988,6 +988,29 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
         """
         assert (len(lyap_deriv_milp_return.beta) == len(
             lyap_deriv_milp_return.beta_next))
+        # We know that the derivative MILP always has a solution of x=x*, such
+        # that the objective is 0. Hence we put the constraint that the
+        # objective should be non-negative, namely we focus on only the
+        # adversarial states.
+        objective = lyap_deriv_milp_return.milp.gurobi_model.getObjective()
+        nonnegative_objective_cnstr = \
+            lyap_deriv_milp_return.milp.gurobi_model.addLConstr(objective >= 0)
+        gurobi_default_options = dict()
+
+        def set_gurobi_options(param, param_val):
+            default_val = lyap_deriv_milp_return.milp.gurobi_model.\
+                getParamInfo(param)[2]
+            gurobi_default_options[param] = default_val
+            lyap_deriv_milp_return.milp.gurobi_model.setParam(param, param_val)
+
+        set_gurobi_options(gurobipy.GRB.Param.OutputFlag, False)
+        set_gurobi_options(gurobipy.GRB.Param.DualReductions, False)
+        # Terminate once it finds a single solution. We don't care
+        # finding the optimal solution in this pre-solve stage.
+        set_gurobi_options(gurobipy.GRB.Param.SolutionLimit, 1)
+        if gurobi_options is not None:
+            for param, param_val in gurobi_options.items():
+                set_gurobi_options(param, param_val)
         for i in range(len(lyap_deriv_milp_return.beta)):
             # beta[i] and beta_next[i] can both take value 0 and 1.
             if lyap_deriv_milp_return.lyap_relu_x_mip_cnstr_ret.\
@@ -1001,13 +1024,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                 gurobi_cnstr = lyap_deriv_milp_return.milp.gurobi_model.\
                     addConstr(lyap_deriv_milp_return.beta[i] +
                               lyap_deriv_milp_return.beta_next[i] == 1)
-                lyap_deriv_milp_return.milp.gurobi_model.setParam(
-                    gurobipy.GRB.Param.OutputFlag, False)
-                lyap_deriv_milp_return.milp.gurobi_model.setParam(
-                    gurobipy.GRB.Param.DualReductions, False)
-                # Terminate once it finds a single solution.
-                lyap_deriv_milp_return.milp.gurobi_model.setParam(
-                    gurobipy.GRB.Param.SolutionLimit, 1)
                 lyap_deriv_milp_return.milp.gurobi_model.optimize()
                 if lyap_deriv_milp_return.milp.gurobi_model.status ==\
                         gurobipy.GRB.Status.INFEASIBLE:
@@ -1026,9 +1042,13 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                         sense=gurobipy.GRB.EQUAL,
                         rhs=0.)
                 lyap_deriv_milp_return.milp.gurobi_model.remove(gurobi_cnstr)
-        # Rest the solution limit to default value.
-        lyap_deriv_milp_return.milp.gurobi_model.setParam(
-            gurobipy.GRB.Param.SolutionLimit, gurobipy.GRB.MAXINT)
+        # Reset the gurobi params to default value.
+        for param, param_default_val in gurobi_default_options.items():
+            lyap_deriv_milp_return.milp.gurobi_model.setParam(
+                param, param_default_val)
+        # Remove the constraint that the objective should be non-negative.
+        lyap_deriv_milp_return.milp.gurobi_model.remove(
+            nonnegative_objective_cnstr)
 
     def strengthen_lyapunov_derivative_as_milp(self,
                                                x_equilibrium,
