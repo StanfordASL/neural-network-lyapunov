@@ -328,7 +328,7 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)
         if (self.lyapunov_derivative_mip_pool_solutions > 1):
             lyapunov_derivative_mip.gurobi_model.setParam(
-                gurobipy.GRB.Param.PoolSearchMode, 2)
+                gurobipy.GRB.Param.PoolSearchMode, 1)
             lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.PoolSolutions,
                 self.lyapunov_derivative_mip_pool_solutions)
@@ -961,27 +961,33 @@ class TrainLyapunovReLU:
                     _cluster_adversarial_states(
                         derivative_mip_adversarial,
                         options.adversarial_cluster_radius)
-            else:
-                positivity_mip_adversarial_repeatition = torch.ones(
-                    (positivity_mip_adversarial.shape[0], ),
-                    dtype=positivity_mip_adversarial.dtype)
-                derivative_mip_adversarial_repeatition = torch.ones(
-                    (derivative_mip_adversarial.shape[0], ),
-                    dtype=derivative_mip_adversarial.dtype)
+            # else:
+            #     positivity_mip_adversarial_repeatition = torch.ones(
+            #         (positivity_mip_adversarial.shape[0], ),
+            #         dtype=positivity_mip_adversarial.dtype)
+            #     derivative_mip_adversarial_repeatition = torch.ones(
+            #         (derivative_mip_adversarial.shape[0], ),
+            #         dtype=derivative_mip_adversarial.dtype)
             positivity_state_samples_all = torch.cat(
                 (positivity_state_samples_all, positivity_mip_adversarial),
                 dim=0)
             derivative_state_samples_all = torch.cat(
                 (derivative_state_samples_all, derivative_mip_adversarial),
                 dim=0)
-            positivity_state_repeatition = torch.cat(
-                (positivity_state_repeatition,
-                 positivity_mip_adversarial_repeatition),
-                dim=0)
-            derivative_state_repeatition = torch.cat(
-                (derivative_state_repeatition,
-                 derivative_mip_adversarial_repeatition),
-                dim=0)
+            # positivity_state_repeatition = torch.cat(
+            #     (positivity_state_repeatition,
+            #      positivity_mip_adversarial_repeatition),
+            #     dim=0)
+            positivity_state_repeatition = torch.ones((
+                positivity_state_samples_all.shape[0],),
+                dtype=positivity_state_samples_all.dtype)
+            # derivative_state_repeatition = torch.cat(
+            #     (derivative_state_repeatition,
+            #      derivative_mip_adversarial_repeatition),
+            #     dim=0)
+            derivative_state_repeatition = torch.ones((
+                derivative_state_samples_all.shape[0],),
+                dtype=derivative_state_samples_all.dtype)
             if positivity_state_samples_all.shape[
                     0] > options.positivity_samples_pool_size:
                 positivity_state_samples_all = positivity_state_samples_all[
@@ -1122,6 +1128,9 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
     adversarial_states[i+1]. So we select the most adversarial state in each
     cluster.
     """
+    if adversarial_states.shape[0] == 0:
+        return adversarial_states,\
+            torch.tensor([], dtype=adversarial_states.dtype)
     with torch.no_grad():
         states_distance_squared = torch.sum(
             (adversarial_states[1:] - adversarial_states[:-1])**2, dim=1)
