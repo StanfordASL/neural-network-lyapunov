@@ -5,11 +5,12 @@ import itertools
 import numpy as np
 import torch
 import torch.nn as nn
+import gym
 from torch.optim import Adam
 from copy import deepcopy
 from torch.utils.tensorboard import SummaryWriter
 
-from neural_network_lyapunov.examples.quadrotor2d.rl.quadrotor2d_env import \
+from neural_network_lyapunov.examples.quadrotor2d.quadrotor2d_env import \
     Quadrotor2DEnv
 
 
@@ -121,7 +122,8 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         replay_size=int(1e6), gamma=0.99,
         polyak=0.995, pi_lr=1e-3, q_lr=1e-3, batch_size=100, start_steps=10000,
         update_after=1000, update_every=50, act_noise=0.1, target_noise=0.2,
-        noise_clip=0.5, policy_delay=2, num_test_episodes=10, max_ep_len=1000):
+        noise_clip=0.5, policy_delay=2, num_test_episodes=10, max_ep_len=1000,
+        exp_name='td3'):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)
 
@@ -208,9 +210,16 @@ def td3(env_fn, actor_critic=MLPActorCritic,
     act_high = torch.tensor(env.action_space.high)
 
     # Create actor-critic module and target networks
+    if hasattr(env, 'obs_equ'):
+        obs_equ = env.obs_equ
+    else:
+        obs_equ = torch.zeros(env.observation_space.shape)
+    if hasattr(env, 'act_equ'):
+        act_equ = env.act_equ
+    else:
+        act_equ = torch.zeros(env.action_space.shape)
     ac = actor_critic(
-        env.observation_space, env.action_space, env.obs_equ, env.act_equ,
-        **ac_kwargs)
+        env.observation_space, env.action_space, obs_equ, act_equ, **ac_kwargs)
     ac_targ = deepcopy(ac)
 
     # Freeze target networks with respect to optimizers
@@ -372,12 +381,13 @@ def td3(env_fn, actor_critic=MLPActorCritic,
             # Test the performance of the deterministic version of the agent.
             test_agent(epoch)
 
-            torch.save(ac, 'actor_critic.pt')
+            torch.save(ac, exp_name + '_actor_critic.pt')
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('env', type=str)
     parser.add_argument('--hid', type=int, default=256)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
@@ -387,7 +397,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     def env_fn():
-        return Quadrotor2DEnv()
+        if args.env == 'quadrotor2d':
+            return Quadrotor2DEnv()
+        else:
+            return gym.make(args.env)
 
     td3(env_fn, actor_critic=MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l),
@@ -401,4 +414,5 @@ if __name__ == '__main__':
         steps_per_epoch=4000,
         start_steps=10000,
         update_after=1000,
-        update_every=50)
+        update_every=50,
+        exp_name=args.exp_name + '_' + args.env)
