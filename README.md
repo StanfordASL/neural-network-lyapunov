@@ -1,3 +1,14 @@
+# Introduction
+This repo contains the code for the two papers
+   - Counter-example guided synthesis of neural network Lyapunov functions for piecewise linear systems
+       by Hongkai Dai, Benoit Landry, Marco Pavone and Russ Tedrake
+       IEEE Conference on Decision and Control, 2020
+   - Lyapunov-stable neural-network control
+       by Hongkai Dai, Benoit Landry, Lujie Yang, Marco Pavone and Russ Tedrake
+       Robotics: Science and Systems, 2021
+
+We can synthesize neural-network controllers with Lyapunov stability guarantees. Namely for all the initial states within a certain region, the controller will drive the system from these initial states to converge to the goal state.
+
 # Setup
 
 ## Python requirements
@@ -38,5 +49,3 @@ to check if there are any violations.
 ## Unit test
 I am a strong believer of unit test. We strongly encourage to add tests to the functions in the PR.
 
-## Submitting a pull request
-Currently this is a private repo. In order to trigger CI on a private repo, please send your branch to upstream `https://github.com/StanfordASL/neural-network-lyapunov` (not your own fork), and then submit a PR from the upstream.
