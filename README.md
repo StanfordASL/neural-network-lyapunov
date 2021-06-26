@@ -3,7 +3,7 @@ This repo contains the code for the two papers
    - [Counter-example guided synthesis of neural network Lyapunov functions for piecewise linear systems](http://groups.csail.mit.edu/robotics-center/public_papers/Dai20.pdf) <br>
        Hongkai Dai, Benoit Landry, Marco Pavone and Russ Tedrake <br>
        IEEE Conference on Decision and Control, 2020
-   - Lyapunov-stable neural-network control <br>
+   - [Lyapunov-stable neural-network control](http://groups.csail.mit.edu/robotics-center/public_papers/Dai21.pdf) <br>
        Hongkai Dai, Benoit Landry, Lujie Yang, Marco Pavone and Russ Tedrake <br>
        Robotics: Science and Systems, 2021
 
