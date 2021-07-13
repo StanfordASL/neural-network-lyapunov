@@ -151,7 +151,6 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                 fixed_R=True)
             mip = derivative_return.milp
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
-            mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
                                       num_solutions)
             mip.gurobi_model.optimize()
@@ -191,12 +190,14 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
             self.dut.train_adversarial(
                 positivity_state_samples_init, derivative_state_samples_init,
                 options)
-        self.assertEqual(positivity_state_samples.shape,
-                         (positivity_state_samples_init.shape[0] +
-                          self.dut.lyapunov_positivity_mip_pool_solutions, 2))
-        self.assertEqual(derivative_state_samples.shape,
-                         (derivative_state_samples_init.shape[0] +
-                          self.dut.lyapunov_derivative_mip_pool_solutions, 2))
+        self.assertLessEqual(
+            positivity_state_samples.shape,
+            (positivity_state_samples_init.shape[0] +
+             self.dut.lyapunov_positivity_mip_pool_solutions, 2))
+        self.assertLessEqual(
+            derivative_state_samples.shape,
+            (derivative_state_samples_init.shape[0] +
+             self.dut.lyapunov_derivative_mip_pool_solutions, 2))
         self.assertEqual(positivity_state_repeatition.shape,
                          (positivity_state_samples.shape[0],))
         self.assertEqual(derivative_state_repeatition.shape,

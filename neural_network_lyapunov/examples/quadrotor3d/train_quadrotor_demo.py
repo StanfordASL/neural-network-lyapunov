@@ -247,10 +247,10 @@ if __name__ == "__main__":
     plant = quadrotor.Quadrotor(dtype)
     u_equilibrium = plant.hover_thrust * torch.ones((4, ), dtype=dtype)
     x_lo = torch.tensor([
-        -0.04, -0.04, -0.04, -0.04 * np.pi, -0.04 * np.pi, -0.04 * np.pi, -0.2,
-        -0.2, -0.4, -np.pi * 0.08, -np.pi * 0.08, -np.pi * 0.08
+        -0.05, -0.05, -0.05, -0.05 * np.pi, -0.05 * np.pi, -0.05 * np.pi, -0.2,
+        -0.2, -0.2, -np.pi * 0.1, -np.pi * 0.1, -np.pi * 0.1
     ],
-                        dtype=dtype) * 0.5
+                        dtype=dtype) * 0.1
     x_up = -x_lo
     u_lo = torch.zeros((4, ), dtype=dtype)
     u_up = 3 * u_equilibrium
@@ -345,8 +345,8 @@ if __name__ == "__main__":
         options.positivity_samples_pool_size = 50000
         options.derivative_samples_pool_size = 300000
         options.adversarial_cluster_radius = 1E-5
-        dut.lyapunov_positivity_mip_pool_solutions = 100
-        dut.lyapunov_derivative_mip_pool_solutions = 300
+        dut.lyapunov_positivity_mip_pool_solutions = 10
+        dut.lyapunov_derivative_mip_pool_solutions = 20
         dut.add_positivity_adversarial_state = True
         dut.add_derivative_adversarial_state = True
         if args.training_set:
