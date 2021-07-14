@@ -328,8 +328,6 @@ class TrainLyapunovReLU:
             lyapunov_derivative_mip.gurobi_model.setParam(param, val)
         if (self.lyapunov_derivative_mip_pool_solutions > 1):
             lyapunov_derivative_mip.gurobi_model.setParam(
-                gurobipy.GRB.Param.PoolSearchMode, 1)
-            lyapunov_derivative_mip.gurobi_model.setParam(
                 gurobipy.GRB.Param.PoolSolutions,
                 self.lyapunov_derivative_mip_pool_solutions)
         if self.lyapunov_derivative_mip_term_threshold is not None:
@@ -935,15 +933,8 @@ class TrainLyapunovReLU:
         derivative_state_repeatition = torch.ones(
             (derivative_state_samples_all.shape[0], ),
             dtype=derivative_state_samples_all.dtype)
-        training_params = self._training_params()
-        if self.optimizer == "Adam":
-            optimizer = torch.optim.Adam(training_params,
-                                         lr=self.learning_rate)
-        elif self.optimizer == "SGD":
-            optimizer = torch.optim.SGD(training_params,
-                                        lr=self.learning_rate,
-                                        momentum=self.momentum)
         iter_count = 0
+        training_params = self._training_params()
         while iter_count < self.max_iterations:
             # Now solve MIP to find adversarial states.
             lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
@@ -1017,6 +1008,13 @@ class TrainLyapunovReLU:
                 return True, positivity_state_samples_all,\
                     derivative_state_samples_all
             # Now do gradient descent on the adversarial states.
+            if self.optimizer == "Adam":
+                optimizer = torch.optim.Adam(training_params,
+                                             lr=self.learning_rate)
+            elif self.optimizer == "SGD":
+                optimizer = torch.optim.SGD(training_params,
+                                            lr=self.learning_rate,
+                                            momentum=self.momentum)
             self._batch_descent_on_samples(positivity_state_samples_all,
                                            derivative_state_samples_all,
                                            optimizer,
