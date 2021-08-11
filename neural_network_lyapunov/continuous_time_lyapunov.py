@@ -171,7 +171,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (isinstance(beta, list))
 
         z = [None] * self.system.num_modes
-        a_out = [None] * self.system.num_modes
+        A_out = [None] * self.system.num_modes
         if (Aisi_lower is None or Aisi_upper is None):
             Aisi_lower, Aisi_upper = self.__compute_Aisi_bounds()
         else:
@@ -179,9 +179,10 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             assert (len(Aisi_upper) == self.system.num_modes)
         for i in range(self.system.num_modes):
             # First write ∂ReLU(x)/∂x*Aᵢsᵢ
-            a_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
+            A_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     Aisi_lower[i], Aisi_upper[i])
+            A_out[i] = A_out[i].view(A_out[i].shape[1])
             z[i] = milp.addVars(A_z.shape[1],
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
@@ -194,7 +195,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                              sense=gurobipy.GRB.LESS_EQUAL,
                              b=rhs,
                              name="milp_relu_gradient_times_Aisi")
-        return (z, a_out)
+        return (z, A_out)
 
     def add_relu_gradient_times_xdot(self,
                                      milp,
@@ -225,10 +226,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (xdot_lower.shape == (self.system.x_dim, ))
         assert (xdot_upper.shape == (self.system.x_dim, ))
         # First write ∂ReLU(x)/∂x*ẋ
-        a_out, A_xdot, A_z, A_beta, rhs, _, _ = \
+        A_out, A_xdot, A_z, A_beta, rhs, _, _ = \
             self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                 torch.from_numpy(xdot_lower),
                 torch.from_numpy(xdot_upper))
+        A_out = A_out.view(A_out.shape[1])
         z = milp.addVars(A_z.shape[1],
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
@@ -237,7 +239,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                          sense=gurobipy.GRB.LESS_EQUAL,
                          b=rhs,
                          name="milp_relu_gradient_times_xdot")
-        return (z, a_out)
+        return (z, A_out)
 
     def add_relu_gradient_times_gigammai(self,
                                          milp,
@@ -266,7 +268,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (len(gamma) == self.system.num_modes)
         assert (isinstance(beta, list))
         z = [None] * self.system.num_modes
-        a_out = [None] * self.system.num_modes
+        A_out = [None] * self.system.num_modes
         if gigammai_lower is None or gigammai_upper is None:
             gigammai_lower = [None] * self.system.num_modes
             gigammai_upper = [None] * self.system.num_modes
@@ -278,9 +280,10 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                     torch.zeros(self.system.x_dim, dtype=self.system.dtype),
                     self.system.g[i])
         for i in range(self.system.num_modes):
-            a_out[i], A_gigammai, A_z, A_beta, rhs, _, _ =\
+            A_out[i], A_gigammai, A_z, A_beta, rhs, _, _ =\
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     gigammai_lower[i], gigammai_upper[i])
+            A_out[i] = A_out[i].view(A_out[i].shape[1])
             z[i] = milp.addVars(A_z.shape[1],
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
@@ -291,7 +294,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                              sense=gurobipy.GRB.LESS_EQUAL,
                              b=rhs,
                              name="milp_relu_gradient_times_gigammai")
-        return (z, a_out)
+        return (z, A_out)
 
     def add_sign_state_error_times_Aisi(self,
                                         milp,

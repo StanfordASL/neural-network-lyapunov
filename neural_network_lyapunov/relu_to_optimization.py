@@ -1003,20 +1003,16 @@ class ReLUFreePattern:
         ReLU unit). And we define a matrix
         M(β, c) = c*I + (1-c)*diag(β)
         We notice that
-        ∂ReLU(x)/∂x = wₙᵀ * M(βₙ₋₁, c) +  * Wₙ₋₁ * M(βₙ₋₂, c) * Wₙ₋₂ * ...
+        ∂ReLU(x)/∂x = Wₙ * M(βₙ₋₁, c)  * Wₙ₋₁ * M(βₙ₋₂, c) * Wₙ₋₂ * ...
                       * M(β₀, c) * W₀
         So we introduce slack variable z, such that
         z₀ = y
         zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
         The constraint (1) can be replaced by mixed-integer linear constraint
         on zᵢ and βᵢ.
-        If the ReLU network has a ReLU unit for the output layer, then
-        ∂ReLU(x)/∂x * y = zₙ₊₁
-        otherwise
-        ∂ReLU(x)/∂x * y = wₙᵀzₙ
 
         We write ∂ReLU(x)/∂x * y as
-        aₒᵤₜᵀz
+        Aₒᵤₜ * z
         with the additional constraint
         A_y * y + A_z * z + A_beta * β ≤ rhs
         where z = [z₁; z₂;...;zₙ]
@@ -1042,16 +1038,17 @@ class ReLUFreePattern:
         zi_lo = vector_lower
         zi_up = vector_upper
         ineq_count = 0
-        a_out = torch.zeros(self.num_relu_units, dtype=self.dtype)
+        A_out = torch.zeros((self.model[-1].out_features, self.num_relu_units),
+                            dtype=self.dtype)
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
                 if layer_count == len(self.relu_unit_index):
                     # If this is the last linear layer, and this linear layer
-                    # is the output layer, then we set a_out. Otherwise, we
+                    # is the output layer, then we set A_out. Otherwise, we
                     # append inequality constraints.
-                    a_out[self.relu_unit_index[layer_count - 1]] =\
-                        layer.weight[0]
+                    A_out[:, self.relu_unit_index[layer_count - 1]] = \
+                        layer.weight
                 else:
                     # First compute the range of (Wᵢ*zᵢ)(j)
                     Wizi_lo = torch.zeros(layer.weight.shape[0],
@@ -1126,4 +1123,4 @@ class ReLUFreePattern:
             else:
                 raise Exception("output_gradient_times_vector: we currently " +
                                 "only support linear and ReLU units.")
-        return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up)
+        return (A_out, A_y, A_z, A_beta, rhs, z_lo, z_up)

@@ -560,9 +560,11 @@ class TestReLU(unittest.TestCase):
             (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
                 model, 2, activation_pattern, self.dtype)
             output_expected = g.squeeze() @ y
-            (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) =\
+            (A_out, A_y, A_z, A_beta, rhs, z_lo, z_up) =\
                 relu_free_pattern.output_gradient_times_vector(
                     y_lo, y_up)
+            self.assertEqual(
+                A_out.shape, (1, relu_free_pattern.num_relu_units))
 
             # Now compute z manually
             z_expected = torch.empty((relu_free_pattern.num_relu_units),
@@ -595,8 +597,8 @@ class TestReLU(unittest.TestCase):
                                          z_up.detach().numpy() + 1E-10)
             np.testing.assert_array_less(z_lo.detach().numpy() - 1E-10,
                                          z_expected.detach().numpy())
-            # Check that the output equals to a_out.dot(z_expected)
-            self.assertAlmostEqual((a_out @ z_expected).item(),
+            # Check that the output equals to A_out.dot(z_expected)
+            self.assertAlmostEqual((A_out @ z_expected).item(),
                                    output_expected.item())
             # Check that y, z, beta satisfies the constraint
             lhs = A_y @ y + A_z @ z_expected + A_beta @ beta
