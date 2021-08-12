@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from neural_network_lyapunov.examples.quadrotor2d.quadrotor2d_env import \
     Quadrotor2DEnv
+import neural_network_lyapunov.utils as utils
 
 
 def combined_shape(length, shape=None):
@@ -20,41 +21,39 @@ def combined_shape(length, shape=None):
     return (length, shape) if np.isscalar(shape) else (length, *shape)
 
 
-def mlp(sizes, activation, output_activation=nn.Identity):
-    layers = []
-    for j in range(len(sizes)-1):
-        act = activation if j < len(sizes)-2 else output_activation
-        layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
-    return nn.Sequential(*layers)
-
-
-def count_vars(module):
-    return sum([np.prod(p.shape) for p in module.parameters()])
-
-
 class MLPActor(nn.Module):
     def __init__(self, act_low, act_high, obs_equ, act_equ,
-                 hidden_sizes, activation):
+                 hidden_sizes, dtype):
         super().__init__()
-        pi_sizes = [obs_equ.shape[0]] + list(hidden_sizes) + [act_equ.shape[0]]
-        self.pi = mlp(pi_sizes, activation, nn.Sigmoid)
         self.act_low = act_low
         self.act_high = act_high
         self.obs_equ = obs_equ
         self.act_equ = act_equ
+        controller_sizes = tuple([obs_equ.shape[0]] + list(
+            hidden_sizes) + [act_equ.shape[0]])
+        self.controller_relu = utils.setup_relu(controller_sizes,
+                                                params=None,
+                                                negative_slope=0.01,
+                                                bias=True,
+                                                dtype=dtype)
 
     def forward(self, obs):
-        ctrl_eq = self.pi(self.obs_equ) * (self.act_high - self.act_low) + \
-            self.act_low
-        ctrl = self.pi(obs) * (self.act_high - self.act_low) + self.act_low
-        return (ctrl - ctrl_eq) + self.act_equ
+        output_raw = self.controller_relu(obs)
+        output_equ = self.controller_relu(self.obs_equ)
+        output_clip = (torch.clip(output_raw - output_equ, -1, 1.) + 1.) * .5
+        output = output_clip * (self.act_high - self.act_low) + self.act_equ
+        return output
 
 
 class MLPQFunction(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+    def __init__(self, obs_dim, act_dim, hidden_sizes, dtype):
         super().__init__()
-        self.q = mlp(
-            [obs_dim + act_dim] + list(hidden_sizes) + [1], activation)
+        q_sizes = tuple([obs_dim + act_dim] + list(hidden_sizes) + [1])
+        self.q = utils.setup_relu(q_sizes,
+                                  params=None,
+                                  negative_slope=0.01,
+                                  bias=True,
+                                  dtype=dtype)
 
     def forward(self, obs, act):
         q = self.q(torch.cat([obs, act], dim=-1))
@@ -63,7 +62,7 @@ class MLPQFunction(nn.Module):
 
 class MLPActorCritic(nn.Module):
     def __init__(self, observation_space, action_space, obs_equ, act_equ,
-                 hidden_sizes=(256, 256), activation=nn.ReLU):
+                 hidden_sizes):
         super().__init__()
 
         obs_dim = observation_space.shape[0]
@@ -72,14 +71,14 @@ class MLPActorCritic(nn.Module):
         act_high = torch.tensor(action_space.high)
 
         # build policy and value functions
-        self.pi = MLPActor(
-            act_low, act_high, obs_equ, act_equ, hidden_sizes, activation)
-        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
-        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
+        self.actor = MLPActor(
+            act_low, act_high, obs_equ, act_equ, hidden_sizes, act_low.dtype)
+        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, act_low.dtype)
+        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, act_low.dtype)
 
     def act(self, obs):
         with torch.no_grad():
-            return self.pi(obs).numpy()
+            return self.actor(obs).numpy()
 
 
 class ReplayBuffer:
@@ -117,13 +116,14 @@ class ReplayBuffer:
                 k, v in batch.items()}
 
 
-def td3(env_fn, actor_critic=MLPActorCritic,
-        ac_kwargs=dict(), seed=0, steps_per_epoch=4000, epochs=100,
+def td3(env_fn, actor_critic=MLPActorCritic, ac_kwargs=dict(), ac_state=None, 
+        seed=0, steps_per_epoch=4000, epochs=100,
         replay_size=int(1e6), gamma=0.99,
         polyak=0.995, pi_lr=1e-3, q_lr=1e-3, batch_size=100, start_steps=10000,
         update_after=1000, update_every=50, act_noise=0.1, target_noise=0.2,
-        noise_clip=0.5, policy_delay=2, num_test_episodes=10, max_ep_len=1000,
-        exp_name='td3'):
+        policy_delay=2, num_test_episodes=10, max_ep_len=1000,
+        exp_name='td3', continuous_test=True, save_model=True,
+        log_tensorboard=True, log_console=True):
     """
     Twin Delayed Deep Deterministic Policy Gradient (TD3)
 
@@ -141,6 +141,10 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         ac_kwargs (dict): Any kwargs appropriate for the ActorCritic object
             you provided to TD3.
 
+        ac_state (dict): State to start the actor critic model with (can be
+        generated using torch.save(model.state_dict(), PATH) and 
+        torch.load(PATH))
+
         seed (int): Seed for random number generators.
 
         steps_per_epoch (int): Number of steps of interaction
@@ -153,14 +157,7 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         gamma (float): Discount factor. (Always between 0 and 1.)
 
         polyak (float): Interpolation factor in polyak averaging for target
-            networks. Target networks are updated towards main networks
-            according to:
-
-            .. math:: \\theta_{\\text{targ}} \\leftarrow
-                \\rho \\theta_{\\text{targ}} + (1-\\rho) \\theta
-
-            where :math:`\\rho` is polyak. (Always between 0 and 1, usually
-            close to 1.)
+            networks. (Always between 0 and 1, usually close to 1.)
 
         pi_lr (float): Learning rate for policy.
 
@@ -171,9 +168,9 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         start_steps (int): Number of steps for uniform-random action selection,
             before running real policy. Helps exploration.
 
-        update_after (int): Number of env interactions to collect before
-            starting to do gradient descent updates. Ensures replay buffer
-            is full enough for useful updates.
+        update_after (int): Number of env interactions (at the very beginning)
+            to collect before starting to do gradient descent updates.
+            Ensures replay buffer is full enough for useful updates.
 
         update_every (int): Number of env interactions that should elapse
             between gradient descent updates. Note: Regardless of how long
@@ -186,9 +183,6 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         target_noise (float): Stddev for smoothing noise added to target
             policy.
 
-        noise_clip (float): Limit for absolute value of target policy
-            smoothing noise.
-
         policy_delay (int): Policy will only be updated once every
             policy_delay times for each update of the Q-networks.
 
@@ -198,7 +192,8 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         max_ep_len (int): Maximum length of trajectory / episode / rollout.
 
     """
-    writer = SummaryWriter()
+    if log_tensorboard:
+        writer = SummaryWriter()
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -220,6 +215,8 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         act_equ = torch.zeros(env.action_space.shape)
     ac = actor_critic(
         env.observation_space, env.action_space, obs_equ, act_equ, **ac_kwargs)
+    if ac_state is not None:
+        ac.load_state_dict(ac_state)
     ac_targ = deepcopy(ac)
 
     # Freeze target networks with respect to optimizers
@@ -243,11 +240,11 @@ def td3(env_fn, actor_critic=MLPActorCritic,
 
         # Bellman backup for Q functions
         with torch.no_grad():
-            pi_targ = ac_targ.pi(o2)
+            pi_targ = ac_targ.actor(o2)
 
             # Target policy smoothing
-            epsilon = torch.randn_like(pi_targ) * target_noise
-            epsilon = torch.clamp(epsilon, -noise_clip, noise_clip)
+            epsilon = torch.randn_like(pi_targ) * target_noise * \
+                (act_high - act_low)
             a2 = pi_targ + epsilon
             a2 = torch.max(torch.min(a2, act_high), act_low)
 
@@ -271,11 +268,11 @@ def td3(env_fn, actor_critic=MLPActorCritic,
     # Set up function for computing TD3 pi loss
     def compute_loss_pi(data):
         o = data['obs']
-        q1_pi = ac.q1(o, ac.pi(o))
+        q1_pi = ac.q1(o, ac.actor(o))
         return -q1_pi.mean()
 
     # Set up optimizers for policy and q-function
-    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    pi_optimizer = Adam(ac.actor.parameters(), lr=pi_lr)
     q_optimizer = Adam(q_params, lr=q_lr)
 
     def update(data, timer, step):
@@ -285,7 +282,8 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         loss_q.backward()
         q_optimizer.step()
 
-        writer.add_scalar('Qloss', loss_q.item(), step)
+        if log_tensorboard:
+            writer.add_scalar('Qloss', loss_q.item(), step)
 
         # Possibly update pi and target networks
         if timer % policy_delay == 0:
@@ -301,7 +299,8 @@ def td3(env_fn, actor_critic=MLPActorCritic,
             loss_pi.backward()
             pi_optimizer.step()
 
-            writer.add_scalar('Piloss', loss_pi.item(), step)
+            if log_tensorboard:
+                writer.add_scalar('Piloss', loss_pi.item(), step)
 
             # Unfreeze Q-networks so you can optimize it at next DDPG step.
             for p in q_params:
@@ -315,11 +314,12 @@ def td3(env_fn, actor_critic=MLPActorCritic,
 
     def get_action(o, noise_scale):
         a = ac.act(torch.as_tensor(o, dtype=torch.float32))
-        a += noise_scale * np.random.randn(act_dim)
+        a += noise_scale * np.random.randn(act_dim) * \
+            (env.action_space.high - env.action_space.low)
         return np.maximum(np.minimum(
             a, env.action_space.high), env.action_space.low)
 
-    def test_agent(epoch):
+    def test_agent():
         mean_ret = 0.
         for j in range(num_test_episodes):
             o, d, ep_ret, ep_len = test_env.reset(), False, 0, 0
@@ -330,8 +330,7 @@ def td3(env_fn, actor_critic=MLPActorCritic,
                 ep_len += 1
             mean_ret += ep_ret
         mean_ret /= float(num_test_episodes)
-        writer.add_scalar('TD3AvgRet', mean_ret, epoch)
-        print("Epoch %s: %s" % (str(epoch), str(mean_ret)))
+        return mean_ret
 
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
@@ -379,21 +378,32 @@ def td3(env_fn, actor_critic=MLPActorCritic,
             epoch = (t+1) // steps_per_epoch
 
             # Test the performance of the deterministic version of the agent.
-            test_agent(epoch)
+            if continuous_test:
+                mean_ret = test_agent()
+                if log_tensorboard:
+                    writer.add_scalar('TD3AvgRet', mean_ret, epoch)
+                if log_console:
+                    print("Epoch %s: %s" % (str(epoch), str(mean_ret)))
 
-            torch.save(ac, exp_name + '_actor_critic.pt')
+            if save_model:
+                torch.save(ac, exp_name + '_actor_critic.pt')
+
+    mean_ret = test_agent()
+
+    return ac, pi_optimizer, q_optimizer, mean_ret
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('env', type=str)
-    parser.add_argument('--hid', type=int, default=256)
+    parser.add_argument('--hid', type=int, default=10)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--exp_name', type=str, default='td3')
+    parser.add_argument('--load_ac', type=str, default='')
     args = parser.parse_args()
 
     def env_fn():
@@ -402,15 +412,20 @@ if __name__ == '__main__':
         else:
             return gym.make(args.env)
 
+    if args.load_ac == '':
+        ac_state = None
+    else:
+        ac_state = torch.load(args.load_ac).state_dict()
+
     td3(env_fn, actor_critic=MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l),
+        ac_state=ac_state,
         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-        max_ep_len=100,
+        max_ep_len=1000,
         pi_lr=1e-3, q_lr=1e-3,
         polyak=.995,
         act_noise=0.1,
         target_noise=0.2,
-        noise_clip=.5,
         steps_per_epoch=4000,
         start_steps=10000,
         update_after=1000,
