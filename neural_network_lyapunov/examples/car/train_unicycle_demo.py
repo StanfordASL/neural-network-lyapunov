@@ -340,7 +340,6 @@ if __name__ == "__main__":
                                                        dynamics_relu, dt,
                                                        thetadot_as_input)
     # We only stabilize the horizontal position, not the orientation of the car
-    xhat_indices = None
     Ru_options = r_options.SearchRwithSVDOptions(controller_Ru.shape,
                                                  np.array([0.1, 0.2]))
     Ru_options.set_variable_value(controller_Ru.detach().numpy())
@@ -376,8 +375,6 @@ if __name__ == "__main__":
     dut.lyapunov_derivative_epsilon = 0.002
     # Only want to stabilize the horizontal position of the car, not the
     # orientation.
-    dut.xbar_indices = xhat_indices
-    dut.xhat_indices = xhat_indices
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (31, 31, 31),
                                                    dtype=torch.float64)

@@ -496,9 +496,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                      R,
                                      fixed_R,
                                      lyapunov_lower=None,
-                                     lyapunov_upper=None,
-                                     xbar_indices=None,
-                                     xhat_indices=None):
+                                     lyapunov_upper=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -588,14 +586,10 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
-        relu_xhat_coeff = []
-        relu_xhat_var = []
-        relu_xhat_constant = relu_x_equilibrium
         self.add_lyapunov_bounds_constraint(lyapunov_lower, lyapunov_upper,
                                             milp, a_relu_out, b_relu_out,
-                                            V_lambda, relu_z, relu_xhat_coeff,
-                                            relu_xhat_var, relu_xhat_constant,
-                                            t)
+                                            V_lambda, relu_z,
+                                            relu_x_equilibrium, t)
 
         # z1[i] is the slack variable to write ∂ReLU(x)/∂x*Aᵢsᵢ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
@@ -681,9 +675,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                     fixed_R,
                                     lyapunov_lower=None,
                                     lyapunov_upper=None,
-                                    x_warmstart=None,
-                                    xbar_indices=None,
-                                    xhat_indices=None):
+                                    x_warmstart=None):
         """
         We assume that the Lyapunov function
         V(x) = ReLU(x) - ReLU(x*) + λ|x-x*|₁, where x* is the equilibrium
@@ -787,15 +779,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
-        relu_xhat_coeff = []
-        relu_xhat_var = []
         relu_x_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
-        relu_xhat_constant = relu_x_equilibrium
         self.add_lyapunov_bounds_constraint(lyapunov_lower, lyapunov_upper,
                                             milp, a_relu_out, b_relu_out,
-                                            V_lambda, relu_z, relu_xhat_coeff,
-                                            relu_xhat_var, relu_xhat_constant,
-                                            t)
+                                            V_lambda, relu_z,
+                                            relu_x_equilibrium, t)
 
         # z1 is the slack variable to write ∂ReLU(x)/∂x*ẋ as
         # mixed-integer linear constraints. cost_z1_coef is the coefficient of
@@ -852,8 +840,6 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                             *,
                                             R,
                                             margin=0.,
-                                            xbar_indices=None,
-                                            xhat_indices=None,
                                             reduction="mean",
                                             weight=None):
         """
@@ -921,8 +907,6 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             *,
             R,
             margin=0.,
-            xbar_indices=None,
-            xhat_indices=None,
             reduction="mean",
             weight=None):
         """

@@ -21,7 +21,6 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
-import neural_network_lyapunov.compute_xhat as compute_xhat
 
 
 class ControllerMipConstraintReturn:
@@ -51,18 +50,14 @@ class FeedbackSystem:
                  x_equilibrium: torch.Tensor,
                  u_equilibrium: torch.Tensor,
                  u_lower_limit: np.ndarray,
-                 u_upper_limit: np.ndarray,
-                 *,
-                 xhat_indices=None):
+                 u_upper_limit: np.ndarray):
         """
         @param forward_system. The forward dynamical system representing
         x[n+1] = f(x[n], u[n]). This system must implements functions like
         add_dynamics_constraint(). Check ReLUSystemGivenEquilibrium in
         relu_system.py as a reference.
         @param controller_network The network ϕᵤ, where the control law is
-        u[n] = ϕᵤ(x[n]) - ϕᵤ(x̂) + u*
-        where x̂[i] = x*[i] if i is in xhat_indices, otherwise x̂[i]=x[i]. This
-        means that we allow u[n] = u* when x[xhat_indices]=x*[xhat_indices].
+        u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         @param x_equilibrium The equilibrium state.
         @param u_equilibrium The control action at equilibrium.
         @param u_lower_limit The lower limit for the control u[n]. We will
@@ -73,8 +68,6 @@ class FeedbackSystem:
         saturate the control if it is above u_upper_limit. Set to
         u_upper_limit[i] to infinity if you don't want saturation for the i'th
         control.
-        @param xhat_indices x̂[i] = x*[i] if i is in xhat_indices, otherwise
-        x̂[i]=x[i]. By default xhat_indices=None means x̂=x*.
         @note If a control has a lower limit, it has to also have an upper
         limit, and vice versa.
         """
@@ -112,7 +105,6 @@ class FeedbackSystem:
         assert (u_upper_limit.shape == (self.forward_system.u_dim, ))
         self.u_lower_limit = u_lower_limit
         self.u_upper_limit = u_upper_limit
-        self.xhat_indices = xhat_indices
         self.controller_network_bound_propagate_method = \
             mip_utils.PropagateBoundsMethod.IA
 
@@ -138,57 +130,31 @@ class FeedbackSystem:
                                  lb=-gurobipy.GRB.INFINITY,
                                  vtype=gurobipy.GRB.CONTINUOUS,
                                  name="u_pre_sat")
-        # Write ϕᵤ(x̂) = relu_xhat_coeff * relu_xhat_var + relu_xhat_constant
-        if self.xhat_indices is None or self.xhat_indices == list(
-                range(self.x_dim)):
-            relu_xhat_coeff = []
-            relu_xhat_var = []
-            relu_xhat_constant = self.controller_network(self.x_equilibrium)
-        else:
-            relu_xhat_slack, relu_xhat_binary, relu_xhat_Aout,\
-                relu_xhat_Cout, _, controller_relu_xhat_lo,\
-                controller_relu_xhat_up\
-                = compute_xhat._compute_network_at_xhat(
-                    prog, x_var, self.x_equilibrium,
-                    self.controller_relu_free_pattern, self.xhat_indices,
-                    torch.from_numpy(self.forward_system.x_lo_all),
-                    torch.from_numpy(self.forward_system.x_up_all),
-                    self.controller_network_bound_propagate_method,
-                    binary_var_type)
-            relu_xhat_coeff = [relu_xhat_Aout]
-            relu_xhat_var = [relu_xhat_slack]
-            relu_xhat_constant = relu_xhat_Cout.reshape((-1, ))
+        # compute ϕᵤ(x*)
+        relu_x_equilibrium = self.controller_network(self.x_equilibrium)
+
         # Add the input saturation constraint
-        # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x̂) + u*
+        # u_pre_sat = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         # and u[n] = saturation(u_pre_sat)
-        # If we write
-        # ϕᵤ(x̂) = relu_xhat_coeff * relu_xhat_var + relu_xhat_constant
         # Then the constraint is
         # Aout_slack * controller_slack -u_pre_sat
-        # - relu_xhat_coeff * relu_xhat_var = relu_xhat_constant - u* -Cout
+        # = relu_x_equilibrium- u* -Cout
         if isinstance(self.controller_network, torch.nn.Sequential):
             prog.addMConstrs([
                 controller_mip_cnstr.Aout_slack.reshape(
                     (self.forward_system.u_dim, len(controller_slack))),
                 -torch.eye(self.forward_system.u_dim,
                            dtype=self.forward_system.dtype)
-            ] + [-coeff for coeff in relu_xhat_coeff],
-                             [controller_slack, u_pre_sat] + relu_xhat_var,
+            ], [controller_slack, u_pre_sat],
                              sense=gurobipy.GRB.EQUAL,
-                             b=relu_xhat_constant - self.u_equilibrium -
+                             b=relu_x_equilibrium - self.u_equilibrium -
                              controller_mip_cnstr.Cout,
                              name="controller_output")
-        # Now compute the bounds of ϕᵤ(x̂)
-        if self.xhat_indices is None or self.xhat_indices == list(
-                range(self.x_dim)):
-            controller_relu_xhat_lo = self.controller_network(
-                self.x_equilibrium)
-            controller_relu_xhat_up = controller_relu_xhat_lo
 
         u_pre_sat_lo = controller_network_output_lo -\
-            controller_relu_xhat_up + self.u_equilibrium
+            relu_x_equilibrium + self.u_equilibrium
         u_pre_sat_up = controller_network_output_up -\
-            controller_relu_xhat_lo + self.u_equilibrium
+            relu_x_equilibrium + self.u_equilibrium
         u_lower_bound, u_upper_bound = _add_input_saturation_constraint(
             prog, u_var, u_pre_sat, self.u_lower_limit, self.u_upper_limit,
             u_pre_sat_lo, u_pre_sat_up, self.dtype, binary_var_type)
@@ -243,8 +209,6 @@ class FeedbackSystem:
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
                                 name="u_pre_sat")
-        assert (self.xhat_indices is None
-                or self.xhat_indices == list(range(self.x_dim)))
 
         network_at_x_equilibrium = self.controller_network(self.x_equilibrium)
         # Add the input saturation constraint
@@ -388,8 +352,8 @@ class FeedbackSystem:
         return u, forward_dynamics_return, controller_mip_cnstr_return
 
     def strengthen_dynamics_constraint(
-        self, mip: gurobi_torch_mip.GurobiTorchMIP,
-        forward_dynamics_return: hybrid_linear_system.DynamicsConstraintReturn,
+            self, mip: gurobi_torch_mip.GurobiTorchMIP,
+            forward_dynamics_return: hybrid_linear_system.DynamicsConstraintReturn,  # noqa
             controller_mip_cnstr_return: ControllerMipConstraintReturn):
         """
         Strengthen the MIP constraint on system dynamics.
@@ -452,10 +416,8 @@ class FeedbackSystem:
         The controller is defined as
         u[n] = ϕᵤ(x[n]) - ϕᵤ(x*) + u*
         """
-        xhat = compute_xhat._get_xhat_val(x, self.x_equilibrium,
-                                          self.xhat_indices)
         u_pre_sat = self.controller_network(x) - \
-            self.controller_network(xhat) + self.u_equilibrium
+            self.controller_network(self.x_equilibrium) + self.u_equilibrium
         if len(x.shape) == 1:
             u = torch.max(
                 torch.min(u_pre_sat, torch.from_numpy(self.u_upper_limit)),
