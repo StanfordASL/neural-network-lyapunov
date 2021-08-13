@@ -560,11 +560,24 @@ class TestReLU(unittest.TestCase):
             (g, _, _, _) = relu_to_optimization.ReLUGivenActivationPattern(
                 model, 2, activation_pattern, self.dtype)
             output_expected = g.squeeze() @ y
-            (A_out, A_y, A_z, A_beta, rhs, z_lo, z_up) =\
-                relu_free_pattern.output_gradient_times_vector(
-                    y_lo, y_up)
-            self.assertEqual(
-                A_out.shape, (1, relu_free_pattern.num_relu_units))
+            mip_cnstr_return = relu_free_pattern.output_gradient_times_vector(
+                y_lo, y_up)
+            self.assertIsNone(mip_cnstr_return.Aout_input)
+            A_out = mip_cnstr_return.Aout_slack
+            self.assertIsNone(mip_cnstr_return.Aout_binary)
+            self.assertIsNone(mip_cnstr_return.Cout)
+            A_y = mip_cnstr_return.Ain_input
+            A_z = mip_cnstr_return.Ain_slack
+            A_beta = mip_cnstr_return.Ain_binary
+            rhs = mip_cnstr_return.rhs_in
+            self.assertIsNone(mip_cnstr_return.Aeq_input)
+            self.assertIsNone(mip_cnstr_return.Aeq_slack)
+            self.assertIsNone(mip_cnstr_return.Aeq_binary)
+            self.assertIsNone(mip_cnstr_return.rhs_eq)
+            z_lo = mip_cnstr_return.z_lo
+            z_up = mip_cnstr_return.z_up
+            self.assertEqual(A_out.shape,
+                             (1, relu_free_pattern.num_relu_units))
 
             # Now compute z manually
             z_expected = torch.empty((relu_free_pattern.num_relu_units),
@@ -667,6 +680,68 @@ class TestReLU(unittest.TestCase):
             x = torch.from_numpy(np.random.normal(0, 1,
                                                   (2, ))).type(self.dtype)
             test_model(self.model2, x, y, y_lo, y_up)
+
+    def compute_Wz_bounds_IA_tester(self, dut, vector_lower, vector_upper):
+        z_lo, z_up, Wz_lo, Wz_up = dut._compute_Wz_bounds_IA(
+            vector_lower, vector_upper)
+        self.assertIsInstance(z_lo, list)
+        self.assertIsInstance(z_up, list)
+        self.assertIsInstance(Wz_lo, list)
+        self.assertIsInstance(Wz_up, list)
+        num_linear_layer = int((len(dut.model) + 1) / 2)
+        self.assertEqual(len(z_lo), num_linear_layer)
+        self.assertEqual(len(z_up), num_linear_layer)
+        self.assertEqual(len(Wz_lo), num_linear_layer)
+        self.assertEqual(len(Wz_up), num_linear_layer)
+        np.testing.assert_allclose(z_lo[0].detach().numpy(),
+                                   vector_lower.detach().numpy())
+        np.testing.assert_allclose(z_up[0].detach().numpy(),
+                                   vector_upper.detach().numpy())
+        # Take many samples of the input vector.
+        vec_samples = utils.uniform_sample_in_box(vector_lower, vector_upper,
+                                                  100)
+        for sample_count in range(vec_samples.shape[0]):
+            zi = vec_samples[sample_count]
+            for layer_count in range(num_linear_layer):
+                Wizi = dut.model[2 * layer_count].weight @ zi
+                np.testing.assert_array_less(
+                    Wizi.detach().numpy(),
+                    Wz_up[layer_count].detach().numpy() + 1E-10)
+                np.testing.assert_array_less(
+                    Wz_lo[layer_count].detach().numpy() - 1E-10,
+                    Wizi.detach().numpy())
+                # Now compute zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ
+                if layer_count < num_linear_layer - 1:
+                    if isinstance(dut.model[2 * layer_count + 1],
+                                  torch.nn.ReLU):
+                        c = 0
+                    else:
+                        c = dut.model[2 * layer_count + 1].negative_slope
+                    beta_sample = torch.rand(
+                        (dut.model[2 * layer_count].out_features, ),
+                        dtype=self.dtype).round()
+                    M = torch.diag(
+                        c * torch.ones_like(beta_sample, dtype=self.dtype) +
+                        (1 - c) * beta_sample)
+                    zi = M @ Wizi
+                    np.testing.assert_array_less(
+                        zi.detach().numpy(),
+                        z_up[layer_count + 1].detach().numpy() + 1E-10)
+                    np.testing.assert_array_less(
+                        z_lo[layer_count + 1].detach().numpy() - 1E-10,
+                        zi.detach().numpy())
+
+    def test_compute_Wz_bounds_IA(self):
+        dut2 = relu_to_optimization.ReLUFreePattern(self.model2, self.dtype)
+        self.compute_Wz_bounds_IA_tester(
+            dut2,
+            vector_lower=torch.tensor([-2, -1], dtype=self.dtype),
+            vector_upper=torch.tensor([2, 3], dtype=self.dtype))
+
+        dut4 = relu_to_optimization.ReLUFreePattern(self.model4, self.dtype)
+        self.compute_Wz_bounds_IA_tester(
+            dut4, torch.tensor([-3, 1], dtype=self.dtype),
+            torch.tensor([-1, 2], dtype=self.dtype))
 
     def test_set_activation_warmstart(self):
         x = torch.tensor([1, 2], dtype=self.dtype)
