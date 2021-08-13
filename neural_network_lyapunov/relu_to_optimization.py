@@ -225,6 +225,25 @@ class ReLUMixedIntegerConstraintsReturn(
         self.relu_output_up = None
 
 
+class ReLUGradientTimesVecMixedIntegerConstraintsReturn(
+        gurobi_torch_mip.MixedIntegerConstraintsReturn):
+    """
+    The output of ReLUFreePattern.output_gradient_times_vector.
+    """
+    def __init__(self):
+        super(ReLUGradientTimesVecMixedIntegerConstraintsReturn,
+              self).__init__()
+        # The lower bound of the slack variable z (Note z is NOT the ReLU unit
+        # input/output). z_lo[0]/z_up[0] is the bound on the input vector.
+        self.z_lo = None
+        self.z_up = None
+        # The lower and upper bound of Wi * zi, where Wi is the weight matrix
+        # of the i'th linear layer. Wz_lo[-1]/Wz_up[-1] is the bound on
+        # ∂ϕ/∂x * y
+        self.Wz_lo = None
+        self.Wz_up = None
+
+
 class ReLUFreePattern:
     """
     The output of ReLU network is a piecewise linear function of the input.
@@ -994,7 +1013,9 @@ class ReLUFreePattern:
 
         return (M, B1, B2, d)
 
-    def output_gradient_times_vector(self, vector_lower, vector_upper):
+    def output_gradient_times_vector(
+            self, vector_lower,
+            vector_upper) -> ReLUGradientTimesVecMixedIntegerConstraintsReturn:
         """
         We want to compute the gradient of the network ∂ReLU(x)/∂x times a
         vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
@@ -1012,23 +1033,25 @@ class ReLUFreePattern:
         on zᵢ and βᵢ.
 
         We write ∂ReLU(x)/∂x * y as
-        Aₒᵤₜ * z
+        Aₒᵤₜ * slack
         with the additional constraint
-        A_y * y + A_z * z + A_beta * β ≤ rhs
-        where z = [z₁; z₂;...;zₙ]
+        A_y * y + A_slack * slack + A_beta * β ≤ rhs
+        where slack = [z₁; z₂;...;zₙ]
         Note that we do NOT require that β is the right activation pattern for
         the input x. This constraint should be imposed in output() function.
         @param vector_lower The lower bound of the vector y.
         @param vector_upper The upper bound of the vector y.
-        @return (a_out, A_y, A_z, A_beta, rhs, z_lo, z_up) z_lo and z_up are
-        the propagated bounds on z, based on the bounds on y.
+        @return mip_cnstr_return that contains the output
+        ∂ReLU(x)/∂x * y = Aₒᵤₜ * z
+        and the linear inequality constraint
+        A_y * y + A_slack * slack + A_beta * β ≤ rhs
         """
         utils.check_shape_and_type(vector_lower, (self.x_size, ), self.dtype)
         utils.check_shape_and_type(vector_upper, (self.x_size, ), self.dtype)
         A_y = torch.zeros((4 * self.num_relu_units, self.x_size),
                           dtype=self.dtype)
-        A_z = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
-                          dtype=self.dtype)
+        A_slack = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
+                              dtype=self.dtype)
         A_beta = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
                              dtype=self.dtype)
         rhs = torch.zeros(4 * self.num_relu_units, dtype=self.dtype)
@@ -1040,6 +1063,9 @@ class ReLUFreePattern:
         ineq_count = 0
         A_out = torch.zeros((self.model[-1].out_features, self.num_relu_units),
                             dtype=self.dtype)
+        Wz_lo = [None] * (len(self.relu_unit_index) + 1)
+        Wz_up = [None] * (len(self.relu_unit_index) + 1)
+        linear_layer_count = 0
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
                 Wi = layer.weight
@@ -1067,6 +1093,9 @@ class ReLUFreePattern:
                             else:
                                 Wizi_lo[j] += layer.weight[j][k] * zi_up[k]
                                 Wizi_up[j] += layer.weight[j][k] * zi_lo[k]
+                Wz_lo[linear_layer_count] = Wizi_lo
+                Wz_up[linear_layer_count] = Wizi_up
+                linear_layer_count += 1
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 for j in range(len(self.relu_unit_index[layer_count])):
                     if isinstance(layer, nn.ReLU):
@@ -1083,18 +1112,21 @@ class ReLUFreePattern:
                             A_pre.reshape((-1, 1)) @\
                             Wi[j].reshape((1, -1))
                     else:
-                        A_z[ineq_count:ineq_count+4,
-                            self.relu_unit_index[layer_count - 1]] =\
+                        A_slack[ineq_count:ineq_count+4,
+                                self.relu_unit_index[layer_count - 1]] =\
                             A_pre.reshape((-1, 1)) @\
                             Wi[j].reshape((1, -1))
-                    A_z[ineq_count:ineq_count+4,
-                        self.relu_unit_index[layer_count][j]] =\
+                    A_slack[ineq_count:ineq_count+4,
+                            self.relu_unit_index[layer_count][j]] =\
                         A_z_next.squeeze()
                     A_beta[ineq_count:ineq_count+4,
                            self.relu_unit_index[layer_count][j]] =\
                         A_beta_i.squeeze()
                     rhs[ineq_count:ineq_count + 4] = rhs_i
                     ineq_count += 4
+                # Compute the range of M(βᵢ, c) * Wᵢzᵢ
+                # where M(βᵢ, c) is the diagonal matrix whose diagonal
+                # entries are either 1 or c.
                 if isinstance(layer, nn.ReLU):
                     zi_lo = torch.min(
                         torch.zeros(len(self.relu_unit_index[layer_count]),
@@ -1123,4 +1155,95 @@ class ReLUFreePattern:
             else:
                 raise Exception("output_gradient_times_vector: we currently " +
                                 "only support linear and ReLU units.")
-        return (A_out, A_y, A_z, A_beta, rhs, z_lo, z_up)
+        result = ReLUGradientTimesVecMixedIntegerConstraintsReturn()
+        result.Aout_slack = A_out
+        result.Ain_input = A_y
+        result.Ain_slack = A_slack
+        result.Ain_binary = A_beta
+        result.rhs_in = rhs
+        result.vec_lo = vector_lower
+        result.vec_up = vector_upper
+        result.z_lo = z_lo
+        result.z_up = z_up
+        return result
+
+    def _compute_Wz_bounds_IA(self, vector_lower: torch.Tensor,
+                              vector_upper: torch.Tensor):
+        """
+        This function is used in output_gradient_times_vector. It computes
+        the lower/upper bounds of Wᵢ*z through interval arithemetics (IA)ᵢ,
+        where zᵢ is defined recursively as
+        vector_lower <= z₀ <= vector_upper
+        zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
+        and M is the matrix defined as
+        M(β, c) = c*I + (1-c)*diag(β)
+        Refer to output_gradient_times_vector() for more details.
+
+        Returns:
+            z_lo, z_up: z_lo[i]/z_up[i] is the lower/upper bound of zᵢ
+            Wz_lo, Wz_up: Wz_lo[i]/Wz_up[i] is the lower/upper bound of Wᵢ*zᵢ
+        """
+        num_linear_layers = int((len(self.model) + 1) / 2)
+        z_lo = [None] * num_linear_layers
+        z_up = [None] * num_linear_layers
+        z_lo[0] = vector_lower
+        z_up[0] = vector_upper
+        Wz_lo = [None] * num_linear_layers
+        Wz_up = [None] * num_linear_layers
+        for layer_count in range(num_linear_layers):
+            # First compute the range of (Wᵢ*zᵢ)(j)
+            linear_layer = self.model[2 * layer_count]
+            assert (isinstance(linear_layer, torch.nn.Linear))
+            Wizi_lo = torch.zeros(linear_layer.weight.shape[0],
+                                  dtype=self.dtype)
+            Wizi_up = torch.zeros(linear_layer.weight.shape[0],
+                                  dtype=self.dtype)
+
+            for j in range(linear_layer.weight.shape[0]):
+                for k in range(linear_layer.weight.shape[1]):
+                    if linear_layer.weight[j][k] > 0:
+                        Wizi_lo[j] += linear_layer.weight[j][k] * z_lo[
+                            layer_count][k]
+                        Wizi_up[j] += linear_layer.weight[j][k] * z_up[
+                            layer_count][k]
+                    else:
+                        Wizi_lo[j] += linear_layer.weight[j][k] * z_up[
+                            layer_count][k]
+                        Wizi_up[j] += linear_layer.weight[j][k] * z_lo[
+                            layer_count][k]
+            Wz_lo[layer_count] = Wizi_lo
+            Wz_up[layer_count] = Wizi_up
+
+            # Now compute the range of zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ
+            if layer_count < num_linear_layers - 1:
+                relu_layer = self.model[2 * layer_count + 1]
+                # M(βᵢ, c) is a diagonal matrix, with diagonal entries being
+                # either c or 1. So the lower/upper bound of zᵢ₊₁ is either
+                # the lower/upper bound of Wᵢ*zᵢ, or c times the lower/upper
+                # bounds.
+                if isinstance(relu_layer, nn.ReLU):
+                    z_lo[layer_count + 1] = torch.min(
+                        torch.zeros_like(Wz_lo[layer_count], dtype=self.dtype),
+                        Wz_lo[layer_count])
+                    z_up[layer_count + 1] = torch.max(
+                        torch.zeros_like(Wz_up[layer_count], dtype=self.dtype),
+                        Wz_up[layer_count])
+                elif isinstance(relu_layer, nn.LeakyReLU):
+                    c = relu_layer.negative_slope
+                    assert (c >= 0)
+                    z_lo[layer_count + 1], _ = torch.min(torch.cat(
+                        (Wz_lo[layer_count].reshape(
+                            (1, -1)), c * Wz_lo[layer_count].reshape((1, -1))),
+                        dim=0),
+                                                         axis=0)
+                    z_up[layer_count + 1], _ = torch.max(torch.cat(
+                        (Wz_up[layer_count].reshape(
+                            (1, -1)), c * Wz_up[layer_count].reshape((1, -1))),
+                        dim=0),
+                                                         axis=0)
+                else:
+                    raise Exception(
+                        "compute_Wz_bounds_IA(): this layer should be either"
+                        + "ReLU or leaky ReLU"
+                    )
+        return z_lo, z_up, Wz_lo, Wz_up

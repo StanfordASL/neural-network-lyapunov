@@ -179,16 +179,21 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             assert (len(Aisi_upper) == self.system.num_modes)
         for i in range(self.system.num_modes):
             # First write ∂ReLU(x)/∂x*Aᵢsᵢ
-            A_out[i], A_Aisi, A_z, A_beta, rhs, _, _ = \
+            mip_cnstr_return = \
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     Aisi_lower[i], Aisi_upper[i])
-            A_out[i] = A_out[i].view(A_out[i].shape[1])
-            z[i] = milp.addVars(A_z.shape[1],
+            A_out[i] = mip_cnstr_return.Aout_slack.view(
+                mip_cnstr_return.Aout_slack.shape[1])
+            A_Aisi = mip_cnstr_return.Ain_input
+            A_slack = mip_cnstr_return.Ain_slack
+            A_beta = mip_cnstr_return.Ain_binary
+            rhs = mip_cnstr_return.rhs_in
+            z[i] = milp.addVars(A_slack.shape[1],
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
                                 name=slack_name + "[" + str(i) + "]")
             A_si = A_Aisi @ self.system.A[i]
-            milp.addMConstrs([A_si, A_z, A_beta], [
+            milp.addMConstrs([A_si, A_slack, A_beta], [
                 s[i * self.system.x_dim:(i + 1) * self.system.x_dim], z[i],
                 beta
             ],
@@ -226,16 +231,21 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (xdot_lower.shape == (self.system.x_dim, ))
         assert (xdot_upper.shape == (self.system.x_dim, ))
         # First write ∂ReLU(x)/∂x*ẋ
-        A_out, A_xdot, A_z, A_beta, rhs, _, _ = \
+        mip_cnstr_return = \
             self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                 torch.from_numpy(xdot_lower),
                 torch.from_numpy(xdot_upper))
-        A_out = A_out.view(A_out.shape[1])
-        z = milp.addVars(A_z.shape[1],
+        A_out = mip_cnstr_return.Aout_slack.view(
+            mip_cnstr_return.Aout_slack.shape[1])
+        A_xdot = mip_cnstr_return.Ain_input
+        A_slack = mip_cnstr_return.Ain_slack
+        A_beta = mip_cnstr_return.Ain_binary
+        rhs = mip_cnstr_return.rhs_in
+        z = milp.addVars(A_slack.shape[1],
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name=slack_name)
-        milp.addMConstrs([A_xdot, A_z, A_beta], [xdot, z, beta],
+        milp.addMConstrs([A_xdot, A_slack, A_beta], [xdot, z, beta],
                          sense=gurobipy.GRB.LESS_EQUAL,
                          b=rhs,
                          name="milp_relu_gradient_times_xdot")
@@ -280,16 +290,21 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                     torch.zeros(self.system.x_dim, dtype=self.system.dtype),
                     self.system.g[i])
         for i in range(self.system.num_modes):
-            A_out[i], A_gigammai, A_z, A_beta, rhs, _, _ =\
+            mip_cnstr_return = \
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     gigammai_lower[i], gigammai_upper[i])
-            A_out[i] = A_out[i].view(A_out[i].shape[1])
-            z[i] = milp.addVars(A_z.shape[1],
+            A_out[i] = mip_cnstr_return.Aout_slack.view(
+                mip_cnstr_return.Aout_slack.shape[1])
+            A_gigammai = mip_cnstr_return.Ain_input
+            A_slack = mip_cnstr_return.Ain_slack
+            A_beta = mip_cnstr_return.Ain_binary
+            rhs = mip_cnstr_return.rhs_in
+            z[i] = milp.addVars(A_slack.shape[1],
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS,
                                 name=slack_name)
             A_gammai = A_gigammai @ self.system.g[i]
-            milp.addMConstrs([A_gammai.reshape((-1, 1)), A_z, A_beta],
+            milp.addMConstrs([A_gammai.reshape((-1, 1)), A_slack, A_beta],
                              [[gamma[i]], z[i], beta],
                              sense=gurobipy.GRB.LESS_EQUAL,
                              b=rhs,
