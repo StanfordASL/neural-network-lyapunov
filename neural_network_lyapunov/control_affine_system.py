@@ -69,9 +69,18 @@ class ControlPiecewiseAffineSystem:
         Computes ẋ=f(x)+G(x) * clamp(u, u_lo, u_up)
         """
         u_clamped = torch.max(torch.min(u, self.u_up), self.u_lo)
-        return self._do_dynamics(x, u_clamped)
+        return self.f(x) + self.G(x) @ u_clamped
 
-    def _do_dynamics(self, x: torch.Tensor, u_clamped: torch.Tensor):
+    def f(self, x):
+        """
+        The dynamics is ẋ=f(x)+G(x)u
+        """
+        raise NotImplementedError
+
+    def G(self, x):
+        """
+        The dynamics is ẋ=f(x)+G(x)u
+        """
         raise NotImplementedError
 
 
@@ -99,5 +108,8 @@ class LinearSystem(ControlPiecewiseAffineSystem):
             mip_cnstr_G[i].Cout = self.B[:, i]
         return (mip_cnstr_f, mip_cnstr_G)
 
-    def _do_dynamics(self, x: torch.Tensor, u_clamped: torch.Tensor):
-        return self.A @ x + self.B @ u_clamped
+    def f(self, x):
+        return self.A @ x
+
+    def G(self, x):
+        return self.G
