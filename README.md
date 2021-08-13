@@ -2,10 +2,12 @@
 This repo contains the code for the two papers
    - [Counter-example guided synthesis of neural network Lyapunov functions for piecewise linear systems](http://groups.csail.mit.edu/robotics-center/public_papers/Dai20.pdf) <br>
        Hongkai Dai, Benoit Landry, Marco Pavone and Russ Tedrake <br>
-       IEEE Conference on Decision and Control, 2020
+       IEEE Conference on Decision and Control, 2020 <br>
+       [video](https://www.youtube.com/watch?v=A8Bpqb27DEE)
    - [Lyapunov-stable neural-network control](http://groups.csail.mit.edu/robotics-center/public_papers/Dai21.pdf) <br>
        Hongkai Dai, Benoit Landry, Lujie Yang, Marco Pavone and Russ Tedrake <br>
-       Robotics: Science and Systems, 2021
+       Robotics: Science and Systems, 2021 <br>
+       [video](https://www.youtube.com/watch?v=vCBdd-VuTwc)
 
 We can synthesize neural-network controllers with Lyapunov stability guarantees. Namely for all the initial states within a certain region, the controller will drive the system from these initial states to converge to the goal state.
 
