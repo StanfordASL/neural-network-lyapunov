@@ -17,8 +17,7 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                              forward_system.x_equilibrium,
                              forward_system.u_equilibrium,
                              u_lower_limit,
-                             u_upper_limit,
-                             xhat_indices=None)
+                             u_upper_limit)
 
     def add_dynamics_mip_constraint(self, mip, x_var, x_next_var, u_var_name,
                                     forward_slack_var_name,

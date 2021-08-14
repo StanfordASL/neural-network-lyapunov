@@ -156,14 +156,6 @@ class TrainLyapunovReLU:
         self.lyapunov_positivity_last_x_adv = None
         self.lyapunov_derivative_last_x_adv = None
 
-        # If you require only a subset of the states to converge, then set
-        # xbar_indices to the indices of these converging states. By default
-        # xbar_indices=None means all the states are required to converge.
-        # This will set x̂ in the Lyapunov function.
-        # The Lyapunov function is V(x) = ϕ(x) − ϕ(x̂) + λ |R*(x̅−x̅*|₁
-        self.xbar_indices = None
-        self.xhat_indices = None
-
         # If set to true, then we only add the states that violate the
         # Lyapunov conditions to the training set.
         self.add_adversarial_state_only = True
@@ -216,8 +208,6 @@ class TrainLyapunovReLU:
                     positivity_state_samples, self.V_lambda,
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     margin=self.lyapunov_positivity_sample_margin,
-                    xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices,
                     reduction=self.sample_loss_reduction,
                     weight=positivity_sample_repeatition)
         else:
@@ -232,8 +222,6 @@ class TrainLyapunovReLU:
                     derivative_state_samples_next, self.x_equilibrium,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     margin=self.lyapunov_derivative_sample_margin,
-                    xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices,
                     reduction=self.sample_loss_reduction,
                     weight=derivative_sample_repeatition)
         else:
@@ -248,9 +236,7 @@ class TrainLyapunovReLU:
                 self.x_equilibrium, self.V_lambda,
                 self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                 fixed_R=self.R_options.fixed_R,
-                x_warmstart=self.lyapunov_positivity_last_x_adv,
-                xbar_indices=self.xbar_indices,
-                xhat_indices=self.xhat_indices)
+                x_warmstart=self.lyapunov_positivity_last_x_adv)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -302,9 +288,7 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_epsilon,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     fixed_R=self.R_options.fixed_R,
-                    x_warmstart=self.lyapunov_derivative_last_x_adv,
-                    xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices)
+                    x_warmstart=self.lyapunov_derivative_last_x_adv)
         else:
             assert (self.derivative_mip_num_strengthen_pts > 0)
             lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
@@ -316,9 +300,7 @@ class TrainLyapunovReLU:
                     self.derivative_mip_num_strengthen_pts,
                     R=self.R_options.R(),
                     fixed_R=self.R_options.fixed_R,
-                    x_warmstart=self.lyapunov_derivative_last_x_adv,
-                    xbar_indices=self.xbar_indices,
-                    xhat_indices=self.xhat_indices)
+                    x_warmstart=self.lyapunov_derivative_last_x_adv)
         if self.derivative_mip_strengthen_binary:
             self.lyapunov_hybrid_system.\
                 strengthen_lyapunov_derivative_milp_binary(

@@ -8,7 +8,6 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.compute_xhat as compute_xhat
 
 import unittest
 
@@ -422,10 +421,8 @@ class TestFeedbackSystem(unittest.TestCase):
         """
         Compute u for a single state.
         """
-        xhat = compute_xhat._get_xhat_val(x_val, dut.x_equilibrium,
-                                          dut.xhat_indices)
         u_pre_sat = dut.controller_network(x_val) - dut.controller_network(
-            xhat) + dut.u_equilibrium
+            dut.x_equilibrium) + dut.u_equilibrium
         u = u_pre_sat.clone()
         for i in range(u_pre_sat.shape[0]):
             if u_pre_sat[i] < dut.u_lower_limit[i]:
@@ -474,8 +471,6 @@ class TestFeedbackSystem(unittest.TestCase):
                 u[i].detach().numpy(),
                 closed_loop_system.compute_u(x[i]).detach().numpy())
 
-        # set xhat_indices
-        closed_loop_system.xhat_indices = [0, 2]
         with torch.no_grad():
             for x in x_all:
                 u = closed_loop_system.compute_u(x)
@@ -758,7 +753,6 @@ class TestFeedbackSystem(unittest.TestCase):
                 self.add_controller_mip_constraint_tester(
                     dut, torch.tensor([0.4, -1.5, 3.6, 3.1], dtype=self.dtype))
                 if not isinstance(controller_network, torch.nn.Linear):
-                    dut.xhat_indices = [0, 2]
                     self.add_controller_mip_constraint_tester(
                         dut, torch.tensor([2., 0.5, 0.6, 3.1],
                                           dtype=self.dtype))

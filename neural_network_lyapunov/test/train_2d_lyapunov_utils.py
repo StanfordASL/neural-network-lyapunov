@@ -216,8 +216,7 @@ def plot_lyapunov_dot_colormap(fig, ax, relu, system, V_lambda,
                         dut.lyapunov_derivative(state_sample, x_equilibrium,
                                                 V_lambda,
                                                 lyapunov_derivative_epsilon,
-                                                R=R, xbar_indices=None,
-                                                xhat_indices=None)))
+                                                R=R)))
         samples_x_np = samples_x.detach().numpy()
         samples_y_np = samples_y.detach().numpy()
         dV_np = dV.detach().numpy()
