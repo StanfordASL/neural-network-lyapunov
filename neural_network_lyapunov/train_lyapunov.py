@@ -1,5 +1,4 @@
 import torch
-import torch.utils.tensorboard
 import numpy as np
 import gurobipy
 import copy
@@ -104,10 +103,6 @@ class TrainLyapunovReLU:
 
         # We support Adam or SGD.
         self.optimizer = "Adam"
-
-        # If summary writer is not None, then we use tensorboard to write
-        # training loss to the summary writer.
-        self.summary_writer_folder = None
 
         # Enable wandb to log the data.
         self.enable_wandb = False
@@ -525,8 +520,7 @@ class TrainLyapunovReLU:
         """
         for attr in inspect.getmembers(self):
             if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
-                if attr[0] not in ('lyapunov_hybrid_system',
-                                   'summary_writer_folder'):
+                if attr[0] not in ('lyapunov_hybrid_system'):
                     print(f"{attr[0]}: {attr[1]}")
                     if self.enable_wandb:
                         wandb.config.update({attr[0]: f"{attr[1]}"})
@@ -581,9 +575,6 @@ class TrainLyapunovReLU:
         else:
             raise Exception(
                 "train: unknown optimizer, only support Adam or SGD.")
-        if self.summary_writer_folder is not None:
-            writer = torch.utils.tensorboard.SummaryWriter(
-                self.summary_writer_folder)
         best_derivative_mip_cost = np.inf
         best_training_params = None
         while iter_count < self.max_iterations:
@@ -622,12 +613,6 @@ class TrainLyapunovReLU:
                     "derivative MIP cost": lyapunov_derivative_mip_cost,
                     "time": time.time() - train_start_time
                 })
-            if self.summary_writer_folder is not None:
-                writer.add_scalar("loss", loss.item(), iter_count)
-                writer.add_scalar("positivity MIP cost",
-                                  lyapunov_positivity_mip_cost, iter_count)
-                writer.add_scalar("derivative MIP cost",
-                                  lyapunov_derivative_mip_cost, iter_count)
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {loss}, " +
                       "positivity cost " +
