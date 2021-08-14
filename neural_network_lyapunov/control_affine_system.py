@@ -112,4 +112,4 @@ class LinearSystem(ControlPiecewiseAffineSystem):
         return self.A @ x
 
     def G(self, x):
-        return self.G
+        return self.B
