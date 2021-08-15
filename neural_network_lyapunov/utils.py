@@ -1091,16 +1091,16 @@ def train_approximator(dataset,
             input_samples, target = data
             optimizer.zero_grad()
 
-            output_samples = output_fun(
-                model, input_samples, **output_fun_args)
+            output_samples = output_fun(model, input_samples,
+                                        **output_fun_args)
             batch_loss = loss(output_samples, target)
             batch_loss.backward()
             optimizer.step()
 
             running_loss += batch_loss.item()
         test_input_samples, test_target = test_set[:]
-        test_output_samples = output_fun(
-            model, test_input_samples, **output_fun_args)
+        test_output_samples = output_fun(model, test_input_samples,
+                                         **output_fun_args)
         test_loss = loss(test_output_samples, test_target)
 
         if verbose:
@@ -1156,8 +1156,7 @@ def relu_network_gradient(relu_network, x: torch.Tensor) -> torch.Tensor:
             else:
                 raise Exception(
                     "relu_network_gradient(): We only accept linear layer, " +
-                    "relu layer or leaky ReLU layer"
-                )
+                    "relu layer or leaky ReLU layer")
             for i in range(layer_input.shape[0]):
                 if layer_input[i] > 0:
                     pass
@@ -1172,3 +1171,40 @@ def relu_network_gradient(relu_network, x: torch.Tensor) -> torch.Tensor:
         layer_input = layer(layer_input)
 
     return dphi_dx
+
+
+def l1_gradient(x: torch.Tensor) -> torch.Tensor:
+    """
+    Compute all the possible gradient of the 1-norm |x|₁
+    Notice that when x(i)=0, the 1-norm is non-differentiable. We consider
+    both the left and right gradient.
+
+    Return:
+      grad: A torch tensor of shape (num_possible_gradient, x_dim), where
+            num_possible_gradient is power(2, number of x(i)=0).
+    """
+    assert (len(x.shape) == 1)
+    if not torch.any(x == 0):
+        return torch.sign(x).reshape((1, -1))
+    elif torch.sum(x == 0) == 1:
+        s = torch.sign(x)
+        s_plus = s.clone()
+        s_plus[s_plus == 0] = 1
+        s_minus = s.clone()
+        s_minus[s_minus == 0] = -1
+        return torch.vstack((s_plus, s_minus))
+    else:
+        # Denote the first index of x[i] == 0 as k
+        # Get the gradient of 1-norm(x[:k])
+        first_zero_index = (x == 0).nonzero(as_tuple=True)[0][0]
+        grad_before = torch.sign(x[:first_zero_index])
+        # The gradient w.r.t x[k] is 1 and -1
+        # Also compute the gradient w.r.t x[k+1:]
+        grad_after = l1_gradient(x[first_zero_index + 1:])
+        grad = torch.hstack(
+            (grad_before.repeat((2 * grad_after.shape[0], 1)),
+             torch.vstack((torch.ones(
+                 (grad_after.shape[0], 1), dtype=x.dtype), -torch.ones(
+                     (grad_after.shape[0], 1), dtype=x.dtype))),
+             torch.vstack((grad_after, grad_after))))
+        return grad

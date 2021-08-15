@@ -931,5 +931,51 @@ class TestReluNetworkGradient(unittest.TestCase):
             self.assertTrue(found_match_row)
 
 
+class TestL1Gradient(unittest.TestCase):
+    def test1(self):
+        dtype = torch.float64
+        np.testing.assert_allclose(
+            utils.l1_gradient(torch.tensor([0.5, 1, -2], dtype=dtype)),
+            np.array([[1., 1., -1.]]))
+
+    def test2(self):
+        # one of x(i) is 0.
+        dtype = torch.float64
+        np.testing.assert_allclose(
+            utils.l1_gradient(torch.tensor([0., 1, -2], dtype=dtype)),
+            np.array([[1, 1., -1.], [-1., 1., -1.]]))
+        np.testing.assert_allclose(
+            utils.l1_gradient(torch.tensor([1., 0, -2], dtype=dtype)),
+            np.array([[1, 1., -1.], [1., -1., -1.]]))
+        np.testing.assert_allclose(
+            utils.l1_gradient(torch.tensor([1., -2, 0], dtype=dtype)),
+            np.array([[1, -1., 1.], [1., -1., -1.]]))
+
+    def test3(self):
+        def check_grad(grad, grad_expected):
+            # The exact order of the gradient rows don't matter.
+            self.assertEqual(grad.shape, grad_expected.shape)
+            for i in range(grad.shape[0]):
+                found_match = False
+                for j in range(grad.shape[0]):
+                    if np.linalg.norm(grad[i].detach().numpy() -
+                                      grad_expected[j]) < 1E-10:
+                        found_match = True
+                        break
+                self.assertTrue(found_match)
+
+        # multiple x(i) are 0
+        dtype = torch.float64
+        grad = utils.l1_gradient(torch.tensor([0, 0, 2], dtype=dtype))
+        grad_expected = np.array([[1., 1, 1], [1, -1, 1], [-1, 1, 1],
+                                  [-1, -1, 1]])
+        check_grad(grad, grad_expected)
+
+        grad = utils.l1_gradient(torch.tensor([0, -2, 0], dtype=dtype))
+        grad_expected = np.array([[1, -1, 1], [1, -1, -1], [-1, -1, 1],
+                                  [-1, -1, -1.]])
+        check_grad(grad, grad_expected)
+
+
 if __name__ == "__main__":
     unittest.main()
