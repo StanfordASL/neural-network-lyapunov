@@ -137,8 +137,7 @@ def train_control_affine_forward_model(forward_model_f, forward_model_G,
     x_dim = x_equ.shape[0]
     u_dim = u_equ.shape[0]
 
-    def compute_x_dot(forward_model_f, network_input, forward_model_G=None):
-        assert(forward_model_G is not None)
+    def compute_x_dot(forward_model_f, network_input, forward_model_G):
         x, u = torch.split(network_input, [x_dim, u_dim], dim=1)
         x_dot = forward_model_f(x) +\
             (forward_model_G(x).view((x.shape[0], x_dim, u_dim)) @
