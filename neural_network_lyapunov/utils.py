@@ -1123,3 +1123,52 @@ def uniform_sample_in_box(lo: torch.Tensor, hi: torch.Tensor,
     samples = samples @ torch.diag(hi - lo)
     samples += torch.reshape(lo, (1, x_dim))
     return samples
+
+
+def relu_network_gradient(relu_network, x: torch.Tensor) -> torch.Tensor:
+    """
+    For a fully-connected neural network ϕ(x) with (leaky) relu units,
+    compute the gradient ∂ϕ/∂x.
+    Notice that since (leaky) ReLU unit is non-differentiable at 0, we
+    consider both the left and right gradient at 0. This function computes all
+    the possible ∂ϕ/∂x, where the (leaky) ReLU units takes both the left and
+    the right gradient.
+
+    Args:
+      relu_network: A fully connected neural network with (leaky) ReLU units.
+      x: The network input.
+    Return:
+      dphi_dx: A tensor of shape (num_possible_gradients, phi_dim, x_dim)
+      where phi_dim is the dimension of the network output ϕ(x).
+    """
+    assert (x.shape == (relu_network[0].in_features, ))
+    dphi_dx = torch.eye(relu_network[0].in_features,
+                        dtype=x.dtype).unsqueeze(0)
+    layer_input = x
+    for layer in relu_network:
+        if (isinstance(layer, torch.nn.Linear)):
+            dphi_dx = layer.weight.unsqueeze(0) @ dphi_dx
+        else:
+            if isinstance(layer, torch.nn.ReLU):
+                c = 0
+            elif isinstance(layer, torch.nn.LeakyReLU):
+                c = layer.negative_slope
+            else:
+                raise Exception(
+                    "relu_network_gradient(): We only accept linear layer, " +
+                    "relu layer or leaky ReLU layer"
+                )
+            for i in range(layer_input.shape[0]):
+                if layer_input[i] > 0:
+                    pass
+                elif layer_input[i] < 0:
+                    dphi_dx[:, i, :] *= c
+                else:
+                    # (leaky) ReLU unit has input 0. We need to consider both
+                    # the left and the right gradient.
+                    dphi_dx = torch.cat((dphi_dx, dphi_dx), dim=0)
+                    dphi_dx[int(dphi_dx.shape[0] / 2):, i, :] *= c
+        # Propagate the layer value.
+        layer_input = layer(layer_input)
+
+    return dphi_dx
