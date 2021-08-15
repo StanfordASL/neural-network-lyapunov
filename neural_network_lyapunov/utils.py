@@ -1061,11 +1061,15 @@ def train_approximator(dataset,
                        batch_size,
                        num_epochs,
                        lr,
-                       additional_variable=None):
+                       additional_variable=None,
+                       output_fun_args=dict(),
+                       verbose=True):
     """
     @param additional_variable A list of torch tensors (with
     requires_grad=True), such that we will optimize the model together with
     additional_variable.
+    @param output_fun_args A dictionnary of additional arguments to pass to
+    output_fun
     """
     train_set_size = int(len(dataset) * 0.8)
     test_set_size = len(dataset) - train_set_size
@@ -1087,19 +1091,22 @@ def train_approximator(dataset,
             input_samples, target = data
             optimizer.zero_grad()
 
-            output_samples = output_fun(model, input_samples)
+            output_samples = output_fun(
+                model, input_samples, **output_fun_args)
             batch_loss = loss(output_samples, target)
             batch_loss.backward()
             optimizer.step()
 
             running_loss += batch_loss.item()
         test_input_samples, test_target = test_set[:]
-        test_output_samples = output_fun(model, test_input_samples)
+        test_output_samples = output_fun(
+            model, test_input_samples, **output_fun_args)
         test_loss = loss(test_output_samples, test_target)
 
-        print(
-            f"epoch {epoch} training loss {running_loss/len(train_loader)}," +
-            f"test loss {test_loss}")
+        if verbose:
+            print(f"epoch {epoch} training loss " +
+                  f"{running_loss/len(train_loader)}," +
+                  f" test loss {test_loss}")
         model_params.append(extract_relu_parameters(model))
     pass
 

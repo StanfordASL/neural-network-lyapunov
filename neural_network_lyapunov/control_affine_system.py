@@ -1,5 +1,6 @@
 import torch
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.utils as utils
 
 
 class ControlPiecewiseAffineSystem:
@@ -113,3 +114,46 @@ class LinearSystem(ControlPiecewiseAffineSystem):
 
     def G(self, x):
         return self.B
+
+
+def train_control_affine_forward_model(forward_model_f, forward_model_G,
+                                       x_equ, u_equ,
+                                       model_dataset, num_epochs, lr,
+                                       batch_size=50,
+                                       verbose=True):
+    """
+    Helper function to train neural networks that approximate continuous time
+    dynamics as
+    ẋ = ϕ_f(x) + ϕ_G(x) u - ϕ_f(x*) - ϕ_G(x*) u*
+    @param forward_model_f Feedforward network ϕ_f
+    @param forward_model_G Feedforward network ϕ_G
+    @param x_equ Tensor shape (x_dim,) with the system equilibrium state
+    @param u_equ Tensor shape (u_dim,) with the system equilibrium control
+    @param model_dataset TensorDataset with data, label = ([x|u], ẋ)
+    @param num_epochs int number of training epochs
+    @param lr float learning rate
+    @param batch_size int
+    """
+    x_dim = x_equ.shape[0]
+    u_dim = u_equ.shape[0]
+
+    def compute_x_dot(forward_model_f, network_input, forward_model_G):
+        x, u = torch.split(network_input, [x_dim, u_dim], dim=1)
+        x_dot = forward_model_f(x) +\
+            (forward_model_G(x).view((x.shape[0], x_dim, u_dim)) @
+                u.unsqueeze(2)).squeeze(2) -\
+            forward_model_f(x_equ) -\
+            forward_model_G(x_equ).view((x_dim, u_dim)) @ u_equ
+        return x_dot
+
+    utils.train_approximator(model_dataset,
+                             forward_model_f,
+                             compute_x_dot,
+                             batch_size=batch_size,
+                             num_epochs=num_epochs,
+                             lr=lr,
+                             additional_variable=list(
+                                forward_model_G.parameters()),
+                             output_fun_args=dict(
+                                forward_model_G=forward_model_G),
+                             verbose=verbose)
