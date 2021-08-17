@@ -576,61 +576,78 @@ class TestReLU(unittest.TestCase):
             self.assertIsNone(mip_cnstr_return.rhs_eq)
             z_lo = mip_cnstr_return.z_lo
             z_up = mip_cnstr_return.z_up
+            self.assertEqual(len(z_lo), (len(model) + 1) / 2)
+            self.assertEqual(len(z_up), (len(model) + 1) / 2)
+            self.assertEqual(len(mip_cnstr_return.Wz_lo), (len(model) + 1) / 2)
+            self.assertEqual(len(mip_cnstr_return.Wz_up), (len(model) + 1) / 2)
+            np.testing.assert_allclose(z_lo[0].detach().numpy(),
+                                       y_lo.detach().numpy())
+            np.testing.assert_allclose(z_up[0].detach().numpy(),
+                                       y_up.detach().numpy())
             self.assertEqual(A_out.shape,
                              (1, relu_free_pattern.num_relu_units))
 
             # Now compute z manually
-            z_expected = torch.empty((relu_free_pattern.num_relu_units),
-                                     dtype=self.dtype)
+            slack_expected = []
             z_pre = y
             layer_count = 0
             for layer in model:
                 if (isinstance(layer, nn.Linear)):
-                    z_cur = layer.weight.data @ z_pre
+                    Wz = layer.weight.data @ z_pre
+                    np.testing.assert_array_less(
+                        Wz.detach().numpy(),
+                        mip_cnstr_return.Wz_up[layer_count].detach().numpy() +
+                        1E-10)
+                    np.testing.assert_array_less(
+                        mip_cnstr_return.Wz_lo[layer_count].detach().numpy(),
+                        Wz.detach().numpy() + 1E-10)
                 elif isinstance(layer, nn.ReLU) or \
                         isinstance(layer, nn.LeakyReLU):
                     if isinstance(layer, nn.ReLU):
                         z_cur = beta[relu_free_pattern.
-                                     relu_unit_index[layer_count]] * z_cur
+                                     relu_unit_index[layer_count]] * Wz
                     else:
+                        z_cur = torch.empty_like(Wz, dtype=Wz.dtype)
                         for i in range(
                                 len(relu_free_pattern.
                                     relu_unit_index[layer_count])):
                             if activation_pattern[layer_count][i]:
-                                z_cur[i] = z_cur[i]
+                                z_cur[i] = Wz[i]
                             else:
-                                z_cur[i] = layer.negative_slope * z_cur[i]
-                    z_expected[relu_free_pattern.relu_unit_index[layer_count]]\
-                        = z_cur
+                                z_cur[i] = layer.negative_slope * Wz[i]
+                    slack_expected.append(z_cur)
+                    np.testing.assert_array_less(
+                        z_cur.detach().numpy(),
+                        z_up[layer_count + 1].detach().numpy() + 1E-10)
+                    np.testing.assert_array_less(
+                        z_lo[layer_count + 1].detach().numpy(),
+                        z_cur.detach().numpy() + 1E-10)
                     z_pre = z_cur
                     layer_count += 1
+            slack_expected = torch.cat(slack_expected)
 
-            # Now check that z_expected is within the bound.
-            np.testing.assert_array_less(z_expected.detach().numpy(),
-                                         z_up.detach().numpy() + 1E-10)
-            np.testing.assert_array_less(z_lo.detach().numpy() - 1E-10,
-                                         z_expected.detach().numpy())
             # Check that the output equals to A_out.dot(z_expected)
-            self.assertAlmostEqual((A_out @ z_expected).item(),
+            self.assertAlmostEqual((A_out @ slack_expected).item(),
                                    output_expected.item())
             # Check that y, z, beta satisfies the constraint
-            lhs = A_y @ y + A_z @ z_expected + A_beta @ beta
+            lhs = A_y @ y + A_z @ slack_expected + A_beta @ beta
             np.testing.assert_array_less(lhs.detach().numpy(),
                                          rhs.detach().numpy() + 1E-10)
 
             # Now solve an optimization problem satisfying the constraint, and
             # fix y and beta. The only z that satisfies the constraint should
             # be z_expected.
-            z_var = cp.Variable(relu_free_pattern.num_relu_units)
+            slack_var = cp.Variable(relu_free_pattern.num_relu_units)
             objective = cp.Minimize(0.)
             con = [
-                A_z.detach().numpy() @ z_var <=
+                A_z.detach().numpy() @ slack_var <=
                 (rhs - A_y @ y - A_beta @ beta).detach().numpy()
             ]
             prob = cp.Problem(objective, con)
             prob.solve(solver=cp.GUROBI)
-            np.testing.assert_array_almost_equal(z_var.value,
-                                                 z_expected.detach().numpy())
+            np.testing.assert_array_almost_equal(
+                slack_var.value,
+                slack_expected.detach().numpy())
 
         # Check for different models and inputs.
         for model in (self.model2, self.model4, self.model5):

@@ -1058,13 +1058,11 @@ class ReLUFreePattern:
         z_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
         z_up = torch.empty(self.num_relu_units, dtype=self.dtype)
         layer_count = 0
-        zi_lo = vector_lower
-        zi_up = vector_upper
         ineq_count = 0
         A_out = torch.zeros((self.model[-1].out_features, self.num_relu_units),
                             dtype=self.dtype)
-        Wz_lo = [None] * (len(self.relu_unit_index) + 1)
-        Wz_up = [None] * (len(self.relu_unit_index) + 1)
+        z_lo, z_up, Wz_lo, Wz_up = self._compute_Wz_bounds_IA(
+            vector_lower, vector_upper)
         linear_layer_count = 0
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
@@ -1075,38 +1073,21 @@ class ReLUFreePattern:
                     # append inequality constraints.
                     A_out[:, self.relu_unit_index[layer_count - 1]] = \
                         layer.weight
-                else:
-                    # First compute the range of (Wᵢ*zᵢ)(j)
-                    Wizi_lo = torch.zeros(layer.weight.shape[0],
-                                          dtype=self.dtype)
-                    Wizi_up = torch.zeros(layer.weight.shape[0],
-                                          dtype=self.dtype)
-
-                    # Now impose the constraint zᵢ₊₁ = diag(βᵢ)*Wᵢ*zᵢ
-                    # We do this by replacing zᵢ₊₁(j) = βᵢ(j)*(Wᵢ*zᵢ)(j) with
-                    # mixed-integer linear constraints.
-                    for j in range(layer.weight.shape[0]):
-                        for k in range(layer.weight.shape[1]):
-                            if layer.weight[j][k] > 0:
-                                Wizi_lo[j] += layer.weight[j][k] * zi_lo[k]
-                                Wizi_up[j] += layer.weight[j][k] * zi_up[k]
-                            else:
-                                Wizi_lo[j] += layer.weight[j][k] * zi_up[k]
-                                Wizi_up[j] += layer.weight[j][k] * zi_lo[k]
-                Wz_lo[linear_layer_count] = Wizi_lo
-                Wz_up[linear_layer_count] = Wizi_up
                 linear_layer_count += 1
             elif isinstance(layer, nn.ReLU) or isinstance(layer, nn.LeakyReLU):
                 for j in range(len(self.relu_unit_index[layer_count])):
                     if isinstance(layer, nn.ReLU):
                         A_pre, A_z_next, A_beta_i, rhs_i = utils.\
                             replace_binary_continuous_product(
-                                Wizi_lo[j], Wizi_up[j], dtype=self.dtype)
+                                Wz_lo[linear_layer_count-1][j],
+                                Wz_up[linear_layer_count-1][j],
+                                dtype=self.dtype)
                     else:
                         A_pre, A_z_next, A_beta_i, rhs_i = utils.\
                             leaky_relu_gradient_times_x(
-                                Wizi_lo[j], Wizi_up[j], layer.negative_slope,
-                                dtype=self.dtype)
+                                Wz_lo[linear_layer_count-1][j],
+                                Wz_up[linear_layer_count-1][j],
+                                layer.negative_slope, dtype=self.dtype)
                     if layer_count == 0:
                         A_y[ineq_count:ineq_count+4] =\
                             A_pre.reshape((-1, 1)) @\
@@ -1124,32 +1105,6 @@ class ReLUFreePattern:
                         A_beta_i.squeeze()
                     rhs[ineq_count:ineq_count + 4] = rhs_i
                     ineq_count += 4
-                # Compute the range of M(βᵢ, c) * Wᵢzᵢ
-                # where M(βᵢ, c) is the diagonal matrix whose diagonal
-                # entries are either 1 or c.
-                if isinstance(layer, nn.ReLU):
-                    zi_lo = torch.min(
-                        torch.zeros(len(self.relu_unit_index[layer_count]),
-                                    dtype=self.dtype), Wizi_lo)
-                    zi_up = torch.max(
-                        torch.zeros(len(self.relu_unit_index[layer_count]),
-                                    dtype=self.dtype), Wizi_up)
-                else:
-                    zi_lo, _ = torch.min(torch.cat((Wizi_lo.reshape(
-                        (1, -1)), layer.negative_slope * Wizi_lo.reshape(
-                            (1, -1)), layer.negative_slope * Wizi_up.reshape(
-                                (1, -1))),
-                                                   dim=0),
-                                         axis=0)
-                    zi_up, _ = torch.max(torch.cat((Wizi_up.reshape(
-                        (1, -1)), layer.negative_slope * Wizi_lo.reshape(
-                            (1, -1)), layer.negative_slope * Wizi_up.reshape(
-                                (1, -1))),
-                                                   dim=0),
-                                         axis=0)
-
-                z_lo[self.relu_unit_index[layer_count]] = zi_lo
-                z_up[self.relu_unit_index[layer_count]] = zi_up
                 layer_count += 1
 
             else:
@@ -1161,10 +1116,10 @@ class ReLUFreePattern:
         result.Ain_slack = A_slack
         result.Ain_binary = A_beta
         result.rhs_in = rhs
-        result.vec_lo = vector_lower
-        result.vec_up = vector_upper
         result.z_lo = z_lo
         result.z_up = z_up
+        result.Wz_lo = Wz_lo
+        result.Wz_up = Wz_up
         return result
 
     def _compute_Wz_bounds_IA(self, vector_lower: torch.Tensor,
@@ -1243,7 +1198,6 @@ class ReLUFreePattern:
                                                          axis=0)
                 else:
                     raise Exception(
-                        "compute_Wz_bounds_IA(): this layer should be either"
-                        + "ReLU or leaky ReLU"
-                    )
+                        "compute_Wz_bounds_IA(): this layer should be either" +
+                        "ReLU or leaky ReLU")
         return z_lo, z_up, Wz_lo, Wz_up
