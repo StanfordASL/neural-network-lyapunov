@@ -13,6 +13,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.control_affine_system as control_affine_system
 
 
 class ConvergenceEps(Enum):
@@ -63,7 +64,10 @@ class LyapunovHybridLinearSystem:
                 or isinstance(
                     system,
                     relu_system.AutonomousResidualReLUSystemGivenEquilibrium)
-                or isinstance(system, feedback_system.FeedbackSystem))
+                or isinstance(system, feedback_system.FeedbackSystem)
+                or isinstance(
+                    system,
+                    control_affine_system.ControlPiecewiseAffineSystem))
         self.system = system
         self.lyapunov_relu = lyapunov_relu
         self.lyapunov_relu_free_pattern = \
