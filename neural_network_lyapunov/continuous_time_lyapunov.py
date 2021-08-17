@@ -494,7 +494,6 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                      eps_type,
                                      *,
                                      R,
-                                     fixed_R,
                                      lyapunov_lower=None,
                                      lyapunov_upper=None):
         """
@@ -580,8 +579,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                                      x_equilibrium,
                                                      x,
                                                      slack_name="t",
-                                                     binary_var_name="alpha",
-                                                     fixed_R=fixed_R)
+                                                     binary_var_name="alpha")
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper
@@ -672,7 +670,6 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                     eps_type: lyapunov.ConvergenceEps,
                                     *,
                                     R,
-                                    fixed_R,
                                     lyapunov_lower=None,
                                     lyapunov_upper=None,
                                     x_warmstart=None):
@@ -774,8 +771,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                                      x_equilibrium,
                                                      x,
                                                      slack_name="t",
-                                                     binary_var_name="alpha",
-                                                     fixed_R=fixed_R)
+                                                     binary_var_name="alpha")
 
         # Now add the constraint
         # lower <= ReLU(x[n]) - ReLU(x*) + λ|x[n]-x*|₁ <= upper

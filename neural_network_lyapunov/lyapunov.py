@@ -155,7 +155,6 @@ class LyapunovHybridLinearSystem:
                                       R=None,
                                       slack_name="s",
                                       binary_var_name="alpha",
-                                      fixed_R=True,
                                       binary_var_type=gurobipy.GRB.BINARY):
         """
         This function is intended for internal usage only (but I expose it
@@ -166,8 +165,6 @@ class LyapunovHybridLinearSystem:
         alpha(i) = 1 => s(i) >= 0, alpha(i) = 0 => s(i) <= 0
         @param R A matrix. We want this matrix to have full column rank. If
         R=None, then we use identity as R.
-        @param fixed_R If set to False, then we will treat R as free
-        variables, which eventually we will need to compute the gradient of R.
         """
         if not torch.all(torch.from_numpy(self.system.x_lo_all)
                          <= x_equilibrium) or\
@@ -271,7 +268,6 @@ class LyapunovHybridLinearSystem:
                                     V_epsilon,
                                     *,
                                     R,
-                                    fixed_R,
                                     x_warmstart=None):
         """
         For a ReLU network, in order to determine if the function
@@ -293,7 +289,6 @@ class LyapunovHybridLinearSystem:
         @param V_epsilon A scalar. ε in the documentation above.
         @param R This matrix must have full column rank, we will use the
         1-norm of R * (x - x*). If R=None, then we use identity matrix as R.
-        @param fixed_R Whether R is fixed or not.
         @param x_warmstart tensor of size self.system.x_dim. If provided, will
         use x_warmstart as initial guess for the *binary* variables of the
         milp. Instead of warm start beta with the binary variable solution from
@@ -335,8 +330,7 @@ class LyapunovHybridLinearSystem:
                                                      x,
                                                      R=R,
                                                      slack_name="s",
-                                                     binary_var_name="gamma",
-                                                     fixed_R=fixed_R)
+                                                     binary_var_name="gamma")
 
         relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
         # Now set the objective as -ϕ(x) + ϕ(x*) + (ε-λ)*|R(x−x*)|₁
@@ -514,8 +508,7 @@ class LyapunovHybridLinearSystem:
                                                      x,
                                                      R=R,
                                                      slack_name="s",
-                                                     binary_var_name="gamma",
-                                                     fixed_R=True)
+                                                     binary_var_name="gamma")
 
         # Objective is
         # min V(x[n])
@@ -585,7 +578,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                     eps_type: ConvergenceEps,
                                     *,
                                     R,
-                                    fixed_R,
                                     lyapunov_lower=None,
                                     lyapunov_upper=None,
                                     x_warmstart=None,
@@ -703,7 +695,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R=R,
             slack_name="|x[n]-x*|",
             binary_var_name="beta_x_norm",
-            fixed_R=fixed_R,
             binary_var_type=binary_var_type)
         # Now add the mixed-integer linear constraint to represent
         # |R*(x[n+1] - x*)|₁. To do so, we introduce the slack variable
@@ -716,7 +707,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             R=R,
             slack_name="|R*(x[n+1]-x*)|",
             binary_var_name="beta_x_next_norm",
-            fixed_R=fixed_R,
             binary_var_type=binary_var_type)
 
         # Now add the constraint
@@ -879,7 +869,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                                num_strengthen_pts,
                                                *,
                                                R,
-                                               fixed_R,
                                                lyapunov_lower=None,
                                                lyapunov_upper=None,
                                                x_warmstart=None):
@@ -903,7 +892,6 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
             epsilon,
             epsilon_type,
             R=R,
-            fixed_R=fixed_R,
             lyapunov_lower=lyapunov_lower,
             lyapunov_upper=lyapunov_upper,
             x_warmstart=x_warmstart,
@@ -1255,8 +1243,7 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                                                      x_curr,
                                                      R=R,
                                                      slack_name="s",
-                                                     binary_var_name="gamma",
-                                                     fixed_R=True)
+                                                     binary_var_name="gamma")
 
         # Objective is
         # min V(x[n])

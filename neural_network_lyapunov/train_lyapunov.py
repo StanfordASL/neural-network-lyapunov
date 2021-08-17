@@ -230,7 +230,6 @@ class TrainLyapunovReLU:
             lyapunov_positivity_as_milp(
                 self.x_equilibrium, self.V_lambda,
                 self.lyapunov_positivity_epsilon, R=self.R_options.R(),
-                fixed_R=self.R_options.fixed_R,
                 x_warmstart=self.lyapunov_positivity_last_x_adv)
         lyapunov_positivity_mip = lyapunov_positivity_as_milp_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
@@ -282,7 +281,6 @@ class TrainLyapunovReLU:
                     self.x_equilibrium, self.V_lambda,
                     self.lyapunov_derivative_epsilon,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
-                    fixed_R=self.R_options.fixed_R,
                     x_warmstart=self.lyapunov_derivative_last_x_adv)
         else:
             assert (self.derivative_mip_num_strengthen_pts > 0)
@@ -294,7 +292,6 @@ class TrainLyapunovReLU:
                     self.lyapunov_derivative_eps_type,
                     self.derivative_mip_num_strengthen_pts,
                     R=self.R_options.R(),
-                    fixed_R=self.R_options.fixed_R,
                     x_warmstart=self.lyapunov_derivative_last_x_adv)
         if self.derivative_mip_strengthen_binary:
             self.lyapunov_hybrid_system.\

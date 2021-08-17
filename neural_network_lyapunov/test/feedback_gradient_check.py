@@ -164,15 +164,13 @@ def create_mip(lyap, x_equilibrium, V_lambda, V_epsilon, R_options,
         mip = lyap.lyapunov_positivity_as_milp(x_equilibrium,
                                                V_lambda,
                                                V_epsilon,
-                                               R=R_options.R(),
-                                               fixed_R=R_options.fixed_R)[0]
+                                               R=R_options.R())[0]
     else:
         mip = lyap.lyapunov_derivative_as_milp(x_equilibrium,
                                                V_lambda,
                                                V_epsilon,
                                                eps_type,
-                                               R=R_options.R(),
-                                               fixed_R=R_options.fixed_R).milp
+                                               R=R_options.R()).milp
     return mip
 
 

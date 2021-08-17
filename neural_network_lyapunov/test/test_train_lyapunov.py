@@ -111,8 +111,7 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                 self.dut.x_equilibrium,
                 self.dut.V_lambda,
                 self.dut.lyapunov_positivity_epsilon,
-                R=self.R_options.R(),
-                fixed_R=True)
+                R=self.R_options.R())
             mip = positivity_return[0]
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSearchMode, 2)
@@ -147,8 +146,7 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                 self.dut.V_lambda,
                 self.dut.lyapunov_derivative_epsilon,
                 self.dut.lyapunov_derivative_eps_type,
-                R=self.R_options.R(),
-                fixed_R=True)
+                R=self.R_options.R())
             mip = derivative_return.milp
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.PoolSolutions,
@@ -270,7 +268,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         lyapunov_positivity_mip_return = lyapunov_hybrid_system.\
             lyapunov_positivity_as_milp(
                 x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon,
-                R=R_options.R(), fixed_R=R_options.fixed_R)
+                R=R_options.R())
         lyapunov_positivity_mip = lyapunov_positivity_mip_return[0]
         lyapunov_positivity_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
@@ -285,8 +283,7 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             lyapunov_derivative_as_milp(
                 x_equilibrium, V_lambda, dut.lyapunov_derivative_epsilon,
                 lyapunov.ConvergenceEps.ExpLower, R=R_options.R(),
-                fixed_R=R_options.fixed_R, lyapunov_lower=None,
-                lyapunov_upper=None)
+                lyapunov_lower=None, lyapunov_upper=None)
         lyapunov_derivative_mip = lyapunov_derivative_mip_return.milp
         lyapunov_derivative_mip.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
