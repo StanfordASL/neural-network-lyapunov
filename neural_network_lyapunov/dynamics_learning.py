@@ -112,8 +112,7 @@ class DynamicsLearning:
             self.lyap.system.x_equilibrium,
             self.opt.V_lambda,
             self.opt.V_eps_pos,
-            R=self.opt.R,
-            fixed_R=True)
+            R=self.opt.R)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -139,8 +138,7 @@ class DynamicsLearning:
             self.opt.V_lambda,
             self.opt.V_eps_der_lo,
             lyapunov.ConvergenceEps.ExpLower,
-            R=self.opt.R,
-            fixed_R=True)
+            R=self.opt.R)
         lyap_der_mip = lyap_der_mip_.milp
         x_var = lyap_der_mip_.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -168,8 +166,7 @@ class DynamicsLearning:
             self.opt.V_lambda,
             self.opt.V_eps_der_up,
             lyapunov.ConvergenceEps.ExpUpper,
-            R=self.opt.R,
-            fixed_R=True)
+            R=self.opt.R)
         lyap_der_mip = lyap_der_mip_.milp
         x_var = lyap_der_mip_.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -219,15 +216,13 @@ class DynamicsLearning:
                 self.opt.V_lambda,
                 self.opt.V_eps_pos,
                 x_warmstart=self.lyap_pos_x_adv,
-                R=self.opt.R,
-                fixed_R=True)
+                R=self.opt.R)
         else:
             lyap_pos_mip, x_var = self.lyap.lyapunov_positivity_as_milp(
                 self.lyap.system.x_equilibrium,
                 self.opt.V_lambda,
                 self.opt.V_eps_pos,
-                R=self.opt.R,
-                fixed_R=True)
+                R=self.opt.R)
         lyap_pos_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
                                            False)
         if self.opt.lyap_loss_optimal:
@@ -256,7 +251,6 @@ class DynamicsLearning:
                 self.opt.V_eps_der_lo,
                 lyapunov.ConvergenceEps.ExpLower,
                 R=self.opt.R,
-                fixed_R=True,
                 x_warmstart=self.lyap_der_lo_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
@@ -264,8 +258,7 @@ class DynamicsLearning:
                 self.opt.V_lambda,
                 self.opt.V_eps_der_lo,
                 lyapunov.ConvergenceEps.ExpLower,
-                R=self.opt.R,
-                fixed_R=True)
+                R=self.opt.R)
         lyap_der_mip = lyap_der_mip_return.milp
         x_var = lyap_der_mip_return.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
@@ -296,7 +289,6 @@ class DynamicsLearning:
                 self.opt.V_eps_der_up,
                 lyapunov.ConvergenceEps.ExpUpper,
                 R=self.opt.R,
-                fixed_R=True,
                 x_warmstart=self.lyap_der_up_x_adv)
         else:
             lyap_der_mip_return = self.lyap.lyapunov_derivative_as_milp(
@@ -304,8 +296,7 @@ class DynamicsLearning:
                 self.opt.V_lambda,
                 self.opt.V_eps_der_up,
                 lyapunov.ConvergenceEps.ExpUpper,
-                R=self.opt.R,
-                fixed_R=True)
+                R=self.opt.R)
         lyap_der_mip = lyap_der_mip_return.milp
         x_var = lyap_der_mip_return.x
         lyap_der_mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,

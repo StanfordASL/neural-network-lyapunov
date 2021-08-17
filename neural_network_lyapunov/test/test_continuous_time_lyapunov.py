@@ -59,7 +59,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 system, relu)
 
             lyapunov_positivity_mip_return = dut.lyapunov_positivity_as_milp(
-                x_equilibrium, V_lambda, positivity_epsilon, R=R, fixed_R=True)
+                x_equilibrium, V_lambda, positivity_epsilon, R=R)
             lyapunov_positivity_mip_return[0].gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
             lyapunov_positivity_mip_return[0].gurobi_model.optimize()
@@ -75,8 +75,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 V_lambda,
                 derivative_epsilon,
                 lyapunov.ConvergenceEps.ExpLower,
-                R=R,
-                fixed_R=True)
+                R=R)
             lyapunov_derivative_mip_return.milp.gurobi_model.setParam(
                 gurobipy.GRB.Param.OutputFlag, False)
             lyapunov_derivative_mip_return.milp.gurobi_model.optimize()
@@ -568,7 +567,6 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     epsilon,
                     lyapunov.ConvergenceEps.ExpLower,
                     R=R,
-                    fixed_R=True,
                     lyapunov_lower=None,
                     lyapunov_upper=None)
             elif formulation == 2:
@@ -578,7 +576,6 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     epsilon,
                     lyapunov.ConvergenceEps.ExpLower,
                     R=R,
-                    fixed_R=True,
                     lyapunov_lower=None,
                     lyapunov_upper=None)
             milp = milp_return.milp
@@ -657,7 +654,6 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     epsilon,
                     lyapunov.ConvergenceEps.ExpLower,
                     R=R,
-                    fixed_R=True,
                     lyapunov_lower=None,
                     lyapunov_upper=None).milp
             elif formulation == 2:
@@ -667,7 +663,6 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                     epsilon,
                     lyapunov.ConvergenceEps.ExpLower,
                     R=R,
-                    fixed_R=True,
                     lyapunov_lower=None,
                     lyapunov_upper=None).milp
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)

@@ -63,8 +63,7 @@ def compute_milp_cost_given_relu(system, x_equilibrium, relu_layer_width,
         milp = dut.lyapunov_positivity_as_milp(x_equilibrium,
                                                V_lambda,
                                                lyapunov_positivity_epsilon,
-                                               R=None,
-                                               fixed_R=True)[0]
+                                               R=None)[0]
     else:
         milp = dut.lyapunov_derivative_as_milp(
             x_equilibrium,
