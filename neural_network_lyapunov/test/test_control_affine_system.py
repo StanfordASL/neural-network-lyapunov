@@ -1,6 +1,7 @@
 import neural_network_lyapunov.control_affine_system as mut
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import torch
 import numpy as np
 import random
@@ -57,6 +58,26 @@ class TestLinearSystem(unittest.TestCase):
             np.array([Gi.x for Gi in G_flat]).reshape((dut.x_dim, dut.u_dim)),
             G_expected)
 
+    def test_compute_range_by_ia(self):
+        dtype = torch.float64
+        A, B, x_lo, x_up, u_lo, u_up = get_simple_ca_system_params(dtype)
+        dut = mut.LinearSystem(A, B, x_lo, x_up, u_lo, u_up)
+        f_lo, f_up = dut.compute_f_range_ia()
+        f_lo_expected, f_up_expected = mip_utils.compute_range_by_IA(
+            A, torch.zeros(dut.x_dim, dtype=dtype), x_lo, x_up)
+        np.testing.assert_allclose(f_lo.detach().numpy(),
+                                   f_lo_expected.detach().numpy())
+        np.testing.assert_allclose(f_up.detach().numpy(),
+                                   f_up_expected.detach().numpy())
+        G_lo, G_up = dut.compute_G_range_ia()
+        self.assertEqual(len(G_lo), dut.u_dim)
+        self.assertEqual(len(G_up), dut.u_dim)
+        for i in range(dut.u_dim):
+            np.testing.assert_allclose(G_lo[i].detach().numpy(),
+                                       B[:, i].detach().numpy())
+            np.testing.assert_allclose(G_up[i].detach().numpy(),
+                                       B[:, i].detach().numpy())
+
 
 class TestTrainControlAffineSystem(unittest.TestCase):
     def test(self):
@@ -83,25 +104,29 @@ class TestTrainControlAffineSystem(unittest.TestCase):
         x_equ = torch.zeros(dut.x_dim, dtype=dtype)
         u_equ = torch.zeros(dut.u_dim, dtype=dtype)
 
-        forward_model_f = utils.setup_relu((dut.x_dim,
-                                            4 * dut.x_dim,
-                                            dut.x_dim),
-                                           params=None,
-                                           bias=True,
-                                           negative_slope=0.01,
-                                           dtype=dtype)
+        forward_model_f = utils.setup_relu(
+            (dut.x_dim, 4 * dut.x_dim, dut.x_dim),
+            params=None,
+            bias=True,
+            negative_slope=0.01,
+            dtype=dtype)
 
-        forward_model_G = utils.setup_relu((dut.x_dim,
-                                            4 * dut.x_dim * dut.u_dim,
-                                            dut.x_dim * dut.u_dim),
-                                           params=None,
-                                           bias=True,
-                                           negative_slope=0.01,
-                                           dtype=dtype)
+        forward_model_G = utils.setup_relu(
+            (dut.x_dim, 4 * dut.x_dim * dut.u_dim, dut.x_dim * dut.u_dim),
+            params=None,
+            bias=True,
+            negative_slope=0.01,
+            dtype=dtype)
 
-        mut.train_control_affine_forward_model(
-            forward_model_f, forward_model_G, x_equ, u_equ,
-            dataset, 200, 1e-2, batch_size=100, verbose=False)
+        mut.train_control_affine_forward_model(forward_model_f,
+                                               forward_model_G,
+                                               x_equ,
+                                               u_equ,
+                                               dataset,
+                                               200,
+                                               1e-2,
+                                               batch_size=100,
+                                               verbose=False)
 
         for i in range(10):
             x_test = torch.rand(dut.x_dim, dtype=dtype) * (x_up - x_lo) + x_lo
@@ -113,10 +138,9 @@ class TestTrainControlAffineSystem(unittest.TestCase):
                 forward_model_f(x_equ) -\
                 forward_model_G(x_equ).view((dut.x_dim, dut.u_dim)) @ u_equ
 
-            np.testing.assert_allclose(
-                x_dot_pred.detach().numpy(),
-                x_dot_exp.detach().numpy(),
-                rtol=.1)
+            np.testing.assert_allclose(x_dot_pred.detach().numpy(),
+                                       x_dot_exp.detach().numpy(),
+                                       rtol=.1)
 
 
 if __name__ == "__main__":

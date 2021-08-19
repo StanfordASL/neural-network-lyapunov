@@ -1,6 +1,7 @@
 import torch
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class ControlPiecewiseAffineSystem:
@@ -84,6 +85,25 @@ class ControlPiecewiseAffineSystem:
         """
         raise NotImplementedError
 
+    def compute_f_range_ia(self) -> (torch.Tensor, torch.Tensor):
+        """
+        Compute the range of f through interval arithemetics (IA).
+
+        Return:
+          f_lo, f_up: The lower and upper bound of f.
+        """
+        raise NotImplementedError
+
+    def compute_G_range_ia(self) -> (list, list):
+        """
+        Compute the range of G through interval arithemetics (IA).
+
+        Return:
+          G_lo, G_up: G_lo[i]/G_up[i] is the lower/upper bound of G[:, i] (the
+          i'th column of G).
+        """
+        raise NotImplementedError
+
 
 class LinearSystem(ControlPiecewiseAffineSystem):
     """
@@ -115,10 +135,24 @@ class LinearSystem(ControlPiecewiseAffineSystem):
     def G(self, x):
         return self.B
 
+    def compute_f_range_ia(self):
+        return mip_utils.compute_range_by_IA(
+            self.A, torch.zeros((self.x_dim, ), dtype=self.dtype), self.x_lo,
+            self.x_up)
 
-def train_control_affine_forward_model(forward_model_f, forward_model_G,
-                                       x_equ, u_equ,
-                                       model_dataset, num_epochs, lr,
+    def compute_G_range_ia(self):
+        G_lo = [self.B[:, i] for i in range(self.u_dim)]
+        G_up = [self.B[:, i] for i in range(self.u_dim)]
+        return G_lo, G_up
+
+
+def train_control_affine_forward_model(forward_model_f,
+                                       forward_model_G,
+                                       x_equ,
+                                       u_equ,
+                                       model_dataset,
+                                       num_epochs,
+                                       lr,
                                        batch_size=50,
                                        verbose=True):
     """
@@ -146,14 +180,13 @@ def train_control_affine_forward_model(forward_model_f, forward_model_G,
             forward_model_G(x_equ).view((x_dim, u_dim)) @ u_equ
         return x_dot
 
-    utils.train_approximator(model_dataset,
-                             forward_model_f,
-                             compute_x_dot,
-                             batch_size=batch_size,
-                             num_epochs=num_epochs,
-                             lr=lr,
-                             additional_variable=list(
-                                forward_model_G.parameters()),
-                             output_fun_args=dict(
-                                forward_model_G=forward_model_G),
-                             verbose=verbose)
+    utils.train_approximator(
+        model_dataset,
+        forward_model_f,
+        compute_x_dot,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        additional_variable=list(forward_model_G.parameters()),
+        output_fun_args=dict(forward_model_G=forward_model_G),
+        verbose=verbose)
