@@ -3,9 +3,11 @@ import neural_network_lyapunov.control_lyapunov as mut
 import unittest
 import torch
 import numpy as np
+import gurobipy
 
 import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 class TestControlLyapunov(unittest.TestCase):
@@ -83,6 +85,54 @@ class TestControlLyapunov(unittest.TestCase):
         x = torch.tensor([0, 1], dtype=self.dtype)
         self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
                                         epsilon, R)
+
+    def add_system_constraint_tester(self, dut, x_val: torch.Tensor,
+                                     is_feasible):
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=x_val, ub=x_val)
+        f = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        G = [None] * dut.system.u_dim
+        for i in range(dut.system.u_dim):
+            G[i] = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        ret = dut.add_system_constraint(milp, x, f, G)
+        # Linear system doesn't introduce slack/binary variables.
+        self.assertEqual(len(ret.slack), 0)
+        self.assertEqual(len(ret.binary), 0)
+
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp.gurobi_model.optimize()
+        if is_feasible:
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            f_val = np.array([v.x for v in f])
+            G_val = [None] * dut.system.u_dim
+            for i in range(dut.system.u_dim):
+                G_val[i] = [v.x for v in G[i]]
+            G_val = np.array(G_val).T
+
+            f_expected = dut.system.f(x_val)
+            G_expected = dut.system.G(x_val)
+            np.testing.assert_allclose(f_val, f_expected.detach().numpy())
+            np.testing.assert_allclose(G_val, G_expected.detach().numpy())
+        else:
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.INFEASIBLE)
+
+    def test_add_system_constraint1(self):
+        # Test with linear system.
+        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        # x within [x_lo, x_up]
+        self.add_system_constraint_tester(
+            dut, (self.linear_system.x_lo + self.linear_system.x_up) / 2, True)
+        self.add_system_constraint_tester(
+            dut,
+            (0.9 * self.linear_system.x_lo + 0.1 * self.linear_system.x_up),
+            True)
+        # x outside of [x_lo, x_up]
+        self.add_system_constraint_tester(
+            dut, torch.tensor([-3, 0], dtype=self.dtype), False)
+        self.add_system_constraint_tester(
+            dut, torch.tensor([0, 4], dtype=self.dtype), False)
 
 
 if __name__ == "__main__":

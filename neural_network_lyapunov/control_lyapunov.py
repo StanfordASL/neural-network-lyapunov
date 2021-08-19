@@ -1,7 +1,20 @@
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.control_affine_system as control_affine_system
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import torch
+import gurobipy
+
+
+class ControlAffineSystemConstraintReturn(lyapunov.SystemConstraintReturn):
+    """
+    The return type of add_system_constraint()
+    """
+    def __init__(self, slack, binary):
+        super(ControlAffineSystemConstraintReturn,
+              self).__init__(slack, binary)
+        self.mip_cnstr_f = None
+        self.mip_cnstr_G = None
 
 
 class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
@@ -35,6 +48,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
           lyapunov_relu: The neural network ϕ which defines the Lyapunov
           function.
         """
+        assert (isinstance(system,
+                           control_affine_system.ControlPiecewiseAffineSystem))
         super(ControlLyapunov, self).__init__(system, lyapunov_relu)
 
     def lyapunov_derivative(self, x, x_equilibrium, V_lambda, epsilon, *, R):
@@ -77,3 +92,52 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 dim=1)
         V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
         return torch.min(Vdot.squeeze()) + epsilon * V
+
+    def add_system_constraint(
+        self,
+        milp: gurobi_torch_mip.GurobiTorchMIP,
+        x: list,
+        f: list,
+        G: list,
+        *,
+        binary_var_type=gurobipy.GRB.BINARY
+    ) -> ControlAffineSystemConstraintReturn:
+        """
+        Add the (mixed-integer linear) constraints of f(x) and G(x).
+
+        Args:
+          G: G is a 2D list. len(G) = u_dim. len(G[i]) = x_dim
+        """
+        assert (len(f) == self.system.x_dim)
+        assert (len(G) == self.system.u_dim)
+        # Add constraint that x_lo <= x <= x_up
+        milp.addMConstrs(
+            [torch.eye(self.system.x_dim, dtype=self.system.dtype)], [x],
+            gurobipy.GRB.LESS_EQUAL,
+            self.system.x_up,
+            name="x_up")
+        milp.addMConstrs(
+            [torch.eye(self.system.x_dim, dtype=self.system.dtype)], [x],
+            gurobipy.GRB.GREATER_EQUAL,
+            self.system.x_lo,
+            name="x_lo")
+        # Set the bounds of x
+        for i in range(self.system.x_dim):
+            if x[i].lb < self.system.x_lo[i].item():
+                x[i].lb = self.system.x_lo[i].item()
+            if x[i].ub > self.system.x_up[i].item():
+                x[i].ub = self.system.x_up[i].item()
+        mip_cnstr_f, mip_cnstr_G = self.system.mixed_integer_constraints()
+        slack, binary = milp.add_mixed_integer_linear_constraints(
+            mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq", "f_eq",
+            "f_output", binary_var_type)
+        for i in range(self.system.u_dim):
+            slack_Gi, binary_Gi = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_G[i], x, G[i], f"slack_G[{i}]", f"binary_G[{i}]",
+                "G[{i}]_ineq", "G[{i}]_eq", "G[{i}]_out", binary_var_type)
+            slack.extend(slack_Gi)
+            binary.extend(binary_Gi)
+        ret = ControlAffineSystemConstraintReturn(slack, binary)
+        ret.mip_cnstr_f = mip_cnstr_f
+        ret.mip_cnstr_G = mip_cnstr_G
+        return ret
