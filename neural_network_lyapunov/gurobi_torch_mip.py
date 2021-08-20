@@ -394,9 +394,15 @@ class GurobiTorchMIP:
         constraints to the program. We assume that the input variable and
         output variables are already created, and we will create the slack
         variable and binary variables within this function.
-        @param output_vars If output_vars is None, thn we do not add the output
-        constraint output_vars = Aout_input * input + Aout_slack * slack +
-        Aout_binary * binary + Cout, otherwise we add the constraint.
+        @param output_vars If output_vars is None, then we do not add the
+        output constraint
+        output_vars = Aout_input * input + Aout_slack * slack +
+                      Aout_binary * binary + Cout
+        otherwise we add the constraint.
+        @param binary_var_name If set to a str, then we add binary variables
+        with this name. If binary_var_name is a list of gurobi binary
+        variables, then we don't add new binary variables, and use this given
+        binary variables directly.
         @param binary_var_type Can be either gurobipy.GRB.CONTINUOUS,
         gurobipy.GRB.BINARY or BINARYRELAX.
         """
@@ -454,14 +460,19 @@ class GurobiTorchMIP:
         elif mip_cnstr_return.binary_up is not None:
             binary_size = mip_cnstr_return.binary_up.numel()
         if binary_size != 0:
-            assert (isinstance(binary_var_name, str))
-            binary = self.addVars(binary_size,
-                                  lb=0.,
-                                  ub=1.,
-                                  vtype=binary_var_type,
-                                  name=binary_var_name)
-            set_var_bound(binary, mip_cnstr_return.binary_lo,
-                          mip_cnstr_return.binary_up)
+            if (isinstance(binary_var_name, str)):
+                binary = self.addVars(binary_size,
+                                      lb=0.,
+                                      ub=1.,
+                                      vtype=binary_var_type,
+                                      name=binary_var_name)
+                set_var_bound(binary, mip_cnstr_return.binary_lo,
+                              mip_cnstr_return.binary_up)
+            elif isinstance(binary_var_name, list) and all(
+                    (isinstance(v, gurobipy.Var) for v in binary_var_name)):
+                binary = binary_var_name
+                assert (len(binary) == binary_size)
+                assert (all((v.vtype == binary_var_type for v in binary)))
         else:
             binary = []
 
