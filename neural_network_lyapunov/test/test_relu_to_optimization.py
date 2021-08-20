@@ -10,6 +10,68 @@ import cvxpy as cp
 import gurobipy
 
 
+def compute_output_gradient_times_vec_intermediate(relu_network, x, z0):
+    """
+    Compute z and Wz defined in output_gradient_times_vector() function.
+    Notice that when the relu network input is 0, we use only the right
+    derivative.
+
+    Return:
+      z, Wz: Refer to output_gradient_times_vector()
+      unique_flag: whether the output gradient is unique. Note the gradient
+      is non-unique if an input to a ReLU unit is 0.
+    """
+    num_linear_layers = int((len(relu_network) + 1) / 2)
+    z = [None] * num_linear_layers
+    Wz = [None] * num_linear_layers
+    z[0] = z0
+    linear_layer_input = x
+    unique_flag = True
+    for linear_layer_count in range(num_linear_layers):
+        Wz[linear_layer_count] = relu_network[
+            2 * linear_layer_count].weight.data @ z[linear_layer_count]
+        linear_layer_output = relu_network[2 * linear_layer_count](
+            linear_layer_input)
+        if linear_layer_count < num_linear_layers - 1:
+            relu_layer = relu_network[2 * linear_layer_count + 1]
+            linear_layer_input = relu_layer(linear_layer_output)
+            beta = linear_layer_output >= 0
+            c = 0 if isinstance(relu_layer,
+                                torch.nn.ReLU) else relu_layer.negative_slope
+            if torch.any(torch.abs(linear_layer_output) < 1E-10):
+                unique_flag = False
+            M = c + (1 - c) * beta
+            z[linear_layer_count + 1] = M * Wz[linear_layer_count]
+    return z, Wz, unique_flag
+
+
+def compute_output_gradient_times_vec_intermediate_with_beta(
+        relu_network, beta, z0):
+    """
+    Similar to compute_output_gradient_times_vec_intermediate(), but the value
+    of beta (the activation of the ReLU unit is given)
+    """
+    num_linear_layers = int((len(relu_network) + 1) / 2)
+    z = [None] * num_linear_layers
+    Wz = [None] * num_linear_layers
+    z[0] = z0
+    beta_count = 0
+    for linear_layer_count in range(num_linear_layers):
+        Wz[linear_layer_count] = relu_network[
+            2 * linear_layer_count].weight.data @ z[linear_layer_count]
+        if linear_layer_count < num_linear_layers - 1:
+            relu_layer = relu_network[2 * linear_layer_count + 1]
+            c = 0 if isinstance(relu_layer,
+                                torch.nn.ReLU) else relu_layer.negative_slope
+            layer_beta = beta[beta_count:beta_count +
+                              relu_network[2 *
+                                           linear_layer_count].out_features]
+            beta_count += relu_network[2 * linear_layer_count].out_features
+            M = c + (1 - c) * layer_beta
+            z[linear_layer_count + 1] = M * Wz[linear_layer_count]
+    return z, Wz
+
+
 class TestReLU(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
@@ -759,6 +821,109 @@ class TestReLU(unittest.TestCase):
         self.compute_Wz_bounds_IA_tester(
             dut4, torch.tensor([-3, 1], dtype=self.dtype),
             torch.tensor([-1, 2], dtype=self.dtype))
+
+    def compute_Wz_bounds_optimization_tester(self, dut, x_lo, x_up, A, b):
+        # We compute the range of ∂ϕ/∂x * (Ax+b)
+        # Namely z₀ = Ax+b
+        x_dim = dut.model[0].in_features
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        x = milp.addVars(x_dim, lb=-gurobipy.GRB.INFINITY, name="x")
+        mip_cnstr_return = dut.output_constraint(
+            x_lo, x_up, mip_utils.PropagateBoundsMethod.MIP)
+        s, beta = milp.add_mixed_integer_linear_constraints(
+            mip_cnstr_return,
+            x,
+            None,
+            "s",
+            "beta",
+            "",
+            "",
+            "",
+            binary_var_type=gurobipy.GRB.BINARY)
+        # Add constraint z0 = Ax+b
+        z0 = milp.addVars(x_dim, lb=-gurobipy.GRB.INFINITY)
+        milp.addMConstrs([torch.eye(x_dim, dtype=self.dtype), -A], [z0, x],
+                         sense=gurobipy.GRB.EQUAL,
+                         b=b)
+        z_lo, z_up, Wz_lo, Wz_up, z = dut._compute_Wz_bounds_optimization(
+            milp.gurobi_model, z0, beta)
+        # Take many sampled x, compute z and Wz for each sample
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(x_lo, x_up, 1000)
+        for i in range(x_samples.shape[0]):
+            z0 = A @ x_samples[i] + b
+            np.testing.assert_array_less(z_lo[0].detach().numpy(),
+                                         z0.detach().numpy() + 1E-10)
+            z_val, Wz_val, _ = compute_output_gradient_times_vec_intermediate(
+                dut.model, x_samples[i], z0)
+            for i in range(len(z)):
+                np.testing.assert_array_less(z_val[i].detach().numpy(),
+                                             z_up[i].detach().numpy() + 1E-10)
+                np.testing.assert_array_less(z_lo[i].detach().numpy(),
+                                             z_val[i].detach().numpy() + 1E-10)
+                np.testing.assert_array_less(Wz_val[i].detach().numpy(),
+                                             Wz_up[i].detach().numpy() + 1E-10)
+                np.testing.assert_array_less(
+                    Wz_lo[i].detach().numpy(),
+                    Wz_val[i].detach().numpy() + 1E-10)
+        # We solved an MIP to find the bounds on z and Wz. These bounds should
+        # be tight.
+        num_linear_layers = int((len(dut.model) + 1) / 2)
+        for i in range(1, num_linear_layers):
+            for j in range(dut.model[2 * i].in_features):
+                # Check z_up
+                milp.gurobi_model.setObjective(gurobipy.LinExpr(z[i][j]),
+                                               sense=gurobipy.GRB.MAXIMIZE)
+                milp.gurobi_model.optimize()
+                x_val = torch.tensor([v.x for v in x], dtype=self.dtype)
+                beta_val = torch.tensor([v.x for v in beta], dtype=self.dtype)
+                z_val, _ = \
+                    compute_output_gradient_times_vec_intermediate_with_beta(
+                        dut.model, beta_val, A @ x_val + b)
+                self.assertAlmostEqual(z_val[i][j].item(), z_up[i][j].item())
+                # Check z_lo
+                milp.gurobi_model.setObjective(gurobipy.LinExpr(z[i][j]),
+                                               sense=gurobipy.GRB.MINIMIZE)
+                milp.gurobi_model.optimize()
+                x_val = torch.tensor([v.x for v in x], dtype=self.dtype)
+                beta_val = torch.tensor([v.x for v in beta], dtype=self.dtype)
+                z_val, _ = \
+                    compute_output_gradient_times_vec_intermediate_with_beta(
+                        dut.model, beta_val, A @ x_val + b)
+                self.assertAlmostEqual(z_val[i][j].item(), z_lo[i][j].item())
+        for i in range(num_linear_layers):
+            for j in range(dut.model[2 * i].out_features):
+                # Check Wz_up
+                Wz_obj = gurobipy.LinExpr(
+                    dut.model[2 * i].weight.data[j, :].tolist(), z[i])
+                milp.gurobi_model.setObjective(Wz_obj,
+                                               sense=gurobipy.GRB.MAXIMIZE)
+                milp.gurobi_model.optimize()
+                x_val = torch.tensor([v.x for v in x], dtype=self.dtype)
+                beta_val = torch.tensor([v.x for v in beta], dtype=self.dtype)
+                _, Wz_val = \
+                    compute_output_gradient_times_vec_intermediate_with_beta(
+                        dut.model, beta_val, A @ x_val + b)
+                self.assertAlmostEqual(Wz_val[i][j].item(), Wz_up[i][j].item())
+                # Check Wz_lo
+                milp.gurobi_model.setObjective(Wz_obj,
+                                               sense=gurobipy.GRB.MINIMIZE)
+                milp.gurobi_model.optimize()
+                x_val = torch.tensor([v.x for v in x], dtype=self.dtype)
+                beta_val = torch.tensor([v.x for v in beta], dtype=self.dtype)
+                _, Wz_val = \
+                    compute_output_gradient_times_vec_intermediate_with_beta(
+                        dut.model, beta_val, A @ x_val + b)
+                self.assertAlmostEqual(Wz_val[i][j].item(), Wz_lo[i][j].item())
+
+    def test_compute_Wz_bounds_optimization(self):
+        dut2 = relu_to_optimization.ReLUFreePattern(self.model2, self.dtype)
+        A = torch.tensor([[1, 3], [-2, 1]], dtype=self.dtype)
+        b = torch.tensor([-1, 2], dtype=self.dtype)
+        x_lo = torch.tensor([-2, -3], dtype=self.dtype)
+        x_up = torch.tensor([1, -0.5], dtype=self.dtype)
+        self.compute_Wz_bounds_optimization_tester(dut2, x_lo, x_up, A, b)
 
     def test_set_activation_warmstart(self):
         x = torch.tensor([1, 2], dtype=self.dtype)

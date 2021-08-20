@@ -1122,6 +1122,126 @@ class ReLUFreePattern:
         result.Wz_up = Wz_up
         return result
 
+    def _compute_Wz_bounds_optimization(self, prog: gurobipy.Model, z0: list,
+                                        beta: list):
+        """
+        This function is used in output_gradient_times_vector. It computes
+        the lower/upper bounds of Wᵢ*z through optimization, where zᵢ is
+        defined recursively as
+        zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
+        and M is the matrix defined as
+        M(β, c) = c*I + (1-c)*diag(β)
+        Note that unlike _compute_Wz_bounds_IA(), the bounds computed in this
+        approach does NOT carry the gradient.
+
+        Args:
+          prog, z0, beta: prog is an optimization program, it contains all the
+          constraints that you want to impose on z₀, β except
+          zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1
+
+        Return:
+          z_lo, z_up: The lower and upper bound of z.
+          Wz_lo, Wz_up: Wz_lo[i]/Wz_up[i] is the lower/upper bound of Wᵢ*zᵢ
+          z: The decision variables of z.
+        """
+        assert (isinstance(prog, gurobipy.Model))
+        assert (isinstance(z0, list))
+        assert (isinstance(beta, list))
+        # Loop through each layer
+        num_linear_layers = int((len(self.model) + 1) / 2)
+        z = [None] * num_linear_layers
+        z[0] = z0
+        z_lo = [None] * num_linear_layers
+        z_up = [None] * num_linear_layers
+        Wz_lo = [None] * num_linear_layers
+        Wz_up = [None] * num_linear_layers
+
+        # First compute the bounds of z₀
+        z_lo[0] = torch.empty((self.model[0].in_features, ), dtype=self.dtype)
+        z_up[0] = torch.empty((self.model[0].in_features, ), dtype=self.dtype)
+        for i in range(len(z0)):
+            prog.setObjective(gurobipy.LinExpr(1, z0[i]),
+                              sense=gurobipy.GRB.MAXIMIZE)
+            prog.optimize()
+            assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+            z_up[0][i] = prog.ObjVal
+            prog.setObjective(gurobipy.LinExpr(1, z0[i]),
+                              sense=gurobipy.GRB.MINIMIZE)
+            prog.optimize()
+            assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+            z_lo[0][i] = prog.ObjVal
+
+        # Now compute the bounds of z and Wz.
+        for linear_layer_count in range(num_linear_layers):
+            linear_layer = self.model[2 * linear_layer_count]
+            # Compute the bounds of Wᵢ(j, :)*zᵢ
+            Wz_lo[linear_layer_count] = torch.empty(
+                (linear_layer.out_features, ), dtype=self.dtype)
+            Wz_up[linear_layer_count] = torch.empty(
+                (linear_layer.out_features, ), dtype=self.dtype)
+            if linear_layer_count < num_linear_layers - 1:
+                z[linear_layer_count + 1] = [None] * linear_layer.out_features
+                z_lo[linear_layer_count + 1] = torch.empty(
+                    (linear_layer.out_features, ), dtype=self.dtype)
+                z_up[linear_layer_count + 1] = torch.empty(
+                    (linear_layer.out_features, ), dtype=self.dtype)
+            for j in range(linear_layer.out_features):
+                Wizi = gurobipy.LinExpr(
+                    linear_layer.weight.data[j, :].tolist(),
+                    z[linear_layer_count])
+                prog.setObjective(Wizi, sense=gurobipy.GRB.MAXIMIZE)
+                prog.optimize()
+                assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+                Wz_up[linear_layer_count][j] = prog.ObjVal
+                prog.setObjective(Wizi, sense=gurobipy.GRB.MINIMIZE)
+                prog.optimize()
+                assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+                Wz_lo[linear_layer_count][j] = prog.ObjVal
+                # Compute the bounds of
+                # zᵢ₊₁(j) =((1−c)βᵢ(j)+c)*Wᵢ(j, :)*zᵢ
+                if linear_layer_count < num_linear_layers - 1:
+                    relu_layer = self.model[2 * linear_layer_count + 1]
+                    if isinstance(relu_layer, nn.ReLU):
+                        A_pre, A_z_next, A_beta_i, rhs_i = \
+                            utils.replace_binary_continuous_product(
+                                Wz_lo[linear_layer_count][j],
+                                Wz_up[linear_layer_count][j],
+                                dtype=self.dtype)
+                    elif isinstance(relu_layer, nn.LeakyReLU):
+                        A_pre, A_z_next, A_beta_i, rhs_i =\
+                            utils.leaky_relu_gradient_times_x(
+                                Wz_lo[linear_layer_count][j],
+                                Wz_up[linear_layer_count][j],
+                                relu_layer.negative_slope,
+                                dtype=self.dtype)
+                    A_z = A_pre.reshape(
+                        (-1, 1)) @ linear_layer.weight.data[j, :].reshape(
+                            (1, -1))
+                    z[linear_layer_count +
+                      1][j] = prog.addVar(lb=-gurobipy.GRB.INFINITY)
+                    A_relu = torch.hstack((A_z, A_z_next.reshape(
+                        (-1, 1)), A_beta_i.reshape((-1, 1))))
+                    var_relu = z[linear_layer_count] + [
+                        z[linear_layer_count + 1][j]
+                    ] + [beta[self.relu_unit_index[linear_layer_count][j]]]
+                    prog.addMConstrs(A_relu.detach().numpy(),
+                                     var_relu,
+                                     sense=gurobipy.GRB.LESS_EQUAL,
+                                     b=rhs_i.detach().numpy().squeeze())
+                    z_next_j_objective = gurobipy.LinExpr(
+                        z[linear_layer_count + 1][j])
+                    prog.setObjective(z_next_j_objective,
+                                      sense=gurobipy.GRB.MAXIMIZE)
+                    prog.optimize()
+                    assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+                    z_up[linear_layer_count + 1][j] = prog.ObjVal
+                    prog.setObjective(z_next_j_objective,
+                                      sense=gurobipy.GRB.MINIMIZE)
+                    prog.optimize()
+                    assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+                    z_lo[linear_layer_count + 1][j] = prog.ObjVal
+        return z_lo, z_up, Wz_lo, Wz_up, z
+
     def _compute_Wz_bounds_IA(self, vector_lower: torch.Tensor,
                               vector_upper: torch.Tensor):
         """
