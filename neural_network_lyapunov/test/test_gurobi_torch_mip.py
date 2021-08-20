@@ -992,6 +992,27 @@ class TestGurobiTorchMIP(unittest.TestCase):
         self.assertEqual(len(mip.Aeq_zeta_col), 4)
         self.assertEqual(len(mip.Aeq_zeta_val), 4)
 
+    def test_add_mixed_integer_linear_constraints9(self):
+        # Test with binary_var_name equals to a list of binary variables.
+        mip_constr_return, dtype = \
+            self.setup_mixed_integer_constraints_return()
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        input_vars = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+        output_vars = mip.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        binary_var = mip.addVars(2, vtype=gurobipy.GRB.BINARY)
+        slack, binary_var_return = mip.add_mixed_integer_linear_constraints(
+            mip_constr_return,
+            input_vars,
+            output_vars,
+            "slack",
+            binary_var,
+            "ineq",
+            "eq",
+            "out",
+            binary_var_type=gurobipy.GRB.BINARY)
+        self.assertIs(binary_var, binary_var_return)
+        self.assertEqual(len(mip.zeta), 2)
+
     def test_remove_binary_relaxation(self):
         dtype = torch.float64
         dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
