@@ -61,8 +61,8 @@ class ControlPiecewiseAffineSystem:
           (mip_cnstr_f, mip_cnstr_G):
           mip_cnstr_f: A MixedIntegerConstraintsReturn object with f as the
           output.
-          mip_cnstr_G: A list (of size u_dim) of MixedIntegerConstraintsReturn
-          object such mip_cnstr_G[i] has G.col(i) as the output.
+          mip_cnstr_G: A MixedIntegerConstraintsReturn object with the flat
+          vector G.reshape((-1,)) as the output.
         """
         raise NotImplementedError
 
@@ -94,13 +94,12 @@ class ControlPiecewiseAffineSystem:
         """
         raise NotImplementedError
 
-    def compute_G_range_ia(self) -> (list, list):
+    def compute_G_range_ia(self) -> (torch.Tensor, torch.Tensor):
         """
         Compute the range of G through interval arithemetics (IA).
 
         Return:
-          G_lo, G_up: G_lo[i]/G_up[i] is the lower/upper bound of G[:, i] (the
-          i'th column of G).
+          G_lo, G_up: G_lo/G_up is the lower/upper bound of G.reshape((-1,))
         """
         raise NotImplementedError
 
@@ -123,10 +122,8 @@ class LinearSystem(ControlPiecewiseAffineSystem):
         # G = B
         mip_cnstr_f = gurobi_torch_mip.MixedIntegerConstraintsReturn()
         mip_cnstr_f.Aout_input = self.A
-        mip_cnstr_G = [None] * self.u_dim
-        for i in range(self.u_dim):
-            mip_cnstr_G[i] = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-            mip_cnstr_G[i].Cout = self.B[:, i]
+        mip_cnstr_G = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        mip_cnstr_G.Cout = self.B.reshape((-1, ))
         return (mip_cnstr_f, mip_cnstr_G)
 
     def f(self, x):
@@ -141,8 +138,8 @@ class LinearSystem(ControlPiecewiseAffineSystem):
             self.x_up)
 
     def compute_G_range_ia(self):
-        G_lo = [self.B[:, i] for i in range(self.u_dim)]
-        G_up = [self.B[:, i] for i in range(self.u_dim)]
+        G_lo = self.B.reshape((-1, ))
+        G_up = self.B.reshape((-1, ))
         return G_lo, G_up
 
 
