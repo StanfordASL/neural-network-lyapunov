@@ -37,10 +37,8 @@ class TestLinearSystem(unittest.TestCase):
         prog.add_mixed_integer_linear_constraints(mip_cnstr_f, x, f, "", "",
                                                   "", "", "")
         for i in range(dut.u_dim):
-            prog.add_mixed_integer_linear_constraints(
-                mip_cnstr_G[i], x,
-                [G_flat[j * dut.u_dim + i]
-                 for j in range(dut.x_dim)], "", "", "", "", "")
+            prog.add_mixed_integer_linear_constraints(mip_cnstr_G, x, G_flat,
+                                                      "", "", "", "", "")
 
         x_val = np.array([1., 2.])
         for i in range(dut.x_dim):
@@ -70,13 +68,10 @@ class TestLinearSystem(unittest.TestCase):
         np.testing.assert_allclose(f_up.detach().numpy(),
                                    f_up_expected.detach().numpy())
         G_lo, G_up = dut.compute_G_range_ia()
-        self.assertEqual(len(G_lo), dut.u_dim)
-        self.assertEqual(len(G_up), dut.u_dim)
-        for i in range(dut.u_dim):
-            np.testing.assert_allclose(G_lo[i].detach().numpy(),
-                                       B[:, i].detach().numpy())
-            np.testing.assert_allclose(G_up[i].detach().numpy(),
-                                       B[:, i].detach().numpy())
+        np.testing.assert_allclose(G_lo.detach().numpy(),
+                                   B.reshape((-1, )).detach().numpy())
+        np.testing.assert_allclose(G_up.detach().numpy(),
+                                   B.reshape((-1, )).detach().numpy())
 
 
 class TestTrainControlAffineSystem(unittest.TestCase):
