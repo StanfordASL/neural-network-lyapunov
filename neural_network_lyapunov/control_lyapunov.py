@@ -350,9 +350,6 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                         (-1, )))
                 Vdot_vars.append(dphidx_times_G_l1_slack)
 
-        # TODO(hongkai.dai): implement V_lambda != 0 case.
-        if V_lambda != 0:
-            raise NotImplementedError
         # We need to compute |R(x−x*)|₁
         # l1_slack, l1_binary = self.add_state_error_l1_constraint(
         #    milp,
@@ -374,3 +371,51 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         return LyapDerivMilpReturn(milp, x, relu_beta,
                                    dphidx_times_G_l1_binary,
                                    system_constraint_return)
+
+    def _add_dl1dx_times_f(self, milp: gurobi_torch_mip.GurobiTorchMIP,
+                           x: list, l1_binary: list, f: list, R: torch.Tensor,
+                           Rf_lo: torch.Tensor, Rf_up: torch.Tensor,
+                           V_lambda: float, Vdot_coeff: list,
+                           Vdot_vars: list) -> list:
+        """
+        Adds λ*∂|R(x−x*)|₁/∂x * f to V̇.
+        We need to add the mixed-integer linear constraints, and also append
+        new terms to Vdot_coeff and Vdot_vars.
+        As we have introduced binary variables α for the l1 norm, such that
+        α = 1 => (R(x-x*))(i) >= 0
+        α = 0 => (R(x-x*))(i) <= 0
+        we know that ∂|R(x−x*)|₁/∂x = (2α-1)ᵀ * R. Hence
+        λ*∂|R(x−x*)|₁/∂x * f = 2λ*αᵀ*R*f − λ*1ᵀ*R*f
+
+        Args:
+          l1_binary: α in the documentation above.
+          f: The variables representing the dynamics term f
+          Rf_lo, Rf_up: The lower/upper bounds of R*f
+
+        Return:
+          slack: the newly added slack variable, slack(i) =  α(i)*(R*f)(i)
+        """
+        # We need to add slack variables to represent the product between the
+        # binary variable α and R*f
+        assert (len(l1_binary) == R.shape[0])
+        slack = milp.addVars(len(l1_binary),
+                             lb=-gurobipy.GRB.INFINITY,
+                             name="l1_binary_times_Rf")
+        for i in range(len(l1_binary)):
+            A_Rf, A_slack, A_alpha, rhs = \
+                utils.replace_binary_continuous_product(
+                    Rf_lo[i], Rf_up[i], dtype=self.system.dtype)
+            A_f = A_Rf.reshape((-1, 1)) @ R[i].reshape((1, -1))
+            milp.addMConstrs(
+                [A_f, A_slack.reshape((-1, 1)),
+                 A_alpha.reshape((-1, 1))], [f, [slack[i]], [l1_binary[i]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs)
+        Vdot_coeff.append(2 * V_lambda * torch.ones(
+            (len(l1_binary), ), dtype=self.system.dtype))
+        Vdot_vars.append(slack)
+
+        Vdot_coeff.append(-V_lambda *
+                          torch.ones(R.shape[0], dtype=self.system.dtype) @ R)
+        Vdot_vars.append(f)
+        return slack

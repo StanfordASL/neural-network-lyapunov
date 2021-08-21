@@ -7,6 +7,7 @@ import gurobipy
 
 import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.lyapunov as lyapunov
 
@@ -158,6 +159,74 @@ class TestControlLyapunov(unittest.TestCase):
             dut, torch.tensor([-3, 0], dtype=self.dtype), False)
         self.add_system_constraint_tester(
             dut, torch.tensor([0, 4], dtype=self.dtype), False)
+
+    def test_add_dl1dx_times_f(self):
+        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        x_equilibrium = torch.tensor([0.1, 0.2], dtype=dut.system.dtype)
+        R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=dut.system.dtype)
+        milp = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        l1_slack, l1_binary = dut.add_state_error_l1_constraint(milp,
+                                                                x_equilibrium,
+                                                                x,
+                                                                R=R)
+        f = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        f_lo = torch.tensor([-2, 3], dtype=self.dtype)
+        f_up = torch.tensor([1., 5], dtype=self.dtype)
+        Rf_lo, Rf_up = mip_utils.compute_range_by_IA(
+            R, torch.zeros(R.shape[0], dtype=self.dtype), f_lo, f_up)
+        V_lambda = 0.5
+        Vdot_coeff = []
+        Vdot_vars = []
+        dl1dx_times_f_slack = dut._add_dl1dx_times_f(milp, x, l1_binary, f, R,
+                                                     Rf_lo, Rf_up, V_lambda,
+                                                     Vdot_coeff, Vdot_vars)
+        self.assertEqual(len(Vdot_coeff), len(Vdot_vars))
+
+        torch.manual_seed(0)
+        # Fix x and f to some values, compute Vdot_coeff * Vdot_vars.
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        f_samples = utils.uniform_sample_in_box(f_lo, f_up, x_samples.shape[0])
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i][j]
+                x[j].ub = x_samples[i][j]
+                f[j].lb = f_samples[i][j]
+                f[j].ub = f_samples[i][j]
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            l1_binary_sol = torch.tensor([v.x for v in l1_binary],
+                                         dtype=self.dtype)
+            # Check l1_binary_sol is correct.
+            l1_terms = R @ (x_samples[i] - x_equilibrium)
+            for j in range(R.shape[0]):
+                if torch.abs(l1_binary_sol[j] - 1) < 1E-5:
+                    self.assertGreaterEqual(l1_terms[j].item(), -1E-6)
+                elif torch.abs(l1_binary_sol[j] + 1) < 1E-5:
+                    self.assertLessEqual(l1_terms[j].item(), 1E-6)
+            # Check dl1dx_times_f_slack is correct.
+            dl1dx_times_f_slack_sol = np.array(
+                [v.x for v in dl1dx_times_f_slack])
+            dl1dx_times_f_slack_expected = (
+                l1_binary_sol * (R @ f_samples[i])).detach().numpy()
+            np.testing.assert_allclose(dl1dx_times_f_slack_sol,
+                                       dl1dx_times_f_slack_expected)
+            Vdot_sol = torch.sum(
+                torch.stack([
+                    Vdot_coeff[i] @ torch.tensor([v.x for v in Vdot_vars[i]],
+                                                 dtype=self.dtype)
+                    for i in range(len(Vdot_coeff))
+                ]))
+
+            x_samples_i = x_samples[i].clone()
+            x_samples_i.requires_grad = True
+            (V_lambda *
+             torch.norm(R @ (x_samples_i - x_equilibrium), p=1)).backward()
+            Vdot_expected = x_samples_i.grad @ f_samples[i]
+            np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
 
     def lyapunov_derivative_as_milp_tester(self, dut, x_equilibrium, V_lambda,
                                            epsilon, eps_type, R,
