@@ -1173,7 +1173,7 @@ def relu_network_gradient(relu_network, x: torch.Tensor) -> torch.Tensor:
     return dphi_dx
 
 
-def l1_gradient(x: torch.Tensor) -> torch.Tensor:
+def l1_gradient(x: torch.Tensor, *, zero_tol: float = 0.) -> torch.Tensor:
     """
     Compute all the possible gradient of the 1-norm |x|₁
     Notice that when x(i)=0, the 1-norm is non-differentiable. We consider
@@ -1182,25 +1182,29 @@ def l1_gradient(x: torch.Tensor) -> torch.Tensor:
     Return:
       grad: A torch tensor of shape (num_possible_gradient, x_dim), where
             num_possible_gradient is power(2, number of x(i)=0).
+      zero_tol: When abs(x(i)) <= zero_tol, we consider both the left and right
+      gradient.
     """
     assert (len(x.shape) == 1)
-    if not torch.any(x == 0):
+    assert (zero_tol >= 0)
+    if not torch.any(torch.abs(x) <= zero_tol):
         return torch.sign(x).reshape((1, -1))
-    elif torch.sum(x == 0) == 1:
+    elif torch.sum(torch.abs(x) < zero_tol) == 1:
         s = torch.sign(x)
         s_plus = s.clone()
-        s_plus[s_plus == 0] = 1
+        s_plus[torch.abs(s_plus) <= zero_tol] = 1
         s_minus = s.clone()
-        s_minus[s_minus == 0] = -1
+        s_minus[torch.abs(s_minus) <= zero_tol] = -1
         return torch.vstack((s_plus, s_minus))
     else:
         # Denote the first index of x[i] == 0 as k
         # Get the gradient of 1-norm(x[:k])
-        first_zero_index = (x == 0).nonzero(as_tuple=True)[0][0]
+        first_zero_index = (torch.abs(x) <= zero_tol).nonzero(
+            as_tuple=True)[0][0]
         grad_before = torch.sign(x[:first_zero_index])
         # The gradient w.r.t x[k] is 1 and -1
         # Also compute the gradient w.r.t x[k+1:]
-        grad_after = l1_gradient(x[first_zero_index + 1:])
+        grad_after = l1_gradient(x[first_zero_index + 1:], zero_tol=zero_tol)
         grad = torch.hstack(
             (grad_before.repeat((2 * grad_after.shape[0], 1)),
              torch.vstack((torch.ones(
