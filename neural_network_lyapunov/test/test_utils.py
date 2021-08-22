@@ -951,30 +951,60 @@ class TestL1Gradient(unittest.TestCase):
             utils.l1_gradient(torch.tensor([1., -2, 0], dtype=dtype)),
             np.array([[1, -1., 1.], [1., -1., -1.]]))
 
-    def test3(self):
-        def check_grad(grad, grad_expected):
-            # The exact order of the gradient rows don't matter.
-            self.assertEqual(grad.shape, grad_expected.shape)
-            for i in range(grad.shape[0]):
-                found_match = False
-                for j in range(grad.shape[0]):
-                    if np.linalg.norm(grad[i].detach().numpy() -
-                                      grad_expected[j]) < 1E-10:
-                        found_match = True
-                        break
-                self.assertTrue(found_match)
+    def check_grad(self, grad, grad_expected):
+        # The exact order of the gradient rows don't matter.
+        self.assertEqual(grad.shape, grad_expected.shape)
+        for i in range(grad.shape[0]):
+            found_match = False
+            for j in range(grad.shape[0]):
+                if np.linalg.norm(grad[i].detach().numpy() -
+                                  grad_expected[j]) < 1E-10:
+                    found_match = True
+                    break
+            self.assertTrue(found_match)
 
+    def test3(self):
         # multiple x(i) are 0
         dtype = torch.float64
         grad = utils.l1_gradient(torch.tensor([0, 0, 2], dtype=dtype))
         grad_expected = np.array([[1., 1, 1], [1, -1, 1], [-1, 1, 1],
                                   [-1, -1, 1]])
-        check_grad(grad, grad_expected)
+        self.check_grad(grad, grad_expected)
 
         grad = utils.l1_gradient(torch.tensor([0, -2, 0], dtype=dtype))
         grad_expected = np.array([[1, -1, 1], [1, -1, -1], [-1, -1, 1],
                                   [-1, -1, -1.]])
-        check_grad(grad, grad_expected)
+        self.check_grad(grad, grad_expected)
+
+    def test4(self):
+        # Test with zero_tol != 0
+        dtype = torch.float64
+        zero_tol = 1E-10
+        # First use zero_tol = 0. We should have a unique gradient.
+        grad = utils.l1_gradient(torch.tensor([0.5 * zero_tol, 1, -2],
+                                              dtype=dtype),
+                                 zero_tol=0.)
+        grad_expected = np.array([[1, 1, -1.]])
+        self.check_grad(grad, grad_expected)
+        # Now use a non-zero zero_tol.
+        grad = utils.l1_gradient(torch.tensor([0.5 * zero_tol, 1, -2],
+                                              dtype=dtype),
+                                 zero_tol=zero_tol)
+        grad_expected = np.array([[1, 1, -1.], [-1, 1, -1]])
+        self.check_grad(grad, grad_expected)
+        grad = utils.l1_gradient(torch.tensor([-0.5 * zero_tol, 1, -2],
+                                              dtype=dtype),
+                                 zero_tol=zero_tol)
+        grad_expected = np.array([[1, 1, -1.], [-1, 1, -1]])
+        self.check_grad(grad, grad_expected)
+
+        # Multiple almost-zero entries.
+        grad = utils.l1_gradient(torch.tensor(
+            [-0.5 * zero_tol, 1, 0.5 * zero_tol], dtype=dtype),
+                                 zero_tol=zero_tol)
+        grad_expected = np.array([[1, 1, -1.], [-1, 1, -1], [1, 1, 1],
+                                  [-1, 1, 1]])
+        self.check_grad(grad, grad_expected)
 
 
 if __name__ == "__main__":
