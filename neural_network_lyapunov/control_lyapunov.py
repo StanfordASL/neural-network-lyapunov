@@ -174,12 +174,13 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         slack, binary = milp.add_mixed_integer_linear_constraints(
             mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq", "f_eq",
             "f_output", binary_var_type)
-        for i in range(self.system.u_dim):
-            slack_Gi, binary_Gi = milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_G[i], x, Gt[i], f"slack_G[{i}]", f"binary_G[{i}]",
-                "G[{i}]_ineq", "G[{i}]_eq", "G[{i}]_out", binary_var_type)
-            slack.extend(slack_Gi)
-            binary.extend(binary_Gi)
+        G_flat = [None] * self.system.x_dim * self.system.u_dim
+        for i in range(self.system.x_dim):
+            for j in range(self.system.u_dim):
+                G_flat[i * self.system.u_dim + j] = Gt[j][i]
+        slack_G, binary_G = milp.add_mixed_integer_linear_constraints(
+            mip_cnstr_G, x, G_flat, "slack_G", "binary_G", "G_ineq", "G_eq",
+            "G_out", binary_var_type)
         ret = ControlAffineSystemConstraintReturn(slack, binary)
         ret.mip_cnstr_f = mip_cnstr_f
         ret.mip_cnstr_G = mip_cnstr_G
@@ -263,17 +264,26 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         relu_slack, relu_beta, a_relu_out, b_relu_out, _ = \
             self.add_lyap_relu_output_constraint(milp, x)
 
+        # The mip constraints for ∂ϕ/∂x*G(x).col(i).
         mip_cnstr_dphidx_times_G = [None] * self.system.u_dim
         if self.network_bound_propagate_method == \
                 mip_utils.PropagateBoundsMethod.IA:
             f_lo, f_up = self.system.compute_f_range_ia()
-            G_lo, G_up = self.system.compute_G_range_ia()
+            G_flat_lo, G_flat_up = self.system.compute_G_range_ia()
             mip_cnstr_dphidx_times_f = \
                 self.lyapunov_relu_free_pattern.output_gradient_times_vector(
                     f_lo, f_up)
-            for i in range(self.system.u_dim):
-                mip_cnstr_dphidx_times_G[i] = self.lyapunov_relu_free_pattern.\
-                    output_gradient_times_vector(G_lo[i], G_up[i])
+            for j in range(self.system.u_dim):
+                Gi_lo = torch.stack([
+                    G_flat_lo[i * self.system.u_dim + j]
+                    for i in range(self.system.x_dim)
+                ])
+                Gi_up = torch.stack([
+                    G_flat_up[i * self.system.u_dim + j]
+                    for i in range(self.system.x_dim)
+                ])
+                mip_cnstr_dphidx_times_G[j] = self.lyapunov_relu_free_pattern.\
+                    output_gradient_times_vector(Gi_lo, Gi_up)
         else:
             raise NotImplementedError
 
