@@ -880,10 +880,24 @@ class TestReluNetworkGradient(unittest.TestCase):
         self.relu_gradient_tester(self.network2,
                                   torch.tensor([1, -5], dtype=self.dtype))
 
-    def test2(self):
+    def check_gradient(self, dphi_dx, dphi_dx_expected):
+        # The exact row order of dphi_dx doesn't matter. We only want to make
+        # sure that dphi_dx contains all the desired rows.
+        self.assertEqual(dphi_dx.shape, dphi_dx_expected.shape)
+        for i in range(dphi_dx.shape[0]):
+            found_match_row = False
+            for j in range(dphi_dx.shape[0]):
+                if torch.norm(dphi_dx[i] - dphi_dx_expected[j]) < 1E-10:
+                    found_match_row = True
+                    break
+            self.assertTrue(found_match_row)
+
+    def nonunique_gradient_tester(self, zero_tol):
         # Test with non-unique gradient.
-        x = torch.tensor([1, -2], dtype=self.dtype)
-        dphi_dx = utils.relu_network_gradient(self.network1, x)
+        x = torch.tensor([1 + 0.1 * zero_tol, -2], dtype=self.dtype)
+        dphi_dx = utils.relu_network_gradient(self.network1,
+                                              x,
+                                              zero_tol=zero_tol)
         self.assertEqual(dphi_dx.shape, (2, 1, 2))
         dphi_dx_plus = utils.relu_network_gradient(
             self.network1, torch.tensor([1, -2 + 1e-10], dtype=self.dtype))
@@ -897,8 +911,11 @@ class TestReluNetworkGradient(unittest.TestCase):
                                    dphi_dx_minus[0].detach().numpy())
 
         # Multiple relu units have input 0.
-        x = torch.tensor([2, -1.5], dtype=self.dtype)
-        dphi_dx = utils.relu_network_gradient(self.network1, x)
+        x = torch.tensor([2 + 0.1 * zero_tol, -1.5 - 0.1 * zero_tol],
+                         dtype=self.dtype)
+        dphi_dx = utils.relu_network_gradient(self.network1,
+                                              x,
+                                              zero_tol=zero_tol)
         self.assertEqual(dphi_dx.shape, (4, 1, 2))
         network_after_first_layer = torch.nn.Sequential(
             self.network1[1], self.network1[2], self.network1[3],
@@ -920,15 +937,11 @@ class TestReluNetworkGradient(unittest.TestCase):
                                           retain_graph=True)
             dphi_dx_expected[i] = dphi_dy[0] @ self.network1[0].weight.data
 
-        # The exact row order of dphi_dx doesn't matter. We only want to make
-        # sure that dphi_dx contains all the desired rows.
-        for i in range(4):
-            found_match_row = False
-            for j in range(4):
-                if torch.norm(dphi_dx[i] - dphi_dx_expected[j]) < 1E-10:
-                    found_match_row = True
-                    break
-            self.assertTrue(found_match_row)
+        self.check_gradient(dphi_dx, dphi_dx_expected)
+
+    def test2(self):
+        self.nonunique_gradient_tester(zero_tol=0.)
+        self.nonunique_gradient_tester(zero_tol=1E-10)
 
 
 class TestL1Gradient(unittest.TestCase):
