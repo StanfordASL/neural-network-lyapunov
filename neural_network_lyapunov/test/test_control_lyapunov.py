@@ -43,17 +43,28 @@ class TestControlLyapunov(unittest.TestCase):
                                                           dtype=self.dtype)
         self.lyapunov_relu1[4].bias.data = torch.tensor([2], dtype=self.dtype)
 
-    def lyapunov_derivative_tester(self, dut, x, x_equilibrium, V_lambda,
-                                   epsilon, R, subgradient_rule):
+    def lyapunov_derivative_tester(self,
+                                   dut,
+                                   x,
+                                   x_equilibrium,
+                                   V_lambda,
+                                   epsilon,
+                                   R,
+                                   subgradient_rule,
+                                   zero_tol=0.):
         vdot = dut.lyapunov_derivative(x,
                                        x_equilibrium,
                                        V_lambda,
                                        epsilon,
                                        R=R,
-                                       subgradient_rule=subgradient_rule)
+                                       subgradient_rule=subgradient_rule,
+                                       zero_tol=zero_tol)
 
-        dphi_dx = utils.relu_network_gradient(dut.lyapunov_relu, x).squeeze(1)
-        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium)) @ R
+        dphi_dx = utils.relu_network_gradient(dut.lyapunov_relu,
+                                              x,
+                                              zero_tol=zero_tol).squeeze(1)
+        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
+                                              zero_tol=zero_tol) @ R
         v = dut.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
         if subgradient_rule == "max":
             vdot_expected = -np.inf
@@ -99,8 +110,8 @@ class TestControlLyapunov(unittest.TestCase):
         R = torch.tensor([[1, 0], [0, 2], [1, 3]], dtype=self.dtype)
         epsilon = 0.1
 
-        x = torch.tensor([0.5, 1.5], dtype=self.dtype)
         for subgradient_rule in ("min", "max", "all"):
+            x = torch.tensor([0.5, 1.5], dtype=self.dtype)
             self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
                                             epsilon, R, subgradient_rule)
             # Some ReLU inputs equal to 0.
@@ -111,6 +122,20 @@ class TestControlLyapunov(unittest.TestCase):
             x = torch.tensor([0, 1], dtype=self.dtype)
             self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
                                             epsilon, R, subgradient_rule)
+
+            zero_tol = 1E-10
+            # Test with a non-zero zero_tol.
+            # Some relu input is almost zero.
+            x = torch.tensor([0.5 + 0.01 * zero_tol, 2 - 0.01 * zero_tol],
+                             dtype=self.dtype)
+            self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
+                                            epsilon, R, subgradient_rule,
+                                            zero_tol)
+            # Some l1-norm entry is almost zero.
+            x = torch.tensor([0.01 * zero_tol, 1], dtype=self.dtype)
+            self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
+                                            epsilon, R, subgradient_rule,
+                                            zero_tol)
 
     def add_system_constraint_tester(self, dut, x_val: torch.Tensor,
                                      is_feasible):

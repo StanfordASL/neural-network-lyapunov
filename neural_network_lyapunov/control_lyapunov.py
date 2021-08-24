@@ -78,7 +78,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                             epsilon,
                             *,
                             R,
-                            subgradient_rule: str = "max"):
+                            subgradient_rule: str = "max",
+                            zero_tol: float = 0.):
         """
         Compute minᵤ V̇ + ε*V
         subject to u_lo <= u <= u_up
@@ -99,6 +100,10 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             If "min", then we compute the minimal of V̇ among all possible
             subgradients.
             If "all", then we compute all V̇ for every possible subgradients.
+          zero_tol: The l1-norm and ReLU unit is not differentiable at 0.
+          If the absolute value of an input to the l1-norm or ReLU unit is no
+          larger than zero_tol, then we consider both the left and right
+          derivatives.
         """
         assert (isinstance(x, torch.Tensor))
         assert (x.shape == (self.system.x_dim, ))
@@ -106,10 +111,13 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         R = lyapunov._get_R(R, self.system.x_dim, x_equilibrium.device)
 
         # First compute ∂ϕ/∂x
-        dphi_dx = utils.relu_network_gradient(self.lyapunov_relu, x).squeeze(1)
+        dphi_dx = utils.relu_network_gradient(self.lyapunov_relu,
+                                              x,
+                                              zero_tol=zero_tol).squeeze(1)
 
         # Now compute the gradient of λ|R(x−x*)|₁
-        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium)) @ R
+        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
+                                              zero_tol=zero_tol) @ R
 
         # We compute the sum of each possible dphi_dX and dl1_dx
         dVdx = dphi_dx.repeat((dl1_dx.shape[0], 1)) + dl1_dx.repeat(
