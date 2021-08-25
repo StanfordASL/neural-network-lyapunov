@@ -369,14 +369,14 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 Vdot_vars.append(dphidx_times_G_l1_slack)
 
         # We need to compute |R(x−x*)|₁
-        # l1_slack, l1_binary = self.add_state_error_l1_constraint(
-        #    milp,
-        #    x_equilibrium,
-        #    x,
-        #    R=R,
-        #    slack_name="l1_slack",
-        #    binary_var_name="l1_binary",
-        #    binary_var_type=binary_var_type)
+        l1_slack, l1_binary = self.add_state_error_l1_constraint(
+            milp,
+            x_equilibrium,
+            x,
+            R=R,
+            slack_name="l1_slack",
+            binary_var_name="l1_binary",
+            binary_var_type=binary_var_type)
         # TODO(hongkai.dai): implement epsilon != 0 case.
         if epsilon != 0:
             raise NotImplementedError
@@ -429,11 +429,118 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                  A_alpha.reshape((-1, 1))], [f, [slack[i]], [l1_binary[i]]],
                 sense=gurobipy.GRB.LESS_EQUAL,
                 b=rhs)
-        Vdot_coeff.append(2 * V_lambda * torch.ones(
-            (len(l1_binary), ), dtype=self.system.dtype))
+        Vdot_coeff.append(2 * V_lambda *
+                          torch.ones(len(l1_binary), dtype=self.system.dtype))
         Vdot_vars.append(slack)
 
         Vdot_coeff.append(-V_lambda *
                           torch.ones(R.shape[0], dtype=self.system.dtype) @ R)
         Vdot_vars.append(f)
         return slack
+
+    def _add_dl1dx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
+                           x: list, l1_binary: list, Gt: list, R: torch.Tensor,
+                           RG_lo: torch.Tensor, RG_up: torch.Tensor,
+                           V_lambda: float, Vdot_coeff: list,
+                           Vdot_vars: list) -> (list, list, list):
+        """
+        Adds ∑ᵢλ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_lo(i) + u_up(i))/2
+             - ∑ᵢ |λ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_up(i) - u_lo(i))/2| to V̇.
+        We need to add the mixed-integer linear constraints, and also append
+        new terms to Vdot_coeff and Vdot_vars.
+        As we have introduced binary variables α for the l1 norm, such that
+        α = 1 => (R(x-x*))(i) >= 0
+        α = 0 => (R(x-x*))(i) <= 0
+        we know that ∂|R(x−x*)|₁/∂x = (2α-1)ᵀ * R. Hence
+        λ*∂|R(x−x*)|₁/∂x * G.col(i) = 2λ*αᵀ*R*G.col(i) − λ*1ᵀ*R*G.col(i)
+
+        Args:
+          l1_binary: α in the documentation above.
+          Gt: The variables representing the dynamics term G.transpose()
+          RG_lo, RG_up: The lower/upper bounds of R*G
+
+        Return:
+          dl1dx_times_G_slack: the newly added slack variable,
+          dl1dx_times_G_slack[i][j] = α(j)*(R*G.col(i))(j)
+          dl1dx_times_G_abs: the slack variable,
+          dl1dx_times_G_abs(i) = |∂|R(x−x*)|₁/∂x * G.col(i)|
+          dl1dx_times_G_binary: the binary variable representing the sign of
+          ∂|R(x−x*)|₁/∂x * G.col(i)
+        """
+        assert (len(l1_binary) == R.shape[0])
+        assert (RG_lo.shape == (R.shape[0], self.system.u_dim))
+        assert (RG_up.shape == (R.shape[0], self.system.u_dim))
+        dl1dx_times_G_slack = [None] * self.system.u_dim
+        dl1dx_times_G_abs = milp.addVars(self.system.u_dim,
+                                         lb=0.,
+                                         name="dl1dx_times_G_abs")
+        dl1dx_times_G_binary = milp.addVars(self.system.u_dim,
+                                            vtype=gurobipy.GRB.BINARY,
+                                            name="dl1dx_times_G_binary")
+        for i in range(self.system.u_dim):
+            dl1dx_times_G_slack[i] = milp.addVars(len(l1_binary),
+                                                  lb=-gurobipy.GRB.INFINITY,
+                                                  name=f"l1_binary_times_G{i}")
+            for j in range(len(l1_binary)):
+                A_RG, A_slack, A_alpha, rhs = \
+                    utils.replace_binary_continuous_product(
+                        RG_lo[j][i], RG_up[j][i], dtype=self.system.dtype)
+                # A_RG is the coefficient of R.row(j) * G.col(i). Hence the
+                # coefficient for G.col(i) is A_RG * R.row(j)
+                A_Gi = A_RG.reshape((-1, 1)) @ R[j].reshape((1, -1))
+                milp.addMConstrs(
+                    [A_Gi,
+                     A_slack.reshape((-1, 1)),
+                     A_alpha.reshape((-1, 1))],
+                    [Gt[i], [dl1dx_times_G_slack[i][j]], [l1_binary[j]]],
+                    sense=gurobipy.GRB.LESS_EQUAL,
+                    b=rhs)
+            # Adds ∑ᵢλ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_lo(i) + u_up(i))/2
+            # λ*∂|R(x−x*)|₁/∂x * G.col(i) = 2λ*αᵀ*R*G.col(i) − λ*1ᵀ*R*G.col(i)
+            u_mid = (self.system.u_lo[i] + self.system.u_up[i]) / 2
+            Vdot_coeff.append(
+                2 * V_lambda * u_mid *
+                torch.ones(len(l1_binary), dtype=self.system.dtype))
+            Vdot_vars.append(dl1dx_times_G_slack[i])
+            Vdot_coeff.append(
+                -V_lambda * u_mid *
+                torch.ones(R.shape[0], dtype=self.system.dtype) @ R)
+            Vdot_vars.append(Gt[i])
+
+            # We add slack and binary variables for the absolute value
+            # |∂|R(x−x*)|₁/∂x * G.col(i)|
+            # First we need to compute the range of ∂|R(x−x*)|₁/∂x * G.col(i)
+            # We know it equals to (2α-1)ᵀ * R*G.col(i). Each entry in (2α-1)
+            # can be either 1 or -1, so the range of ∂|R(x−x*)|₁/∂x * G.col(i)
+            # is [-bnd, bnd], where
+            # bnd = [∑ⱼ(max(abs(RG_lo[j, i]), abs(RG_up[j, i])))
+            # TODO(hongkai.dai): compute the range of
+            # |∂|R(x−x*)|₁/∂x * G.col(i)| through optimization.
+            bnd = torch.sum(
+                torch.maximum(torch.abs(RG_lo[:, i]), torch.abs(RG_up[:, i])))
+            Ain_abs_input, Ain_abs_output, Ain_abs_binary, rhs_in_abs = \
+                utils.replace_absolute_value_with_mixed_integer_constraint(
+                    -bnd, bnd, dtype=self.system.dtype)
+            # ∂|R(x−x*)|₁/∂x * G.col(i) = 2*αᵀ*R*G.col(i) − 1ᵀ*R*G.col(i)
+            Ain_dl1dx_times_G_slack = 2 * Ain_abs_input.reshape(
+                (-1, 1)) @ torch.ones(
+                    (1, len(l1_binary)), dtype=self.system.dtype)
+            Ain_Gi = -Ain_abs_input.reshape((-1, 1)) @ torch.ones(
+                (1, R.shape[0]), dtype=self.system.dtype) @ R
+            milp.addMConstrs([
+                Ain_dl1dx_times_G_slack, Ain_Gi,
+                Ain_abs_output.reshape((-1, 1)),
+                Ain_abs_binary.reshape((-1, 1))
+            ], [
+                dl1dx_times_G_slack[i], Gt[i], [dl1dx_times_G_abs[i]],
+                [dl1dx_times_G_binary[i]]
+            ],
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             b=rhs_in_abs,
+                             name=f"dl1dx_times_G{i}_abs")
+        # Add - ∑ᵢ |λ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_up(i) - u_lo(i))/2| to V̇.
+        Vdot_coeff.append(-V_lambda * (self.system.u_up - self.system.u_lo) /
+                          2)
+        Vdot_vars.append(dl1dx_times_G_abs)
+
+        return dl1dx_times_G_slack, dl1dx_times_G_abs, dl1dx_times_G_binary
