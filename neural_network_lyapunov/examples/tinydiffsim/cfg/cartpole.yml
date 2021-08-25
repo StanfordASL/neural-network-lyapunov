@@ -1,0 +1,43 @@
+world:
+    name: "cartpole"
+    urdf: "cartpole.urdf"
+    floating: False
+    actuated_joints: ["slider_to_cart"]
+
+data:
+    q_lo:
+        - -1.
+        - -3.14
+    q_up:
+        - 1.
+        - 3.14
+    qd_lo:
+        - -5.
+        - -5.
+    qd_up:
+        - 5.
+        - 5.
+    u_lo:
+        - -1.
+    u_up:
+        - 1.
+    num_samples: 1000
+
+train:
+    # number of hidden layers/units in ẋ = f(x) + G(x)u
+    f_hid:
+        - 10
+        - 10
+    G_hid:
+        - 10
+        - 10
+    x_equ:
+        - 0.
+        - 0.
+        - 0.
+        - 0.
+    u_equ:
+        - 0.
+    epoch: 500
+    lr: 1.e-3
+    batch_size: 30
