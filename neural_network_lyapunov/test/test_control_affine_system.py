@@ -74,6 +74,210 @@ class TestLinearSystem(unittest.TestCase):
                                    B.reshape((-1, )).detach().numpy())
 
 
+class TestSecondOrderControlAffineSystem(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+        self.phi_a = utils.setup_relu((2, 4, 3, 1),
+                                      params=None,
+                                      negative_slope=0.1,
+                                      bias=True,
+                                      dtype=self.dtype)
+        self.phi_a[0].weight.data = torch.tensor(
+            [[0.5, 1], [-1, 1], [0, 3], [1, -2]], dtype=self.dtype)
+        self.phi_a[0].bias.data = torch.tensor([1, -1, 2, -1],
+                                               dtype=self.dtype)
+        self.phi_a[2].weight.data = torch.tensor(
+            [[1., 2., -1, 3], [0, -1, -1.5, 2], [0.5, 1, -1, 2]],
+            dtype=self.dtype)
+        self.phi_a[2].bias.data = torch.tensor([1, 2, -1], dtype=self.dtype)
+        self.phi_a[4].weight.data = torch.tensor([[2, -1, 3]],
+                                                 dtype=self.dtype)
+        self.phi_a[4].bias.data = torch.tensor([1], dtype=self.dtype)
+
+        self.phi_b = utils.setup_relu((2, 4, 3),
+                                      params=None,
+                                      negative_slope=0.1,
+                                      bias=True,
+                                      dtype=self.dtype)
+        self.phi_b[0].weight.data = torch.tensor(
+            [[0.5, -0.1], [0.5, 1], [1, -2], [1, -1]], dtype=self.dtype)
+        self.phi_b[0].bias.data = torch.tensor([1, -1, 0, 2], dtype=self.dtype)
+        self.phi_b[2].weight.data = torch.tensor(
+            [[1, 0, 2, -1], [0.5, -1, -2, 1], [0., 1, -1, 2]],
+            dtype=self.dtype)
+        self.phi_b[2].bias.data = torch.tensor([1, -1, 2], dtype=self.dtype)
+
+    def test_dynamics(self):
+        dut = mut.ReluSecondOrderControlAffineSystem(
+            x_lo=torch.tensor([-2, -1], dtype=self.dtype),
+            x_up=torch.tensor([1, 3], dtype=self.dtype),
+            u_lo=torch.tensor([-2, -1, -3], dtype=self.dtype),
+            u_up=torch.tensor([1, 2, 1], dtype=self.dtype),
+            phi_a=self.phi_a,
+            phi_b=self.phi_b,
+            method=mip_utils.PropagateBoundsMethod.IA)
+        self.assertEqual(dut.nq, 1)
+
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
+        u_samples = utils.uniform_sample_in_box(dut.u_lo, dut.u_up,
+                                                x_samples.shape[0])
+        for i in range(x_samples.shape[0]):
+            phi_a_val = self.phi_a(x_samples[i])
+            phi_b_val = self.phi_b(x_samples[i])
+            vdot = phi_a_val + phi_b_val.reshape(
+                (dut.nq, dut.u_dim)) @ u_samples[i]
+            xdot = torch.cat((x_samples[i, dut.nq:], vdot))
+            np.testing.assert_allclose(
+                dut.dynamics(x_samples[i], u_samples[i]).detach().numpy(),
+                xdot.detach().numpy())
+
+    def test_mixed_integer_constraints_v(self):
+        for method in list(mip_utils.PropagateBoundsMethod):
+            dut = mut.ReluSecondOrderControlAffineSystem(
+                x_lo=torch.tensor([-2, -1], dtype=self.dtype),
+                x_up=torch.tensor([1, 3], dtype=self.dtype),
+                u_lo=torch.tensor([-2, -1, -3], dtype=self.dtype),
+                u_up=torch.tensor([1, 2, 1], dtype=self.dtype),
+                phi_a=self.phi_a,
+                phi_b=self.phi_b,
+                method=method)
+            torch.manual_seed(0)
+            x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 50)
+            milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+            x = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+            a = milp.addVars(dut.nq, lb=-gurobipy.GRB.INFINITY)
+            b_flat = milp.addVars(dut.nq * dut.u_dim,
+                                  lb=-gurobipy.GRB.INFINITY)
+            mip_cnstr_a, mip_cnstr_b_flat = dut._mixed_integer_constraints_v()
+            a_slack, a_binary = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_a,
+                x,
+                a,
+                "a_slack",
+                "a_binary",
+                "",
+                "",
+                "",
+                binary_var_type=gurobipy.GRB.BINARY)
+            b_slack, b_binary = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_b_flat,
+                x,
+                b_flat,
+                "b_slack",
+                "b_binary",
+                "",
+                "",
+                "",
+                binary_var_type=gurobipy.GRB.BINARY)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            for i in range(x_samples.shape[0]):
+                for j in range(dut.x_dim):
+                    x[j].lb = x_samples[i][j]
+                    x[j].ub = x_samples[i][j]
+                milp.gurobi_model.optimize()
+                self.assertEqual(milp.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                a_val = np.array([v.x for v in a])
+                b_val = np.array([v.x for v in b_flat]).reshape(
+                    (dut.nq, dut.u_dim))
+                a_expected = dut.a(x_samples[i])
+                b_expected = dut.b(x_samples[i])
+                np.testing.assert_allclose(a_val, a_expected.detach().numpy())
+                np.testing.assert_allclose(b_val, b_expected.detach().numpy())
+
+    def test_mixed_integer_constraints(self):
+        for method in list(mip_utils.PropagateBoundsMethod):
+            dut = mut.ReluSecondOrderControlAffineSystem(
+                x_lo=torch.tensor([-2, -1], dtype=self.dtype),
+                x_up=torch.tensor([1, 3], dtype=self.dtype),
+                u_lo=torch.tensor([-2, -1, -3], dtype=self.dtype),
+                u_up=torch.tensor([1, 2, 1], dtype=self.dtype),
+                phi_a=self.phi_a,
+                phi_b=self.phi_b,
+                method=method)
+            torch.manual_seed(0)
+            x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 50)
+            milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+            x = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+            f = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+            G_flat = milp.addVars(dut.x_dim * dut.u_dim,
+                                  lb=-gurobipy.GRB.INFINITY)
+            mip_cnstr_f, mip_cnstr_G = dut.mixed_integer_constraints()
+            milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_f,
+                x,
+                f,
+                "f_slack",
+                "f_binary",
+                "",
+                "",
+                "",
+                binary_var_type=gurobipy.GRB.BINARY)
+            milp.add_mixed_integer_linear_constraints(
+                mip_cnstr_G,
+                x,
+                G_flat,
+                "G_slack",
+                "G_binary",
+                "",
+                "",
+                "",
+                binary_var_type=gurobipy.GRB.BINARY)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            for i in range(x_samples.shape[0]):
+                for j in range(dut.x_dim):
+                    x[j].lb = x_samples[i][j]
+                    x[j].ub = x_samples[i][j]
+                milp.gurobi_model.optimize()
+                self.assertEqual(milp.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                f_val = np.array([v.x for v in f])
+                G_val = np.array([v.x for v in G_flat]).reshape(
+                    (dut.x_dim, dut.u_dim))
+                f_expected = dut.f(x_samples[i])
+                G_expected = dut.G(x_samples[i])
+                np.testing.assert_allclose(f_val, f_expected.detach().numpy())
+                np.testing.assert_allclose(G_val, G_expected.detach().numpy())
+
+    def test_compute_range_ia(self):
+        for method in list(mip_utils.PropagateBoundsMethod):
+            dut = mut.ReluSecondOrderControlAffineSystem(
+                x_lo=torch.tensor([-2, -1], dtype=self.dtype),
+                x_up=torch.tensor([1, 3], dtype=self.dtype),
+                u_lo=torch.tensor([-2, -1, -3], dtype=self.dtype),
+                u_up=torch.tensor([1, 2, 1], dtype=self.dtype),
+                phi_a=self.phi_a,
+                phi_b=self.phi_b,
+                method=method)
+            mip_cnstr_a = dut.relu_free_pattern_a.output_constraint(
+                dut.x_lo, dut.x_up, mip_utils.PropagateBoundsMethod.IA)
+            mip_cnstr_b_flat = dut.relu_free_pattern_b.output_constraint(
+                dut.x_lo, dut.x_up, mip_utils.PropagateBoundsMethod.IA)
+            f_lo, f_up = dut.compute_f_range_ia()
+            G_flat_lo, G_flat_up = dut.compute_G_range_ia()
+            np.testing.assert_allclose(f_lo[:dut.nq].detach().numpy(),
+                                       dut.x_lo[dut.nq:].detach().numpy())
+            np.testing.assert_allclose(f_up[:dut.nq].detach().numpy(),
+                                       dut.x_up[dut.nq:].detach().numpy())
+            np.testing.assert_allclose(
+                f_lo[dut.nq:].detach().numpy(),
+                mip_cnstr_a.nn_output_lo.detach().numpy())
+            np.testing.assert_allclose(
+                f_up[dut.nq:].detach().numpy(),
+                mip_cnstr_a.nn_output_up.detach().numpy())
+            np.testing.assert_allclose(
+                G_flat_lo[:dut.nq * dut.u_dim].detach().numpy(), 0)
+            np.testing.assert_allclose(
+                G_flat_up[:dut.nq * dut.u_dim].detach().numpy(), 0)
+            np.testing.assert_allclose(
+                G_flat_lo[dut.nq * dut.u_dim:].detach().numpy(),
+                mip_cnstr_b_flat.nn_output_lo.detach().numpy())
+            np.testing.assert_allclose(
+                G_flat_up[dut.nq * dut.u_dim:].detach().numpy(),
+                mip_cnstr_b_flat.nn_output_up.detach().numpy())
+
+
 class TestTrainControlAffineSystem(unittest.TestCase):
     def test(self):
         torch.manual_seed(0)
