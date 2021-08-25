@@ -25,7 +25,7 @@ class TestControlLyapunov(unittest.TestCase):
             x_lo=torch.tensor([-2, -3], dtype=self.dtype),
             x_up=torch.tensor([3, 3], dtype=self.dtype),
             u_lo=torch.tensor([-1, -2, -3], dtype=self.dtype),
-            u_up=torch.tensor([1, 2, 3], dtype=self.dtype))
+            u_up=torch.tensor([2, 3, 4], dtype=self.dtype))
         self.lyapunov_relu1 = utils.setup_relu((2, 4, 3, 1),
                                                params=None,
                                                negative_slope=0.1,
@@ -253,6 +253,98 @@ class TestControlLyapunov(unittest.TestCase):
             Vdot_expected = x_samples_i.grad @ f_samples[i]
             np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
 
+    def test_add_dl1dx_times_G(self):
+        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        x_equilibrium = torch.tensor([0.1, 0.2], dtype=dut.system.dtype)
+        R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=dut.system.dtype)
+        milp = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        l1_slack, l1_binary = dut.add_state_error_l1_constraint(milp,
+                                                                x_equilibrium,
+                                                                x,
+                                                                R=R)
+        Gt = [None] * dut.system.u_dim
+        for i in range(dut.system.u_dim):
+            Gt[i] = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        G_lo = torch.tensor([[-2, 3, -1], [-1, -2, 2]], dtype=self.dtype)
+        G_up = torch.tensor([[1., 5, 3], [1, 4, 3]], dtype=self.dtype)
+        RG_lo = torch.empty((R.shape[0], dut.system.u_dim), dtype=self.dtype)
+        RG_up = torch.empty((R.shape[0], dut.system.u_dim), dtype=self.dtype)
+        for i in range(dut.system.u_dim):
+            RG_lo[:, i], RG_up[:, i] = mip_utils.compute_range_by_IA(
+                R, torch.zeros(R.shape[0], dtype=self.dtype), G_lo[:, i],
+                G_up[:, i])
+        V_lambda = 0.5
+        Vdot_coeff = []
+        Vdot_vars = []
+        dl1dx_times_G_slack, dl1dx_times_G_abs, dl1dx_times_G_binary = \
+            dut._add_dl1dx_times_G(
+                milp, x, l1_binary, Gt, R, RG_lo, RG_up, V_lambda, Vdot_coeff,
+                Vdot_vars)
+        self.assertEqual(len(Vdot_coeff), len(Vdot_vars))
+        # Now sample many x and G, then solve the optimization problem, make
+        # sure that Vdot_coeff * Vdot_vars evaluates to
+        # ∑ᵢλ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_lo(i) + u_up(i))/2
+        # - ∑ᵢ |λ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_up(i) - u_lo(i))/2|.
+        torch.manual_seed(0)
+        num_samples = 100
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, num_samples)
+        G_flat_samples = utils.uniform_sample_in_box(G_lo.reshape((-1, )),
+                                                     G_up.reshape((-1, )),
+                                                     num_samples)
+        for k in range(num_samples):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[k][j]
+                x[j].ub = x_samples[k][j]
+            G_sample = G_flat_samples[i].reshape(
+                (dut.system.x_dim, dut.system.u_dim))
+            for j in range(dut.system.x_dim):
+                for i in range(dut.system.u_dim):
+                    Gt[i][j].lb = G_sample[j, i]
+                    Gt[i][j].ub = G_sample[j, i]
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            # Check the value of the returned variables.
+            dl1dx_times_G_slack_sol = torch.tensor(
+                [[v.x for v in z] for z in dl1dx_times_G_slack],
+                dtype=self.dtype)
+            alpha_val = torch.tensor([v.x for v in l1_binary],
+                                     dtype=self.dtype)
+            for j in range(dut.system.u_dim):
+                np.testing.assert_allclose(
+                    dl1dx_times_G_slack_sol[j, :].detach().numpy(),
+                    (alpha_val * (R @ G_sample[:, j])).detach().numpy())
+            dl1dx_times_G_abs_sol = torch.tensor(
+                [v.x for v in dl1dx_times_G_abs], dtype=self.dtype)
+            dl1dx_times_G_binary_sol = torch.tensor(
+                [v.x for v in dl1dx_times_G_binary], dtype=self.dtype)
+            dl1dx_sol = (2 * alpha_val - 1) @ R
+            dl1dx_times_G_abs_expected = torch.abs(dl1dx_sol @ G_sample)
+            np.testing.assert_allclose(
+                dl1dx_times_G_abs_sol.detach().numpy(),
+                dl1dx_times_G_abs_expected.detach().numpy())
+            dl1dx_times_G_binary_expected = dl1dx_sol @ G_sample >= 0
+            np.testing.assert_allclose(
+                dl1dx_times_G_binary_sol.detach().numpy(),
+                dl1dx_times_G_binary_expected.detach().numpy())
+
+            # Now check if Vdot_coeff * Vdot_vars =
+            # ∑ᵢλ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_lo(i) + u_up(i))/2
+            # - ∑ᵢ |λ*∂|R(x−x*)|₁/∂x * G.col(i) * (u_up(i) - u_lo(i))/2|.
+            Vdot_sol = 0.
+            for i in range(len(Vdot_vars)):
+                Vdot_sol += Vdot_coeff[i] @ torch.tensor(
+                    [v.x for v in Vdot_vars[i]], dtype=self.dtype)
+            Vdot_expected = torch.sum(V_lambda * dl1dx_sol @ (G_sample * (
+                dut.system.u_lo + dut.system.u_up) / 2)) - torch.norm(
+                    V_lambda * dl1dx_sol @ G_sample
+                    * (dut.system.u_up - dut.system.u_lo) / 2,
+                    p=1)
+            np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
+
     def lyapunov_derivative_as_milp_tester(self, dut, x_equilibrium, V_lambda,
                                            epsilon, eps_type, R,
                                            lyapunov_lower, lyapunov_upper,
@@ -283,12 +375,14 @@ class TestControlLyapunov(unittest.TestCase):
                                                V_lambda,
                                                0.,
                                                R=R,
-                                               subgradient_rule="max")
+                                               subgradient_rule="max",
+                                               zero_tol=1E-8)
             V_sol = dut.lyapunov_value(x_sol, x_equilibrium, V_lambda, R=R)
             if eps_type == lyapunov.ConvergenceEps.ExpLower:
                 np.testing.assert_allclose(
                     (Vdot_sol + epsilon * V_sol).item(),
-                    lyap_deriv_return.milp.gurobi_model.ObjVal)
+                    lyap_deriv_return.milp.gurobi_model.ObjVal,
+                    atol=2E-5)
             else:
                 raise NotImplementedError
 
