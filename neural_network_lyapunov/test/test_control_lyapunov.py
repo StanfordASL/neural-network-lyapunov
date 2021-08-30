@@ -389,8 +389,17 @@ class TestControlLyapunov(unittest.TestCase):
                 np.testing.assert_allclose((Vdot_sol + epsilon * V_sol).item(),
                                            Vdot_optimal,
                                            atol=2E-5)
-            else:
-                raise NotImplementedError
+            elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
+                np.testing.assert_allclose(
+                    (-Vdot_sol - epsilon * V_sol).item(),
+                    Vdot_optimal,
+                    atol=2E-5)
+            elif eps_type == lyapunov.ConvergenceEps.Asymp:
+                np.testing.assert_allclose(
+                    (Vdot_sol + epsilon *
+                     torch.norm(R @ (x_sol - x_equilibrium), p=1)).item(),
+                    Vdot_optimal,
+                    atol=2E-5)
 
             # Sample many x_val within the bounds. make sure the objective
             # value is smaller than the optimal one.
@@ -435,9 +444,20 @@ class TestControlLyapunov(unittest.TestCase):
                     if eps_type == lyapunov.ConvergenceEps.ExpLower:
                         self.assertAlmostEqual(
                             lyap_deriv_return.milp.gurobi_model.ObjVal,
-                            (Vdot_sample + epsilon * V_sample).item())
-                    else:
-                        raise NotImplementedError
+                            (Vdot_sample + epsilon * V_sample).item(),
+                            places=6)
+                    elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
+                        self.assertAlmostEqual(
+                            lyap_deriv_return.milp.gurobi_model.ObjVal,
+                            (-Vdot_sample - epsilon * V_sample).item(),
+                            places=6)
+                    elif eps_type == lyapunov.ConvergenceEps.Asymp:
+                        self.assertAlmostEqual(
+                            lyap_deriv_return.milp.gurobi_model.ObjVal,
+                            (Vdot_sample + epsilon *
+                             torch.norm(R @ (x_samples[i] - x_equilibrium),
+                                        p=1)).item(),
+                            places=6)
                     self.assertLessEqual(
                         lyap_deriv_return.milp.gurobi_model.ObjVal,
                         Vdot_optimal)
@@ -488,6 +508,25 @@ class TestControlLyapunov(unittest.TestCase):
             None,
             gurobipy.GRB.BINARY,
             is_feasible=True)
+
+    def test_lyapunov_derivative_as_milp3(self):
+        # V_lambda != 0 and epsilon != 0
+        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        V_lambda = 0.5
+        epsilon = 0.2
+        R = torch.tensor([[1., 0.], [0.5, 1.], [1., -1.]], dtype=self.dtype)
+        for eps_type in list(lyapunov.ConvergenceEps):
+            self.lyapunov_derivative_as_milp_tester(dut,
+                                                    x_equilibrium,
+                                                    V_lambda,
+                                                    epsilon,
+                                                    eps_type,
+                                                    R,
+                                                    None,
+                                                    None,
+                                                    gurobipy.GRB.BINARY,
+                                                    is_feasible=True)
 
     def compute_dVdx_times_G_tester(self, dut, x_equilibrium, R, G_flat_lo,
                                     G_flat_up, RG_lo, RG_up, V_lambda):

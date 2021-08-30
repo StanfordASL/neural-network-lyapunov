@@ -318,13 +318,31 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         dVdx_times_G_ret, dVdx_times_G_binary = self._add_dVdx_times_G(
             milp, x, l1_binary, relu_beta, Gt, R, G_flat_lo, G_flat_up, RG_lo,
             RG_up, V_lambda, Vdot_coeff, Vdot_vars)
-        # TODO(hongkai.dai): implement epsilon != 0 case.
-        if epsilon != 0:
-            raise NotImplementedError
+        if eps_type in (lyapunov.ConvergenceEps.ExpLower,
+                        lyapunov.ConvergenceEps.ExpUpper):
+            # The cost is V̇ + ε*V= V̇ + ε(ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁)
+            objective_coeff = Vdot_coeff + [epsilon * a_relu_out] + [
+                epsilon * V_lambda *
+                torch.ones(R.shape[0], dtype=self.system.dtype)
+            ]
+            objective_vars = Vdot_vars + [relu_slack] + [l1_slack]
+            objective_constant = Vdot_constant + epsilon * b_relu_out - \
+                epsilon * self.lyapunov_relu(x_equilibrium).squeeze()
+            if eps_type == lyapunov.ConvergenceEps.ExpUpper:
+                # negate the cost.
+                objective_coeff = [-coeff for coeff in objective_coeff]
+                objective_constant *= -1
+        elif eps_type == lyapunov.ConvergenceEps.Asymp:
+            # The cost is V̇ + ε |R(x−x*)|₁
+            objective_coeff = Vdot_coeff + [
+                epsilon * torch.ones(R.shape[0], dtype=self.system.dtype)
+            ]
+            objective_vars = Vdot_vars + [l1_slack]
+            objective_constant = Vdot_constant
 
-        milp.setObjective(Vdot_coeff,
-                          Vdot_vars,
-                          Vdot_constant,
+        milp.setObjective(objective_coeff,
+                          objective_vars,
+                          objective_constant,
                           sense=gurobipy.GRB.MAXIMIZE)
 
         return LyapDerivMilpReturn(milp, x, relu_beta, l1_binary,
