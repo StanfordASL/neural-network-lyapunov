@@ -543,7 +543,8 @@ class ReLUFreePattern:
             else:
                 if method == mip_utils.PropagateBoundsMethod.LP:
                     binary_var_type = gurobi_torch_mip.BINARYRELAX
-                elif method == mip_utils.PropagateBoundsMethod.MIP:
+                elif method in (mip_utils.PropagateBoundsMethod.MIP,
+                                mip_utils.PropagateBoundsMethod.IA_MIP):
                     binary_var_type = gurobipy.GRB.BINARY
                 else:
                     raise Exception(
@@ -561,6 +562,50 @@ class ReLUFreePattern:
                             x_lo.detach().numpy(),
                             x_up.detach().numpy(),
                             create_prog_callback, binary_var_type)
+                if method == mip_utils.PropagateBoundsMethod.IA_MIP:
+                    # We also compute the bounds by IA. If the IA bound is
+                    # close to the MIP bound, then we use the IA bound.
+                    # Otherwise, we relax the MIP bound a little bit to make
+                    # sure this relaxed bound will not be active.
+                    z_pre_relu_lo_ia, z_pre_relu_up_ia = \
+                        mip_utils.compute_range_by_IA(
+                            self.model[2 * layer_count].weight, bias,
+                            linear_layer_input_lo, linear_layer_input_up)
+                    for j in range(self.model[2 * layer_count].out_features):
+                        neuron_index = self.relu_unit_index[layer_count][j]
+                        if torch.abs(z_pre_relu_lo[neuron_index] -
+                                     z_pre_relu_lo_ia[j]) < 1E-5:
+                            z_pre_relu_lo[neuron_index] = z_pre_relu_lo_ia[j]
+                        else:
+                            if z_pre_relu_lo[neuron_index] > 0:
+                                # If the MIP lower bound is > 0, then the ReLU
+                                # unit should always be active. We reduce this
+                                # MIP lower bound a little bit (but still
+                                # remains positive)
+                                z_pre_relu_lo[neuron_index] *= 0.99
+                                z_pre_relu_lo[
+                                    neuron_index] += 0.01 * torch.maximum(
+                                        z_pre_relu_lo_ia[j],
+                                        torch.tensor(0, dtype=self.dtype))
+                            else:
+                                z_pre_relu_lo[neuron_index] *= 0.99
+                                z_pre_relu_lo[
+                                    neuron_index] += 0.01 * z_pre_relu_lo_ia[j]
+                        if torch.abs(z_pre_relu_up[neuron_index] -
+                                     z_pre_relu_up_ia[j]) < 1E-5:
+                            z_pre_relu_up[neuron_index] = z_pre_relu_up_ia[j]
+                        else:
+                            if z_pre_relu_up[neuron_index] <= 0:
+                                z_pre_relu_up[neuron_index] *= 0.99
+                                z_pre_relu_up[
+                                    neuron_index] += 0.01 * torch.minimum(
+                                        z_pre_relu_up_ia[j],
+                                        torch.tensor(
+                                            0, dtype=self.dtype)).detach()
+                            else:
+                                z_pre_relu_up[neuron_index] *= 0.99
+                                z_pre_relu_up[
+                                    neuron_index] += 0.01 * z_pre_relu_up_ia[j]
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -589,7 +634,8 @@ class ReLUFreePattern:
         else:
             if method == mip_utils.PropagateBoundsMethod.LP:
                 binary_var_type = gurobi_torch_mip.BINARYRELAX
-            elif method == mip_utils.PropagateBoundsMethod.MIP:
+            elif method in (mip_utils.PropagateBoundsMethod.MIP,
+                            mip_utils.PropagateBoundsMethod.IA_MIP):
                 binary_var_type = gurobipy.GRB.BINARY
             else:
                 raise Exception(
@@ -599,6 +645,12 @@ class ReLUFreePattern:
                                            dtype=self.dtype)
             linear_output_up = torch.empty((self.model[-1].out_features, ),
                                            dtype=self.dtype)
+            if method == mip_utils.PropagateBoundsMethod.IA_MIP:
+                linear_output_lo_ia, linear_output_up_ia = \
+                    self._compute_network_output_bounds(
+                        previous_neuron_input_lo, previous_neuron_input_up,
+                        network_input_lo, network_input_up,
+                        mip_utils.PropagateBoundsMethod.IA)
             for i in range(self.model[-1].out_features):
                 linear_output_lo[i], linear_output_up[
                     i], _, _ = \
@@ -611,6 +663,20 @@ class ReLUFreePattern:
                             network_input_up.detach().numpy(),
                             create_prog_callback,
                             binary_var_type)
+                if method == mip_utils.PropagateBoundsMethod.IA_MIP:
+                    if torch.abs(linear_output_lo[i] -
+                                 linear_output_lo_ia[i]) < 1E-3:
+                        linear_output_lo[i] = linear_output_lo_ia[i]
+                    else:
+                        linear_output_lo[i] *= 0.99
+                        linear_output_lo[i] += 0.01 * linear_output_lo_ia[i]
+                    if torch.abs(linear_output_up[i] -
+                                 linear_output_up_ia[i]) < 1E-3:
+                        linear_output_up[i] = linear_output_up_ia[i]
+                    else:
+                        linear_output_up[i] *= 0.99
+                        linear_output_up[i] += 0.01 * linear_output_up_ia[i]
+
             return linear_output_lo, linear_output_up
 
     def _output_constraint_given_bounds(self, z_pre_relu_lo, z_pre_relu_up,

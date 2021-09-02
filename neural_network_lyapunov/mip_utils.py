@@ -442,14 +442,16 @@ class PropagateBoundsMethod(enum.Enum):
     IA = 1
     LP = 2
     MIP = 3
+    # First propagate the bounds using IA, then propagate the bounds using MIP
+    # to tighten the bounds (but still keep the IA bounds if these bounds might
+    # be active). Note that by computing the bounds using MIP we lose the
+    # gradient of these bounds.
+    IA_MIP = 4
 
 
 def propagate_bounds(layer, input_lo, input_up):
     """
     Given the bound of the layer's input, find the bound of the output.
-    @param method Either use interval arithemtic (IA) or linear programming
-    (LP) to compute the bounds. Note that LP produces tighter bounds, but loses
-    the gradient information (The output bounds will not carry gradient).
     """
     assert (isinstance(input_lo, torch.Tensor))
     assert (isinstance(input_up, torch.Tensor))
