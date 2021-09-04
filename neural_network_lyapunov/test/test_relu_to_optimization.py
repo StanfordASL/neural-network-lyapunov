@@ -1390,7 +1390,7 @@ class TestComputeLinearOutputBoundByOptimization(unittest.TestCase):
             [[0.1, 0.5, -0.2, 0.3, 0.2], [-0.3, -1.2, 2.1, -0.5, 3.2],
              [0.3, -0.4, 1.1, -0.2, 0.5], [2.1, 4.5, -0.4, -3.2, 0.4]],
             dtype=self.dtype)
-        self.relu_with_bias[2].bias.data = torch.tensor([0.4, 0.3, 1.3, 2.5],
+        self.relu_with_bias[2].bias.data = torch.tensor([0.4, 0.3, 3.3, 0.5],
                                                         dtype=self.dtype)
         self.relu_with_bias[4].weight.data = torch.tensor(
             [[0.3, 0.2, -0.1, 0.4], [1.2, -0.5, 2.1, -0.2],
@@ -1661,6 +1661,45 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
         np.testing.assert_array_less(z_post_relu_up_mip.detach().numpy(),
                                      z_post_relu_up_lp.detach().numpy() + 1E-6)
 
+        # Now test the bounds find by IA_MIP.
+        # First make sure that the network has some ReLU input lower bounds
+        # being positive, and upper bounds being negative, so that we have
+        # test code coverage.
+        if (dut.model[0].bias is not None):
+            assert (torch.any(z_pre_relu_lo_mip > 0))
+            assert (torch.any(z_pre_relu_up_mip < 0))
+        z_pre_relu_lo_ia_mip, z_pre_relu_up_ia_mip, z_post_relu_lo_ia_mip,\
+            z_post_relu_up_ia_mip = dut._compute_layer_bound(
+                x_lo, x_up, mip_utils.PropagateBoundsMethod.IA_MIP)
+        for i in range(z_pre_relu_lo_ia_mip.numel()):
+            # Test lower bound.
+            if torch.abs(z_pre_relu_lo_ia[i] - z_pre_relu_lo_mip[i]) < 1E-5:
+                self.assertEqual(z_pre_relu_lo_ia_mip[i].item(),
+                                 z_pre_relu_lo_ia[i].item())
+            elif z_pre_relu_lo_mip[i] > 0:
+                self.assertGreater(z_pre_relu_lo_ia_mip[i].item(), 0)
+                self.assertLess(z_pre_relu_lo_ia_mip[i].item(),
+                                z_pre_relu_lo_mip[i].item())
+            else:
+                self.assertGreater(z_pre_relu_lo_ia_mip[i].item(),
+                                   z_pre_relu_lo_ia[i].item())
+                self.assertLess(z_pre_relu_lo_ia_mip[i].item(),
+                                z_pre_relu_lo_mip[i].item())
+
+            # Test upper bound.
+            if torch.abs(z_pre_relu_up_ia[i] - z_pre_relu_up_mip[i]) < 1E-5:
+                self.assertEqual(z_pre_relu_up_ia_mip[i].item(),
+                                 z_pre_relu_up_ia[i].item())
+            elif z_pre_relu_up_mip[i] < 0:
+                self.assertGreater(z_pre_relu_up_ia_mip[i].item(),
+                                   z_pre_relu_up_mip[i].item())
+                self.assertLess(z_pre_relu_up_ia_mip[i].item(), 0)
+            else:
+                self.assertGreater(z_pre_relu_up_ia_mip[i].item(),
+                                   z_pre_relu_up_mip[i].item())
+                self.assertLess(z_pre_relu_up_ia_mip[i].item(),
+                                z_pre_relu_up_ia[i].item())
+
     def test(self):
         self.network_tester(self.relu_with_bias)
         self.network_tester(self.relu_no_bias)
@@ -1679,7 +1718,8 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                 mip_utils.propagate_bounds(
                     dut.model[-1], z_post_relu_lo[dut.relu_unit_index[-1]],
                     z_post_relu_up[dut.relu_unit_index[-1]])
-        else:
+        elif method in (mip_utils.PropagateBoundsMethod.LP,
+                        mip_utils.PropagateBoundsMethod.MIP):
             output_lo_expected = torch.empty((dut.model[-1].out_features, ),
                                              dtype=self.dtype)
             output_up_expected = torch.empty((dut.model[-1].out_features, ),
@@ -1700,10 +1740,38 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                             x_up.detach().numpy(),
                             create_prog_callback=None,
                             binary_var_type=binary_var_type)
-        np.testing.assert_allclose(output_lo.detach().numpy(),
-                                   output_lo_expected.detach().numpy())
-        np.testing.assert_allclose(output_up.detach().numpy(),
-                                   output_up_expected.detach().numpy())
+        if method in (mip_utils.PropagateBoundsMethod.IA,
+                      mip_utils.PropagateBoundsMethod.LP,
+                      mip_utils.PropagateBoundsMethod.MIP):
+            np.testing.assert_allclose(output_lo.detach().numpy(),
+                                       output_lo_expected.detach().numpy())
+            np.testing.assert_allclose(output_up.detach().numpy(),
+                                       output_up_expected.detach().numpy())
+        elif method == mip_utils.PropagateBoundsMethod.IA_MIP:
+            output_lo_ia, output_up_ia = dut._compute_network_output_bounds(
+                z_pre_relu_lo, z_pre_relu_up, x_lo, x_up,
+                mip_utils.PropagateBoundsMethod.IA)
+            output_lo_mip, output_up_mip = dut._compute_network_output_bounds(
+                z_pre_relu_lo, z_pre_relu_up, x_lo, x_up,
+                mip_utils.PropagateBoundsMethod.MIP)
+            for i in range(output_lo.numel()):
+                if torch.abs(output_lo_ia[i] - output_lo_mip[i]) < 1E-3:
+                    self.assertEqual(output_lo[i].item(),
+                                     output_lo_ia[i].item())
+                else:
+                    self.assertGreater(output_lo[i].item(),
+                                       output_lo_ia[i].item())
+                    self.assertLess(output_lo[i].item(),
+                                    output_lo_mip[i].item())
+                if torch.abs(output_up_ia[i] - output_up_mip[i]) < 1E-3:
+                    self.assertEqual(output_up[i].item(),
+                                     output_up_ia[i].item())
+                else:
+                    self.assertGreater(output_up[i].item(),
+                                       output_up_mip[i].item())
+                    self.assertLess(output_up[i].item(),
+                                    output_up_ia[i].item())
+
         # Take many sampled inputs, make sure the outputs are in the bounds.
         input_samples = utils.uniform_sample_in_box(x_lo, x_up, 1000)
         output_samples = dut.model(input_samples)
