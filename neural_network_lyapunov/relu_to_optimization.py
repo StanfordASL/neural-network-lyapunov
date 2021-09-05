@@ -574,7 +574,7 @@ class ReLUFreePattern:
                     for j in range(self.model[2 * layer_count].out_features):
                         neuron_index = self.relu_unit_index[layer_count][j]
                         if torch.abs(z_pre_relu_lo[neuron_index] -
-                                     z_pre_relu_lo_ia[j]) < 1E-5:
+                                     z_pre_relu_lo_ia[j]) < 1E-4:
                             z_pre_relu_lo[neuron_index] = z_pre_relu_lo_ia[j]
                         else:
                             if z_pre_relu_lo[neuron_index] > 0:
@@ -584,28 +584,27 @@ class ReLUFreePattern:
                                 # remains positive)
                                 z_pre_relu_lo[neuron_index] *= 0.99
                                 z_pre_relu_lo[
-                                    neuron_index] += 0.01 * torch.maximum(
-                                        z_pre_relu_lo_ia[j],
-                                        torch.tensor(0, dtype=self.dtype))
+                                    neuron_index] += 0.01 * torch.clamp(
+                                        z_pre_relu_lo_ia[j], max=0.).detach()
                             else:
                                 z_pre_relu_lo[neuron_index] *= 0.99
                                 z_pre_relu_lo[
-                                    neuron_index] += 0.01 * z_pre_relu_lo_ia[j]
+                                    neuron_index] += 0.01 * z_pre_relu_lo_ia[
+                                        j].detach()
                         if torch.abs(z_pre_relu_up[neuron_index] -
-                                     z_pre_relu_up_ia[j]) < 1E-5:
+                                     z_pre_relu_up_ia[j]) < 1E-4:
                             z_pre_relu_up[neuron_index] = z_pre_relu_up_ia[j]
                         else:
                             if z_pre_relu_up[neuron_index] <= 0:
                                 z_pre_relu_up[neuron_index] *= 0.99
                                 z_pre_relu_up[
-                                    neuron_index] += 0.01 * torch.minimum(
-                                        z_pre_relu_up_ia[j],
-                                        torch.tensor(
-                                            0, dtype=self.dtype)).detach()
+                                    neuron_index] += 0.01 * torch.clamp(
+                                        z_pre_relu_up_ia[j], max=0.).detach()
                             else:
                                 z_pre_relu_up[neuron_index] *= 0.99
                                 z_pre_relu_up[
-                                    neuron_index] += 0.01 * z_pre_relu_up_ia[j]
+                                    neuron_index] += 0.01 * z_pre_relu_up_ia[
+                                        j].detach()
 
             z_post_relu_lo[z_indices], z_post_relu_up[
                 z_indices] = mip_utils.propagate_bounds(
@@ -665,17 +664,18 @@ class ReLUFreePattern:
                             binary_var_type)
                 if method == mip_utils.PropagateBoundsMethod.IA_MIP:
                     if torch.abs(linear_output_lo[i] -
-                                 linear_output_lo_ia[i]) < 1E-3:
+                                 linear_output_lo_ia[i]) < 1E-4:
                         linear_output_lo[i] = linear_output_lo_ia[i]
                     else:
                         linear_output_lo[i] *= 0.99
                         linear_output_lo[i] += 0.01 * linear_output_lo_ia[i]
                     if torch.abs(linear_output_up[i] -
                                  linear_output_up_ia[i]) < 1E-3:
-                        linear_output_up[i] = linear_output_up_ia[i]
+                        linear_output_up[i] = linear_output_up_ia[i].detach()
                     else:
                         linear_output_up[i] *= 0.99
-                        linear_output_up[i] += 0.01 * linear_output_up_ia[i]
+                        linear_output_up[
+                            i] += 0.01 * linear_output_up_ia[i].detach()
 
             return linear_output_lo, linear_output_up
 

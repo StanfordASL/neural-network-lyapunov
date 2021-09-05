@@ -1673,7 +1673,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                 x_lo, x_up, mip_utils.PropagateBoundsMethod.IA_MIP)
         for i in range(z_pre_relu_lo_ia_mip.numel()):
             # Test lower bound.
-            if torch.abs(z_pre_relu_lo_ia[i] - z_pre_relu_lo_mip[i]) < 1E-5:
+            if torch.abs(z_pre_relu_lo_ia[i] - z_pre_relu_lo_mip[i]) < 1E-4:
                 self.assertEqual(z_pre_relu_lo_ia_mip[i].item(),
                                  z_pre_relu_lo_ia[i].item())
             elif z_pre_relu_lo_mip[i] > 0:
@@ -1687,7 +1687,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                                 z_pre_relu_lo_mip[i].item())
 
             # Test upper bound.
-            if torch.abs(z_pre_relu_up_ia[i] - z_pre_relu_up_mip[i]) < 1E-5:
+            if torch.abs(z_pre_relu_up_ia[i] - z_pre_relu_up_mip[i]) < 1E-4:
                 self.assertEqual(z_pre_relu_up_ia_mip[i].item(),
                                  z_pre_relu_up_ia[i].item())
             elif z_pre_relu_up_mip[i] < 0:
@@ -1755,7 +1755,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                 z_pre_relu_lo, z_pre_relu_up, x_lo, x_up,
                 mip_utils.PropagateBoundsMethod.MIP)
             for i in range(output_lo.numel()):
-                if torch.abs(output_lo_ia[i] - output_lo_mip[i]) < 1E-3:
+                if torch.abs(output_lo_ia[i] - output_lo_mip[i]) < 1E-4:
                     self.assertEqual(output_lo[i].item(),
                                      output_lo_ia[i].item())
                 else:
@@ -1763,7 +1763,7 @@ class TestComputeLayerBound(TestComputeLinearOutputBoundByOptimization):
                                        output_lo_ia[i].item())
                     self.assertLess(output_lo[i].item(),
                                     output_lo_mip[i].item())
-                if torch.abs(output_up_ia[i] - output_up_mip[i]) < 1E-3:
+                if torch.abs(output_up_ia[i] - output_up_mip[i]) < 1E-4:
                     self.assertEqual(output_up[i].item(),
                                      output_up_ia[i].item())
                 else:
