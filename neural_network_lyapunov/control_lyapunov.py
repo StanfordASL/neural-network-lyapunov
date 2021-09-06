@@ -349,6 +349,86 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                                    dl1dx_times_f_slack,
                                    system_constraint_return)
 
+    def lyapunov_derivative_loss_at_samples_and_next_states(
+            self,
+            V_lambda,
+            epsilon,
+            state_samples,
+            state_next,
+            x_equilibrium,
+            eps_type,
+            *,
+            R,
+            margin=0.,
+            reduction="mean",
+            weight=None):
+        """
+        Sample states xⁱ, i=1,...N with loss l(xⁱ) for each sample. We penalize
+        the total loss as reduction(max(l(xⁱ) + margin, 0))
+        If eps_type = ExpLower, then l(x) = V̇(x) + εV(x)
+        If eps_type = ExpUpper, then l(x) = -V̇(x) - εV(x)
+        If eps_type = Asymp, then l(x) = V̇(x) + ε|R(x−x*)|₁
+
+        If @p reduction = "mean", then reduction(x) = mean(x)
+        If @p reduction = "max", then reduction(x) = max(x)
+        If @p reduction = "4norm", then reduction(x) = |x|₄
+
+        Args:
+          state_next: This is a dummy variable for API consistency. It has to
+          be None in this function, and we won't use it.
+          weight: Has to be None. We use uniform weight for each sample.
+        """
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(state_samples, torch.Tensor))
+        assert (state_samples.shape[1] == self.system.x_dim)
+        assert (state_next is None)
+        assert (reduction in {"mean", "max", "4norm"})
+        assert (weight is None)
+        R = lyapunov._get_R(R, self.system.x_dim, state_samples.device)
+        if eps_type in (lyapunov.ConvergenceEps.ExpLower,
+                        lyapunov.ConvergenceEps.Asymp):
+            subgradient_rule = "max"
+        elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
+            subgradient_rule = "min"
+
+        Vdot_samples = torch.stack([
+            self.lyapunov_derivative(state_samples[i],
+                                     x_equilibrium,
+                                     V_lambda,
+                                     epsilon,
+                                     R=R,
+                                     subgradient_rule=subgradient_rule,
+                                     zero_tol=1E-6)
+            for i in range(state_samples.shape[0])
+        ])
+        V_samples = self.lyapunov_value(state_samples,
+                                        x_equilibrium,
+                                        V_lambda,
+                                        R=R).squeeze()
+        if eps_type == lyapunov.ConvergenceEps.ExpLower:
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")(-(Vdot_samples + epsilon * V_samples),
+                                  torch.tensor(-1.).to(state_samples.device))
+        elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")((Vdot_samples + epsilon * V_samples),
+                                  torch.tensor(-1.).to(state_samples.device))
+        elif eps_type == lyapunov.ConvergenceEps.Asymp:
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")(-(Vdot_samples + epsilon * torch.norm(
+                    R @ (state_samples - x_equilibrium).T, p=1, dim=0)),
+                                  torch.tensor(-1.).to(state_samples.device))
+        if reduction == "mean":
+            return torch.mean(hinge_loss_all)
+        elif reduction == "max":
+            return torch.max(hinge_loss_all)
+        elif reduction == "4norm":
+            return torch.norm(hinge_loss_all, p=4)
+
     def _compute_Rf_bounds_IA(self, R, f_lo, f_up):
         """
         Compute the range of R * f.

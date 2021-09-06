@@ -597,6 +597,68 @@ class TestControlLyapunov(unittest.TestCase):
         self.compute_dVdx_times_G_tester(dut, x_equilibrium, R, G_flat_lo,
                                          G_flat_up, RG_lo, RG_up, V_lambda)
 
+    def test_lyapunov_derivative_loss_at_samples_and_next_states(self):
+        # Test with the linear system.
+        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        V_lambda = 0.5
+        epsilon = 0.1
+        torch.manual_seed(0)
+        state_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                    dut.system.x_up, 100)
+        x_equilibrium = torch.tensor([0.2, 0.5], dtype=self.dtype)
+        R = torch.tensor([[1., 2.], [-1., 1.], [2, 0.]], dtype=self.dtype)
+        margin = 1.5
+
+        loss1 = dut.lyapunov_derivative_loss_at_samples_and_next_states(
+            V_lambda,
+            epsilon,
+            state_samples,
+            None,
+            x_equilibrium,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            margin=margin,
+            reduction="mean")
+        Vdot_samples = torch.stack([
+            dut.lyapunov_derivative(state_samples[i],
+                                    x_equilibrium,
+                                    V_lambda,
+                                    epsilon,
+                                    R=R,
+                                    subgradient_rule="max",
+                                    zero_tol=1e-6)
+            for i in range(state_samples.shape[0])
+        ])
+        V_samples = dut.lyapunov_value(state_samples,
+                                       x_equilibrium,
+                                       V_lambda,
+                                       R=R)
+        np.testing.assert_allclose(
+            torch.mean(
+                torch.maximum(Vdot_samples + epsilon * V_samples + margin,
+                              torch.zeros_like(Vdot_samples,
+                                               dtype=self.dtype))).item(),
+            loss1.item())
+
+        loss2 = dut.lyapunov_derivative_loss_at_samples_and_next_states(
+            V_lambda,
+            epsilon,
+            state_samples,
+            None,
+            x_equilibrium,
+            lyapunov.ConvergenceEps.Asymp,
+            R=R,
+            margin=margin,
+            reduction="max")
+        np.testing.assert_allclose(
+            torch.max(
+                torch.maximum(
+                    Vdot_samples + epsilon * torch.norm(
+                        R @ (state_samples - x_equilibrium).T, p=1, dim=0) +
+                    margin, torch.zeros_like(Vdot_samples,
+                                             dtype=self.dtype))).item(),
+            loss2.item())
+
 
 if __name__ == "__main__":
     unittest.main()
