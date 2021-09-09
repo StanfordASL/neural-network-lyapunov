@@ -8,6 +8,8 @@ import time
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
+import neural_network_lyapunov.control_affine_system as control_affine_system
+import neural_network_lyapunov.control_lyapunov as control_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.r_options as r_options
 
@@ -184,14 +186,16 @@ class TrainLyapunovReLU:
         """
         assert (isinstance(positivity_state_samples, torch.Tensor))
         assert (isinstance(derivative_state_samples, torch.Tensor))
-        assert (isinstance(derivative_state_samples_next, torch.Tensor))
+        assert (isinstance(derivative_state_samples_next, torch.Tensor)
+                or derivative_state_samples_next is None)
         assert (positivity_state_samples.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
         assert (derivative_state_samples.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
-        assert (derivative_state_samples_next.shape == (
-            derivative_state_samples.shape[0],
-            self.lyapunov_hybrid_system.system.x_dim))
+        if isinstance(derivative_state_samples_next, torch.Tensor):
+            assert (derivative_state_samples_next.shape == (
+                derivative_state_samples.shape[0],
+                self.lyapunov_hybrid_system.system.x_dim))
         dtype = self.lyapunov_hybrid_system.system.dtype
         if lyapunov_positivity_sample_cost_weight != 0 and\
                 positivity_state_samples.shape[0] > 0:
@@ -360,6 +364,12 @@ class TrainLyapunovReLU:
                            hybrid_linear_system.AutonomousHybridLinearSystem)):
                 derivative_mip_adversarial_next = torch.stack(
                     derivative_mip_adversarial_next)
+            elif (isinstance(
+                    self.lyapunov_hybrid_system.system,
+                    control_affine_system.ControlPiecewiseAffineSystem)
+                  and isinstance(self.lyapunov_hybrid_system,
+                                 control_lyapunov.ControlLyapunov)):
+                derivative_mip_adversarial_next = None
             else:
                 derivative_mip_adversarial_next = \
                     self.lyapunov_hybrid_system.system.step_forward(
@@ -932,15 +942,15 @@ class TrainLyapunovReLU:
             #     (positivity_state_repeatition,
             #      positivity_mip_adversarial_repeatition),
             #     dim=0)
-            positivity_state_repeatition = torch.ones((
-                positivity_state_samples_all.shape[0],),
+            positivity_state_repeatition = torch.ones(
+                (positivity_state_samples_all.shape[0], ),
                 dtype=positivity_state_samples_all.dtype)
             # derivative_state_repeatition = torch.cat(
             #     (derivative_state_repeatition,
             #      derivative_mip_adversarial_repeatition),
             #     dim=0)
-            derivative_state_repeatition = torch.ones((
-                derivative_state_samples_all.shape[0],),
+            derivative_state_repeatition = torch.ones(
+                (derivative_state_samples_all.shape[0], ),
                 dtype=derivative_state_samples_all.dtype)
             if positivity_state_samples_all.shape[
                     0] > options.positivity_samples_pool_size:
@@ -1104,13 +1114,15 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
             1)[states_distance_squared > cluster_radius**2] + 1
         repeatition = new_adversarial_state_index[1:] - \
             new_adversarial_state_index[:-1]
-        if repeatition.shape == (0,):
+        if repeatition.shape == (0, ):
             repeatition = torch.tensor([adversarial_states.shape[0]])
         else:
-            repeatition = torch.cat((torch.tensor([
-                new_adversarial_state_index[0]],
-                dtype=adversarial_states.dtype), repeatition, torch.tensor(
-                    [adversarial_states.shape[0] -
-                     new_adversarial_state_index[-1]],
-                    dtype=adversarial_states.dtype)))
+            repeatition = torch.cat(
+                (torch.tensor([new_adversarial_state_index[0]],
+                              dtype=adversarial_states.dtype), repeatition,
+                 torch.tensor([
+                     adversarial_states.shape[0] -
+                     new_adversarial_state_index[-1]
+                 ],
+                              dtype=adversarial_states.dtype)))
         return clustered_adversarial_states, repeatition
