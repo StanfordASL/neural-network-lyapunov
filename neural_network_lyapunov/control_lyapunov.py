@@ -29,7 +29,7 @@ class LyapDerivMilpReturn:
         """
         self.milp = milp
         self.x = x
-        self.relu_beta = relu_beta
+        self.beta = relu_beta
         self.l1_binary = l1_binary
         self.dl1dx_times_f_slack = dl1dx_times_f_slack
         self.system_constraint_return = system_constraint_return

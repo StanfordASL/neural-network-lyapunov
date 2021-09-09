@@ -8,6 +8,8 @@ import time
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
+import neural_network_lyapunov.control_affine_system as control_affine_system
+import neural_network_lyapunov.control_lyapunov as control_lyapunov
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -187,14 +189,16 @@ class TrainLyapunovReLU:
         """
         assert (isinstance(positivity_state_samples, torch.Tensor))
         assert (isinstance(derivative_state_samples, torch.Tensor))
-        assert (isinstance(derivative_state_samples_next, torch.Tensor))
+        assert (isinstance(derivative_state_samples_next, torch.Tensor)
+                or derivative_state_samples_next is None)
         assert (positivity_state_samples.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
         assert (derivative_state_samples.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
-        assert (derivative_state_samples_next.shape == (
-            derivative_state_samples.shape[0],
-            self.lyapunov_hybrid_system.system.x_dim))
+        if isinstance(derivative_state_samples_next, torch.Tensor):
+            assert (derivative_state_samples_next.shape == (
+                derivative_state_samples.shape[0],
+                self.lyapunov_hybrid_system.system.x_dim))
         dtype = self.lyapunov_hybrid_system.system.dtype
         if lyapunov_positivity_sample_cost_weight != 0 and\
                 positivity_state_samples.shape[0] > 0:
@@ -363,6 +367,12 @@ class TrainLyapunovReLU:
                            hybrid_linear_system.AutonomousHybridLinearSystem)):
                 derivative_mip_adversarial_next = torch.stack(
                     derivative_mip_adversarial_next)
+            elif (isinstance(
+                    self.lyapunov_hybrid_system.system,
+                    control_affine_system.ControlPiecewiseAffineSystem)
+                  and isinstance(self.lyapunov_hybrid_system,
+                                 control_lyapunov.ControlLyapunov)):
+                derivative_mip_adversarial_next = None
             else:
                 derivative_mip_adversarial_next = \
                     self.lyapunov_hybrid_system.system.step_forward(
