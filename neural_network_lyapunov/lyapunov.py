@@ -521,7 +521,7 @@ class LyapunovHybridLinearSystem:
             sense=gurobipy.GRB.MINIMIZE)
         return milp, x
 
-    def validate_x_equilibrium(self, x_equilibrium: torch.Tensor) -> bool:
+    def validate_x_equilibrium(self, x_equilibrium: torch.Tensor):
         """
         Validate that x_equilibrium is acceptable.
         x_equilibrium should be within x_lo and x_up
