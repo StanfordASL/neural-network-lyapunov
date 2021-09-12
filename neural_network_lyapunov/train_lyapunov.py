@@ -53,8 +53,7 @@ class TrainLyapunovReLU:
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
         assert (isinstance(V_lambda, float))
         self.V_lambda = V_lambda
-        assert (isinstance(x_equilibrium, torch.Tensor))
-        assert (x_equilibrium.shape == (lyapunov_hybrid_system.system.x_dim, ))
+        self.lyapunov_hybrid_system.validate_x_equilibrium(x_equilibrium)
         self.x_equilibrium = x_equilibrium
         assert (isinstance(R_options, r_options.ROptions))
         self.R_options = R_options
