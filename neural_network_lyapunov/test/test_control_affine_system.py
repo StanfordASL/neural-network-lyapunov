@@ -68,6 +68,22 @@ class TestLinearSystem(unittest.TestCase):
             G_expected)
 
 
+    def test_is_x_stabilizable(self):
+        dtype = torch.float64
+        A = torch.tensor([[1, 2], [-1, 2]], dtype=dtype)
+        B = torch.tensor([[1, 0, 0], [0, 1, 0]], dtype=dtype)
+        x_lo = torch.tensor([-2, -3], dtype=dtype)
+        x_up = -x_lo
+        u_lo = torch.tensor([1, 1, 0], dtype=dtype)
+        u_up = torch.tensor([2, 3, 4], dtype=dtype)
+        dut = mut.LinearSystem(A, B, x_lo, x_up, u_lo, u_up)
+        self.assertFalse(
+            dut.can_be_equilibrium_state(torch.tensor([1, 1], dtype=dtype)))
+        self.assertTrue(
+            dut.can_be_equilibrium_state(torch.tensor([0, -0.75],
+                                                      dtype=dtype)))
+
+
 class TestSecondOrderControlAffineSystem(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64

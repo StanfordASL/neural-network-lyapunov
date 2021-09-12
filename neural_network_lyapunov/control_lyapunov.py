@@ -600,6 +600,10 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
 
         return compute_dVdx_times_G_return, dVdx_times_G_binary
 
+    def validate_x_equilibrium(self, x_equilibrium: torch.Tensor):
+        super(ControlLyapunov, self).validate_x_equilibrium(x_equilibrium)
+        assert (self.system.can_be_equilibrium_state(x_equilibrium))
+
     class ComputeDvdxTimesGReturn:
         def __init__(self, dVdx_times_G, dVdx_times_G_lo, dVdx_times_G_up,
                      dphidx_times_G, l1_binary_times_RG):
