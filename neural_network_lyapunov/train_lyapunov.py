@@ -3,6 +3,7 @@ import numpy as np
 import gurobipy
 import copy
 import wandb
+import warnings
 import inspect
 import time
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
@@ -74,6 +75,9 @@ class TrainLyapunovReLU:
         self.lyapunov_derivative_sample_margin = 0.
         # The weight of -min_x V(x) - ε₂ |x - x*|₁ in the total loss
         self.lyapunov_positivity_mip_cost_weight = 10.
+        # The lower value for clamping the Lyapunov derivative cost
+        # clamp(max dV(x) + εV(x), min, max)
+        self.lyapunov_derivative_mip_clamp_min = None
         # The number of (sub)optimal solutions for the MIP
         # min_x V(x) - V(x*) - ε₂ |x - x*|₁
         self.lyapunov_positivity_mip_pool_solutions = 1
@@ -500,6 +504,13 @@ class TrainLyapunovReLU:
         derivative_mip_loss is weight * cost4
         value_gap_mip_loss is boundary_value_gap_mip_cost_weight * cost5
         """
+        if (isinstance(self.lyapunov_hybrid_system,
+                       control_lyapunov.ControlLyapunov)
+                and self.lyapunov_derivative_mip_clamp_min is None):
+            warnings.warn(
+                "Train a control Lyapunov function with " +
+                "lyapunov_derivative_mip_clamp_min unset."
+            )
         dtype = self.lyapunov_hybrid_system.system.dtype
         if lyapunov_positivity_mip_cost_weight is not None:
             lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
@@ -534,8 +545,14 @@ class TrainLyapunovReLU:
             mip_cost = lyapunov_derivative_mip.\
                 compute_objective_from_mip_data_and_solution(
                     solution_number=0, penalty=1e-13)
-            derivative_mip_loss = \
-                lyapunov_derivative_mip_cost_weight * mip_cost
+            if self.lyapunov_derivative_mip_clamp_min is None:
+                derivative_mip_loss = \
+                    lyapunov_derivative_mip_cost_weight * mip_cost
+            else:
+                derivative_mip_loss = torch.clamp(
+                    lyapunov_derivative_mip_cost_weight * mip_cost,
+                    min=self.lyapunov_derivative_mip_clamp_min,
+                    max=None)
         gap_mip_loss = 0
         if boundary_value_gap_mip_cost_weight != 0:
             boundary_value_gap, V_min_milp, V_max_milp, x_min, x_max = \
