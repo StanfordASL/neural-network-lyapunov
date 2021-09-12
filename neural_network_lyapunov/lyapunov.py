@@ -521,6 +521,16 @@ class LyapunovHybridLinearSystem:
             sense=gurobipy.GRB.MINIMIZE)
         return milp, x
 
+    def validate_x_equilibrium(self, x_equilibrium: torch.Tensor) -> bool:
+        """
+        Validate that x_equilibrium is acceptable.
+        x_equilibrium should be within x_lo and x_up
+        """
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
+        assert (np.all(x_equilibrium.detach().numpy() <= self.system.x_up_all))
+        assert (np.all(x_equilibrium.detach().numpy() >= self.system.x_lo_all))
+
 
 class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
     """
