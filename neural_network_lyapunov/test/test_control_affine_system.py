@@ -27,18 +27,29 @@ class TestLinearSystem(unittest.TestCase):
         self.assertEqual(dut.x_dim, 2)
         self.assertEqual(dut.u_dim, 3)
 
-        mip_cnstr_f, mip_cnstr_G = dut.mixed_integer_constraints()
+        ret = dut.mixed_integer_constraints()
+        f_lo_expected, f_up_expected = mip_utils.compute_range_by_IA(
+            A, torch.zeros(dut.x_dim, dtype=dtype), x_lo, x_up)
+        np.testing.assert_allclose(ret.f_lo.detach().numpy(),
+                                   f_lo_expected.detach().numpy())
+        np.testing.assert_allclose(ret.f_up.detach().numpy(),
+                                   f_up_expected.detach().numpy())
+        np.testing.assert_allclose(ret.G_flat_lo.detach().numpy(),
+                                   B.reshape((-1, )).detach().numpy())
+        np.testing.assert_allclose(ret.G_flat_up.detach().numpy(),
+                                   B.reshape((-1, )).detach().numpy())
 
         prog = gurobi_torch_mip.GurobiTorchMIP(dtype)
 
         x = prog.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
         f = prog.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
         G_flat = prog.addVars(dut.x_dim * dut.u_dim, lb=-gurobipy.GRB.INFINITY)
-        prog.add_mixed_integer_linear_constraints(mip_cnstr_f, x, f, "", "",
-                                                  "", "", "")
+        prog.add_mixed_integer_linear_constraints(ret.mip_cnstr_f, x, f, "",
+                                                  "", "", "", "")
         for i in range(dut.u_dim):
-            prog.add_mixed_integer_linear_constraints(mip_cnstr_G, x, G_flat,
-                                                      "", "", "", "", "")
+            prog.add_mixed_integer_linear_constraints(ret.mip_cnstr_G, x,
+                                                      G_flat, "", "", "", "",
+                                                      "")
 
         x_val = np.array([1., 2.])
         for i in range(dut.x_dim):
@@ -55,23 +66,6 @@ class TestLinearSystem(unittest.TestCase):
         np.testing.assert_allclose(
             np.array([Gi.x for Gi in G_flat]).reshape((dut.x_dim, dut.u_dim)),
             G_expected)
-
-    def test_compute_range_by_ia(self):
-        dtype = torch.float64
-        A, B, x_lo, x_up, u_lo, u_up = get_simple_ca_system_params(dtype)
-        dut = mut.LinearSystem(A, B, x_lo, x_up, u_lo, u_up)
-        f_lo, f_up = dut.compute_f_range_ia()
-        f_lo_expected, f_up_expected = mip_utils.compute_range_by_IA(
-            A, torch.zeros(dut.x_dim, dtype=dtype), x_lo, x_up)
-        np.testing.assert_allclose(f_lo.detach().numpy(),
-                                   f_lo_expected.detach().numpy())
-        np.testing.assert_allclose(f_up.detach().numpy(),
-                                   f_up_expected.detach().numpy())
-        G_lo, G_up = dut.compute_G_range_ia()
-        np.testing.assert_allclose(G_lo.detach().numpy(),
-                                   B.reshape((-1, )).detach().numpy())
-        np.testing.assert_allclose(G_up.detach().numpy(),
-                                   B.reshape((-1, )).detach().numpy())
 
 
 class TestSecondOrderControlAffineSystem(unittest.TestCase):
@@ -149,7 +143,8 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
             a = milp.addVars(dut.nq, lb=-gurobipy.GRB.INFINITY)
             b_flat = milp.addVars(dut.nq * dut.u_dim,
                                   lb=-gurobipy.GRB.INFINITY)
-            mip_cnstr_a, mip_cnstr_b_flat = dut._mixed_integer_constraints_v()
+            mip_cnstr_a, mip_cnstr_b_flat, a_lo, a_up, b_lo, b_up = \
+                dut._mixed_integer_constraints_v()
             a_slack, a_binary = milp.add_mixed_integer_linear_constraints(
                 mip_cnstr_a,
                 x,
@@ -203,9 +198,9 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
             f = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
             G_flat = milp.addVars(dut.x_dim * dut.u_dim,
                                   lb=-gurobipy.GRB.INFINITY)
-            mip_cnstr_f, mip_cnstr_G = dut.mixed_integer_constraints()
+            ret = dut.mixed_integer_constraints()
             milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_f,
+                ret.mip_cnstr_f,
                 x,
                 f,
                 "f_slack",
@@ -215,7 +210,7 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 "",
                 binary_var_type=gurobipy.GRB.BINARY)
             milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_G,
+                ret.mip_cnstr_G,
                 x,
                 G_flat,
                 "G_slack",
@@ -240,7 +235,7 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 np.testing.assert_allclose(f_val, f_expected.detach().numpy())
                 np.testing.assert_allclose(G_val, G_expected.detach().numpy())
 
-    def test_compute_range_ia(self):
+    def test_compute_range(self):
         for method in list(mip_utils.PropagateBoundsMethod):
             dut = mut.ReluSecondOrderControlAffineSystem(
                 x_lo=torch.tensor([-2, -1], dtype=self.dtype),
@@ -251,30 +246,29 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 phi_b=self.phi_b,
                 method=method)
             mip_cnstr_a = dut.relu_free_pattern_a.output_constraint(
-                dut.x_lo, dut.x_up, mip_utils.PropagateBoundsMethod.IA)
+                dut.x_lo, dut.x_up, method)
             mip_cnstr_b_flat = dut.relu_free_pattern_b.output_constraint(
-                dut.x_lo, dut.x_up, mip_utils.PropagateBoundsMethod.IA)
-            f_lo, f_up = dut.compute_f_range_ia()
-            G_flat_lo, G_flat_up = dut.compute_G_range_ia()
-            np.testing.assert_allclose(f_lo[:dut.nq].detach().numpy(),
+                dut.x_lo, dut.x_up, method)
+            ret = dut.mixed_integer_constraints()
+            np.testing.assert_allclose(ret.f_lo[:dut.nq].detach().numpy(),
                                        dut.x_lo[dut.nq:].detach().numpy())
-            np.testing.assert_allclose(f_up[:dut.nq].detach().numpy(),
+            np.testing.assert_allclose(ret.f_up[:dut.nq].detach().numpy(),
                                        dut.x_up[dut.nq:].detach().numpy())
             np.testing.assert_allclose(
-                f_lo[dut.nq:].detach().numpy(),
+                ret.f_lo[dut.nq:].detach().numpy(),
                 mip_cnstr_a.nn_output_lo.detach().numpy())
             np.testing.assert_allclose(
-                f_up[dut.nq:].detach().numpy(),
+                ret.f_up[dut.nq:].detach().numpy(),
                 mip_cnstr_a.nn_output_up.detach().numpy())
             np.testing.assert_allclose(
-                G_flat_lo[:dut.nq * dut.u_dim].detach().numpy(), 0)
+                ret.G_flat_lo[:dut.nq * dut.u_dim].detach().numpy(), 0)
             np.testing.assert_allclose(
-                G_flat_up[:dut.nq * dut.u_dim].detach().numpy(), 0)
+                ret.G_flat_up[:dut.nq * dut.u_dim].detach().numpy(), 0)
             np.testing.assert_allclose(
-                G_flat_lo[dut.nq * dut.u_dim:].detach().numpy(),
+                ret.G_flat_lo[dut.nq * dut.u_dim:].detach().numpy(),
                 mip_cnstr_b_flat.nn_output_lo.detach().numpy())
             np.testing.assert_allclose(
-                G_flat_up[dut.nq * dut.u_dim:].detach().numpy(),
+                ret.G_flat_up[dut.nq * dut.u_dim:].detach().numpy(),
                 mip_cnstr_b_flat.nn_output_up.detach().numpy())
 
 
