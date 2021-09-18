@@ -88,14 +88,19 @@ def wandb_config_update(args, lyapunov_relu, controller_relu, x_lo, x_up, u_lo,
     wandb.config.update(args)
     lyapunov_linear_layer_width, _, _ = utils.extract_relu_structure(
         lyapunov_relu)
-    controller_linear_layer_width, _, _ = utils.extract_relu_structure(
-        controller_relu)
+    if controller_relu is not None:
+        controller_linear_layer_width, _, _ = utils.extract_relu_structure(
+            controller_relu)
     wandb.config.update({
         "lyapunov_linear_layer_width":
-        lyapunov_linear_layer_width,
-        "controller_linear_layer_width":
-        controller_linear_layer_width
+        lyapunov_linear_layer_width
     })
+
+    if controller_relu is not None:
+        wandb.config.update({
+            "controller_linear_layer_width":
+            controller_linear_layer_width
+        })
     wandb.config.update({
         "x_lo": x_lo,
         "x_up": x_up,
