@@ -7,15 +7,19 @@ import torch
 import gurobipy
 
 
-class ControlAffineSystemConstraintReturn(lyapunov.SystemConstraintReturn):
+class ControlAffineSystemAddConstraintReturn(lyapunov.SystemConstraintReturn):
     """
     The return type of add_system_constraint()
     """
     def __init__(self, slack, binary):
-        super(ControlAffineSystemConstraintReturn,
+        super(ControlAffineSystemAddConstraintReturn,
               self).__init__(slack, binary)
         self.mip_cnstr_f = None
         self.mip_cnstr_G = None
+        self.f_lo = None
+        self.f_up = None
+        self.G_flat_lo = None
+        self.G_flat_up = None
 
 
 class LyapDerivMilpReturn:
@@ -150,7 +154,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         Gt: list,
         *,
         binary_var_type=gurobipy.GRB.BINARY
-    ) -> ControlAffineSystemConstraintReturn:
+    ) -> ControlAffineSystemAddConstraintReturn:
         """
         Add the (mixed-integer linear) constraints of f(x) and G(x).
 
@@ -177,20 +181,24 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 x[i].lb = self.system.x_lo[i].item()
             if x[i].ub > self.system.x_up[i].item():
                 x[i].ub = self.system.x_up[i].item()
-        mip_cnstr_f, mip_cnstr_G = self.system.mixed_integer_constraints()
+        mip_cnstr_ret = self.system.mixed_integer_constraints()
         slack, binary = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq", "f_eq",
-            "f_output", binary_var_type)
+            mip_cnstr_ret.mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq",
+            "f_eq", "f_output", binary_var_type)
         G_flat = [None] * self.system.x_dim * self.system.u_dim
         for i in range(self.system.x_dim):
             for j in range(self.system.u_dim):
                 G_flat[i * self.system.u_dim + j] = Gt[j][i]
         slack_G, binary_G = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_G, x, G_flat, "slack_G", "binary_G", "G_ineq", "G_eq",
-            "G_out", binary_var_type)
-        ret = ControlAffineSystemConstraintReturn(slack, binary)
-        ret.mip_cnstr_f = mip_cnstr_f
-        ret.mip_cnstr_G = mip_cnstr_G
+            mip_cnstr_ret.mip_cnstr_G, x, G_flat, "slack_G", "binary_G",
+            "G_ineq", "G_eq", "G_out", binary_var_type)
+        ret = ControlAffineSystemAddConstraintReturn(slack, binary)
+        ret.mip_cnstr_f = mip_cnstr_ret.mip_cnstr_f
+        ret.mip_cnstr_G = mip_cnstr_ret.mip_cnstr_G
+        ret.f_lo = mip_cnstr_ret.f_lo
+        ret.f_up = mip_cnstr_ret.f_up
+        ret.G_flat_lo = mip_cnstr_ret.G_flat_lo
+        ret.G_flat_up = mip_cnstr_ret.G_flat_up
         return ret
 
     def lyapunov_derivative_as_milp(
@@ -271,14 +279,9 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         relu_slack, relu_beta, a_relu_out, b_relu_out, _ = \
             self.add_lyap_relu_output_constraint(milp, x)
 
-        if self.network_bound_propagate_method == \
-                mip_utils.PropagateBoundsMethod.IA:
-            f_lo, f_up = self.system.compute_f_range_ia()
-            mip_cnstr_dphidx_times_f = \
-                self.lyapunov_relu_free_pattern.output_gradient_times_vector(
-                    f_lo, f_up)
-        else:
-            raise NotImplementedError
+        mip_cnstr_dphidx_times_f = \
+            self.lyapunov_relu_free_pattern.output_gradient_times_vector(
+                system_constraint_return.f_lo, system_constraint_return.f_up)
 
         dphidx_times_f_slack, _ = milp.add_mixed_integer_linear_constraints(
             mip_cnstr_dphidx_times_f, f, None, "f_slack", relu_beta, "f_ineq",
@@ -306,18 +309,22 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             binary_var_type=binary_var_type)
         if (self.network_bound_propagate_method ==
                 mip_utils.PropagateBoundsMethod.IA):
-            f_lo, f_up = self.system.compute_f_range_ia()
-            G_flat_lo, G_flat_up = self.system.compute_G_range_ia()
-            Rf_lo, Rf_up = self._compute_Rf_bounds_IA(R, f_lo, f_up)
-            RG_lo, RG_up = self._compute_RG_bounds_IA(R, G_flat_lo, G_flat_up)
+            Rf_lo, Rf_up = self._compute_Rf_bounds_IA(
+                R, system_constraint_return.f_lo,
+                system_constraint_return.f_up)
+            RG_lo, RG_up = self._compute_RG_bounds_IA(
+                R, system_constraint_return.G_flat_lo,
+                system_constraint_return.G_flat_up)
         else:
             raise NotImplementedError
         dl1dx_times_f_slack = self._add_dl1dx_times_f(milp, x, l1_binary, f, R,
                                                       Rf_lo, Rf_up, V_lambda,
                                                       Vdot_coeff, Vdot_vars)
         dVdx_times_G_ret, dVdx_times_G_binary = self._add_dVdx_times_G(
-            milp, x, l1_binary, relu_beta, Gt, R, G_flat_lo, G_flat_up, RG_lo,
-            RG_up, V_lambda, Vdot_coeff, Vdot_vars)
+            milp, x, l1_binary, relu_beta, Gt, R,
+            system_constraint_return.G_flat_lo,
+            system_constraint_return.G_flat_up, RG_lo, RG_up, V_lambda,
+            Vdot_coeff, Vdot_vars)
         if eps_type in (lyapunov.ConvergenceEps.ExpLower,
                         lyapunov.ConvergenceEps.ExpUpper):
             # The cost is V̇ + ε*V= V̇ + ε(ϕ(x) − ϕ(x*) + λ|R(x−x*)|₁)
@@ -650,7 +657,6 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         mip_cnstr_dphidx_times_G = [None] * self.system.u_dim
         if self.network_bound_propagate_method == \
                 mip_utils.PropagateBoundsMethod.IA:
-            G_flat_lo, G_flat_up = self.system.compute_G_range_ia()
             for j in range(self.system.u_dim):
                 Gi_lo = torch.stack([
                     G_flat_lo[i * self.system.u_dim + j]

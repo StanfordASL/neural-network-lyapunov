@@ -67,7 +67,6 @@ class TestLinearSystem(unittest.TestCase):
             np.array([Gi.x for Gi in G_flat]).reshape((dut.x_dim, dut.u_dim)),
             G_expected)
 
-
     def test_is_x_stabilizable(self):
         dtype = torch.float64
         A = torch.tensor([[1, 2], [-1, 2]], dtype=dtype)

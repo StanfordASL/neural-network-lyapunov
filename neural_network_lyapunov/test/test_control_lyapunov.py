@@ -267,14 +267,16 @@ class TestControlLyapunov(unittest.TestCase):
         Gt = [None] * dut.system.u_dim
         for i in range(dut.system.u_dim):
             Gt[i] = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
-        G_flat_lo, G_flat_up = dut.system.compute_G_range_ia()
-        RG_lo, RG_up = dut._compute_RG_bounds_IA(R, G_flat_lo, G_flat_up)
+        mip_cnstr_return = dut.system.mixed_integer_constraints()
+        RG_lo, RG_up = dut._compute_RG_bounds_IA(R, mip_cnstr_return.G_flat_lo,
+                                                 mip_cnstr_return.G_flat_up)
         V_lambda = 0.5
         Vdot_coeff = []
         Vdot_vars = []
         dVdx_times_G_ret, dVdx_times_G_binary = \
             dut._add_dVdx_times_G(
-                milp, x, l1_binary, relu_beta, Gt, R, G_flat_lo, G_flat_up,
+                milp, x, l1_binary, relu_beta, Gt, R,
+                mip_cnstr_return.G_flat_lo, mip_cnstr_return.G_flat_up,
                 RG_lo, RG_up, V_lambda, Vdot_coeff, Vdot_vars)
         self.assertEqual(len(Vdot_coeff), len(Vdot_vars))
         # Now sample many x and G, then solve the optimization problem, make
@@ -589,13 +591,16 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_compute_dVdx_times_G(self):
         dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
-        G_flat_lo, G_flat_up = dut.system.compute_G_range_ia()
+        mip_cnstr_return = self.linear_system.mixed_integer_constraints()
         R = torch.tensor([[1., 2.], [0., 1.], [1., -2.]], dtype=self.dtype)
-        RG_lo, RG_up = dut._compute_RG_bounds_IA(R, G_flat_lo, G_flat_up)
+        RG_lo, RG_up = dut._compute_RG_bounds_IA(R, mip_cnstr_return.G_flat_lo,
+                                                 mip_cnstr_return.G_flat_up)
         x_equilibrium = torch.tensor([0.5, -1.], dtype=self.dtype)
         V_lambda = 0.5
-        self.compute_dVdx_times_G_tester(dut, x_equilibrium, R, G_flat_lo,
-                                         G_flat_up, RG_lo, RG_up, V_lambda)
+        self.compute_dVdx_times_G_tester(dut, x_equilibrium, R,
+                                         mip_cnstr_return.G_flat_lo,
+                                         mip_cnstr_return.G_flat_up, RG_lo,
+                                         RG_up, V_lambda)
 
     def test_lyapunov_derivative_loss_at_samples_and_next_states(self):
         # Test with the linear system.
