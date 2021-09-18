@@ -103,7 +103,6 @@ class ControlPiecewiseAffineSystem:
         """
         raise NotImplementedError
 
-
     def can_be_equilibrium_state(self, x: torch.Tensor) -> bool:
         """
         Checks if the system can remain equilibrium at x. Namely
