@@ -74,9 +74,9 @@ After solving the inner maximization problem, we then compute the gradient of th
 \subsection{Continuous-time system}
 We assume that the continuous time system forward dynamics is
 \begin{align}
-	\dot{x} = \phi_f(x) + \phi_G(x)u - \phi_f(x^*) - \phi_G(x^*)u^*
+	\dot{x} = f(x) + G(x)u
 \end{align}
-where $\phi_f, \phi_G$ are given feedforward neural networks with leaky ReLU activation units. Without loss of generality we can assume that the bounds on the control input $u$ is 
+Without loss of generality we can assume that the bounds on the control input $u$ is 
 \begin{align}
 	-\mathbf{1}\le u \le \mathbf{1}
 \end{align}
@@ -94,9 +94,9 @@ Note that the left-hand side of the condition \eqref{eq:lyapunov_condition_Vdot_
 \begin{subequations}
 \begin{align}
 	&\min_{-\mathbf{1}\le u \le \mathbf{1}} \dot{V}\\
-	=&\min_{-\mathbf{1}\le u \le\mathbf{1}}\frac{\partial V}{\partial x}(\phi_f(x) + \phi_G(x)u - \phi_f(x^*) - \phi_G(x^*)u^*)\\
-	=&\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) + \min_{-\mathbf{1}\le u \le \mathbf{1}} \frac{\partial V}{\partial x}\phi_G(x)u\label{eq:control_lyapunov3}\\
-	=&\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) - \left|\frac{\partial V}{\partial x}\phi_G(x)\right|_1\label{eq:control_lyapunov4}
+	=&\min_{-\mathbf{1}\le u \le\mathbf{1}}\frac{\partial V}{\partial x}(f(x) + G(x)u)\\
+	=&\frac{\partial V}{\partial x}f(x) + \min_{-\mathbf{1}\le u \le \mathbf{1}} \frac{\partial V}{\partial x}G(x)u\label{eq:control_lyapunov3}\\
+	=&\frac{\partial V}{\partial x}f(x) - \left|\frac{\partial V}{\partial x}G(x)\right|_1\label{eq:control_lyapunov4}
 \end{align}
 \end{subequations}
 From \eqref{eq:control_lyapunov3} to \eqref{eq:control_lyapunov4} we use the fact that $\min_{|x|_{\infty}\le 1} a^Tx = -|a|_1$, namely 1-norm is the \textit{dual norm} of $\infty$-norm.
@@ -109,9 +109,47 @@ We represent the control-Lyapunov function through a neural network as
 And we solve the following two MILPs to either certify the control-Lyapunov condition, or find the counter-examples.
 \begin{align}
 	\max_{x} \epsilon_1|R(x-x^*)|_1 - V(x)\\
-	\max_{x} \underbrace{\frac{\partial V}{\partial x}(\phi_f(x) - \phi_f(x^*) - \phi_G(x^*)u^*) - \left|\frac{\partial V}{\partial x}\phi_G(x)\right|_1}_{\min_{-\mathbf{1}\le u \le \mathbf{1}} \dot{V}} + \epsilon_2V(x)
+	\max_{x} \underbrace{\frac{\partial V}{\partial x}f(x) - \left|\frac{\partial V}{\partial x}G(x)\right|_1}_{\min_{-\mathbf{1}\le u \le \mathbf{1}} \dot{V}} + \epsilon_2V(x)
 \end{align}
 
 We then compute the gradient of each MILP cost w.r.t $\theta, R$, and then use gradient descent on $\theta, R$ to minimize the loss.
+
+\subsubsection{subgradient in control Lyapunov function}
+One tricky thing is that when we compute $\dot{V}$ in the control Lyapunov function, it requires the gradient $\frac{\partial V}{\partial x}$. But as we use the (leaky) ReLU unit (and $l_1$ norm), the Lyapunov function $V$ is not differentiable everywhere. Specifically both the leaky ReLU unit and the $l_1$ norm function have kinks at input equal to 0. Hence we will need to think about the subgradient of the Lyapunov function. We denote the set of subgradient at $x$ as $\mathcal{D}(x)$.
+
+Our goal is that for each state, there exists a control action $u$, such that $\dot{V} < 0$ for all subgradient. Namely
+\begin{align}
+	\max_x \min_{\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^T(f(x) + G(x)u) < 0
+\end{align}
+This max-min-max problem is really hard. Let's try to remove the minimization in the middle. For a fixed $x$, consider the term
+\begin{align}
+	\min_{\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^TG(x)u
+\end{align}
+we denote the set $\mathcal{G}(x) = \{G(x)^Td| d\in\mathcal{D}(x)\}$, and re-write the term above as
+\begin{align}
+	\min_{\mathbf{1}\le u \le \mathbf{1}} \max_{g\in\mathcal{G}(x)} g^Tu
+\end{align}
+Let's consider each coordinate of the vector $g$ and $u$ separately
+\begin{align}
+	\min_{-1 \le u_i \le 1}\max_{g_i\in[\underline{g}_i, \bar{g}_i]} g_iu_i
+\end{align}
+where $[\underline{g}_i, \bar{g}_i]$ is the range of the i'th entry of $g$. We can compute this min-max problem in the analytical form as
+\begin{subequations}
+\begin{align}
+	\min_{-1 \le u_i \le 1}\max_{\underline{g}_i\le g_i \le \bar{g}_i} g_iu_i = &
+	\begin{cases}
+		-\underline{g}_i & \text{ if } \underline{g}_i > 0\\
+		\bar{g}_i & \text{ if } \bar{g}_i < 0\\
+		0 &\text{ otherwise}
+	\end{cases}\\
+	= & \max_{g_i\in[\underline{g}_i, \bar{g}_i]}- |g_i|
+\end{align}
+\end{subequations}
+Namely we can write
+\begin{align}
+	&\max_x \min_{-\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^T(f(x) + G(x)u)\\
+	=&\max_{x, d\in\mathcal{D}(x)} d^Tf(x) - |d^TG(x)|_1
+\end{align}
+which says we need to search over all the subgradient $d$ at each state $x$.
 
 \end{document}
