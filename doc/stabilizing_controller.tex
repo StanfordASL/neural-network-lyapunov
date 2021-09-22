@@ -115,41 +115,44 @@ And we solve the following two MILPs to either certify the control-Lyapunov cond
 We then compute the gradient of each MILP cost w.r.t $\theta, R$, and then use gradient descent on $\theta, R$ to minimize the loss.
 
 \subsubsection{subgradient in control Lyapunov function}
-One tricky thing is that when we compute $\dot{V}$ in the control Lyapunov function, it requires the gradient $\frac{\partial V}{\partial x}$. But as we use the (leaky) ReLU unit (and $l_1$ norm), the Lyapunov function $V$ is not differentiable everywhere. Specifically both the leaky ReLU unit and the $l_1$ norm function have kinks at input equal to 0. Hence we will need to think about the subgradient of the Lyapunov function. We denote the set of subgradient at $x$ as $\mathcal{D}(x)$.
+One tricky thing is that when we compute $\dot{V}$ in the control Lyapunov function, it requires the gradient $\frac{\partial V}{\partial x}$. But as we use the (leaky) ReLU unit (and $l_1$ norm), the Lyapunov function $V$ is not differentiable everywhere. Specifically both the leaky ReLU unit and the $l_1$ norm function have kinks at input equal to 0. Hence we will need to think about the subgradient of the Lyapunov function. We denote the set of subgradient at $x$ as $\mathcal{D}_V(x)$.
 
 Our goal is that for each state, there exists a control action $u$, such that $\dot{V} < 0$ for all subgradient. Namely
 \begin{align}
-	\max_x \min_{\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^T(f(x) + G(x)u) < 0
+	\max_x \min_{-\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}_V(x)} d^T(f(x) + G(x)u) < 0\label{eq:max_min_max_subgradient}
 \end{align}
-This max-min-max problem is really hard. Let's try to remove the minimization in the middle. For a fixed $x$, consider the term
+This max-min-max problem is really hard. The problem would be a lot easier if we could switch the inner minimization and maximization, such that we end up with the following max-min problem
 \begin{align}
-	\min_{\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^TG(x)u
+	\max_{x, d\in\mathcal{D}_V(x)} \min_{-\mathbf{1}\le u \le \mathbf{1}} d^T(f(x)+G(x)u) < 0 \label{eq:max_min_subgradient}
 \end{align}
-we denote the set $\mathcal{G}(x) = \{G(x)^Td| d\in\mathcal{D}(x)\}$, and re-write the term above as
+which we know is equivalent to the following condition with only maximization.
 \begin{align}
-	\min_{\mathbf{1}\le u \le \mathbf{1}} \max_{g\in\mathcal{G}(x)} g^Tu
+	\max_{x, d\in\mathcal{D}_V(x)}d^Tf(x) - |d^TG(x)|_1 < 0 \label{eq:max_subgradient}
 \end{align}
-Let's consider each coordinate of the vector $g$ and $u$ separately
+So the question is, what is the condition such that we can switch the inner minimization and maximization from \eqref{eq:max_min_max_subgradient} to \eqref{eq:max_min_subgradient}?
+
+From \textit{mini-max} theorem we know that if the set of subgradient $\mathcal{D}_V(x)$ is a convex compact set, then we can switch the order of the min-max. We will next describe some conditions such that the subgradient set $\mathcal{D}_V(x)$ is a convex compact set.
+
+Note that
 \begin{align}
-	\min_{-1 \le u_i \le 1}\max_{g_i\in[\underline{g}_i, \bar{g}_i]} g_iu_i
+	V(x) = \phi_V(x) - \phi_V(x^*) + \lambda |R(x-x^*)|_1
 \end{align}
-where $[\underline{g}_i, \bar{g}_i]$ is the range of the i'th entry of $g$. We can compute this min-max problem in the analytical form as
-\begin{subequations}
+Hence the subgradient set $\mathcal{D}_V(x)$ can be written as the Minkowski sum $\mathcal{D}_\phi(x) \oplus \mathcal{D}_l(x)$, where $\mathcal{D}_\phi(x)$ is the set of subgradient for the neural-network $\phi_V(x)$, and $\mathcal{D}_l(x)$ is the set of subgradient for the $l_1$ norm function $l(x) = \lambda |R(x-x^*)|_1$. Let's first analyze the subgradient for the $l_1$ norm function. The set $\mathcal{D}_l(x)$ can be described as
 \begin{align}
-	\min_{-1 \le u_i \le 1}\max_{\underline{g}_i\le g_i \le \bar{g}_i} g_iu_i = &
-	\begin{cases}
-		-\underline{g}_i & \text{ if } \underline{g}_i > 0\\
-		\bar{g}_i & \text{ if } \bar{g}_i < 0\\
-		0 &\text{ otherwise}
-	\end{cases}\\
-	= & \max_{g_i\in[\underline{g}_i, \bar{g}_i]}- |g_i|
+	\mathcal{D}_l(x) = \{\lambda y^TR\}
 \end{align}
-\end{subequations}
-Namely we can write
+where the i'th entry of $y$ has the following form
 \begin{align}
-	&\max_x \min_{-\mathbf{1}\le u \le \mathbf{1}} \max_{d\in\mathcal{D}(x)} d^T(f(x) + G(x)u)\\
-	=&\max_{x, d\in\mathcal{D}(x)} d^Tf(x) - |d^TG(x)|_1
+	y(i)\begin{cases}
+		= 1 & \text{ if } e_i^TR(x - x^*) > 0\\
+		= -1 & \text{ if }e_i^TR(x - x^*) < 0\\
+		\in [-1, 1] &\text { if } e_i^TR(x - x^*) = 0
+	\end{cases}
 \end{align}
-which says we need to search over all the subgradient $d$ at each state $x$.
+Hence for a fixed $x$, the set $\mathcal{Y} = \{y\}$ is a convex compact set. As a result, $\mathcal{D}_l(x)$, which is a linear transformation of $\mathcal{Y}$, also becomes a convex compact set.
+
+Similarly if we consider the ReLU network. The set of subgradient for each individual ReLU unit is also a convex set. Hence if only one layer of neurons has non-unique subgradient, while all other layers have unique gradient, then the set of subgradient $\mathcal{D}_V(x)$ for the entire neural network is also a convex compact set.
+
+To summarize, a sufficient condition for the subgradient set $\mathcal{D}_V(x)$ to be convex and compact, is that for the given state $x$, the (leaky) ReLU units with input being 0 are all in the same layer of the neural network.
 
 \end{document}
