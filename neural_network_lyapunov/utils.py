@@ -108,19 +108,36 @@ def leaky_relu_gradient_times_x(x_lo,
 
 
 def replace_absolute_value_with_mixed_integer_constraint(
-        x_lo, x_up, dtype=torch.float64):
+        x_lo, x_up, dtype=torch.float64, binary_for_zero_input=False):
     """
     For a variable x in the interval [x_lo, x_up], where x_lo < 0 < x_up,
-    if we denote the absolute value |x| as s, and introduce a binary variable
-    alpha, such that
-    alpha = 1 => x >= 0
-    alpha = 0 => x <= 0
-    then s, x and alpha shouls satisfy the following mixed-integer constraint
+    We denote the absolute value |x| as s.
+
+    If binary_for_zero_input=False, we introduce a binary variable
+    α, such that
+    α = 1 => x >= 0
+    α = 0 => x <= 0
+    then s, x and alpha should satisfy the following mixed-integer constraint
     s >= x
     s >= -x
-    -x + s - 2 * x_lo*alpha <= -2 * x_lo
-    x + s - 2 * x_up * alpha <= 0
-    We write this constraint in the conside form as
+    -x + s - 2 * x_lo*α <= -2 * x_lo
+    x + s - 2 * x_up *α <= 0
+
+    If binary_for_zero_input=True, we use 3 binary variables α[0], α[1], α[2],
+    such that
+    α[0] = 1 => x <= 0
+    α[1] = 1 => x = 0
+    α[2] = 1 => x >= 0
+    then s, x, alpha should satisfy the following mixed-integer constraint
+    s >= x
+    s >= -x
+    -x + s + 2 * x_lo*α[0] <= 0
+    x + s - 2 * x_up *α[2] <= 0
+
+    Note that the user is responsible to impose the constraint
+    α[0] + α[1] + α[2] = 1 separately.
+
+    We write these inequality constraint in the concise form as
     Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in
     @return (Ain_x, Ain_s, Ain_alpha, rhs_in)
     """
@@ -134,12 +151,18 @@ def replace_absolute_value_with_mixed_integer_constraint(
     assert (x_up > 0)
     Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
     Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    Ain_alpha = torch.stack((torch.tensor(0, dtype=dtype),
-                             torch.tensor(0,
-                                          dtype=dtype), -2 * x_lo, -2 * x_up))
-    rhs_in = torch.stack(
-        (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype), -2 * x_lo,
-         torch.tensor(0, dtype=dtype)))
+    if binary_for_zero_input:
+        Ain_alpha = torch.zeros((4, 3), dtype=dtype)
+        Ain_alpha[2, 0] = 2 * x_lo
+        Ain_alpha[3, 2] = -2 * x_up
+        rhs_in = torch.zeros(4, dtype=dtype)
+    else:
+        Ain_alpha = torch.stack(
+            (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+             -2 * x_lo, -2 * x_up))
+        rhs_in = torch.stack(
+            (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+             -2 * x_lo, torch.tensor(0, dtype=dtype)))
     return (Ain_x, Ain_s, Ain_alpha, rhs_in)
 
 
