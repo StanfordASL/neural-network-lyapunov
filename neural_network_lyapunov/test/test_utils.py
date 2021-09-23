@@ -64,7 +64,8 @@ class TestLeakyReLUGradientTimesX(unittest.TestCase):
 
 class test_replace_absolute_value_with_mixed_integer_constraint(
         unittest.TestCase):
-    def test(self):
+    def test_without_binary_for_zero_input(self):
+        # binary_for_zero_input is False.
         Ain_x, Ain_s, Ain_alpha, rhs_in =\
             utils.replace_absolute_value_with_mixed_integer_constraint(
                 torch.tensor(-2, dtype=torch.float64),
@@ -91,6 +92,41 @@ class test_replace_absolute_value_with_mixed_integer_constraint(
         test_fun(-1., 0.5, 0., False)
         test_fun(-1., -0.5, 0., False)
         test_fun(-1., 1., 1., False)
+
+    def test_with_binary_for_zero_input(self):
+        # binary_for_zero_input = True
+        dtype = torch.float64
+        Ain_x, Ain_s, Ain_alpha, rhs_in = \
+            utils.replace_absolute_value_with_mixed_integer_constraint(
+                torch.tensor(-2, dtype=dtype),
+                torch.tensor(3, dtype=dtype),
+                dtype=torch.float64,
+                binary_for_zero_input=True)
+
+        def test(x, s, alpha, satisfied):
+            self.assertEqual(
+                torch.all(
+                    Ain_x * torch.tensor([x], dtype=dtype) +
+                    Ain_s * torch.tensor([s], dtype=dtype) +
+                    Ain_alpha @ torch.tensor(alpha, dtype=dtype) <= rhs_in),
+                satisfied)
+
+        test(1, 1, [0, 0, 1], True)
+        test(1, 2, [0, 0, 1], False)
+        test(1, -1, [0, 0, 1], False)
+        test(1, 1, [1, 0, 0], False)
+        test(1, 1, [0, 1, 0], False)
+
+        test(0, 0, [0, 1, 0], True)
+        test(0, 1, [0, 1, 0], False)
+        test(0, -1, [0, 1, 0], False)
+        test(0, 0, [1, 0, 0], True)
+        test(0, 0, [0, 0, 1], True)
+
+        test(-1, 1, [1, 0, 0], True)
+        test(-1, -1, [1, 0, 0], False)
+        test(-1, 1, [0, 1, 0], False)
+        test(-1, 1, [0, 0, 1], False)
 
 
 class test_replace_relu_with_mixed_integer_constraint(unittest.TestCase):
