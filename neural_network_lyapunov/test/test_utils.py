@@ -62,6 +62,206 @@ class TestLeakyReLUGradientTimesX(unittest.TestCase):
         test_fun(0.5, 1.5, 0.1, 1.25, 0.25, 0, False)
 
 
+class test_absolute_value_as_mixed_integer_constraint(unittest.TestCase):
+    def satisfied(self, mip_cnstr_return, x_val: float, s_val: float,
+                  alpha_val: list):
+        dtype = torch.float64
+        if mip_cnstr_return.rhs_in is not None:
+            lhs_in = torch.zeros_like(mip_cnstr_return.rhs_in, dtype=dtype)
+            if mip_cnstr_return.Ain_input is not None:
+                lhs_in += mip_cnstr_return.Ain_input @ torch.tensor(
+                    [x_val], dtype=dtype)
+            if mip_cnstr_return.Ain_slack is not None:
+                lhs_in += mip_cnstr_return.Ain_slack @ torch.tensor(
+                    [s_val], dtype=dtype)
+            if mip_cnstr_return.Ain_binary is not None:
+                lhs_in += mip_cnstr_return.Ain_binary @ torch.tensor(
+                    alpha_val, dtype=dtype)
+            if not torch.all(lhs_in <= mip_cnstr_return.rhs_in):
+                return False
+        if mip_cnstr_return.rhs_eq is not None:
+            lhs_eq = torch.zeros_like(mip_cnstr_return.rhs_eq, dtype=dtype)
+            if mip_cnstr_return.Aeq_input is not None:
+                lhs_eq += mip_cnstr_return.Aeq_input @ torch.tensor(
+                    [x_val], dtype=dtype)
+            if mip_cnstr_return.Aeq_slack is not None:
+                lhs_eq += mip_cnstr_return.Aeq_slack @ torch.tensor(
+                    [s_val], dtype=dtype)
+            if mip_cnstr_return.Aeq_binary is not None:
+                lhs_eq += mip_cnstr_return.Aeq_binary @ torch.tensor(
+                    alpha_val, dtype=dtype)
+            if torch.any(torch.abs(lhs_eq - mip_cnstr_return.rhs_eq) > 1E-12):
+                return False
+        if mip_cnstr_return.binary_lo is not None and torch.any(
+                torch.tensor(alpha_val, dtype=dtype) <
+                mip_cnstr_return.binary_lo):
+            return False
+        if mip_cnstr_return.binary_up is not None and torch.any(
+                torch.tensor(alpha_val, dtype=dtype) >
+                mip_cnstr_return.binary_up):
+            return False
+        return True
+
+    def check_x(self, mip_cnstr_return, x_val, s_val, alpha_val, is_satisfied):
+        dtype = torch.float64
+        self.assertEqual(
+            self.satisfied(mip_cnstr_return, x_val, s_val, alpha_val),
+            is_satisfied)
+        mip = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x_var = mip.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        abs_var = mip.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        s_var, alpha_var = mip.add_mixed_integer_linear_constraints(
+            mip_cnstr_return, x_var, abs_var, "s", "alpha", "", "", "")
+        x_var[0].lb = x_val
+        x_var[0].ub = x_val
+        mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        mip.gurobi_model.optimize()
+        if mip.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+            self.assertAlmostEqual(abs_var[0].x, np.abs(x_val))
+
+    def test1(self):
+        # x_lo < 0 < x_up and binary_for_zero_input=False
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(-2, dtype=dtype),
+            torch.tensor(3, dtype=dtype),
+            binary_for_zero_input=False)
+        self.check_x(mip_cnstr_return, -1, 1, [0], True)
+        self.check_x(mip_cnstr_return, -2, 2, [0], True)
+        self.check_x(mip_cnstr_return, 1, 1, [1], True)
+        self.check_x(mip_cnstr_return, 3, 3, [1], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1], True)
+        self.check_x(mip_cnstr_return, 4, 4, [1], False)
+        self.check_x(mip_cnstr_return, -3, 3, [0], False)
+        self.check_x(mip_cnstr_return, -1, -1, [0], False)
+        self.check_x(mip_cnstr_return, -1, 1, [1], False)
+        self.check_x(mip_cnstr_return, 1, 2, [1], False)
+        self.check_x(mip_cnstr_return, 1, 0, [1], False)
+        self.check_x(mip_cnstr_return, 1, 0, [0], False)
+
+    def test2(self):
+        # x_lo < 0 < x_up and binary_for_zero_input=True
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(-2, dtype=dtype),
+            torch.tensor(3, dtype=dtype),
+            binary_for_zero_input=True)
+        self.check_x(mip_cnstr_return, -2, 2, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 1, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 2, 2, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 3, 3, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 4, 4, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, -3, 3, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 1, 0], False)
+        self.check_x(mip_cnstr_return, -1, -1, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, 1, -1, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 1, 0], False)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 1, 1], False)
+        self.check_x(mip_cnstr_return, -1, 1, [0, 1, 0], False)
+
+    def test3(self):
+        # x_lo >= 0 and binary_for_zero_input=False
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(0, dtype=dtype),
+            torch.tensor(3, dtype=dtype),
+            binary_for_zero_input=False)
+        self.check_x(mip_cnstr_return, 0, 0, [1], True)
+        self.check_x(mip_cnstr_return, 1, 1, [1], True)
+        self.check_x(mip_cnstr_return, 3, 3, [1], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0], False)
+        self.check_x(mip_cnstr_return, -1, 1, [0], False)
+        self.check_x(mip_cnstr_return, 4, 4, [1], False)
+        self.check_x(mip_cnstr_return, 1, 2, [1], False)
+        self.check_x(mip_cnstr_return, 1, 1, [0], False)
+
+    def test4(self):
+        # x_lo > 0 and binary_for_zero_input=True
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(1, dtype=dtype),
+            torch.tensor(3, dtype=dtype),
+            binary_for_zero_input=True)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 2, 2, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 3, 3, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 2, 2, [0, 1, 0], False)
+        self.check_x(mip_cnstr_return, 2, 2, [0, 1, 1], False)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, 4, 4, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, 2, 3, [0, 0, 1], False)
+
+    def test5(self):
+        # x_lo == 0 and binary_for_zero_input=True
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(0, dtype=dtype),
+            torch.tensor(3, dtype=dtype),
+            binary_for_zero_input=True)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 1, 0], True)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 3, 3, [0, 0, 1], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 1, 1], False)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 1, 0], False)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, 4, 4, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, 2, 3, [0, 0, 1], False)
+
+    def test6(self):
+        # x_up <= 0 and binary_for_zero_input=False
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(-2, dtype=dtype),
+            torch.tensor(0, dtype=dtype),
+            binary_for_zero_input=False)
+        self.check_x(mip_cnstr_return, -2, 2, [0], True)
+        self.check_x(mip_cnstr_return, -1, 1, [0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1], False)
+        self.check_x(mip_cnstr_return, -3, 3, [0], False)
+        self.check_x(mip_cnstr_return, 1, 1, [1], False)
+        self.check_x(mip_cnstr_return, -1, 1, [1], False)
+        self.check_x(mip_cnstr_return, -1, 2, [0], False)
+
+    def test7(self):
+        # x_up < 0 and binary_for_zero_input=True
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(-2, dtype=dtype),
+            torch.tensor(-1, dtype=dtype),
+            binary_for_zero_input=True)
+        self.check_x(mip_cnstr_return, -2, 2, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, -1.5, 1.5, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, -1, 1, [0, 1, 0], False)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 1, 0], False)
+        self.check_x(mip_cnstr_return, -3, 3, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, -0.5, 0.5, [1, 0, 0], False)
+
+    def test8(self):
+        # x_up = 0 and binary_for_zero_input=True
+        dtype = torch.float64
+        mip_cnstr_return = utils.absolute_value_as_mixed_integer_constraint(
+            torch.tensor(-2, dtype=dtype),
+            torch.tensor(0, dtype=dtype),
+            binary_for_zero_input=True)
+        self.check_x(mip_cnstr_return, -2, 2, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, -1, 1, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1, 0, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [0, 1, 0], True)
+        self.check_x(mip_cnstr_return, 0, 0, [1, 1, 0], False)
+        self.check_x(mip_cnstr_return, -3, 3, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, 1, 1, [0, 0, 1], False)
+        self.check_x(mip_cnstr_return, 0, 1, [1, 0, 0], False)
+        self.check_x(mip_cnstr_return, 0, 1, [0, 1, 0], False)
+
+
 class test_replace_absolute_value_with_mixed_integer_constraint(
         unittest.TestCase):
     def test_without_binary_for_zero_input(self):

@@ -107,6 +107,204 @@ def leaky_relu_gradient_times_x(x_lo,
         return (-A_x, -A_y, -A_alpha, -rhs)
 
 
+def absolute_value_as_mixed_integer_constraint(
+    x_lo: torch.Tensor,
+    x_up: torch.Tensor,
+    binary_for_zero_input=False
+) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
+    """
+    For a variable x in the interval [x_lo, x_up], we denote the absolute
+    value |x| as s, and returns the mixed-integer constraints on x, s and the
+    binary variables.
+
+    Case 1. When x_lo < 0 < x_up.
+    If binary_for_zero_input=False, we introduce a binary variable
+    α, such that
+    α = 1 => x >= 0
+    α = 0 => x <= 0
+    then s, x and alpha should satisfy the following mixed-integer constraint
+    x - s <= 0
+    -x - s <= 0
+    -x + s - 2 * x_lo*α <= -2 * x_lo
+    x + s - 2 * x_up *α <= 0
+
+    If binary_for_zero_input=True, we use 3 binary variables α[0], α[1], α[2],
+    such that
+    α[0] = 1 => x <= 0
+    α[1] = 1 => x = 0
+    α[2] = 1 => x >= 0
+    then s, x, alpha should satisfy the following mixed-integer constraint
+    s >= x
+    s >= -x
+    -x + s + 2 * x_lo*α[0] <= 0
+    x + s - 2 * x_up *α[2] <= 0
+    α[0] + α[1] + α[2] = 1
+
+    case 2. If (x_lo >= 0 and binary_for_zero_input=False) or
+        (x_lo > 0 and binary_for_zero_input=True)
+    then we impose the linear equality constraint
+    s=x
+    α=1 (if binary_for_zero_input=False)
+    α[0] = α[1] = 0, α[2] = 1 (if binary_for_zero_input=True)
+
+    case 3. If x_lo = 0 and binary_for_zero_input=True
+    s=x
+    x + s - 2 * x_up * α[2] <= 0
+    α[0] = 0
+    α[1] + α[2] = 1
+
+    case 4. If (x_up <= 0 and binary_for_zero_input=False) or
+        (x_up < 0 and binary_for_zero_input=True)
+    then we impose the linear equality constraint
+    s=-x
+    α=0 (if binary_for_zero_input=False)
+    α[0] = 1,  α[1] = α[2] = 0 (if binary_for_zero_input=True)
+
+    case 5. If x_up = 0 and binary_for_zero_input=True
+    s = -x
+    -x + s + 2 * x_lo*α[0] <= 0
+    α[2] = 0
+    α[0] + α[1] = 1
+    """
+    ret = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+    if isinstance(x_lo, float):
+        x_lo = torch.tensor(x_lo, dtype=torch.float64)
+    if isinstance(x_up, float):
+        x_up = torch.tensor(x_up, dtype=torch.float64)
+
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (isinstance(x_up, torch.Tensor))
+    assert (x_lo <= x_up)
+    dtype = x_lo.dtype
+    ret.Aout_slack = torch.tensor([[1]], dtype=dtype)
+    if x_lo < 0 and x_up > 0:
+        # case 1.
+        # s >= x
+        # s >= -x
+        ret.Ain_input = torch.tensor([[1], [-1], [-1], [1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[-1], [-1], [1], [1]], dtype=dtype)
+        if binary_for_zero_input:
+            # -x + s + 2 * x_lo*α[0] <= 0
+            # x + s - 2 * x_up *α[2] <= 0
+            # α[0] + α[1] + α[2] = 1
+            ret.Ain_binary = torch.zeros((4, 3), dtype=dtype)
+            ret.Ain_binary[2, 0] = 2 * x_lo
+            ret.Ain_binary[3, 2] = -2 * x_up
+            ret.rhs_in = torch.zeros(4, dtype=dtype)
+            ret.Aeq_input = torch.tensor([[0]], dtype=dtype)
+            ret.Aeq_slack = torch.tensor([[0]], dtype=dtype)
+            ret.Aeq_binary = torch.tensor([[1, 1, 1]], dtype=dtype)
+            ret.rhs_eq = torch.tensor([1], dtype=dtype)
+        else:
+            ret.Ain_binary = torch.stack(
+                (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+                 -2 * x_lo, -2 * x_up)).reshape((-1, 1))
+            ret.rhs_in = torch.stack(
+                (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
+                 -2 * x_lo, torch.tensor(0, dtype=dtype)))
+    elif x_lo >= 0 and not binary_for_zero_input:
+        # x >= x_lo
+        # x <= x_up
+        # s = x, α=1
+        ret.Ain_input = torch.tensor([[-1], [1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[0], [0]], dtype=dtype)
+        ret.Ain_binary = torch.tensor([[0], [0]], dtype=dtype)
+        ret.rhs_in = torch.stack((-x_lo, x_up))
+        ret.Aeq_input = torch.tensor([[1], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[-1], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.tensor([[0], [1]], dtype=dtype)
+        ret.rhs_eq = torch.tensor([0, 1], dtype=dtype)
+        ret.binary_lo = torch.tensor([1], dtype=dtype)
+        ret.binary_up = torch.tensor([1], dtype=dtype)
+    elif x_lo > 0 and binary_for_zero_input:
+        # x >= x_lo
+        # x <= x_up
+        # s = x, α[0] = α[1] = 0, α[2] = 1
+        ret.Ain_input = torch.tensor([[-1], [1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[0], [0]], dtype=dtype)
+        ret.Ain_binary = torch.zeros((2, 3), dtype=dtype)
+        ret.rhs_in = torch.stack((-x_lo, x_up))
+        ret.Aeq_input = torch.tensor([[1], [0], [0], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[-1], [0], [0], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.vstack((torch.zeros(
+            (1, 3), dtype=dtype), torch.eye(3, dtype=dtype)))
+        ret.rhs_eq = torch.tensor([0, 0, 0, 1], dtype=dtype)
+        ret.binary_lo = torch.tensor([0, 0, 1], dtype=dtype)
+        ret.binary_up = torch.tensor([0, 0, 1], dtype=dtype)
+    elif x_lo == 0 and binary_for_zero_input:
+        # s=x
+        # x >= x_lo
+        # x <= x_up
+        # x + s - 2 * x_up * α[2] <= 0
+        # α[0] = 0
+        # α[1] + α[2] = 1
+        ret.Ain_input = torch.tensor([[-1], [1], [1]], dtype=dtype)
+        ret.Ain_salck = torch.tensor([[0], [0], [1]], dtype=dtype)
+        ret.Ain_binary = torch.zeros((3, 3), dtype=dtype)
+        ret.Ain_binary[2, 2] = -2 * x_up
+        ret.rhs_in = torch.stack((-x_lo, x_up, torch.tensor(0, dtype=dtype)))
+        ret.Aeq_input = torch.tensor([[1], [0], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[-1], [0], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.tensor([[0, 0, 0], [1, 0, 0], [0, 1, 1]],
+                                      dtype=dtype)
+        ret.rhs_eq = torch.tensor([0, 0, 1], dtype=dtype)
+        ret.binary_lo = torch.tensor([0, 0, 0], dtype=dtype)
+        ret.binary_up = torch.tensor([0, 1, 1], dtype=dtype)
+    elif x_up <= 0 and not binary_for_zero_input:
+        # x >= x_lo
+        # x <= x_up
+        # s = -x
+        # α = 0
+        ret.Ain_input = torch.tensor([[-1], [1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[0], [0]], dtype=dtype)
+        ret.Ain_binary = torch.tensor([[0], [0]], dtype=dtype)
+        ret.rhs_in = torch.stack((-x_lo, x_up))
+        ret.Aeq_input = torch.tensor([[1], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[1], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.tensor([[0], [1]], dtype=dtype)
+        ret.rhs_eq = torch.tensor([0, 0], dtype=dtype)
+        ret.binary_lo = torch.tensor([0], dtype=dtype)
+        ret.binary_up = torch.tensor([0], dtype=dtype)
+    elif x_up < 0 and binary_for_zero_input:
+        # x >= x_lo
+        # x <= x_up
+        # s = -x
+        # α = [1, 0, 0]
+        ret.Ain_input = torch.tensor([[-1], [1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[0], [0]], dtype=dtype)
+        ret.Ain_binary = torch.zeros((2, 3), dtype=dtype)
+        ret.rhs_in = torch.stack((-x_lo, x_up))
+        ret.Aeq_input = torch.tensor([[1], [0], [0], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[1], [0], [0], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.vstack((torch.zeros(
+            (1, 3), dtype=dtype), torch.eye(3, dtype=dtype)))
+        ret.rhs_eq = torch.tensor([0, 1, 0, 0], dtype=dtype)
+        ret.binary_lo = torch.tensor([1, 0, 0], dtype=dtype)
+        ret.binary_up = torch.tensor([1, 0, 0], dtype=dtype)
+    elif x_up == 0 and binary_for_zero_input:
+        # x >= x_lo
+        # x <= x_up
+        # s = -x
+        # -x + s + 2 * x_lo*α[0] <= 0
+        # α[2] = 0
+        # α[0] + α[1] = 1
+        ret.Ain_input = torch.tensor([[-1], [1], [-1]], dtype=dtype)
+        ret.Ain_slack = torch.tensor([[0], [0], [1]], dtype=dtype)
+        ret.Ain_binary = torch.zeros((3, 3), dtype=dtype)
+        ret.Ain_binary[2, 0] = 2 * x_lo
+        ret.rhs_in = torch.stack((-x_lo, x_up, torch.tensor(0, dtype=dtype)))
+        ret.Aeq_input = torch.tensor([[1], [0], [0]], dtype=dtype)
+        ret.Aeq_slack = torch.tensor([[1], [0], [0]], dtype=dtype)
+        ret.Aeq_binary = torch.zeros((3, 3), dtype=dtype)
+        ret.Aeq_binary[1, 2] = 1.
+        ret.Aeq_binary[2, 0] = 1.
+        ret.Aeq_binary[2, 1] = 1.
+        ret.rhs_eq = torch.tensor([0, 0, 1], dtype=dtype)
+        ret.binary_lo = torch.tensor([0, 0, 0], dtype=dtype)
+        ret.binary_up = torch.tensor([1, 1, 0], dtype=dtype)
+    return ret
+
+
 def replace_absolute_value_with_mixed_integer_constraint(
         x_lo, x_up, dtype=torch.float64, binary_for_zero_input=False):
     """
