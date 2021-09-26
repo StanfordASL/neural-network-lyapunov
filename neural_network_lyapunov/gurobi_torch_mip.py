@@ -47,6 +47,45 @@ class MixedIntegerConstraintsReturn:
         self.binary_up = None
         self.binary_lo = None
 
+    def num_ineq(self):
+        if self.rhs_in is None:
+            assert (self.Ain_input is None and self.Ain_slack is None
+                    and self.Ain_binary is None)
+            return 0
+        assert (len(self.rhs_in.shape) == 1)
+        if self.Ain_input is not None:
+            assert (self.Ain_input.shape[0] == self.rhs_in.shape[0])
+        if self.Ain_slack is not None:
+            assert (self.Ain_slack.shape[0] == self.rhs_in.shape[0])
+        if self.Ain_binary is not None:
+            assert (self.Ain_binary.shape[0] == self.rhs_in.shape[0])
+        return self.rhs_in.shape[0]
+
+    def num_eq(self):
+        if self.rhs_eq is None:
+            assert (self.Aeq_input is None and self.Aeq_slack is None
+                    and self.Aeq_binary is None)
+            return 0
+        assert (len(self.rhs_eq.shape) == 1)
+        if self.Aeq_input is not None:
+            assert (self.Aeq_input.shape[0] == self.rhs_eq.shape[0])
+        if self.Aeq_slack is not None:
+            assert (self.Aeq_slack.shape[0] == self.rhs_eq.shape[0])
+        if self.Aeq_binary is not None:
+            assert (self.Aeq_binary.shape[0] == self.rhs_eq.shape[0])
+        return self.rhs_eq.shape[0]
+
+    def clone(self):
+        other = MixedIntegerConstraintsReturn()
+        for item in self.__dict__.keys():
+            if self.__dict__[item] is None:
+                other.__dict__[item] = None
+            elif isinstance(self.__dict__[item], torch.Tensor):
+                other.__dict__[item] = torch.clone(self.__dict__[item])
+            else:
+                assert ("clone(): unknown type.")
+        return other
+
 
 """
 binary relaxed variables. This variable is registered as continuous
