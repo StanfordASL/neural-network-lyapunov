@@ -6,6 +6,46 @@ import unittest
 import numpy as np
 
 
+class TestMixedIntegerConstraintsReturn(unittest.TestCase):
+    def test_constructor(self):
+        dut = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        self.assertEqual(dut.num_eq(), 0)
+        self.assertEqual(dut.num_ineq(), 0)
+        dtype = torch.float64
+
+        dut.Ain_input = torch.tensor([[2], [3]], dtype=dtype)
+        dut.rhs_in = torch.tensor([2, 5], dtype=dtype)
+        self.assertEqual(dut.num_ineq(), 2)
+        self.assertEqual(dut.num_eq(), 0)
+
+        dut.Aeq_slack = torch.tensor([[1, 2], [2, 3], [3, 4]], dtype=dtype)
+        dut.rhs_eq = torch.tensor([1, 2, 3], dtype=dtype)
+        self.assertEqual(dut.num_ineq(), 2)
+        self.assertEqual(dut.num_eq(), 3)
+
+    def test_clone(self):
+        dtype = torch.float64
+        dut = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        dut.Ain_input = torch.tensor([[2], [3]], dtype=dtype)
+        dut.rhs_in = torch.tensor([2, 5], dtype=dtype)
+        other = dut.clone()
+        np.testing.assert_allclose(other.Ain_input.detach().numpy(),
+                                   dut.Ain_input.detach().numpy())
+        np.testing.assert_allclose(other.rhs_in.detach().numpy(),
+                                   dut.rhs_in.detach().numpy())
+        for item in dut.__dict__.keys():
+            if item not in ("Ain_input", "rhs_in"):
+                self.assertIsNone(other.__dict__[item])
+
+        # Changing other won't affect dut, and vice versa.
+        dut.Ain_input = torch.tensor([[3], [4]], dtype=dtype)
+        np.testing.assert_allclose(other.Ain_input.detach().numpy(),
+                                   np.array([[2], [3]]))
+        other.rhs_in = torch.tensor([1, 4], dtype=dtype)
+        np.testing.assert_allclose(dut.rhs_in.detach().numpy(),
+                                   np.array([2., 5]))
+
+
 def setup_mip1(dut):
     dtype = torch.float64
     # The constraints are
