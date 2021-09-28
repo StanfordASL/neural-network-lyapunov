@@ -305,65 +305,6 @@ def absolute_value_as_mixed_integer_constraint(
     return ret
 
 
-def replace_absolute_value_with_mixed_integer_constraint(
-        x_lo, x_up, dtype=torch.float64, binary_for_zero_input=False):
-    """
-    For a variable x in the interval [x_lo, x_up], where x_lo < 0 < x_up,
-    We denote the absolute value |x| as s.
-
-    If binary_for_zero_input=False, we introduce a binary variable
-    α, such that
-    α = 1 => x >= 0
-    α = 0 => x <= 0
-    then s, x and alpha should satisfy the following mixed-integer constraint
-    s >= x
-    s >= -x
-    -x + s - 2 * x_lo*α <= -2 * x_lo
-    x + s - 2 * x_up *α <= 0
-
-    If binary_for_zero_input=True, we use 3 binary variables α[0], α[1], α[2],
-    such that
-    α[0] = 1 => x <= 0
-    α[1] = 1 => x = 0
-    α[2] = 1 => x >= 0
-    then s, x, alpha should satisfy the following mixed-integer constraint
-    s >= x
-    s >= -x
-    -x + s + 2 * x_lo*α[0] <= 0
-    x + s - 2 * x_up *α[2] <= 0
-
-    Note that the user is responsible to impose the constraint
-    α[0] + α[1] + α[2] = 1 separately.
-
-    We write these inequality constraint in the concise form as
-    Ain_x * x + Ain_s * s + Ain_alpha * alpha <= rhs_in
-    @return (Ain_x, Ain_s, Ain_alpha, rhs_in)
-    """
-    if isinstance(x_lo, float):
-        x_lo = torch.tensor(x_lo, dtype=dtype)
-    if isinstance(x_up, float):
-        x_up = torch.tensor(x_up, dtype=dtype)
-    assert (isinstance(x_lo, torch.Tensor))
-    assert (isinstance(x_up, torch.Tensor))
-    assert (x_lo < 0)
-    assert (x_up > 0)
-    Ain_x = torch.tensor([1, -1, -1, 1], dtype=dtype)
-    Ain_s = torch.tensor([-1, -1, 1, 1], dtype=dtype)
-    if binary_for_zero_input:
-        Ain_alpha = torch.zeros((4, 3), dtype=dtype)
-        Ain_alpha[2, 0] = 2 * x_lo
-        Ain_alpha[3, 2] = -2 * x_up
-        rhs_in = torch.zeros(4, dtype=dtype)
-    else:
-        Ain_alpha = torch.stack(
-            (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
-             -2 * x_lo, -2 * x_up))
-        rhs_in = torch.stack(
-            (torch.tensor(0, dtype=dtype), torch.tensor(0, dtype=dtype),
-             -2 * x_lo, torch.tensor(0, dtype=dtype)))
-    return (Ain_x, Ain_s, Ain_alpha, rhs_in)
-
-
 def replace_relu_with_mixed_integer_constraint(x_lo,
                                                x_up,
                                                dtype=torch.float64):

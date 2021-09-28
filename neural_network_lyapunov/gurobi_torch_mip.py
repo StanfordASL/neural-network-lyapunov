@@ -86,6 +86,37 @@ class MixedIntegerConstraintsReturn:
                 assert ("clone(): unknown type.")
         return other
 
+    def transform_input(self, A: torch.Tensor, b: torch.Tensor):
+        """
+        Transform the input to be A * x + b.
+        Originally the constraints are
+        Ain_input * x + Ain_slack * s + Ain_binary * binary <= rhs_in
+        Aeq_input * x + Aeq_slack * s + Aeq_binary * binary = rhs_eq.
+        After transforming the input, now the constraints are
+        Ain_input * A * x + Ain_slack * s + Ain_binary * binary <=
+            rhs_in - Ain_input * b
+        Aeq_input * A * x + Aeq_slack * s + Aeq_binary * binary =
+            rhs_eq - Aeq_input * b.
+        The output is
+        Aout_input * A * x + Aout_slack * s + Aout_binary * binary +
+            Aout_input * b + Cout.
+        """
+        if self.Ain_input is not None:
+            self.rhs_in -= self.Ain_input @ b
+            self.Ain_input = self.Ain_input @ A
+        if self.Aeq_input is not None:
+            self.rhs_eq -= self.Aeq_input @ b
+            self.Aeq_input = self.Aeq_input @ A
+        if self.Aout_input is not None:
+            if self.Cout is not None:
+                self.Cout += self.Aout_input @ b
+            else:
+                self.Cout = self.Aout_input @ b
+            self.Aout_input = self.Aout_input @ A
+        if self.input_lo is not None or self.input_up is not None:
+            assert("transform_input(): cannot handle non-empty input_lo or " +
+                   "input_up")
+
 
 """
 binary relaxed variables. This variable is registered as continuous

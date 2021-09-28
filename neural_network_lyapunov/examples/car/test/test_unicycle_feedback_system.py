@@ -61,6 +61,7 @@ class TestUnicycleFeedbackSystem(unittest.TestCase):
         lambda_u = 0.4
         Ru_options = r_options.SearchRwithSVDOptions((3, 2),
                                                      a=np.array([0.1, 0.2]))
+        Ru_options.set_variable_value(np.array([[0.2, 0], [0, 0.4], [0, 0]]))
         self.dut = unicycle_feedback_system.UnicycleFeedbackSystem(
             self.forward_system, controller_network,
             self.u_lo.detach().numpy(),
