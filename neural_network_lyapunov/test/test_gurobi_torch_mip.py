@@ -45,6 +45,53 @@ class TestMixedIntegerConstraintsReturn(unittest.TestCase):
         np.testing.assert_allclose(dut.rhs_in.detach().numpy(),
                                    np.array([2., 5]))
 
+    def transform_input_tester(self, dut, x_eq):
+        dtype = torch.float64
+        other = dut.clone()
+        A = torch.tensor([[1, 0, 2], [2, 1, 2], [3, 1, 2]], dtype=dtype)
+        b = torch.tensor([1, 3, 2], dtype=dtype)
+        other.transform_input(A, b)
+        np.testing.assert_array_less((dut.Ain_input @ x_eq).detach().numpy(),
+                                     dut.rhs_in.detach().numpy())
+        x_other = A.inverse() @ (x_eq - b)
+        np.testing.assert_array_less(
+            (other.Ain_input @ x_other).detach().numpy(),
+            other.rhs_in.detach().numpy())
+        np.testing.assert_allclose(
+            (other.Aeq_input @ x_other).detach().numpy(),
+            other.rhs_eq.detach().numpy())
+        x_samples = utils.uniform_sample_in_box(
+            -10 * torch.ones(3, dtype=dtype), 10 * torch.ones(3, dtype=dtype),
+            100)
+        for i in range(x_samples.shape[0]):
+            self.assertEqual(
+                torch.all(
+                    dut.Ain_input @ (A @ x_samples[i] + b) <= dut.rhs_in),
+                torch.all(other.Ain_input @ x_samples[i] <= other.rhs_in))
+            out = dut.Aout_input @ (A @ x_samples[i] + b)
+            if dut.Cout is not None:
+                out += dut.Cout
+            np.testing.assert_allclose(out.detach().numpy(),
+                                       (other.Aout_input @ x_samples[i] +
+                                        other.Cout).detach().numpy())
+
+    def test_transform_input(self):
+        dut = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        dtype = torch.float64
+        dut.Ain_input = torch.tensor([[1, 2, 3], [3, 4, 5]], dtype=dtype)
+        dut.rhs_in = torch.tensor([1, 5], dtype=dtype)
+        dut.Aeq_input = torch.tensor([[1, 2, 5], [7, 8, -1]], dtype=dtype)
+        dut.Aout_input = torch.tensor([[1, 3, 2]], dtype=dtype)
+        x_eq = torch.tensor([-2, -3, 1], dtype=dtype)
+        dut.rhs_eq = dut.Aeq_input @ x_eq
+
+        # First test dut.Cout = None
+        dut.Cout = None
+        self.transform_input_tester(dut, x_eq)
+        # Now set dut.Cout
+        dut.Cout = torch.tensor([2], dtype=dtype)
+        self.transform_input_tester(dut, x_eq)
+
 
 def setup_mip1(dut):
     dtype = torch.float64
@@ -1169,7 +1216,7 @@ class TestGurobiTorchMILP(unittest.TestCase):
                            rhs=a[0] + 2 * a[2] * a[1])
             dut.addLConstr([
                 torch.stack((torch.tensor(2., dtype=dtype), a[1]**2,
-                             torch.tensor(0.5, dtype=dtype))),
+                            torch.tensor(0.5, dtype=dtype))),
                 torch.tensor([1., 1.], dtype=dtype)
             ], [x, alpha],
                            sense=gurobipy.GRB.EQUAL,

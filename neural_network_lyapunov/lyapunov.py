@@ -155,14 +155,25 @@ class LyapunovHybridLinearSystem:
                                       R=None,
                                       slack_name="s",
                                       binary_var_name="alpha",
-                                      binary_var_type=gurobipy.GRB.BINARY):
+                                      binary_var_type=gurobipy.GRB.BINARY,
+                                      binary_for_zero_input=False):
         """
         This function is intended for internal usage only (but I expose it
         as a public function for unit test).
         we add the L1 loss |R*(x-x*)|₁ as mixed-integer linear constraints.
         return (s, alpha) s is the continuous slack variable,
         s(i) = |R[i, :] * (x - x*)|, alpha is the binary variable,
+        If binary_for_zero_input is False, then
+        alpha is the same dimension as s
         alpha(i) = 1 => s(i) >= 0, alpha(i) = 0 => s(i) <= 0
+        If binary_for_zero_input is True, then
+        alpha is a list, where each entry of alpha[i] contains 3 binary
+        variables.
+        alpha[i][0] = 1 => s(i) <= 0
+        alpha[i][1] = 1 => s(i) = 0
+        alpha[i][2] = 1 => s(i) >= 0
+        and we also impose the constraint
+        alpha[i][0] + alpha[i][1] + alpha[i][2] = 1
         @param R A matrix. We want this matrix to have full column rank. If
         R=None, then we use identity as R.
         """
@@ -176,62 +187,32 @@ class LyapunovHybridLinearSystem:
         # R should have full column rank, so that s = 0 implies x = x*
         assert (R.shape[0] >= R.shape[1])
         s_dim = R.shape[0]
-        s = milp.addVars(s_dim,
-                         lb=-gurobipy.GRB.INFINITY,
-                         vtype=gurobipy.GRB.CONTINUOUS,
-                         name=slack_name)
-        alpha = milp.addVars(s_dim,
-                             lb=0.,
-                             ub=1.,
-                             vtype=binary_var_type,
-                             name=binary_var_name)
-
-        s_lb, s_ub = mip_utils.compute_range_by_IA(
+        # The lower and upper bound of R*(x-x*)
+        Rx_lb, Rx_ub = mip_utils.compute_range_by_IA(
             R, -R @ x_equilibrium, torch.from_numpy(self.system.x_lo_all),
             torch.from_numpy(self.system.x_up_all))
+        s = [None] * s_dim
+        alpha = [None] * s_dim
         for i in range(s_dim):
-            if s_lb[i] < 0 and s_ub[i] > 0:
-                # Add the constraint s[i] = |R[i, :] * ( x - x*)|
-                # We first convert the absolute value to mixed-integer linear
-                # constraint, and then add the constraint
-                # Ain_x * (R[i, :] * (x - x*)) + Ain_s * s + Ain_alpha *
-                # alpha <= rhs_in
-                Ain_x, Ain_s, Ain_alpha, rhs_in = utils.\
-                    replace_absolute_value_with_mixed_integer_constraint(
-                        s_lb[i], s_ub[i], dtype=torch.float64)
-                rhs = rhs_in + (Ain_x.reshape((-1, 1)) @ R[i].reshape(
-                    (1, -1)) @ x_equilibrium.reshape((-1, 1))).reshape((-1))
-                milp.addMConstrs([
-                    Ain_x.reshape((-1, 1)) @ R[i].reshape((1, -1)),
-                    Ain_s.reshape((-1, 1)),
-                    Ain_alpha.reshape((-1, 1))
-                ], [x, [s[i]], [alpha[i]]],
-                                 sense=gurobipy.GRB.LESS_EQUAL,
-                                 b=rhs)
-            elif s_lb[i] >= 0:
-                # Add the constraint s[i] = R[i, :] * (x - x*)
-                milp.addLConstr(
-                    [torch.tensor([1], dtype=torch.float64), -R[i]],
-                    [[s[i]], x],
-                    sense=gurobipy.GRB.EQUAL,
-                    rhs=-R[i] @ x_equilibrium)
-                # Add the constraint alpha[i] = 1
-                milp.addLConstr([torch.tensor([1], dtype=torch.float64)],
-                                [[alpha[i]]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=1.)
+            mip_cnstr = utils.absolute_value_as_mixed_integer_constraint(
+                Rx_lb[i], Rx_ub[i], binary_for_zero_input)
+            # The constraint in mip_cnstr is
+            # Ain_input * (R[i, :] * (x-x*)) + Ain_slack * s[i] +
+            # Ain_binary * alpha <= rhs_in
+            # Aeq_input * (R[i, :] * (x-x*)) + Aeq_slack * s[i] +
+            # Aeq_binary * alpha = rhs_eq
+            mip_cnstr.transform_input(R[i, :].reshape(
+                (1, -1)), (-R[i, :] @ x_equilibrium).reshape((-1, )))
+            s_i, alpha_i = milp.add_mixed_integer_linear_constraints(
+                mip_cnstr, x, None, slack_name + f"[{i}]",
+                binary_var_name + f"[{i}]", "l1_ineq", "l1_eq", "",
+                binary_var_type)
+            assert (len(s_i) == 1)
+            s[i] = s_i[0]
+            if len(alpha_i) == 1:
+                alpha[i] = alpha_i[0]
             else:
-                # Add the constraint s[i] = -R[i, :] * (x - x*)
-                milp.addLConstr([torch.tensor([1], dtype=torch.float64), R[i]],
-                                [[s[i]], x],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=R[i] @ x_equilibrium)
-                # Add the constraint alpha[i] = 0
-                milp.addLConstr([torch.tensor([1], dtype=torch.float64)],
-                                [[alpha[i]]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=0.)
-
+                alpha[i] = alpha_i
         return (s, alpha)
 
     def lyapunov_value(self, x, x_equilibrium, V_lambda, *, R=None):

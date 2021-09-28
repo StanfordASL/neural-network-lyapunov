@@ -77,59 +77,33 @@ class UnicycleFeedbackSystem(feedback_system.FeedbackSystem):
         # Write the part |Rᵤ*[p_x, p_y]|₁ = sum s
         Ru = self.Ru_options.R()
         s_dim = Ru.shape[0]
-        s = prog.addVars(s_dim,
-                         lb=-gurobipy.GRB.INFINITY,
-                         vtype=gurobipy.GRB.CONTINUOUS,
-                         name="unicycle_controller_s")
-        alpha = prog.addVars(s_dim,
-                             vtype=gurobipy.GRB.BINARY,
-                             name="unicycle_controller_alpha")
         Rx_lb, Rx_ub = mip_utils.compute_range_by_IA(
             Ru, torch.zeros((s_dim, ), dtype=self.dtype),
             torch.from_numpy(self.forward_system.x_lo_all[:2]),
             torch.from_numpy(self.forward_system.x_up_all[:2]))
         s_lb = torch.zeros((s_dim, ), dtype=self.dtype)
         s_ub = torch.zeros((s_dim, ), dtype=self.dtype)
+        s = [None] * s_dim
+        alpha = [None] * s_dim
         for i in range(s_dim):
+            mip_cnstr_ret = utils.absolute_value_as_mixed_integer_constraint(
+                Rx_lb[i], Rx_ub[i], False)
+            mip_cnstr_ret.transform_input(Ru[i, :].reshape((1, -1)),
+                                          torch.tensor([0], dtype=self.dtype))
+            s_i, alpha_i = prog.add_mixed_integer_linear_constraints(
+                mip_cnstr_ret, x_var[:2], None, "unicycle_controller_s",
+                "unicycle_controller_binary", "", "", "", gurobipy.GRB.BINARY)
+            assert (len(s_i) == 1)
+            s[i] = s_i[0]
+            assert (len(alpha_i) == 1)
+            alpha[i] = alpha_i[0]
+
             if Rx_lb[i] < 0 and Rx_ub[i] > 0:
-                # Add the constraint
-                # Ain_x * (Ru[i, :] * x[:2]) + Ain_s * s + Ain_alpha * alpha
-                # <= rhs_in
-                Ain_x, Ain_s, Ain_alpha, rhs_in = \
-                    utils.replace_absolute_value_with_mixed_integer_constraint(
-                        Rx_lb[i], Rx_ub[i], dtype=self.dtype)
-                prog.addMConstrs([
-                    Ain_x.reshape((-1, 1)) @ Ru[i].reshape((1, -1)),
-                    Ain_s.reshape((-1, 1)),
-                    Ain_alpha.reshape((-1, 1))
-                ], [x_var[:2], [s[i]], [alpha[i]]],
-                                 sense=gurobipy.GRB.LESS_EQUAL,
-                                 b=rhs_in)
                 s_ub[i] = torch.max(-Rx_lb[i], Rx_ub[i])
             elif Rx_lb[i] >= 0:
-                # Add the constraint s[i] = Ru[i, :] * x[:2]
-                prog.addLConstr([torch.tensor([1], dtype=self.dtype), -Ru[i]],
-                                [[s[i]], x_var[:2]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=0.)
-                # Add the constraint alpha[i] = 1
-                prog.addLConstr([torch.tensor([1], dtype=self.dtype)],
-                                [[alpha[i]]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=1.)
                 s_lb[i] = Rx_lb[i]
                 s_ub[i] = Rx_ub[i]
             elif Rx_ub[i] <= 0:
-                # Add the constraint s[i] = -R[i,:] * x[:2]
-                prog.addLConstr([torch.tensor([1], dtype=self.dtype), Ru[i]],
-                                [[s[i]], x_var[:2]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=0.)
-                # Add the constraint alpha[i] = 0
-                prog.addLConstr([torch.tensor([1], dtype=torch.float64)],
-                                [[alpha[i]]],
-                                sense=gurobipy.GRB.EQUAL,
-                                rhs=0.)
                 s_lb[i] = -Rx_ub[i]
                 s_ub[i] = -Rx_lb[i]
 
