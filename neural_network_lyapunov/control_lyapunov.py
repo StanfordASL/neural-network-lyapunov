@@ -63,7 +63,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
     """
     def __init__(self,
                  system: control_affine_system.ControlPiecewiseAffineSystem,
-                 lyapunov_relu):
+                 lyapunov_relu,
+                 search_subgradient=False):
         """
         Args:
           system: A control-affine system.
@@ -73,6 +74,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         assert (isinstance(system,
                            control_affine_system.ControlPiecewiseAffineSystem))
         super(ControlLyapunov, self).__init__(system, lyapunov_relu)
+        self.search_subgradient = search_subgradient
 
     def lyapunov_derivative(self,
                             x,
@@ -582,23 +584,16 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                         dtype=self.system.dtype))
                 Vdot_vars.append([compute_dVdx_times_G_return.dVdx_times_G[i]])
             else:
-                Ain_abs_input, Ain_abs_output, Ain_abs_binary, rhs_in_abs = \
-                    utils.replace_absolute_value_with_mixed_integer_constraint(
+                mip_cnstr_abs = \
+                    utils.absolute_value_as_mixed_integer_constraint(
                         compute_dVdx_times_G_return.dVdx_times_G_lo[i],
                         compute_dVdx_times_G_return.dVdx_times_G_up[i],
-                        dtype=self.system.dtype)
-                slack = milp.addVars(1,
-                                     lb=-gurobipy.GRB.INFINITY,
-                                     name=f"dVdx_times_G[{i}]_abs")
-                milp.addMConstrs([
-                    Ain_abs_input.reshape((-1, 1)),
-                    Ain_abs_output.reshape((-1, 1)),
-                    Ain_abs_binary.reshape((-1, 1))
-                ], [[compute_dVdx_times_G_return.dVdx_times_G[i]], slack,
-                    [dVdx_times_G_binary[i]]],
-                                 sense=gurobipy.GRB.LESS_EQUAL,
-                                 b=rhs_in_abs,
-                                 name=f"dVdx_times_G{i}_abs")
+                        binary_for_zero_input=self.search_subgradient)
+                slack, _ = milp.add_mixed_integer_linear_constraints(
+                    mip_cnstr_abs,
+                    [compute_dVdx_times_G_return.dVdx_times_G[i]], None,
+                    f"dVdx_times_G[{i}]_abs", [dVdx_times_G_binary[i]], "", "",
+                    "")
                 Vdot_coeff.append(
                     torch.tensor(
                         [-(self.system.u_up[i] - self.system.u_lo[i]) / 2],
