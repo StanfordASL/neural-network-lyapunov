@@ -70,6 +70,9 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
           system: A control-affine system.
           lyapunov_relu: The neural network ϕ which defines the Lyapunov
           function.
+          search_subgradient: If set to True, then we will search for all the
+          subgradient of V(x); Otherwise, we only search for the left and right
+          derivatives of V(x).
         """
         assert (isinstance(system,
                            control_affine_system.ControlPiecewiseAffineSystem))
@@ -308,7 +311,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             R=R,
             slack_name="l1_slack",
             binary_var_name="l1_binary",
-            binary_var_type=binary_var_type)
+            binary_var_type=binary_var_type,
+            binary_for_zero_input=self.search_subgradient)
         if (self.network_bound_propagate_method ==
                 mip_utils.PropagateBoundsMethod.IA):
             Rf_lo, Rf_up = self._compute_Rf_bounds_IA(
@@ -471,8 +475,17 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         We need to add the mixed-integer linear constraints, and also append
         new terms to Vdot_coeff and Vdot_vars.
         As we have introduced binary variables α for the l1 norm, such that
-        α = 1 => (R(x-x*))(i) >= 0
-        α = 0 => (R(x-x*))(i) <= 0
+        If search_subgradient=True:
+        α[i][0] = 1 => (R(x-x*))[i] <= 0
+        α[i][1] = 1 => (R(x-x*))[i] = 0
+        α[i][2] = 1 => (R(x-x*))[i] >= 0
+        We know that λ * ∂|R(x−x*)|₁/∂x * f =
+        λ * (-α[:][0] + α[:][2])ᵀ * R * f + λ * α[:][1]ᵀ * t
+        where -|(R*f)[i]| <= t <= |(R*f)[i]|
+
+        If search_subgradient=False
+        α[i] = 1 => (R(x-x*))[i] >= 0
+        α[i] = 0 => (R(x-x*))[i] <= 0
         we know that ∂|R(x−x*)|₁/∂x = (2α-1)ᵀ * R. Hence
         λ*∂|R(x−x*)|₁/∂x * f = 2λ*αᵀ*R*f − λ*1ᵀ*R*f
 
@@ -728,3 +741,66 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                                                        dVdx_times_G_up,
                                                        dphidx_times_G,
                                                        l1_binary_times_RG)
+
+
+def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
+                           l1_binary: list, y: list, R: torch.Tensor,
+                           Ry_lo: torch.Tensor, Ry_up: torch.Tensor,
+                           V_lambda: float, return_var_name: str,
+                           search_subgradient: bool) -> gurobipy.Var:
+    """
+    Adds the constraint z = λ*∂|R(x−x*)|₁/∂x * y
+    We need to add this as mixed-integer linear constraints, and also
+    return z.
+
+    If we don't search for subgradient, but just the left and right
+    derivatives, then l1_binary is a list of binary variables α, meaning
+    α[i] = 0 => (R*(x-x*))[i] <= 0
+    α[i] = 1 => (R*(x-x*))[i] >= 0
+    and ∂|R(x−x*)|₁/∂x = (2α-1)ᵀ*R
+    hence z = 2λ*αᵀ*R*y − λ*1ᵀ*R*y
+
+    If we search for subgradient, then l1_binary is a list of size-3 lists,
+    with meaning
+    α[i][0] = 1 => (R*(x-x*))[i] <= 0
+    α[i][1] = 1 => (R*(x-x*))[i] = 0
+    α[i][2] = 1 => (R*(x-x*))[i] >= 0
+    ∂|R(x−x*)|₁/∂x * y = -α[:][0]ᵀ*R*y + α[:][2]ᵀ*R*y + α[:][1]ᵀ*t
+    where -|(R * y)[i]| <= t[i] <= |(R * y)[i]|
+
+    Args:
+      y: The list of variables y.
+      Ry_lo: The lower bound of R * y.
+      Ry_up: The upper bound of R * y.
+    """
+    assert (len(l1_binary) == R.shape[0])
+    assert (len(y) == R.shape[1])
+    dtype = R.dtype
+    dl1dx_times_y_var = milp.addVars(1,
+                                     lb=-gurobipy.GRB.INFINITY,
+                                     name=return_var_name)
+    if not search_subgradient:
+        # Only search for the left and right derivatives.
+        slack = milp.addVars(len(l1_binary),
+                             lb=-gurobipy.GRB.INFINITY,
+                             name="l1_binary_times_Ry")
+        for i in range(len(l1_binary)):
+            A_Ry, A_slack, A_alpha, rhs = \
+                utils.replace_binary_continuous_product(
+                    Ry_lo[i], Ry_up[i], dtype=dtype)
+            A_y = A_Ry.reshape((-1, 1)) @ R[i].reshape((1, -1))
+            milp.addMConstrs(
+                [A_y, A_slack.reshape((-1, 1)),
+                 A_alpha.reshape((-1, 1))], [y, [slack[i]], [l1_binary[i]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs)
+        milp.addLConstr([
+            2 * V_lambda * torch.ones(len(l1_binary), dtype=dtype),
+            -V_lambda * torch.ones(R.shape[0], dtype=dtype) @ R,
+            -torch.tensor([1], dtype=dtype)
+        ], [slack, y, dl1dx_times_y_var],
+                        sense=gurobipy.GRB.EQUAL,
+                        rhs=0.)
+    else:
+        raise NotImplementedError
+    return dl1dx_times_y_var[0]

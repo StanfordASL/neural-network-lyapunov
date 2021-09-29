@@ -104,7 +104,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_lyapunov_derivative1(self):
         # Test with linear system.
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0, -1], dtype=self.dtype)
         V_lambda = 0.5
         R = torch.tensor([[1, 0], [0, 2], [1, 3]], dtype=self.dtype)
@@ -171,7 +173,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_add_system_constraint1(self):
         # Test with linear system.
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         # x within [x_lo, x_up]
         self.add_system_constraint_tester(
             dut, (self.linear_system.x_lo + self.linear_system.x_up) / 2, True)
@@ -186,7 +190,9 @@ class TestControlLyapunov(unittest.TestCase):
             dut, torch.tensor([0, 4], dtype=self.dtype), False)
 
     def test_add_dl1dx_times_f(self):
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0.1, 0.2], dtype=dut.system.dtype)
         R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=dut.system.dtype)
         milp = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
@@ -254,7 +260,9 @@ class TestControlLyapunov(unittest.TestCase):
             np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
 
     def test_add_dVdx_times_G(self):
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0.1, 0.2], dtype=dut.system.dtype)
         R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=dut.system.dtype)
         milp = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
@@ -475,7 +483,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_lyapunov_derivative_as_milp1(self):
         # V_lambda = 0 and epsilon = 0, only compute ϕdot.
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         V_lambda = 0.
         epsilon = 0.
@@ -494,7 +504,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_lyapunov_derivative_as_milp2(self):
         # V_lambda != 0 and epsilon = 0
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         V_lambda = 0.5
         epsilon = 0.
@@ -513,7 +525,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_lyapunov_derivative_as_milp3(self):
         # V_lambda != 0 and epsilon != 0
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         V_lambda = 0.5
         epsilon = 0.2
@@ -590,7 +604,9 @@ class TestControlLyapunov(unittest.TestCase):
                 ret.dVdx_times_G_lo.detach().numpy() - 1E-10, dVdx_times_G_sol)
 
     def test_compute_dVdx_times_G(self):
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         mip_cnstr_return = self.linear_system.mixed_integer_constraints()
         R = torch.tensor([[1., 2.], [0., 1.], [1., -2.]], dtype=self.dtype)
         RG_lo, RG_up = dut._compute_RG_bounds_IA(R, mip_cnstr_return.G_flat_lo,
@@ -604,7 +620,9 @@ class TestControlLyapunov(unittest.TestCase):
 
     def test_lyapunov_derivative_loss_at_samples_and_next_states(self):
         # Test with the linear system.
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1)
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  search_subgradient=False)
         V_lambda = 0.5
         epsilon = 0.1
         torch.manual_seed(0)
@@ -663,6 +681,80 @@ class TestControlLyapunov(unittest.TestCase):
                     margin, torch.zeros_like(Vdot_samples,
                                              dtype=self.dtype))).item(),
             loss2.item())
+
+
+class TestComputeDl1dxTimesY(unittest.TestCase):
+    def test1(self):
+        # test with search_subgradient=False
+        dtype = torch.float64
+        milp = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        R = torch.tensor([[1, -2], [0, 1], [-1, 1]], dtype=dtype)
+        Ry_lo = torch.tensor([1, -3, -5], dtype=dtype)
+        Ry_up = torch.tensor([9, -1, 5], dtype=dtype)
+        V_lambda = 0.5
+        l1_binary = milp.addVars(3, vtype=gurobipy.GRB.BINARY)
+        y = milp.addVars(2, lb=-gurobipy.GRB.INFINITY)
+        dl1dx_times_y_var = mut._compute_dl1dx_times_y(milp, l1_binary, y, R,
+                                                       Ry_lo, Ry_up, V_lambda,
+                                                       "dl1dx_times_y", False)
+        # Take many sample x and y, compute dl1dx_times_y by hand.
+        x_equilibrium = torch.tensor([0, 0], dtype=dtype)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(
+            torch.tensor([-3, -3], dtype=dtype),
+            torch.tensor([3, 3], dtype=dtype), 100)
+        for i in range(x_samples.shape[0]):
+            dl1dx = utils.l1_gradient(R @ (x_samples[i] - x_equilibrium))
+            # We will check non-unique subgradient separately.
+            if dl1dx.shape[0] > 1:
+                continue
+            dl1dx = V_lambda * (dl1dx @ R)
+            # Now sample y
+            found_y = False
+            while not found_y:
+                y_sample = 10 * torch.rand(2, dtype=dtype) - 5
+                Ry = R @ y_sample
+                if torch.all(Ry <= Ry_up) and torch.all(Ry >= Ry_lo):
+                    found_y = True
+            dl1dx_times_y = dl1dx @ y_sample
+            # Now solve the MIP
+            for j in range(2):
+                y[j].lb = y_sample[j].item()
+                y[j].ub = y_sample[j].item()
+            for j in range(3):
+                if R[j, :] @ (x_samples[i] - x_equilibrium) < 0:
+                    l1_binary[j].lb = 0
+                    l1_binary[j].ub = 0
+                elif R[j, :] @ (x_samples[i] - x_equilibrium) > 0:
+                    l1_binary[j].lb = 1
+                    l1_binary[j].ub = 1
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(dl1dx_times_y_var.x, dl1dx_times_y.item())
+
+        # Test input x such that R * (x-x*) has non-unique gradient.
+        x_sample = torch.tensor([2, 1], dtype=dtype)
+        dl1dx = V_lambda * (
+            utils.l1_gradient(R @ (x_sample - x_equilibrium)) @ R)
+        dl1dx_times_y = dl1dx @ y_sample
+        alpha_val = [0, 1, 0]
+        for alpha0_val in (0, 1):
+            l1_binary[0].lb = alpha0_val
+            l1_binary[0].ub = alpha0_val
+            for j in range(1, 3):
+                l1_binary[j].lb = alpha_val[j]
+                l1_binary[j].ub = alpha_val[j]
+            for j in range(2):
+                y[j].lb = y_sample[j].item()
+                y[j].ub = y_sample[j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertLess(
+                torch.min(torch.abs(dl1dx_times_y_var.x - dl1dx_times_y)),
+                1E-6)
 
 
 if __name__ == "__main__":
