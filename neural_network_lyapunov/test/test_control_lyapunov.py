@@ -209,9 +209,9 @@ class TestControlLyapunov(unittest.TestCase):
         V_lambda = 0.5
         Vdot_coeff = []
         Vdot_vars = []
-        dl1dx_times_f_slack = dut._add_dl1dx_times_f(milp, x, l1_binary, f, R,
-                                                     Rf_lo, Rf_up, V_lambda,
-                                                     Vdot_coeff, Vdot_vars)
+        dl1dx_times_f = dut._add_dl1dx_times_f(milp, x, l1_binary, f, R, Rf_lo,
+                                               Rf_up, V_lambda, Vdot_coeff,
+                                               Vdot_vars)
         self.assertEqual(len(Vdot_coeff), len(Vdot_vars))
 
         torch.manual_seed(0)
@@ -238,13 +238,13 @@ class TestControlLyapunov(unittest.TestCase):
                     self.assertGreaterEqual(l1_terms[j].item(), -1E-6)
                 elif torch.abs(l1_binary_sol[j] + 1) < 1E-5:
                     self.assertLessEqual(l1_terms[j].item(), 1E-6)
-            # Check dl1dx_times_f_slack is correct.
-            dl1dx_times_f_slack_sol = np.array(
-                [v.x for v in dl1dx_times_f_slack])
-            dl1dx_times_f_slack_expected = (
-                l1_binary_sol * (R @ f_samples[i])).detach().numpy()
-            np.testing.assert_allclose(dl1dx_times_f_slack_sol,
-                                       dl1dx_times_f_slack_expected)
+            # Check dl1dx_times_f is correct.
+            dl1dx = V_lambda * (
+                utils.l1_gradient(R @ (x_samples[i] - x_equilibrium)) @ R)
+            assert (dl1dx.shape[0] == 1)
+            dl1dx_times_f_expected = (dl1dx[0] @ f_samples[i]).squeeze()
+            self.assertAlmostEqual(dl1dx_times_f.x,
+                                   dl1dx_times_f_expected.item())
             Vdot_sol = torch.sum(
                 torch.stack([
                     Vdot_coeff[i] @ torch.tensor([v.x for v in Vdot_vars[i]],
@@ -580,18 +580,14 @@ class TestControlLyapunov(unittest.TestCase):
             np.testing.assert_allclose(
                 dphidx_times_G_sol,
                 dphidx_times_G_expected.detach().numpy())
-            l1_binary_sol = torch.tensor([v.x for v in l1_binary],
-                                         dtype=self.dtype)
-            l1_binary_times_RG_sol = [None] * dut.system.u_dim
-            RG = R @ G
-            for j in range(dut.system.u_dim):
-                l1_binary_times_RG_sol[j] = l1_binary_sol * RG[:, j]
-                np.testing.assert_allclose(
-                    np.array([v.x for v in ret.l1_binary_times_RG[j]]),
-                    l1_binary_times_RG_sol[j].detach().numpy())
-            dl1dx = utils.l1_gradient(R @ (x_samples[i] - x_equilibrium))
+            dl1dx = V_lambda * (
+                utils.l1_gradient(R @ (x_samples[i] - x_equilibrium)) @ R)
             assert (dl1dx.shape[0] == 1)
-            dVdx = dphidx[0][0] + V_lambda * dl1dx[0] @ R
+            np.testing.assert_allclose(
+                np.array([v.x for v in ret.dl1dx_times_G]),
+                (dl1dx @ G).squeeze())
+
+            dVdx = dphidx[0][0] + dl1dx[0]
             dVdx_times_G_expected = dVdx @ G
             dVdx_times_G_sol = np.array([v.x for v in ret.dVdx_times_G])
             np.testing.assert_allclose(dVdx_times_G_sol,

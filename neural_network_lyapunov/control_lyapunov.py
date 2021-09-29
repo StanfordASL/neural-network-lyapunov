@@ -23,19 +23,19 @@ class ControlAffineSystemAddConstraintReturn(lyapunov.SystemConstraintReturn):
 
 
 class LyapDerivMilpReturn:
-    def __init__(self, milp, x, relu_beta, l1_binary, dl1dx_times_f_slack,
+    def __init__(self, milp, x, relu_beta, l1_binary, dl1dx_times_f,
                  system_constraint_return):
         """
         Args:
           relu_beta: The binary variable indicating the activeness of each ReLU
           unit in the network.
-          dl1dx_times_f_slack: refer to _add_dl1dx_times_f() for more details.
+          dl1dx_times_f: refer to _add_dl1dx_times_f() for more details.
         """
         self.milp = milp
         self.x = x
         self.beta = relu_beta
         self.l1_binary = l1_binary
-        self.dl1dx_times_f_slack = dl1dx_times_f_slack
+        self.dl1dx_times_f = dl1dx_times_f
         self.system_constraint_return = system_constraint_return
 
 
@@ -323,9 +323,9 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 system_constraint_return.G_flat_up)
         else:
             raise NotImplementedError
-        dl1dx_times_f_slack = self._add_dl1dx_times_f(milp, x, l1_binary, f, R,
-                                                      Rf_lo, Rf_up, V_lambda,
-                                                      Vdot_coeff, Vdot_vars)
+        dl1dx_times_f = self._add_dl1dx_times_f(milp, x, l1_binary, f, R,
+                                                Rf_lo, Rf_up, V_lambda,
+                                                Vdot_coeff, Vdot_vars)
         dVdx_times_G_ret, dVdx_times_G_binary = self._add_dVdx_times_G(
             milp, x, l1_binary, relu_beta, Gt, R,
             system_constraint_return.G_flat_lo,
@@ -359,8 +359,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                           sense=gurobipy.GRB.MAXIMIZE)
 
         return LyapDerivMilpReturn(milp, x, relu_beta, l1_binary,
-                                   dl1dx_times_f_slack,
-                                   system_constraint_return)
+                                   dl1dx_times_f, system_constraint_return)
 
     def lyapunov_derivative_loss_at_samples_and_next_states(
             self,
@@ -495,32 +494,18 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
           Rf_lo, Rf_up: The lower/upper bounds of R*f
 
         Return:
-          slack: the newly added slack variable, slack(i) =  α(i)*(R*f)(i)
+          dl1dx_times_f: The newly added variable representing λ∂|R(x−x*)|/∂x*f
         """
         # We need to add slack variables to represent the product between the
         # binary variable α and R*f
         assert (len(l1_binary) == R.shape[0])
-        slack = milp.addVars(len(l1_binary),
-                             lb=-gurobipy.GRB.INFINITY,
-                             name="l1_binary_times_Rf")
-        for i in range(len(l1_binary)):
-            A_Rf, A_slack, A_alpha, rhs = \
-                utils.replace_binary_continuous_product(
-                    Rf_lo[i], Rf_up[i], dtype=self.system.dtype)
-            A_f = A_Rf.reshape((-1, 1)) @ R[i].reshape((1, -1))
-            milp.addMConstrs(
-                [A_f, A_slack.reshape((-1, 1)),
-                 A_alpha.reshape((-1, 1))], [f, [slack[i]], [l1_binary[i]]],
-                sense=gurobipy.GRB.LESS_EQUAL,
-                b=rhs)
-        Vdot_coeff.append(2 * V_lambda *
-                          torch.ones(len(l1_binary), dtype=self.system.dtype))
-        Vdot_vars.append(slack)
-
-        Vdot_coeff.append(-V_lambda *
-                          torch.ones(R.shape[0], dtype=self.system.dtype) @ R)
-        Vdot_vars.append(f)
-        return slack
+        dl1dx_times_f = _compute_dl1dx_times_y(milp, l1_binary, f, R, Rf_lo,
+                                               Rf_up, V_lambda,
+                                               "dl1dx_times_f",
+                                               self.search_subgradient)
+        Vdot_coeff.append(torch.tensor([1], dtype=self.system.dtype))
+        Vdot_vars.append([dl1dx_times_f])
+        return dl1dx_times_f
 
     def _add_dVdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP, x: list,
                           l1_binary: list, relu_beta: list, Gt: list,
@@ -621,17 +606,16 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
 
     class ComputeDvdxTimesGReturn:
         def __init__(self, dVdx_times_G, dVdx_times_G_lo, dVdx_times_G_up,
-                     dphidx_times_G, l1_binary_times_RG):
+                     dphidx_times_G, dl1dx_times_G):
             """
             dphidx_times_G: ∂ϕ/∂x*G(x)
-            l1_binary_times_RG: the newly added slack variable,
-            l1_binary_times_RG[i][j] = α(j)*(R*G.col(i))(j)
+            dl1dx_times_G: λ∂|R(x−x*)|/∂x*G
             """
             self.dVdx_times_G = dVdx_times_G
             self.dVdx_times_G_lo = dVdx_times_G_lo
             self.dVdx_times_G_up = dVdx_times_G_up
             self.dphidx_times_G = dphidx_times_G
-            self.l1_binary_times_RG = l1_binary_times_RG
+            self.dl1dx_times_G = dl1dx_times_G
 
     def _compute_dVdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
                               x: list, relu_beta: list, l1_binary: list,
@@ -689,39 +673,22 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 f"dphidx_times_G[{i}]_ineq", f"dphidx_times_G[{i}]_eq",
                 f"G[{i}]")
 
-        # l1_binary_times_RG[i][j] = α(j)*(R*G.col(i))(j)
-        l1_binary_times_RG = [None] * self.system.u_dim
+        # dl1dx_times_G[i] = λ∂|R(x−x*)|/∂x*G.col(i)
+        dl1dx_times_G = [None] * self.system.u_dim
         for i in range(self.system.u_dim):
-            l1_binary_times_RG[i] = milp.addVars(len(l1_binary),
-                                                 lb=-gurobipy.GRB.INFINITY,
-                                                 name=f"l1_binary_times_RG{i}")
-            for j in range(len(l1_binary)):
-                A_RG, A_slack, A_alpha, rhs = \
-                    utils.replace_binary_continuous_product(
-                        RG_lo[j][i], RG_up[j][i], dtype=dtype)
-                # A_RG is the coefficient of R.row(j) * G.col(i). Hence the
-                # coefficient for G.col(i) is A_RG * R.row(j)
-                A_Gi = A_RG.reshape((-1, 1)) @ R[j].reshape((1, -1))
-                milp.addMConstrs(
-                    [A_Gi,
-                     A_slack.reshape((-1, 1)),
-                     A_alpha.reshape((-1, 1))],
-                    [Gt[i], [l1_binary_times_RG[i][j]], [l1_binary[j]]],
-                    sense=gurobipy.GRB.LESS_EQUAL,
-                    b=rhs)
+            dl1dx_times_G[i] = _compute_dl1dx_times_y(milp, l1_binary, Gt[i],
+                                                      R, RG_lo[:, i],
+                                                      RG_up[:, i], V_lambda,
+                                                      f"dl1dx_times_G[{i}]",
+                                                      self.search_subgradient)
 
         # ∂V/∂x * G(x) = ∂ϕ/∂x*G(x) + λ*∂|R(x−x*)|₁/∂x*G(x)
-        # = ∂ϕ/∂x*G(x) + 2λ*αᵀ*R*G − λ*1ᵀ*R*G
         # Hence we add the constraint
-        # ∂ϕ/∂x*G + 2λ*αᵀ*R*G - ∂V/∂x * G - λ*1ᵀ*R*G(x) = 0
+        # ∂ϕ/∂x*G + λ*∂|R(x−x*)|₁/∂x*G(x)- ∂V/∂x * G = 0
         for i in range(self.system.u_dim):
             milp.addLConstr([
-                torch.tensor([1], dtype=dtype),
-                2 * V_lambda * torch.ones(len(l1_binary), dtype=dtype),
-                -torch.tensor([1], dtype=dtype),
-                -V_lambda * torch.ones(len(l1_binary), dtype=dtype) @ R
-            ], [[dphidx_times_G[i]], l1_binary_times_RG[i], [dVdx_times_G[i]],
-                Gt[i]],
+                torch.tensor([1, 1, -1], dtype=dtype),
+            ], [[dphidx_times_G[i], dl1dx_times_G[i], dVdx_times_G[i]]],
                             sense=gurobipy.GRB.EQUAL,
                             rhs=0.)
         # Now compute the bounds on dVdx_times_G
@@ -740,7 +707,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                                                        dVdx_times_G_lo,
                                                        dVdx_times_G_up,
                                                        dphidx_times_G,
-                                                       l1_binary_times_RG)
+                                                       dl1dx_times_G)
 
 
 def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
