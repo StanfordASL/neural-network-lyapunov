@@ -748,6 +748,7 @@ def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
                                      name=return_var_name)
     if not search_subgradient:
         # Only search for the left and right derivatives.
+        # slack[i] = α[i] * R.row(i) * y
         slack = milp.addVars(len(l1_binary),
                              lb=-gurobipy.GRB.INFINITY,
                              name="l1_binary_times_Ry")
@@ -755,7 +756,7 @@ def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
             A_Ry, A_slack, A_alpha, rhs = \
                 utils.replace_binary_continuous_product(
                     Ry_lo[i], Ry_up[i], dtype=dtype)
-            A_y = A_Ry.reshape((-1, 1)) @ R[i].reshape((1, -1))
+            A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
             milp.addMConstrs(
                 [A_y, A_slack.reshape((-1, 1)),
                  A_alpha.reshape((-1, 1))], [y, [slack[i]], [l1_binary[i]]],
@@ -769,5 +770,100 @@ def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
                         sense=gurobipy.GRB.EQUAL,
                         rhs=0.)
     else:
-        raise NotImplementedError
+        # alpha0_times_Ry[i] = α[i][0] * R.row(i) * y
+        alpha0_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+        # alpha2_times_Ry[i] = α[i][2] * R.row(i) * y
+        alpha2_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+        # t is the slack variable for the subgradient at 0 times R * y.
+        t = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+        # alpha1_times_t[i] = α[i][1] * t[i]
+        alpha1_times_t = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+        for i in range(R.shape[0]):
+            A_Ry, A_slack, A_alpha, rhs = \
+                utils.replace_binary_continuous_product(
+                    Ry_lo[i], Ry_up[i], dtype=dtype)
+            A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
+            milp.addMConstrs(
+                [A_y, A_slack.reshape((-1, 1)),
+                 A_alpha.reshape(
+                     (-1, 1))], [y, [alpha0_times_Ry[i]], [l1_binary[i][0]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs)
+            milp.addMConstrs(
+                [A_y, A_slack.reshape((-1, 1)),
+                 A_alpha.reshape(
+                     (-1, 1))], [y, [alpha2_times_Ry[i]], [l1_binary[i][2]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs)
+            if Ry_lo[i] >= 0:
+                # Add the constraint -R.row(i)*y <= t[i] <= R.row(i)*y
+                milp.addLConstr([torch.tensor([1], dtype=dtype), -R[i, :]],
+                                [[t[i]], y],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                milp.addLConstr([torch.tensor([-1], dtype=dtype), -R[i, :]],
+                                [[t[i]], y],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                ti_lo = -Ry_up[i]
+                ti_up = Ry_up[i]
+            elif Ry_up[i] <= 0:
+                # Add the constraint R.row(i)*y <= t[i] <= -R.row(i)*y
+                milp.addLConstr([torch.tensor([-1], dtype=dtype), R[i, :]],
+                                [[t[i]], y],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                milp.addLConstr([torch.tensor([1], dtype=dtype), R[i, :]],
+                                [[t[i]], y],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                ti_lo = Ry_lo[i]
+                ti_up = -Ry_lo[i]
+            else:
+                # We need to add a slack variable and binary variable to write
+                # the absolute value |R.row(i)*y|.
+                mip_cnstr_abs = \
+                    utils.absolute_value_as_mixed_integer_constraint(
+                        Ry_lo[i], Ry_up[i], binary_for_zero_input=False)
+                mip_cnstr_abs.transform_input(R[i, :].reshape((1, -1)),
+                                              torch.tensor([0], dtype=dtype))
+                Ry_abs, Ry_abs_binary = \
+                    milp.add_mixed_integer_linear_constraints(
+                        mip_cnstr_abs, y, None, "", "", "", "", "")
+                # Now add the constraint -Ry_abs <= t[i] <= Ry_abs
+                milp.addLConstr([torch.tensor([-1, -1], dtype=dtype)],
+                                [[t[i], Ry_abs[0]]],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                milp.addLConstr([torch.tensor([1, -1], dtype=dtype)],
+                                [[t[i], Ry_abs[0]]],
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=0.)
+                ti_lo = -torch.maximum(-Ry_lo[i], Ry_up[i])
+                ti_up = torch.maximum(-Ry_lo[i], Ry_up[i])
+            # Now add the constraint such that
+            # alpha1_times_t[i] = α[i][1] * t[i]
+            Ain_t, Ain_slack, Ain_alpha, rhs = \
+                utils.replace_binary_continuous_product(
+                    ti_lo, ti_up, dtype=dtype)
+            milp.addMConstrs([
+                Ain_t.reshape((-1, 1)),
+                Ain_slack.reshape((-1, 1)),
+                Ain_alpha.reshape((-1, 1))
+            ], [[t[i]], [alpha1_times_t[i]], [l1_binary[i][1]]],
+                             sense=gurobipy.GRB.LESS_EQUAL,
+                             b=rhs)
+        # Now add the constraint
+        # λ*∂|R(x−x*)|₁/∂x * y = -λα[:][0]ᵀ*R*y + λα[:][2]ᵀ*R*y + λα[:][1]ᵀ*t
+        milp.addLConstr([
+            -V_lambda * torch.ones(R.shape[0], dtype=dtype),
+            V_lambda * torch.ones(R.shape[0], dtype=dtype),
+            V_lambda * torch.ones(R.shape[0], dtype=dtype),
+            torch.tensor([-1], dtype=dtype)
+        ], [
+            alpha0_times_Ry, alpha2_times_Ry, alpha1_times_t, dl1dx_times_y_var
+        ],
+                        sense=gurobipy.GRB.EQUAL,
+                        rhs=0.)
+
     return dl1dx_times_y_var[0]
