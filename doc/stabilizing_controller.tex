@@ -155,4 +155,20 @@ Similarly if we consider the ReLU network. The set of subgradient for each indiv
 
 To summarize, a sufficient condition for the subgradient set $\mathcal{D}_V(x)$ to be convex and compact, is that for the given state $x$, the (leaky) ReLU units with input being 0 are all in the same layer of the neural network.
 
+\subsubsection{Computing subgradient}
+We use the $l_1$ norm function $|R(x-x^*)|_1$ to denote how to use the subgradient. We will have the terms $\frac{\partial |R(x-x^*)|_1}{\partial x}f(x)$ and $\frac{\partial |R(x-x^*)|_1}{\partial x}G(x)$ when computing $\dot{V}$. If we denote a valid subgradient as $g$, then these two terms are written as $g^TRf, g^TRG$, where the value of $g$ is
+\begin{align}
+	g_i  \begin{cases}
+		=1 \text{ if } R[i, :](x-x^*) > 0\\
+		=-1 \text{ if } R[i, :](x-x^*) < 0\\
+		\in[-1, 1] \text{ if } R[i, :](x-x^*)=0
+	\end{cases}
+\end{align}
+Notice that when the gradient is unique, then we only need to consider the discrete value $\pm1$ multiplying the continuous value $Rf, RG$, and this product can be captured by mixed-integer linear constraints. But when we have subgradient, then we need to consider the continuous variable in the range $[-1, 1]$ multiplying continuous value $Rf, RG$. This product between continuous variables can't be captured by mixed-integer linear constraints.
+
+To remedy this, we only consider a finite number of sampled subgradients. For example if we only consider the sub-gradient $-1, 0, 1$, then we can write the subgradient as
+\begin{align}
+	g_i = \beta_0*-1+\beta_1 * 0 + \beta_2 * 1, \beta_i \text{ is binary}, \beta_0 + \beta_1 + \beta_2 = 1 \text{ if } R[i, :] (x-x^*)=0
+\end{align}
+
 \end{document}
