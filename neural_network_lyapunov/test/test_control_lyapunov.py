@@ -679,42 +679,43 @@ class TestControlLyapunov(unittest.TestCase):
             loss2.item())
 
 
-class TestComputeDl1dxTimesY(unittest.TestCase):
-    def set_l1_binary_val(self, R, x, x_equilibrium, l1_binary, idx):
-        """
-        Set the value of l1_binary[idx] based on R * (x - x_equilibrium)
-        """
-        Rx = R @ (x - x_equilibrium)
-        for i in idx:
-            if isinstance(l1_binary[i], gurobipy.Var):
-                if Rx[i] > 0:
-                    l1_binary[i].lb = 1
-                    l1_binary[i].ub = 1
-                elif Rx[i] < 0:
-                    l1_binary[i].lb = 0
-                    l1_binary[i].ub = 0
-                else:
-                    raise Exception("Can't set l1_binary value")
-            elif isinstance(l1_binary[i], list):
-                if Rx[i] > 0:
-                    l1_binary[i][0].lb = 0
-                    l1_binary[i][0].ub = 0
-                    l1_binary[i][1].lb = 0
-                    l1_binary[i][1].ub = 0
-                    l1_binary[i][2].lb = 1
-                    l1_binary[i][2].ub = 1
-                elif Rx[i] < 0:
-                    l1_binary[i][0].lb = 1
-                    l1_binary[i][0].ub = 1
-                    l1_binary[i][1].lb = 0
-                    l1_binary[i][1].ub = 0
-                    l1_binary[i][2].lb = 0
-                    l1_binary[i][2].ub = 0
-                else:
-                    raise Exception("Can't set l1_binary value")
+def set_l1_binary_val(R, x, x_equilibrium, l1_binary, idx):
+    """
+    Set the value of l1_binary[idx] based on R * (x - x_equilibrium)
+    """
+    Rx = R @ (x - x_equilibrium)
+    for i in idx:
+        if isinstance(l1_binary[i], gurobipy.Var):
+            if Rx[i] > 0:
+                l1_binary[i].lb = 1
+                l1_binary[i].ub = 1
+            elif Rx[i] < 0:
+                l1_binary[i].lb = 0
+                l1_binary[i].ub = 0
             else:
-                raise Exception("Unknow l1_binary value")
+                raise Exception("Can't set l1_binary value")
+        elif isinstance(l1_binary[i], list):
+            if Rx[i] > 0:
+                l1_binary[i][0].lb = 0
+                l1_binary[i][0].ub = 0
+                l1_binary[i][1].lb = 0
+                l1_binary[i][1].ub = 0
+                l1_binary[i][2].lb = 1
+                l1_binary[i][2].ub = 1
+            elif Rx[i] < 0:
+                l1_binary[i][0].lb = 1
+                l1_binary[i][0].ub = 1
+                l1_binary[i][1].lb = 0
+                l1_binary[i][1].ub = 0
+                l1_binary[i][2].lb = 0
+                l1_binary[i][2].ub = 0
+            else:
+                raise Exception("Can't set l1_binary value")
+        else:
+            raise Exception("Unknow l1_binary value")
 
+
+class TestComputeDl1dxTimesY(unittest.TestCase):
     def test1(self):
         # test with search_subgradient=False
         dtype = torch.float64
@@ -752,8 +753,8 @@ class TestComputeDl1dxTimesY(unittest.TestCase):
             for j in range(2):
                 y[j].lb = y_sample[j].item()
                 y[j].ub = y_sample[j].item()
-            self.set_l1_binary_val(R, x_samples[i], x_equilibrium, l1_binary,
-                                   [0, 1, 2])
+            set_l1_binary_val(R, x_samples[i], x_equilibrium, l1_binary,
+                              [0, 1, 2])
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
@@ -768,8 +769,7 @@ class TestComputeDl1dxTimesY(unittest.TestCase):
         for alpha0_val in (0, 1):
             l1_binary[0].lb = alpha0_val
             l1_binary[0].ub = alpha0_val
-            self.set_l1_binary_val(R, x_sample, x_equilibrium, l1_binary,
-                                   [1, 2])
+            set_l1_binary_val(R, x_sample, x_equilibrium, l1_binary, [1, 2])
             for j in range(2):
                 y[j].lb = y_sample[j].item()
                 y[j].ub = y_sample[j].item()
@@ -803,8 +803,8 @@ class TestComputeDl1dxTimesY(unittest.TestCase):
                 l1_binary[idx][1].ub = 1
                 l1_binary[idx][2].lb = 0
                 l1_binary[idx][2].ub = 0
-        self.set_l1_binary_val(R, x_sample, x_equilibrium, l1_binary,
-                               gradient_index)
+        set_l1_binary_val(R, x_sample, x_equilibrium, l1_binary,
+                          gradient_index)
         for _ in range(10):
             # Test with different y_sample
             y_sample = sample_y()
@@ -892,8 +892,8 @@ class TestComputeDl1dxTimesY(unittest.TestCase):
             for j in range(2):
                 y[j].lb = y_sample[j].item()
                 y[j].ub = y_sample[j].item()
-            self.set_l1_binary_val(R, x_samples[i], x_equilibrium, l1_binary,
-                                   [0, 1, 2, 3])
+            set_l1_binary_val(R, x_samples[i], x_equilibrium, l1_binary,
+                              [0, 1, 2, 3])
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
@@ -928,6 +928,132 @@ class TestComputeDl1dxTimesY(unittest.TestCase):
         self.subgradient_tester(milp, y, l1_binary, dl1dx_times_y_var,
                                 x_sample, [0, 1, 2, 3], [], R, x_equilibrium,
                                 Ry_lo, Ry_up, V_lambda)
+
+
+class TestComputeDl1dxTimesYSampledGradient(unittest.TestCase):
+    def setUp(self):
+        self.dtype = torch.float64
+        self.milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        self.R = torch.tensor([[1, -2], [0, 1], [-1, 1]], dtype=self.dtype)
+        self.Ry_lo = torch.tensor([1, -3, -5], dtype=self.dtype)
+        self.Ry_up = torch.tensor([9, -1, 5], dtype=self.dtype)
+        self.V_lambda = 0.5
+        self.l1_binary = [None] * 3
+        self.subgradient_samples = np.array([-0.6, -0.4, 0, 0.3, 0.5])
+        self.subgradient_binary = [None] * 3
+        self.y = self.milp.addVars(2, lb=-gurobipy.GRB.INFINITY)
+        for i in range(3):
+            self.l1_binary[i] = self.milp.addVars(3, vtype=gurobipy.GRB.BINARY)
+            self.subgradient_binary[i] = self.milp.addVars(
+                5, vtype=gurobipy.GRB.BINARY)
+            self.milp.addLConstr([
+                torch.ones(5, dtype=self.dtype),
+                torch.tensor([-1], dtype=self.dtype)
+            ], [self.subgradient_binary[i], [self.l1_binary[i][1]]],
+                                 sense=gurobipy.GRB.EQUAL,
+                                 rhs=0.)
+        self.dl1dx_times_y_var = \
+            mut._compute_dl1dx_times_y_sampled_subgradient(
+                self.milp, self.l1_binary, self.y, self.subgradient_binary,
+                self.subgradient_samples, self.R, self.Ry_lo, self.Ry_up,
+                self.V_lambda, "dl1dx_times_y")
+
+    def sample_y(self):
+        found_y = False
+        while not found_y:
+            y_sample = 10 * torch.rand(2, dtype=self.dtype) - 5
+            Ry = self.R @ y_sample
+            if torch.all(Ry <= self.Ry_up) and torch.all(Ry >= self.Ry_lo):
+                found_y = True
+                return y_sample
+
+    def test1(self):
+        # Test with no subgradient.
+
+        x_samples = utils.uniform_sample_in_box(
+            torch.tensor([-3, -4], dtype=self.dtype),
+            torch.tensor([4, 5], dtype=self.dtype), 100)
+        x_equilibrium = torch.tensor([0, 0], dtype=self.dtype)
+        for i in range(x_samples.shape[0]):
+            dl1dx = self.V_lambda * utils.l1_gradient(
+                self.R @ (x_samples[i] - x_equilibrium)) @ self.R
+            if dl1dx.shape[0] > 1:
+                continue
+            y_sample = self.sample_y()
+            dl1dx_times_y = dl1dx @ y_sample
+            for j in range(2):
+                self.y[j].lb = y_sample[j].item()
+                self.y[j].ub = y_sample[j].item()
+
+            set_l1_binary_val(self.R, x_samples[i], x_equilibrium,
+                              self.l1_binary, [0, 1, 2])
+            self.milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag,
+                                            False)
+            self.milp.gurobi_model.optimize()
+            self.assertEqual(self.milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(self.dl1dx_times_y_var.x,
+                                   dl1dx_times_y.item())
+
+    def test2(self):
+        # Test with subgradients.
+        x_equilibrium = torch.tensor([0, 0], dtype=self.dtype)
+        x_sample = torch.tensor([2, 1], dtype=self.dtype)
+        # R @ (x - x*) = [0, 1, -1]
+        # set the subgradient to 0.3
+        dl1dx = self.V_lambda * torch.tensor(
+            [self.subgradient_samples[3], 1, -1], dtype=self.dtype) @ self.R
+        y_sample = self.sample_y()
+        for i in range(2):
+            self.y[i].lb = y_sample[i].item()
+            self.y[i].ub = y_sample[i].item()
+        set_l1_binary_val(self.R, x_sample, x_equilibrium, self.l1_binary,
+                          [1, 2])
+        self.l1_binary[0][0].lb = 0.
+        self.l1_binary[0][0].ub = 0.
+        self.l1_binary[0][1].lb = 1.
+        self.l1_binary[0][1].ub = 1.
+        self.l1_binary[0][2].lb = 0.
+        self.l1_binary[0][2].ub = 0.
+        self.subgradient_binary[0][3].lb = 1.
+        self.subgradient_binary[0][3].ub = 1.
+        self.milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        self.milp.gurobi_model.optimize()
+        self.assertEqual(self.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        self.assertAlmostEqual(self.dl1dx_times_y_var.x,
+                               (dl1dx @ y_sample).item())
+
+        # x_sample = [1, 1], R @ (x - x*) = [-1, 1, 0]
+        # set the subgradient to -0.4
+        x_sample = torch.tensor([1, 1], dtype=self.dtype)
+        dl1dx = self.V_lambda * torch.tensor(
+            [-1, 1, self.subgradient_samples[1]], dtype=self.dtype) @ self.R
+        y_sample = self.sample_y()
+        for i in range(2):
+            self.y[i].lb = y_sample[i].item()
+            self.y[i].ub = y_sample[i].item()
+        set_l1_binary_val(self.R, x_sample, x_equilibrium, self.l1_binary,
+                          [0, 1])
+        self.l1_binary[2][0].lb = 0.
+        self.l1_binary[2][0].ub = 0.
+        self.l1_binary[2][1].lb = 1.
+        self.l1_binary[2][1].ub = 1.
+        self.l1_binary[2][2].lb = 0.
+        self.l1_binary[2][2].ub = 0.
+        # Reset the bounds on subgradient_binary.
+        for i in range(3):
+            for j in range(5):
+                self.subgradient_binary[i][j].lb = 0.
+                self.subgradient_binary[i][j].ub = 1.
+        self.subgradient_binary[2][1].lb = 1.
+        self.subgradient_binary[2][1].ub = 1.
+        self.milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        self.milp.gurobi_model.optimize()
+        self.assertEqual(self.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        self.assertAlmostEqual(self.dl1dx_times_y_var.x,
+                               (dl1dx @ y_sample).item())
 
 
 if __name__ == "__main__":

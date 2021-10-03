@@ -4,6 +4,7 @@ import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.mip_utils as mip_utils
 import torch
+import numpy as np
 import gurobipy
 
 
@@ -586,7 +587,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                     utils.absolute_value_as_mixed_integer_constraint(
                         compute_dVdx_times_G_return.dVdx_times_G_lo[i],
                         compute_dVdx_times_G_return.dVdx_times_G_up[i],
-                        binary_for_zero_input=self.search_subgradient)
+                        binary_for_zero_input=False)
                 slack, _ = milp.add_mixed_integer_linear_constraints(
                     mip_cnstr_abs,
                     [compute_dVdx_times_G_return.dVdx_times_G[i]], None,
@@ -770,31 +771,13 @@ def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
                         sense=gurobipy.GRB.EQUAL,
                         rhs=0.)
     else:
-        # alpha0_times_Ry[i] = α[i][0] * R.row(i) * y
-        alpha0_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
-        # alpha2_times_Ry[i] = α[i][2] * R.row(i) * y
-        alpha2_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+        alpha0_times_Ry, alpha2_times_Ry = _compute_alpha_times_Ry(
+            milp, y, l1_binary, R, Ry_lo, Ry_up)
         # t is the slack variable for the subgradient at 0 times R * y.
         t = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
         # alpha1_times_t[i] = α[i][1] * t[i]
         alpha1_times_t = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
         for i in range(R.shape[0]):
-            A_Ry, A_slack, A_alpha, rhs = \
-                utils.replace_binary_continuous_product(
-                    Ry_lo[i], Ry_up[i], dtype=dtype)
-            A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
-            milp.addMConstrs(
-                [A_y, A_slack.reshape((-1, 1)),
-                 A_alpha.reshape(
-                     (-1, 1))], [y, [alpha0_times_Ry[i]], [l1_binary[i][0]]],
-                sense=gurobipy.GRB.LESS_EQUAL,
-                b=rhs)
-            milp.addMConstrs(
-                [A_y, A_slack.reshape((-1, 1)),
-                 A_alpha.reshape(
-                     (-1, 1))], [y, [alpha2_times_Ry[i]], [l1_binary[i][2]]],
-                sense=gurobipy.GRB.LESS_EQUAL,
-                b=rhs)
             if Ry_lo[i] >= 0:
                 # Add the constraint -R.row(i)*y <= t[i] <= R.row(i)*y
                 milp.addLConstr([torch.tensor([1], dtype=dtype), -R[i, :]],
@@ -867,3 +850,127 @@ def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
                         rhs=0.)
 
     return dl1dx_times_y_var[0]
+
+
+def _compute_dl1dx_times_y_sampled_subgradient(
+        milp: gurobi_torch_mip.GurobiTorchMIP, l1_binary: list, y: list,
+        subgradient_binary: list, subgradient_samples: np.array,
+        R: torch.Tensor, Ry_lo: torch.Tensor, Ry_up: torch.Tensor,
+        V_lambda: float, return_var_name: str) -> gurobipy.Var:
+    """
+    Adds the constraint z = λ*∂|R(x−x*)|₁/∂x * y
+    The value of z is unique when the gradient ∂|R(x−x*)|₁/∂x is unique.
+    When ∂|R(x−x*)|₁/∂x isn't unique, then we consider only a finite number
+    of sampled subgradients.
+
+    We write
+    ∂|R(x−x*)|₁/∂x * y = -α[:][0]ᵀ*R*y + α[:][2]ᵀ*R*y + ∑ⱼβ[:][j]*s[j]* R * y
+
+    α is the binary variable with meaning
+    α[i][0] = 1 => (R*(x-x*))[i] <= 0
+    α[i][1] = 1 => (R*(x-x*))[i] = 0
+    α[i][2] = 1 => (R*(x-x*))[i] >= 0
+
+    s[j] is the j'th sampled subgradient. β[i][j] is the binary variable
+    indicating that the j'th subgradient is active for R.row(i) * (x - x*).
+
+    The user should impose the following constraint separately outside of this
+    function:
+    ∑ⱼ β[i][j] <= α[i][1] for each i.
+    Namely the at most one subgradient can be active when R.row(i) * (x-x*) = 0
+
+    Args:
+      l1_binary: α in the documentation above.
+      subgradient_binary: β in the documentation above.
+      subgradient_samples: A array of number within (-1, 1)
+    Return:
+      dl1dx_times_y_var: The variable z above, z = λ*∂|R(x−x*)|₁/∂x * y
+    """
+    assert (isinstance(subgradient_binary, list))
+    assert (len(subgradient_binary) == R.shape[0])
+    assert (isinstance(subgradient_samples, np.ndarray))
+    assert (np.all(subgradient_samples > -1))
+    assert (np.all(subgradient_samples < 1))
+    assert (all(
+        [len(v) == subgradient_samples.size for v in subgradient_binary]))
+    assert (all([len(v) == 3 for v in l1_binary]))
+    dtype = R.dtype
+    alpha0_times_Ry, alpha2_times_Ry = _compute_alpha_times_Ry(
+        milp, y, l1_binary, R, Ry_lo, Ry_up)
+    # Now add the term beta_times_Ry[i][j] = β[i][j] * R[i, :] * y
+    beta_times_Ry = [None] * R.shape[0]
+    dl1dx_times_y_var = milp.addVars(1,
+                                     lb=-gurobipy.GRB.INFINITY,
+                                     name=return_var_name)
+    # We will need to add the constraint
+    # λ∂|R(x−x*)|₁/∂x * y = -λ*α[:][0]ᵀ*R*y + λ*α[:][2]ᵀ*R*y +
+    #                       λ*∑ⱼβ[:][j]*s[j]* R * y
+    # The right-hand side is written as
+    # dl1dx_times_y_vars * dl1dx_times_y_coeffs.
+    dl1dx_times_y_coeffs = [
+        -V_lambda * torch.ones(R.shape[0], dtype=dtype),
+        V_lambda * torch.ones(R.shape[0], dtype=dtype)
+    ]
+    dl1dx_times_y_vars = [alpha0_times_Ry, alpha2_times_Ry]
+    for i in range(R.shape[0]):
+        beta_times_Ry[i] = milp.addVars(subgradient_samples.size,
+                                        lb=-gurobipy.GRB.INFINITY)
+        A_Ry, A_slack, A_beta, rhs = utils.replace_binary_continuous_product(
+            Ry_lo[i], Ry_up[i], dtype=dtype)
+        A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
+        for j in range(subgradient_samples.size):
+            milp.addMConstrs(
+                [A_y, A_slack.reshape((-1, 1)),
+                 A_beta.reshape((-1, 1))],
+                [y, [beta_times_Ry[i][j]], [subgradient_binary[i][j]]],
+                sense=gurobipy.GRB.LESS_EQUAL,
+                b=rhs)
+        dl1dx_times_y_coeffs.append(V_lambda *
+                                    torch.from_numpy(subgradient_samples))
+        dl1dx_times_y_vars.append(beta_times_Ry[i])
+    # Add the constraint
+    # λ∂|R(x−x*)|₁/∂x * y =
+    #    -λ*α[:][0]ᵀ*R*y + λ*α[:][2]ᵀ*R*y + λ*∑ⱼβ[:][j]*s[j]* R * y
+    dl1dx_times_y_coeffs.append(torch.tensor([-1], dtype=dtype))
+    dl1dx_times_y_vars.append(dl1dx_times_y_var)
+    milp.addLConstr(dl1dx_times_y_coeffs,
+                    dl1dx_times_y_vars,
+                    sense=gurobipy.GRB.EQUAL,
+                    rhs=0.)
+    return dl1dx_times_y_var[0]
+
+
+def _compute_alpha_times_Ry(milp: gurobi_torch_mip.GurobiTorchMIP, y: list,
+                            l1_binary: list, R: torch.Tensor,
+                            Ry_lo: torch.Tensor, Ry_up: torch.Tensor):
+    """
+    Compute
+    alpha0_times_Ry[i] = α[i][0] * R.row(i) * y
+    alpha2_times_Ry[i] = α[i][2] * R.row(i) * y
+    where α is the binary variable with meaning
+    α[i][0] = 1 => (R*(x-x*))[i] <= 0
+    α[i][1] = 1 => (R*(x-x*))[i] = 0
+    α[i][2] = 1 => (R*(x-x*))[i] >= 0
+    """
+    dtype = R.dtype
+    # alpha0_times_Ry[i] = α[i][0] * R.row(i) * y
+    alpha0_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+    # alpha2_times_Ry[i] = α[i][2] * R.row(i) * y
+    alpha2_times_Ry = milp.addVars(R.shape[0], lb=-gurobipy.GRB.INFINITY)
+    for i in range(R.shape[0]):
+        A_Ry, A_slack, A_alpha, rhs = utils.replace_binary_continuous_product(
+            Ry_lo[i], Ry_up[i], dtype=dtype)
+        A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
+        milp.addMConstrs(
+            [A_y, A_slack.reshape((-1, 1)),
+             A_alpha.reshape(
+                 (-1, 1))], [y, [alpha0_times_Ry[i]], [l1_binary[i][0]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs)
+        milp.addMConstrs(
+            [A_y, A_slack.reshape((-1, 1)),
+             A_alpha.reshape(
+                 (-1, 1))], [y, [alpha2_times_Ry[i]], [l1_binary[i][2]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs)
+    return alpha0_times_Ry, alpha2_times_Ry
