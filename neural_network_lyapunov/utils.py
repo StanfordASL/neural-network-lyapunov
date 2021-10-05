@@ -1342,20 +1342,33 @@ def relu_network_gradient(relu_network,
     return dphi_dx
 
 
-def l1_gradient(x: torch.Tensor, *, zero_tol: float = 0.) -> torch.Tensor:
+def l1_gradient(x: torch.Tensor,
+                *,
+                zero_tol: float = 0.,
+                subgradient_samples: np.ndarray = None) -> torch.Tensor:
     """
     Compute all the possible gradient of the 1-norm |x|₁
     Notice that when x(i)=0, the 1-norm is non-differentiable. We consider
-    both the left and right gradient.
+    both the left and right gradient, and also the sampled subgradient
+
+    Args:
+      zero_tol: When abs(x(i)) <= zero_tol, we consider both the left and right
+      gradient.
+      subgradient_samples: an array of sampled subgradient (in the range
+      (-1, 1)) that will be included in grad.
 
     Return:
       grad: A torch tensor of shape (num_possible_gradient, x_dim), where
-            num_possible_gradient is power(2, number of x(i)=0).
-      zero_tol: When abs(x(i)) <= zero_tol, we consider both the left and right
-      gradient.
+            num_possible_gradient is
+            power(2+subgradient_samples.size, number of x(i)=0).
     """
     assert (len(x.shape) == 1)
     assert (zero_tol >= 0)
+    if subgradient_samples is not None:
+        assert (isinstance(subgradient_samples, np.ndarray))
+        assert (np.all(subgradient_samples > -1)
+                and np.all(subgradient_samples < 1))
+
     if not torch.any(torch.abs(x) <= zero_tol):
         return torch.sign(x).reshape((1, -1))
     elif torch.sum(torch.abs(x) < zero_tol) == 1:
@@ -1364,20 +1377,41 @@ def l1_gradient(x: torch.Tensor, *, zero_tol: float = 0.) -> torch.Tensor:
         s_plus[torch.abs(s_plus) <= zero_tol] = 1
         s_minus = s.clone()
         s_minus[torch.abs(s_minus) <= zero_tol] = -1
-        return torch.vstack((s_plus, s_minus))
+        if subgradient_samples is None:
+            return torch.vstack((s_plus, s_minus))
+        else:
+            s_list = [s_plus, s_minus]
+            for i in range(subgradient_samples.size):
+                s_subgradient = s.clone()
+                s_subgradient[torch.abs(s_subgradient) <=
+                              zero_tol] = subgradient_samples[i]
+                s_list.append(s_subgradient)
+            return torch.vstack(s_list)
     else:
         # Denote the first index of x[i] == 0 as k
         # Get the gradient of 1-norm(x[:k])
         first_zero_index = (torch.abs(x) <= zero_tol).nonzero(
             as_tuple=True)[0][0]
         grad_before = torch.sign(x[:first_zero_index])
-        # The gradient w.r.t x[k] is 1 and -1
+        # The gradient w.r.t x[k] is 1 and -1 (plus subgradient_samples)
         # Also compute the gradient w.r.t x[k+1:]
-        grad_after = l1_gradient(x[first_zero_index + 1:], zero_tol=zero_tol)
-        grad = torch.hstack(
-            (grad_before.repeat((2 * grad_after.shape[0], 1)),
-             torch.vstack((torch.ones(
-                 (grad_after.shape[0], 1), dtype=x.dtype), -torch.ones(
-                     (grad_after.shape[0], 1), dtype=x.dtype))),
-             torch.vstack((grad_after, grad_after))))
+        grad_after = l1_gradient(x[first_zero_index + 1:],
+                                 zero_tol=zero_tol,
+                                 subgradient_samples=subgradient_samples)
+        if subgradient_samples is None:
+            grad = torch.hstack(
+                (grad_before.repeat((2 * grad_after.shape[0], 1)),
+                 torch.vstack((torch.ones(
+                     (grad_after.shape[0], 1), dtype=x.dtype), -torch.ones(
+                         (grad_after.shape[0], 1), dtype=x.dtype))),
+                 torch.vstack((grad_after, grad_after))))
+        else:
+            all_subgradient = torch.from_numpy(
+                np.concatenate((np.array([1., -1.]), subgradient_samples)))
+            grad = torch.hstack((grad_before.repeat(
+                ((2 + subgradient_samples.size) * grad_after.shape[0],
+                 1)), (all_subgradient.repeat(
+                     (grad_after.shape[0], 1)).T).reshape((-1, 1)),
+                                 grad_after.repeat(
+                                     (2 + subgradient_samples.size, 1))))
         return grad

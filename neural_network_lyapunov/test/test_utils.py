@@ -1188,6 +1188,38 @@ class TestL1Gradient(unittest.TestCase):
                                   [-1, 1, 1]])
         self.check_grad(grad, grad_expected)
 
+    def test5(self):
+        # Test with subgradient_samples
+        dtype = torch.float64
+        grad = utils.l1_gradient(torch.tensor([2, -2], dtype=dtype),
+                                 subgradient_samples=np.array([-0.5, 0.5]))
+        self.check_grad(grad, np.array([[1., -1.]]))
+
+        grad = utils.l1_gradient(torch.tensor([0, 2, -2], dtype=dtype),
+                                 subgradient_samples=np.array([0.]))
+        self.check_grad(
+            grad, np.array([[1., 1., -1.], [-1., 1., -1.], [0., 1., -1.]]))
+
+        grad = utils.l1_gradient(torch.tensor([0, 2, -2], dtype=dtype),
+                                 subgradient_samples=np.array([-0.5, 0.5]))
+        self.check_grad(
+            grad,
+            np.array([[0.5, 1., -1.], [1., 1., -1.], [-1., 1., -1.],
+                      [-0.5, 1., -1.]]))
+
+        grad = utils.l1_gradient(torch.tensor([2., 0., -2., 0.], dtype=dtype),
+                                 subgradient_samples=np.array([-0.5, 0.5]))
+        self.check_grad(
+            grad,
+            np.array([[1., 1., -1., 1.], [1., 1., -1., 0.5],
+                      [1., 1., -1., -0.5], [1., 1., -1., -1.],
+                      [1., 0.5, -1., 1.], [1., 0.5, -1., 0.5],
+                      [1., 0.5, -1., -0.5], [1., 0.5, -1., -1.],
+                      [1., -0.5, -1., 1.], [1., -0.5, -1., 0.5],
+                      [1., -0.5, -1., -0.5], [1., -0.5, -1., -1.],
+                      [1., -1., -1., 1.], [1., -1., -1., 0.5],
+                      [1., -1., -1., -0.5], [1., -1., -1., -1.]]))
+
 
 if __name__ == "__main__":
     unittest.main()
