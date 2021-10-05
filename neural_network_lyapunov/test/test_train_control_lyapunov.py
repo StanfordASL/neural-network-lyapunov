@@ -42,8 +42,9 @@ class TestTrainControlLyapunov(unittest.TestCase):
         self.lyapunov_relu1[4].bias.data = torch.tensor([2], dtype=self.dtype)
 
     def test_total_loss1(self):
-        clf = control_lyapunov.ControlLyapunov(self.linear_system,
-                                               self.lyapunov_relu1)
+        clf = control_lyapunov.ControlLyapunov(
+            self.linear_system, self.lyapunov_relu1,
+            control_lyapunov.SubgradientPolicy(None))
         V_lambda = 0.5
         x_equilibrium = torch.tensor([0.2, 0.5], dtype=self.dtype)
         R = torch.tensor([[1, 0.5], [-0.5, 2], [0, 1]], dtype=self.dtype)
@@ -134,8 +135,9 @@ class TestTrainControlLyapunov(unittest.TestCase):
         lyapunov_relu[4].weight.data = torch.tensor([[0.9, 3.1, -1.8]],
                                                     dtype=self.dtype)
         lyapunov_relu[4].bias.data = torch.tensor([2], dtype=self.dtype)
-        clf = control_lyapunov.ControlLyapunov(self.linear_system,
-                                               lyapunov_relu)
+        clf = control_lyapunov.ControlLyapunov(
+            self.linear_system, lyapunov_relu,
+            control_lyapunov.SubgradientPolicy(None))
         x_equilibrium = torch.tensor([0.2, 0.5], dtype=self.dtype)
         R = torch.tensor([[1, 0.5], [-0.5, 2], [0, 1]], dtype=self.dtype)
         R_options = r_options.FixedROptions(R)
@@ -167,8 +169,9 @@ class TestTrainControlLyapunov(unittest.TestCase):
         self.assertEqual(loss.item(), positivity_mip_loss.item())
 
     def test_train(self):
-        clf = control_lyapunov.ControlLyapunov(self.linear_system,
-                                               self.lyapunov_relu1)
+        clf = control_lyapunov.ControlLyapunov(
+            self.linear_system, self.lyapunov_relu1,
+            control_lyapunov.SubgradientPolicy(None))
         V_lambda = 0.5
         x_equilibrium = torch.tensor([0.2, 0.5], dtype=self.dtype)
         R = torch.tensor([[1, 0.5], [-0.5, 2], [0, 1]], dtype=self.dtype)

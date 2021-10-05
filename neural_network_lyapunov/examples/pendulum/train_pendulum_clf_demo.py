@@ -120,20 +120,22 @@ if __name__ == "__main__":
 
     elif args.load_forward_model is not None:
         dynamics_model_data = torch.load(args.load_forward_model)
-        phi_a = utils.setup_relu(
+        dynamics_model.phi_a = utils.setup_relu(
             dynamics_model_data["phi_a"]["linear_layer_width"],
             params=None,
             negative_slope=dynamics_model_data["phi_a"]["negative_slope"],
             bias=dynamics_model_data["phi_a"]["bias"],
             dtype=dtype)
-        phi_a.load_state_dict(dynamics_model_data["phi_a"]["state_dict"])
-        phi_b = utils.setup_relu(
+        dynamics_model.phi_a.load_state_dict(
+            dynamics_model_data["phi_a"]["state_dict"])
+        dynamics_model.phi_b = utils.setup_relu(
             dynamics_model_data["phi_b"]["linear_layer_width"],
             params=None,
             negative_slope=dynamics_model_data["phi_b"]["negative_slope"],
             bias=dynamics_model_data["phi_b"]["bias"],
             dtype=dtype)
-        phi_b.load_state_dict(dynamics_model_data["phi_b"]["state_dict"])
+        dynamics_model.phi_b.load_state_dict(
+            dynamics_model_data["phi_b"]["state_dict"])
 
     V_lambda = 0.5
     lyapunov_relu = utils.setup_relu((2, 8, 8, 1),
@@ -144,7 +146,8 @@ if __name__ == "__main__":
     R = torch.tensor([[0.5, 1], [-1, 0], [1, 1]], dtype=dtype)
 
     lyapunov_hybrid_system = control_lyapunov.ControlLyapunov(
-        dynamics_model, lyapunov_relu)
+        dynamics_model, lyapunov_relu,
+        control_lyapunov.SubgradientPolicy(None))
 
     R_options = r_options.SearchRwithSVDOptions(R.shape, np.array([0.1, 0.2]))
     R_options.set_variable_value(R.detach().numpy())

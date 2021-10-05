@@ -40,6 +40,32 @@ class LyapDerivMilpReturn:
         self.system_constraint_return = system_constraint_return
 
 
+class SubgradientPolicy:
+    """
+    Since our Lyapunov function V(x) is a piecewise linear function of x, its
+    gradient is not well-defined everywhere. When the gradient is not unique,
+    we consider different policies to handle subgradient ∂V/∂x. For example
+    1. Only consider the left and right derivatives of (leaky) ReLU and
+       absolute value function.
+    2. Consider a finite set of sampled subgradient.
+    """
+    def __init__(self, subgradient_samples=None):
+        """
+        The sampled subgradient. If set to None, then we only consider the left
+        and right derivatives. Note that subgradient_samples should in the
+        open-set of (left_derivative, right_derivative).
+        """
+        if subgradient_samples is None:
+            self.subgradient_samples = None
+        else:
+            assert (isinstance(subgradient_samples, np.ndarray))
+            self.subgradient_samples = subgradient_samples
+
+    @property
+    def search_subgradient(self):
+        return self.subgradient_samples is not None
+
+
 class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
     """
     Given a control affine system with dynamics
@@ -64,21 +90,20 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
     """
     def __init__(self,
                  system: control_affine_system.ControlPiecewiseAffineSystem,
-                 lyapunov_relu,
-                 search_subgradient=False):
+                 lyapunov_relu, l1_subgradient_policy: SubgradientPolicy):
         """
         Args:
           system: A control-affine system.
           lyapunov_relu: The neural network ϕ which defines the Lyapunov
           function.
-          search_subgradient: If set to True, then we will search for all the
-          subgradient of V(x); Otherwise, we only search for the left and right
-          derivatives of V(x).
+          l1_subgradient_policy: The policy for searching subgradient of
+          absolute function in the l1-norm.
         """
         assert (isinstance(system,
                            control_affine_system.ControlPiecewiseAffineSystem))
         super(ControlLyapunov, self).__init__(system, lyapunov_relu)
-        self.search_subgradient = search_subgradient
+        assert (isinstance(l1_subgradient_policy, SubgradientPolicy))
+        self.l1_subgradient_policy = l1_subgradient_policy
 
     def lyapunov_derivative(self,
                             x,
@@ -313,7 +338,10 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             slack_name="l1_slack",
             binary_var_name="l1_binary",
             binary_var_type=binary_var_type,
-            binary_for_zero_input=self.search_subgradient)
+            binary_for_zero_input=self.l1_subgradient_policy.search_subgradient
+        )
+        l1_subgradient_binary = self._add_l1_subgradient_binary(
+            milp, l1_binary)
         if (self.network_bound_propagate_method ==
                 mip_utils.PropagateBoundsMethod.IA):
             Rf_lo, Rf_up = self._compute_Rf_bounds_IA(
@@ -324,11 +352,12 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 system_constraint_return.G_flat_up)
         else:
             raise NotImplementedError
-        dl1dx_times_f = self._add_dl1dx_times_f(milp, x, l1_binary, f, R,
+        dl1dx_times_f = self._add_dl1dx_times_f(milp, x, l1_binary,
+                                                l1_subgradient_binary, f, R,
                                                 Rf_lo, Rf_up, V_lambda,
                                                 Vdot_coeff, Vdot_vars)
         dVdx_times_G_ret, dVdx_times_G_binary = self._add_dVdx_times_G(
-            milp, x, l1_binary, relu_beta, Gt, R,
+            milp, x, l1_binary, relu_beta, l1_subgradient_binary, Gt, R,
             system_constraint_return.G_flat_lo,
             system_constraint_return.G_flat_up, RG_lo, RG_up, V_lambda,
             Vdot_coeff, Vdot_vars)
@@ -442,6 +471,28 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         elif reduction == "4norm":
             return torch.norm(hinge_loss_all, p=4)
 
+    def _add_l1_subgradient_binary(self, milp, l1_binary):
+        if self.l1_subgradient_policy.search_subgradient:
+            l1_subgradient_binary = [None] * len(l1_binary)
+            for i in range(len(l1_binary)):
+                l1_subgradient_binary[i] = milp.addVars(
+                    self.l1_subgradient_policy.subgradient_samples.size,
+                    vtype=gurobipy.GRB.BINARY,
+                    name=f"subgradient_binary[{i}]")
+                # Add the constraint
+                # sum_j subgradient_binary[i][j] = l1_binary[i][1]
+                milp.addLConstr([
+                    torch.ones(
+                        self.l1_subgradient_policy.subgradient_samples.size,
+                        dtype=self.system.dtype),
+                    torch.tensor([-1], dtype=self.system.dtype)
+                ], [l1_subgradient_binary[i], [l1_binary[i][1]]],
+                                sense=gurobipy.GRB.EQUAL,
+                                rhs=0.)
+        else:
+            l1_subgradient_binary = None
+        return l1_subgradient_binary
+
     def _compute_Rf_bounds_IA(self, R, f_lo, f_up):
         """
         Compute the range of R * f.
@@ -466,10 +517,10 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         return RG_lo, RG_up
 
     def _add_dl1dx_times_f(self, milp: gurobi_torch_mip.GurobiTorchMIP,
-                           x: list, l1_binary: list, f: list, R: torch.Tensor,
-                           Rf_lo: torch.Tensor, Rf_up: torch.Tensor,
-                           V_lambda: float, Vdot_coeff: list,
-                           Vdot_vars: list) -> list:
+                           x: list, l1_binary: list, subgradient_binary: list,
+                           f: list, R: torch.Tensor, Rf_lo: torch.Tensor,
+                           Rf_up: torch.Tensor, V_lambda: float,
+                           Vdot_coeff: list, Vdot_vars: list) -> list:
         """
         Adds λ*∂|R(x−x*)|₁/∂x * f to V̇.
         We need to add the mixed-integer linear constraints, and also append
@@ -500,16 +551,22 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         # We need to add slack variables to represent the product between the
         # binary variable α and R*f
         assert (len(l1_binary) == R.shape[0])
-        dl1dx_times_f = _compute_dl1dx_times_y(milp, l1_binary, f, R, Rf_lo,
-                                               Rf_up, V_lambda,
-                                               "dl1dx_times_f",
-                                               self.search_subgradient)
+        if self.l1_subgradient_policy.search_subgradient:
+            dl1dx_times_f = _compute_dl1dx_times_y_sampled_subgradient(
+                milp, l1_binary, f, subgradient_binary,
+                self.l1_subgradient_policy.subgradient_samples, R, Rf_lo,
+                Rf_up, V_lambda, "dl1dx_times_f")
+        else:
+            dl1dx_times_f = _compute_dl1dx_times_y(milp, l1_binary, f, R,
+                                                   Rf_lo, Rf_up, V_lambda,
+                                                   "dl1dx_times_f", False)
         Vdot_coeff.append(torch.tensor([1], dtype=self.system.dtype))
         Vdot_vars.append([dl1dx_times_f])
         return dl1dx_times_f
 
     def _add_dVdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP, x: list,
-                          l1_binary: list, relu_beta: list, Gt: list,
+                          l1_binary: list, relu_beta: list,
+                          l1_subgradient_binary: list, Gt: list,
                           R: torch.Tensor, G_flat_lo: torch.Tensor,
                           G_flat_up: torch.Tensor, RG_lo: torch.Tensor,
                           RG_up: torch.Tensor, V_lambda: float,
@@ -541,8 +598,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         assert (RG_lo.shape == (R.shape[0], self.system.u_dim))
         assert (RG_up.shape == (R.shape[0], self.system.u_dim))
         compute_dVdx_times_G_return = self._compute_dVdx_times_G(
-            milp, x, relu_beta, l1_binary, Gt, G_flat_lo, G_flat_up, RG_lo,
-            RG_up, R, V_lambda)
+            milp, x, relu_beta, l1_binary, l1_subgradient_binary, Gt,
+            G_flat_lo, G_flat_up, RG_lo, RG_up, R, V_lambda)
 
         u_mid = (self.system.u_lo + self.system.u_up) / 2
         # Add ∂V/∂x*G(x) * (u_lo + u_up)/2 to Vdot
@@ -620,10 +677,10 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
 
     def _compute_dVdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
                               x: list, relu_beta: list, l1_binary: list,
-                              Gt: list, G_flat_lo: torch.Tensor,
-                              G_flat_up: torch.Tensor, RG_lo: torch.Tensor,
-                              RG_up: torch.Tensor, R: torch.Tensor,
-                              V_lambda: float):
+                              subgradient_binary: list, Gt: list,
+                              G_flat_lo: torch.Tensor, G_flat_up: torch.Tensor,
+                              RG_lo: torch.Tensor, RG_up: torch.Tensor,
+                              R: torch.Tensor, V_lambda: float):
         """
         Add the constraint for ∂V/∂x * G(x) to the program.
         Namely we introduce a new variable dVdx_times_G, add the constraint
@@ -677,11 +734,15 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         # dl1dx_times_G[i] = λ∂|R(x−x*)|/∂x*G.col(i)
         dl1dx_times_G = [None] * self.system.u_dim
         for i in range(self.system.u_dim):
-            dl1dx_times_G[i] = _compute_dl1dx_times_y(milp, l1_binary, Gt[i],
-                                                      R, RG_lo[:, i],
-                                                      RG_up[:, i], V_lambda,
-                                                      f"dl1dx_times_G[{i}]",
-                                                      self.search_subgradient)
+            if self.l1_subgradient_policy.search_subgradient:
+                dl1dx_times_G[i] = _compute_dl1dx_times_y_sampled_subgradient(
+                    milp, l1_binary, Gt[i], subgradient_binary,
+                    self.l1_subgradient_policy.subgradient_samples, R,
+                    RG_lo[:, i], RG_up[:, i], V_lambda, f"dl1dx_times_G[{i}]")
+            else:
+                dl1dx_times_G[i] = _compute_dl1dx_times_y(
+                    milp, l1_binary, Gt[i], R, RG_lo[:, i], RG_up[:, i],
+                    V_lambda, f"dl1dx_times_G[{i}]", False)
 
         # ∂V/∂x * G(x) = ∂ϕ/∂x*G(x) + λ*∂|R(x−x*)|₁/∂x*G(x)
         # Hence we add the constraint
