@@ -95,12 +95,15 @@ class TestControlLyapunov(unittest.TestCase):
         dphi_dx = utils.relu_network_gradient(dut.lyapunov_relu,
                                               x,
                                               zero_tol=zero_tol).squeeze(1)
-        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
-                                              zero_tol=zero_tol) @ R
+        dl1_dx = V_lambda * utils.l1_gradient(
+            R @ (x - x_equilibrium),
+            zero_tol=zero_tol,
+            subgradient_samples=dut.l1_subgradient_policy.subgradient_samples
+        ) @ R
         v = dut.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
-        if subgradient_rule == "max":
+        if subgradient_rule == "max_sample":
             vdot_expected = -np.inf
-        elif subgradient_rule == "min":
+        elif subgradient_rule == "min_sample":
             vdot_expected = np.inf
         elif subgradient_rule == "all":
             subgradient_rule = []
@@ -113,15 +116,15 @@ class TestControlLyapunov(unittest.TestCase):
                     vdot_expected_ij += torch.minimum(
                         dV_dx_times_G[k] * dut.system.u_lo[k],
                         dV_dx_times_G[k] * dut.system.u_up[k])
-                if subgradient_rule == "max" and vdot_expected_ij > \
+                if subgradient_rule == "max_sample" and vdot_expected_ij > \
                         vdot_expected:
                     vdot_expected = vdot_expected_ij
-                elif subgradient_rule == "min" and vdot_expected_ij < \
+                elif subgradient_rule == "min_sample" and vdot_expected_ij < \
                         vdot_expected:
                     vdot_expected = vdot_expected_ij
                 elif subgradient_rule == "all":
                     vdot_expected.append(vdot_expected_ij)
-        if subgradient_rule in ("min", "max"):
+        if subgradient_rule in ("min_sample", "max_sample"):
             self.assertAlmostEqual(vdot[0].item(), vdot_expected.item())
         elif subgradient_rule == "all":
             # We don't care the order in vdot.
@@ -143,7 +146,7 @@ class TestControlLyapunov(unittest.TestCase):
         R = torch.tensor([[1, 0], [0, 2], [1, 3]], dtype=self.dtype)
         epsilon = 0.1
 
-        for subgradient_rule in ("min", "max", "all"):
+        for subgradient_rule in ("min_sample", "max_sample", "all"):
             x = torch.tensor([0.5, 1.5], dtype=self.dtype)
             self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
                                             epsilon, R, subgradient_rule)
@@ -169,6 +172,47 @@ class TestControlLyapunov(unittest.TestCase):
             self.lyapunov_derivative_tester(dut, x, x_equilibrium, V_lambda,
                                             epsilon, R, subgradient_rule,
                                             zero_tol)
+
+    def test_lyapunov_derivative2(self):
+        # Test with subgradient_samples
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  l1_subgradient_policy=mut.SubgradientPolicy(
+                                      np.array([-0.5, 0, 0.5])))
+        x_equilibrium = torch.tensor([0, -1], dtype=self.dtype)
+        V_lambda = 0.5
+        R = torch.tensor([[1, 0], [0, 2], [1, 3]], dtype=self.dtype)
+        epsilon = 0.1
+
+        x = torch.tensor([0.5, 1], dtype=self.dtype)
+        self.lyapunov_derivative_tester(dut,
+                                        x,
+                                        x_equilibrium,
+                                        V_lambda,
+                                        epsilon,
+                                        R,
+                                        subgradient_rule="max_sample",
+                                        zero_tol=0.)
+
+        # Some l1 norm entry equals to 0.
+        x = torch.tensor([0, 1], dtype=self.dtype)
+        self.lyapunov_derivative_tester(dut,
+                                        x,
+                                        x_equilibrium,
+                                        V_lambda,
+                                        epsilon,
+                                        R,
+                                        subgradient_rule="max_sample",
+                                        zero_tol=0.)
+        x = x_equilibrium
+        self.lyapunov_derivative_tester(dut,
+                                        x,
+                                        x_equilibrium,
+                                        V_lambda,
+                                        epsilon,
+                                        R,
+                                        subgradient_rule="max_sample",
+                                        zero_tol=0.)
 
     def add_system_constraint_tester(self, dut, x_val: torch.Tensor,
                                      is_feasible):
@@ -407,9 +451,9 @@ class TestControlLyapunov(unittest.TestCase):
         lyap_deriv_return.milp.gurobi_model.optimize()
         if eps_type in (lyapunov.ConvergenceEps.ExpLower,
                         lyapunov.ConvergenceEps.Asymp):
-            subgradient_rule = "max"
+            subgradient_rule = "max_sample"
         else:
-            subgradient_rule = "min"
+            subgradient_rule = "min_sample"
         if is_feasible:
             self.assertEqual(lyap_deriv_return.milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
@@ -571,6 +615,54 @@ class TestControlLyapunov(unittest.TestCase):
                                                     None,
                                                     gurobipy.GRB.BINARY,
                                                     is_feasible=True)
+
+    def test_lyapunov_derivative_as_milp4(self):
+        # V_lambda != 0 and epsilon != 0 and l1 subgradient samples is
+        # non-empty.
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  l1_subgradient_policy=mut.SubgradientPolicy(
+                                      np.array([-0.5, 0, 0.5])))
+        x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        V_lambda = 0.5
+        epsilon = 0.2
+        R = torch.tensor([[1., 0.], [0.5, 1.], [1., -1.]], dtype=self.dtype)
+        for eps_type in list(lyapunov.ConvergenceEps):
+            self.lyapunov_derivative_as_milp_tester(dut,
+                                                    x_equilibrium,
+                                                    V_lambda,
+                                                    epsilon,
+                                                    eps_type,
+                                                    R,
+                                                    None,
+                                                    None,
+                                                    gurobipy.GRB.BINARY,
+                                                    is_feasible=True)
+        # Now fix x to x_equilibrium, where l1-norm has many subgradient. Make
+        # sure that the MILP solution is correct.
+
+        lyap_deriv_milp_ret = dut.lyapunov_derivative_as_milp(
+            x_equilibrium,
+            V_lambda,
+            epsilon,
+            lyapunov.ConvergenceEps.ExpLower,
+            R=R)
+        for i in range(dut.system.x_dim):
+            lyap_deriv_milp_ret.x[i].lb = x_equilibrium[i].item()
+            lyap_deriv_milp_ret.x[i].ub = x_equilibrium[i].item()
+        lyap_deriv_milp_ret.milp.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        lyap_deriv_milp_ret.milp.gurobi_model.optimize()
+        self.assertEqual(lyap_deriv_milp_ret.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        self.assertAlmostEqual(
+            lyap_deriv_milp_ret.milp.gurobi_model.ObjVal,
+            dut.lyapunov_derivative(x_equilibrium,
+                                    x_equilibrium,
+                                    V_lambda,
+                                    epsilon,
+                                    R=R,
+                                    zero_tol=1E-14).item())
 
     def compute_dVdx_times_G_tester(self, dut, x_equilibrium, R, G_flat_lo,
                                     G_flat_up, RG_lo, RG_up, V_lambda):
@@ -780,7 +872,7 @@ class TestControlLyapunov(unittest.TestCase):
                                     V_lambda,
                                     epsilon,
                                     R=R,
-                                    subgradient_rule="max",
+                                    subgradient_rule="max_sample",
                                     zero_tol=1e-6)
             for i in range(state_samples.shape[0])
         ])

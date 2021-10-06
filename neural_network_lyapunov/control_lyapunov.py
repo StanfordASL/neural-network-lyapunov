@@ -112,7 +112,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                             epsilon,
                             *,
                             R,
-                            subgradient_rule: str = "max",
+                            subgradient_rule: str = "max_sample",
                             zero_tol: float = 0.):
         """
         Compute minᵤ V̇ + ε*V
@@ -128,12 +128,13 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
           V_lambda: λ in the documentation.
           epsilon: ε in the documentation.
           R: A full column rank matrix. Use the identity matrix if R=None.
-          subgradient_rule: Can be either "max", "min", or "all".
-            If "max", then we compute the maximal of V̇ among all possible
+          subgradient_rule: Can be either "max_sample", "min_sample", or
+            "all".
+            If "max_sample", then we compute the maximal of V̇ among all
+            sampled subgradients.
+            If "min", then we compute the minimal of V̇ among all sampled
             subgradients.
-            If "min", then we compute the minimal of V̇ among all possible
-            subgradients.
-            If "all", then we compute all V̇ for every possible subgradients.
+            If "all", then we compute all V̇ for all sampled subgradients.
           zero_tol: The l1-norm and ReLU unit is not differentiable at 0.
           If the absolute value of an input to the l1-norm or ReLU unit is no
           larger than zero_tol, then we consider both the left and right
@@ -150,8 +151,11 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                                               zero_tol=zero_tol).squeeze(1)
 
         # Now compute the gradient of λ|R(x−x*)|₁
-        dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
-                                              zero_tol=zero_tol) @ R
+        dl1_dx = V_lambda * utils.l1_gradient(
+            R @ (x - x_equilibrium),
+            zero_tol=zero_tol,
+            subgradient_samples=self.l1_subgradient_policy.subgradient_samples
+        ) @ R
 
         # We compute the sum of each possible dphi_dX and dl1_dx
         dVdx = dphi_dx.repeat((dl1_dx.shape[0], 1)) + dl1_dx.repeat(
@@ -170,12 +174,15 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 p=1,
                 dim=1)
         V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
-        if subgradient_rule == "max":
+        if subgradient_rule == "max_sample":
             return torch.max(Vdot.squeeze()) + epsilon * V
-        elif subgradient_rule == "min":
+        elif subgradient_rule == "min_sample":
             return torch.min(Vdot.squeeze()) + epsilon * V
         elif subgradient_rule == "all":
             return Vdot.squeeze() + epsilon * V
+        else:
+            raise Exception("lyapunov_derivative(): unknown subgradient_rule" +
+                            f" {subgradient_rule}")
 
     def add_system_constraint(
         self,
@@ -430,9 +437,9 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         R = lyapunov._get_R(R, self.system.x_dim, state_samples.device)
         if eps_type in (lyapunov.ConvergenceEps.ExpLower,
                         lyapunov.ConvergenceEps.Asymp):
-            subgradient_rule = "max"
+            subgradient_rule = "max_sample"
         elif eps_type == lyapunov.ConvergenceEps.ExpUpper:
-            subgradient_rule = "min"
+            subgradient_rule = "min_sample"
 
         Vdot_samples = torch.stack([
             self.lyapunov_derivative(state_samples[i],
@@ -677,7 +684,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
 
     def _compute_dVdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
                               x: list, relu_beta: list, l1_binary: list,
-                              subgradient_binary: list, Gt: list,
+                              l1_subgradient_binary: list, Gt: list,
                               G_flat_lo: torch.Tensor, G_flat_up: torch.Tensor,
                               RG_lo: torch.Tensor, RG_up: torch.Tensor,
                               R: torch.Tensor, V_lambda: float):
@@ -736,7 +743,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         for i in range(self.system.u_dim):
             if self.l1_subgradient_policy.search_subgradient:
                 dl1dx_times_G[i] = _compute_dl1dx_times_y_sampled_subgradient(
-                    milp, l1_binary, Gt[i], subgradient_binary,
+                    milp, l1_binary, Gt[i], l1_subgradient_binary,
                     self.l1_subgradient_policy.subgradient_samples, R,
                     RG_lo[:, i], RG_up[:, i], V_lambda, f"dl1dx_times_G[{i}]")
             else:
