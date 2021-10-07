@@ -942,6 +942,71 @@ class TestControlLyapunov(unittest.TestCase):
         self.assertEqual(milp.gurobi_model.status,
                          gurobipy.GRB.Status.INFEASIBLE)
 
+    def test_calc_vdot_allsubgradient(self):
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  l1_subgradient_policy=mut.SubgradientPolicy(
+                                      np.array([0.])))
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        V_lambda = 0.1
+        R = torch.tensor([[1, 2], [0, 1], [1, -1]], dtype=self.dtype)
+        zero_tol = 0.
+
+        # First test x with unique gradient.
+        x = torch.tensor([3, 2], dtype=self.dtype)
+        vdot, _ = dut.calc_vdot_allsubgradient(x, x_equilibrium, V_lambda, R,
+                                               zero_tol)
+        self.assertEqual(
+            vdot.item(),
+            dut.lyapunov_derivative(x, x_equilibrium, V_lambda, 0.,
+                                    R=R).item())
+
+        # The l1-norm has one entry with subgradient.
+        def tester(x):
+            vdot, u_sol = dut.calc_vdot_allsubgradient(x, x_equilibrium,
+                                                       V_lambda, R, zero_tol)
+            np.testing.assert_array_less(
+                u_sol,
+                dut.system.u_up.detach().numpy() + 1E-10)
+            np.testing.assert_array_less(
+                dut.system.u_lo.detach().numpy() - 1E-10, u_sol)
+            dphi_dx = utils.relu_network_gradient(dut.lyapunov_relu,
+                                                  x,
+                                                  zero_tol=zero_tol)
+            dl1_dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
+                                                  zero_tol=zero_tol) @ R
+            all_subgradient = dphi_dx.squeeze(1).repeat(
+                (1, dl1_dx.shape[0])).reshape(
+                    (-1, dut.system.x_dim)) + dl1_dx.repeat(
+                        (dphi_dx.shape[0], 1))
+            f = dut.system.f(x)
+            G = dut.system.G(x)
+            self.assertAlmostEqual(
+                torch.max(
+                    all_subgradient @ f +
+                    all_subgradient @ G @ torch.from_numpy(u_sol)).item(),
+                vdot.item())
+            # Sample many u inside [u_lo, u_up], evaluate vdot on these u,
+            # they should all be larger than vdot evaluated at u_sol.
+            torch.manual_seed(0)
+            u_samples = utils.uniform_sample_in_box(dut.system.u_lo,
+                                                    dut.system.u_up, 100)
+            self.assertGreaterEqual(
+                torch.min(
+                    torch.max((all_subgradient @ f).reshape((-1, 1)).repeat(
+                        (1, u_samples.shape[0])) +
+                              all_subgradient @ G @ u_samples.T,
+                              dim=0)[0]).item(), vdot.item())
+            self.assertGreaterEqual(
+                vdot.item(),
+                dut.lyapunov_derivative(x, x_equilibrium, V_lambda, 0.,
+                                        R=R).item())
+
+        tester(torch.tensor([3, 2], dtype=self.dtype))
+        tester(torch.tensor([1, 1], dtype=self.dtype))
+        tester(torch.tensor([2, -1], dtype=self.dtype))
+        tester(torch.tensor([0, 0], dtype=self.dtype))
+
 
 def set_l1_binary_val(R, x, x_equilibrium, l1_binary, idx):
     """

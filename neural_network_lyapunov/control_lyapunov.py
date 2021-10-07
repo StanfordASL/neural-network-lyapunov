@@ -184,6 +184,61 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             raise Exception("lyapunov_derivative(): unknown subgradient_rule" +
                             f" {subgradient_rule}")
 
+    def calc_vdot_allsubgradient(self,
+                                 x,
+                                 x_equilibrium,
+                                 V_lambda,
+                                 R,
+                                 zero_tol: float = 0.):
+        """
+        Compute V̇ = minᵤ max_d dᵀ(f(x) + G(x)u)
+        where d is the subgradient of V(x) at x.
+        Notice this function only works when the set of subgradient at x
+        is a convex set (namely if the neural network ϕ(x) has subgradient,
+        then all the neurons with input 0 are on the same layer).
+
+        This problem is formulated as the following optimization
+        min_u s
+        s.t s >= dᵢᵀ(f(x) + G(x)u)
+        where dᵢ is the i'th vertex of the set of subgradient.
+        """
+        dphi_dx = utils.relu_network_gradient(self.lyapunov_relu,
+                                              x,
+                                              zero_tol=zero_tol)
+        dl1_dx = utils.l1_gradient(R @ (x - x_equilibrium)) @ R
+        f = self.system.f(x)
+        G = self.system.G(x)
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
+        u = milp.addVars(self.system.u_dim, lb=-gurobipy.GRB.INFINITY)
+        milp.addMConstrs(
+            [torch.eye(self.system.u_dim, dtype=self.system.dtype)], [u],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=self.system.u_up)
+        milp.addMConstrs(
+            [-torch.eye(self.system.u_dim, dtype=self.system.dtype)], [u],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=-self.system.u_lo)
+        s = milp.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        for i in range(dphi_dx.shape[0]):
+            for j in range(dl1_dx.shape[0]):
+                V_subgradient = dphi_dx[i] + V_lambda * dl1_dx[j].unsqueeze(0)
+                milp.addLConstr([
+                    torch.tensor([1.], dtype=self.system.dtype),
+                    (-V_subgradient @ G).squeeze(0)
+                ], [s, u],
+                                sense=gurobipy.GRB.GREATER_EQUAL,
+                                rhs=V_subgradient.squeeze(0) @ f)
+        milp.setObjective([torch.tensor([1.], dtype=self.system.dtype)], [s],
+                          constant=0.,
+                          sense=gurobipy.GRB.MINIMIZE)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp.gurobi_model.optimize()
+        assert (milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        return torch.tensor(milp.gurobi_model.ObjVal,
+                            dtype=self.system.dtype), np.array(
+                                [v.x for v in u])
+        # return milp.compute_objective_from_mip_data_and_solution()
+
     def add_system_constraint(
         self,
         milp: gurobi_torch_mip.GurobiTorchMIP,
