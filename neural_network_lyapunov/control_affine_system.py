@@ -306,6 +306,74 @@ class ReluSecondOrderControlAffineSystem(SecondOrderControlAffineSystem):
         return mip_cnstr_a, mip_cnstr_b_flat, a_lo, a_up, b_lo, b_up
 
 
+class SecondOrderControlAffineWEquilibriumSystem(SecondOrderControlAffineSystem
+                                                 ):
+    """
+    A second order system, that
+    v̇=ϕ_a(x)-ϕ_a(x*)-ϕ_b(x*)*u* + ϕ_b(x) * u
+    where ϕ_a, ϕ_b are both neural networks with (leaky) ReLU activation unit.
+    x*, u* are the state/control at the equilibrium.
+    """
+    def __init__(self, x_lo, x_up, u_lo, u_up, phi_a, phi_b,
+                 x_equilibrium: torch.Tensor, u_equilibrium: torch.Tensor,
+                 method: mip_utils.PropagateBoundsMethod):
+        """
+        Args:
+          phi_a: A neural network that maps x to ϕ_a(x).
+          phi_b: A neural network that maps x to a flat vector
+          [ϕ_b(x).row(0), ϕ_b(x).row(1), ..., ϕ_b(x).row(nq-1)]
+          method: The method to propagate the bounds in the ReLU networks phi_a
+          and phi_b.
+        """
+        super(SecondOrderControlAffineWEquilibriumSystem,
+              self).__init__(x_lo, x_up, u_lo, u_up)
+        assert (phi_a[0].in_features == self.x_dim)
+        assert (phi_a[-1].out_features == self.nq)
+        assert (phi_b[0].in_features == self.x_dim)
+        assert (phi_b[-1].out_features == self.u_dim * self.nq)
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.x_dim, ))
+        assert (isinstance(u_equilibrium, torch.Tensor))
+        assert (u_equilibrium.shape == (self.u_dim, ))
+        assert (torch.all(x_equilibrium <= x_up))
+        assert (torch.all(x_equilibrium >= x_lo))
+        assert (torch.all(u_equilibrium >= u_lo))
+        assert (torch.all(u_equilibrium <= u_up))
+        assert (torch.all(x_equilibrium[self.nq:] == 0))
+        self.phi_a = phi_a
+        self.phi_b = phi_b
+        self.x_equilibrium = x_equilibrium
+        self.u_equilibrium = u_equilibrium
+        self.method = method
+        self.relu_free_pattern_a = relu_to_optimization.ReLUFreePattern(
+            self.phi_a, self.dtype)
+        self.relu_free_pattern_b = relu_to_optimization.ReLUFreePattern(
+            self.phi_b, self.dtype)
+
+    def a(self, x):
+        return self.phi_a(x) - self.phi_a(
+            self.x_equilibrium) - self.phi_b(self.x_equilibrium).reshape(
+                (self.nq, self.u_dim)) @ self.u_equilibrium
+
+    def b(self, x):
+        return self.phi_b(x).reshape((self.nq, self.u_dim))
+
+    def _mixed_integer_constraints_v(self):
+        mip_cnstr_a = self.relu_free_pattern_a.output_constraint(
+            self.x_lo, self.x_up, self.method)
+        mip_cnstr_b_flat = self.relu_free_pattern_b.output_constraint(
+            self.x_lo, self.x_up, self.method)
+        a_delta = -self.phi_a(self.x_equilibrium) - self.phi_b(
+            self.x_equilibrium).reshape(
+                (self.nq, self.u_dim)) @ self.u_equilibrium
+        mip_cnstr_a.Cout += a_delta
+        a_lo = mip_cnstr_a.nn_output_lo + a_delta
+        a_up = mip_cnstr_a.nn_output_up + a_delta
+        b_lo = mip_cnstr_b_flat.nn_output_lo
+        b_up = mip_cnstr_b_flat.nn_output_up
+        return mip_cnstr_a, mip_cnstr_b_flat, a_lo, a_up, b_lo, b_up
+
+
 def train_control_affine_forward_model(forward_model_f,
                                        forward_model_G,
                                        x_equ,

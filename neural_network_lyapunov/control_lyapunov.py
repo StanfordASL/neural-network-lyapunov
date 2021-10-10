@@ -677,7 +677,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             # We add -|∂V/∂x * G.col(i)| * (u_up(i) - u_lo(i))/2
             if compute_dVdx_times_G_return.dVdx_times_G_lo[i] >= 0:
                 # The binary variable equals to 1.
-                milp.addLConstr([torch.tensor([1], dtype=self.dtype)],
+                milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
                                 [dVdx_times_G_binary[i]],
                                 sense=gurobipy.GRB.EQUAL,
                                 rhs=1.)
@@ -690,7 +690,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 Vdot_vars.append([compute_dVdx_times_G_return.dVdx_times_G[i]])
             elif compute_dVdx_times_G_return.dVdx_times_G_up[i] <= 0:
                 # The binary variable equals to 0.
-                milp.addLConstr([torch.tensor([1], dtype=self.dtype)],
+                milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
                                 [dVdx_times_G_binary[i]],
                                 sense=gurobipy.GRB.EQUAL,
                                 rhs=0.)

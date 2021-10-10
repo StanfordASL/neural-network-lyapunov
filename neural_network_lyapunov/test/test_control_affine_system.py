@@ -141,6 +141,36 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 dut.dynamics(x_samples[i], u_samples[i]).detach().numpy(),
                 xdot.detach().numpy())
 
+    def test_dynamics_w_equilibrium(self):
+        x_equilibrium = torch.tensor([0.5, 0], dtype=self.dtype)
+        u_equilibrium = torch.tensor([0.3, -0.1, 0.2], dtype=self.dtype)
+        x_lo = torch.tensor([-0.5, -0.5], dtype=self.dtype)
+        x_up = torch.tensor([2, 1.5], dtype=self.dtype)
+        u_lo = torch.tensor([-1, -1, 0], dtype=self.dtype)
+        u_up = torch.tensor([1, 0., 2], dtype=self.dtype)
+        dut = mut.SecondOrderControlAffineWEquilibriumSystem(
+            x_lo, x_up, u_lo, u_up, self.phi_a, self.phi_b, x_equilibrium,
+            u_equilibrium, mip_utils.PropagateBoundsMethod.IA)
+
+        # Now sample many x and u.
+        x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+        u_samples = utils.uniform_sample_in_box(u_lo, u_up, 100)
+        for i in range(x_samples.shape[0]):
+            xdot = dut.dynamics(x_samples[i], u_samples[i])
+            vdot_expected = self.phi_a(x_samples[i]) - self.phi_a(
+                x_equilibrium) + self.phi_b(x_samples[i]).reshape(
+                    (dut.nq, dut.u_dim
+                     )) @ u_samples[i] - self.phi_b(x_equilibrium).reshape(
+                         (dut.nq, dut.u_dim)) @ u_equilibrium
+            np.testing.assert_allclose(
+                xdot.detach().numpy(),
+                torch.cat(
+                    (x_samples[i][dut.nq:], vdot_expected)).detach().numpy())
+
+        np.testing.assert_allclose(
+            dut.dynamics(x_equilibrium, u_equilibrium).detach().numpy(),
+            np.zeros(dut.x_dim))
+
     def test_mixed_integer_constraints_v(self):
         for method in list(mip_utils.PropagateBoundsMethod):
             dut = mut.ReluSecondOrderControlAffineSystem(
@@ -196,7 +226,52 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 np.testing.assert_allclose(a_val, a_expected.detach().numpy())
                 np.testing.assert_allclose(b_val, b_expected.detach().numpy())
 
-    def test_mixed_integer_constraints(self):
+    def mixed_integer_constraints_tester(self, dut):
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 50)
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+        f = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+        G_flat = milp.addVars(dut.x_dim * dut.u_dim, lb=-gurobipy.GRB.INFINITY)
+        ret = dut.mixed_integer_constraints()
+        milp.add_mixed_integer_linear_constraints(
+            ret.mip_cnstr_f,
+            x,
+            f,
+            "f_slack",
+            "f_binary",
+            "",
+            "",
+            "",
+            binary_var_type=gurobipy.GRB.BINARY)
+        milp.add_mixed_integer_linear_constraints(
+            ret.mip_cnstr_G,
+            x,
+            G_flat,
+            "G_slack",
+            "G_binary",
+            "",
+            "",
+            "",
+            binary_var_type=gurobipy.GRB.BINARY)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.x_dim):
+                x[j].lb = x_samples[i][j]
+                x[j].ub = x_samples[i][j]
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            f_val = np.array([v.x for v in f])
+            G_val = np.array([v.x for v in G_flat]).reshape(
+                (dut.x_dim, dut.u_dim))
+            f_expected = dut.f(x_samples[i])
+            G_expected = dut.G(x_samples[i])
+            np.testing.assert_allclose(f_val, f_expected.detach().numpy())
+            np.testing.assert_allclose(G_val, G_expected.detach().numpy())
+
+    def test_mixed_integer_constraints1(self):
+        # Test with ReluSecondOrderControlAffineSystem
         for method in list(mip_utils.PropagateBoundsMethod):
             dut = mut.ReluSecondOrderControlAffineSystem(
                 x_lo=torch.tensor([-2, -1], dtype=self.dtype),
@@ -206,49 +281,22 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 phi_a=self.phi_a,
                 phi_b=self.phi_b,
                 method=method)
-            torch.manual_seed(0)
-            x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 50)
-            milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
-            x = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
-            f = milp.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
-            G_flat = milp.addVars(dut.x_dim * dut.u_dim,
-                                  lb=-gurobipy.GRB.INFINITY)
-            ret = dut.mixed_integer_constraints()
-            milp.add_mixed_integer_linear_constraints(
-                ret.mip_cnstr_f,
-                x,
-                f,
-                "f_slack",
-                "f_binary",
-                "",
-                "",
-                "",
-                binary_var_type=gurobipy.GRB.BINARY)
-            milp.add_mixed_integer_linear_constraints(
-                ret.mip_cnstr_G,
-                x,
-                G_flat,
-                "G_slack",
-                "G_binary",
-                "",
-                "",
-                "",
-                binary_var_type=gurobipy.GRB.BINARY)
-            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
-            for i in range(x_samples.shape[0]):
-                for j in range(dut.x_dim):
-                    x[j].lb = x_samples[i][j]
-                    x[j].ub = x_samples[i][j]
-                milp.gurobi_model.optimize()
-                self.assertEqual(milp.gurobi_model.status,
-                                 gurobipy.GRB.Status.OPTIMAL)
-                f_val = np.array([v.x for v in f])
-                G_val = np.array([v.x for v in G_flat]).reshape(
-                    (dut.x_dim, dut.u_dim))
-                f_expected = dut.f(x_samples[i])
-                G_expected = dut.G(x_samples[i])
-                np.testing.assert_allclose(f_val, f_expected.detach().numpy())
-                np.testing.assert_allclose(G_val, G_expected.detach().numpy())
+            self.mixed_integer_constraints_tester(dut)
+
+    def test_mixed_integer_constraints2(self):
+        for method in list(mip_utils.PropagateBoundsMethod):
+            dut = mut.SecondOrderControlAffineWEquilibriumSystem(
+                x_lo=torch.tensor([-2, -1], dtype=self.dtype),
+                x_up=torch.tensor([-1, 2], dtype=self.dtype),
+                u_lo=torch.tensor([-2, -1, -1], dtype=self.dtype),
+                u_up=torch.tensor([-1, 2, 1], dtype=self.dtype),
+                phi_a=self.phi_a,
+                phi_b=self.phi_b,
+                x_equilibrium=torch.tensor([-1.5, 0], dtype=self.dtype),
+                u_equilibrium=torch.tensor([-1.5, 0.5, -0.5],
+                                           dtype=self.dtype),
+                method=method)
+            self.mixed_integer_constraints_tester(dut)
 
     def test_compute_range(self):
         for method in list(mip_utils.PropagateBoundsMethod):
