@@ -25,7 +25,7 @@ class ControlAffinePendulum(
         self.x_equilibrium = torch.tensor([np.pi, 0], dtype=self.dtype)
         self.u_equilibrium = torch.tensor([0], dtype=self.dtype)
         self.phi_a = phi_a
-        assert (isinstance(b_val, torch.tensor))
+        assert (isinstance(b_val, torch.Tensor))
         assert (b_val.shape == (1, 1))
         self.b_val = b_val
         self.method = method
@@ -34,7 +34,7 @@ class ControlAffinePendulum(
 
     def a(self, x):
         return self.phi_a(x) - self.phi_a(
-            self.x_equilibrium) - self.b @ self.u_equilibrium
+            self.x_equilibrium) - self.b_val @ self.u_equilibrium
 
     def b(self, x):
         return self.b_val
@@ -74,19 +74,15 @@ def generate_pendulum_dynamics_data():
     return torch.utils.data.TensorDataset(xu_samples, xdot)
 
 
-def train_forward_model(dynamics_model: control_affine_system.
-                        SecondOrderControlAffineWEquilibriumSystem,
+def train_forward_model(dynamics_model: ControlAffinePendulum,
                         model_dataset):
     (xu_inputs, x_next_outputs) = model_dataset[:]
     v_dataset = torch.utils.data.TensorDataset(
         xu_inputs, x_next_outputs[:, 1].reshape((-1, 1)))
 
-    def compute_vdot(phi_a, state_action, phi_b):
+    def compute_vdot(phi_a, state_action, b_val):
         x, u = torch.split(state_action, [2, 1], dim=1)
-        vdot = phi_a(x) - phi_a(dynamics_model.x_equilibrium) - phi_b(
-            dynamics_model.x_equilibrium).reshape(
-                (-1, 1)) * dynamics_model.u_equilibrium + (phi_b(x).reshape(
-                    (-1, 1)) * u).reshape((-1, 1))
+        vdot = phi_a(x) - phi_a(dynamics_model.x_equilibrium) + b_val * u
         return vdot
 
     utils.train_approximator(v_dataset,
@@ -96,8 +92,8 @@ def train_forward_model(dynamics_model: control_affine_system.
                              num_epochs=100,
                              lr=0.001,
                              additional_variable=list(
-                                 dynamics_model.phi_b.parameters()),
-                             output_fun_args=dict(phi_b=dynamics_model.phi_b))
+                                 dynamics_model.b_val),
+                             output_fun_args=dict(b_val=dynamics_model.b_val))
 
 
 if __name__ == "__main__":
@@ -130,35 +126,26 @@ if __name__ == "__main__":
                              negative_slope=0.01,
                              bias=True,
                              dtype=dtype)
-    phi_b = utils.setup_relu((2, 6, 6, 1),
-                             params=None,
-                             negative_slope=0.01,
-                             bias=True,
-                             dtype=dtype)
-    x_lo = torch.tensor([np.pi - 0.2 * np.pi, -1], dtype=dtype)
-    x_up = torch.tensor([np.pi + 0.2 * np.pi, 1], dtype=dtype)
+    b_val = torch.tensor([[1]], dtype=dtype)
+    x_lo = torch.tensor([np.pi - 1.1 * np.pi, -5], dtype=dtype)
+    x_up = torch.tensor([np.pi + 1.1 * np.pi, 5], dtype=dtype)
     u_lo = torch.tensor([-20], dtype=dtype)
     u_up = torch.tensor([20], dtype=dtype)
     x_equilibrium = torch.tensor([np.pi, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0], dtype=dtype)
-    dynamics_model = \
-        control_affine_system.SecondOrderControlAffineWEquilibriumSystem(
+    dynamics_model = ControlAffinePendulum(
             x_lo,
             x_up,
             u_lo,
             u_up,
             phi_a,
-            phi_b,
-            x_equilibrium,
-            u_equilibrium,
+            b_val,
             method=mip_utils.PropagateBoundsMethod.IA)
 
     if args.train_forward_model is not None:
         train_forward_model(dynamics_model, model_dataset)
         linear_layer_width_a, negative_slope_a, bias_a = \
             utils.extract_relu_structure(phi_a)
-        linear_layer_width_b, negative_slope_b, bias_b = \
-            utils.extract_relu_structure(phi_b)
         torch.save(
             {
                 "phi_a": {
@@ -167,12 +154,7 @@ if __name__ == "__main__":
                     "negative_slope": negative_slope_a,
                     "bias": bias_a
                 },
-                "phi_b": {
-                    "linear_layer_width": linear_layer_width_b,
-                    "state_dict": phi_b.state_dict(),
-                    "negative_slope": negative_slope_b,
-                    "bias": bias_b
-                }
+                "b_val": dynamics_model.b_val
             }, args.train_forward_model)
 
     elif args.load_forward_model is not None:
@@ -185,14 +167,7 @@ if __name__ == "__main__":
             dtype=dtype)
         dynamics_model.phi_a.load_state_dict(
             dynamics_model_data["phi_a"]["state_dict"])
-        dynamics_model.phi_b = utils.setup_relu(
-            dynamics_model_data["phi_b"]["linear_layer_width"],
-            params=None,
-            negative_slope=dynamics_model_data["phi_b"]["negative_slope"],
-            bias=dynamics_model_data["phi_b"]["bias"],
-            dtype=dtype)
-        dynamics_model.phi_b.load_state_dict(
-            dynamics_model_data["phi_b"]["state_dict"])
+        dynamics_model.b_val = dynamics_model_data["b_val"]
 
     V_lambda = 0.5
     lyapunov_relu = utils.setup_relu((2, 8, 8, 1),
