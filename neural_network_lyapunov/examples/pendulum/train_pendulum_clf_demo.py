@@ -12,6 +12,7 @@ import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import torch
 import numpy as np
 import argparse
+import scipy.integrate
 
 
 class ControlAffinePendulum(
@@ -74,8 +75,7 @@ def generate_pendulum_dynamics_data():
     return torch.utils.data.TensorDataset(xu_samples, xdot)
 
 
-def train_forward_model(dynamics_model: ControlAffinePendulum,
-                        model_dataset):
+def train_forward_model(dynamics_model: ControlAffinePendulum, model_dataset):
     (xu_inputs, x_next_outputs) = model_dataset[:]
     v_dataset = torch.utils.data.TensorDataset(
         xu_inputs, x_next_outputs[:, 1].reshape((-1, 1)))
@@ -91,9 +91,30 @@ def train_forward_model(dynamics_model: ControlAffinePendulum,
                              batch_size=30,
                              num_epochs=100,
                              lr=0.001,
-                             additional_variable=list(
-                                 dynamics_model.b_val),
+                             additional_variable=list(dynamics_model.b_val),
                              output_fun_args=dict(b_val=dynamics_model.b_val))
+
+
+def simulate_pendulum(x0, T, clf, V_lambda, R):
+    dtype = torch.float64
+    plant = pendulum.Pendulum(dtype)
+
+    def dyn(t, x):
+        x_torch = torch.from_numpy(x)
+        Vdot, u = clf.calc_vdot_allsubgradient(
+            x_torch, torch.tensor([np.pi, 0], dtype=dtype), V_lambda, R)
+        xdot = plant.dynamics(x, u)
+        return xdot
+
+    def reach_goal(t, x):
+        return np.linalg.norm(x - np.array([np.pi, 0])) - 1E-3
+
+    reach_goal.terminal = True
+
+    return scipy.integrate.solve_ivp(dyn, [0, T],
+                                     x0,
+                                     t_eval=np.arange(0, T, 0.001),
+                                     events=reach_goal)
 
 
 if __name__ == "__main__":
@@ -113,6 +134,10 @@ if __name__ == "__main__":
                         help="path to load the forward model")
     parser.add_argument("--max_iterations", type=int, default=1000)
     parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--load_lyapunov_relu",
+                        type=str,
+                        default=None,
+                        help="path to load lyapunov")
     args = parser.parse_args()
     dtype = torch.float64
 
@@ -134,13 +159,13 @@ if __name__ == "__main__":
     x_equilibrium = torch.tensor([np.pi, 0], dtype=dtype)
     u_equilibrium = torch.tensor([0], dtype=dtype)
     dynamics_model = ControlAffinePendulum(
-            x_lo,
-            x_up,
-            u_lo,
-            u_up,
-            phi_a,
-            b_val,
-            method=mip_utils.PropagateBoundsMethod.IA)
+        x_lo,
+        x_up,
+        u_lo,
+        u_up,
+        phi_a,
+        b_val,
+        method=mip_utils.PropagateBoundsMethod.IA)
 
     if args.train_forward_model is not None:
         train_forward_model(dynamics_model, model_dataset)
@@ -169,14 +194,26 @@ if __name__ == "__main__":
             dynamics_model_data["phi_a"]["state_dict"])
         dynamics_model.b_val = dynamics_model_data["b_val"]
 
-    V_lambda = 0.5
-    lyapunov_relu = utils.setup_relu((2, 8, 8, 1),
-                                     params=None,
-                                     negative_slope=0.1,
-                                     bias=True,
-                                     dtype=dtype)
-    R = torch.cat((rotation_matrix(np.pi / 4), rotation_matrix(np.pi / 10)),
-                  dim=0)
+    if args.load_lyapunov_relu is None:
+        V_lambda = 0.5
+        lyapunov_relu = utils.setup_relu((2, 8, 8, 1),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=dtype)
+        R = torch.cat(
+            (rotation_matrix(np.pi / 4), rotation_matrix(np.pi / 10)), dim=0)
+    else:
+        lyapunov_data = torch.load(args.load_lyapunov_relu)
+        lyapunov_relu = utils.setup_relu(
+            lyapunov_data["linear_layer_width"],
+            params=None,
+            negative_slope=lyapunov_data["negative_slope"],
+            bias=True,
+            dtype=dtype)
+        lyapunov_relu.load_state_dict(lyapunov_data["state_dict"])
+        V_lambda = lyapunov_data["V_lambda"]
+        R = lyapunov_data["R"]
 
     lyapunov_hybrid_system = control_lyapunov.ControlLyapunov(
         dynamics_model, lyapunov_relu,
