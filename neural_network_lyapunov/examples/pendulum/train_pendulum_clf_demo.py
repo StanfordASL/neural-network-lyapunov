@@ -13,6 +13,7 @@ import torch
 import numpy as np
 import argparse
 import scipy.integrate
+import gurobipy
 
 
 class ControlAffinePendulum(
@@ -95,15 +96,37 @@ def train_forward_model(dynamics_model: ControlAffinePendulum, model_dataset):
                              output_fun_args=dict(b_val=dynamics_model.b_val))
 
 
-def simulate_pendulum(x0, T, clf, V_lambda, R):
+def simulate_pendulum(x0, T, clf, V_lambda, R, epsilon):
     dtype = torch.float64
     plant = pendulum.Pendulum(dtype)
+    x_equilibrium = torch.tensor([np.pi, 0], dtype=dtype)
 
     def dyn(t, x):
         x_torch = torch.from_numpy(x)
-        Vdot, u = clf.calc_vdot_allsubgradient(
-            x_torch, torch.tensor([np.pi, 0], dtype=dtype), V_lambda, R)
-        xdot = plant.dynamics(x, u)
+        # Now formulate a QP
+        # min uᵀu
+        # s.t Vdot(x, u) <= 0
+        prog = gurobipy.Model()
+        u = prog.addVar(lb=clf.system.u_lo[0].item(),
+                        ub=clf.system.u_up[0].item())
+        dphi_dx = utils.relu_network_gradient(clf.lyapunov_relu, x_torch)
+        dl1_dx = V_lambda * utils.l1_gradient(
+            R @ (x_torch - x_equilibrium)) @ R
+        f = clf.system.f(x_torch)
+        G = clf.system.G(x_torch)
+        V = clf.lyapunov_value(x_torch, x_equilibrium, V_lambda, R=R)
+        for i in range(dphi_dx.shape[0]):
+            for j in range(dl1_dx.shape[0]):
+                dVdx = dphi_dx[i][0] + dl1_dx[j]
+                prog.addLConstr(gurobipy.LinExpr((dVdx @ G).tolist(), [u]),
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                rhs=-(dVdx @ f).item() - epsilon * 0.9 * V)
+        prog.setObjective(u * u, sense=gurobipy.GRB.MINIMIZE)
+        prog.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.optimize()
+        assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+        u_val = np.array([u.x])
+        xdot = plant.dynamics(x, u_val)
         return xdot
 
     def reach_goal(t, x):
@@ -114,7 +137,8 @@ def simulate_pendulum(x0, T, clf, V_lambda, R):
     return scipy.integrate.solve_ivp(dyn, [0, T],
                                      x0,
                                      t_eval=np.arange(0, T, 0.001),
-                                     events=reach_goal)
+                                     events=reach_goal,
+                                     max_step=0.01)
 
 
 if __name__ == "__main__":
@@ -230,6 +254,7 @@ if __name__ == "__main__":
 
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
+    dut.lyapunov_derivative_epsilon = 0.1
     dut.lyapunov_derivative_mip_clamp_min = -2.
     dut.output_flag = True
     dut.max_iterations = args.max_iterations
