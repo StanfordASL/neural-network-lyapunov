@@ -192,6 +192,7 @@ if __name__ == "__main__":
         method=mip_utils.PropagateBoundsMethod.IA)
 
     if args.train_forward_model is not None:
+        dynamics_model.b_val.requires_grad = True
         train_forward_model(dynamics_model, model_dataset)
         linear_layer_width_a, negative_slope_a, bias_a = \
             utils.extract_relu_structure(phi_a)
@@ -205,6 +206,7 @@ if __name__ == "__main__":
                 },
                 "b_val": dynamics_model.b_val
             }, args.train_forward_model)
+        dynamics_model.b_val.requires_grad = False
 
     elif args.load_forward_model is not None:
         dynamics_model_data = torch.load(args.load_forward_model)
