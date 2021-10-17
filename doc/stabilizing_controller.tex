@@ -171,4 +171,27 @@ To remedy this, we only consider a finite number of sampled subgradients. For ex
 	g_i = \beta_0*-1+\beta_1 * 0 + \beta_2 * 1, \beta_i \text{ is binary}, \beta_0 + \beta_1 + \beta_2 = 1 \text{ if } R[i, :] (x-x^*)=0
 \end{align}
 
+\section{Control barrier function}
+We aim at finding a control barrier function $h(x)$ satisfying
+\begin{align}
+	\forall x\;\sup_{-\mathbf{1}\le u\le\mathbf{1}} \frac{\partial h}{\partial x}(f(x) + G(x)u) \ge -\epsilon h(x)
+\end{align}
+with $\epsilon > 0$ a small positive constant. This control barrier function certifies that the superlevel set $\{x | h(x) \ge 0\}$ is an invariant set.
+
+We suppose $x^*$ is a safe state, and the set of unsafe state is denoted as $\mathcal{C}_u$. Then if $h(x)$ satisfies
+\begin{subequations}
+\begin{align}
+	h(x^*) > 0\\
+	h(x) < 0 \forall x\in\mathcal{C}_u\\
+	\forall x\;\sup_{-\mathbf{1}\le u\le\mathbf{1}} \frac{\partial h}{\partial x}(f(x) + G(x)u) \ge -\epsilon h(x)
+\end{align}
+\end{subequations}
+Then we certify that there exists a safe set $\mathcal{C}$ as the super-level set of $h(x)$, $x^*\in\mathcal{C}$ and $\mathcal{C} \cup \mathcal{C}_u=\emptyset$.
+
+We design our control barrier function as
+\begin{align}
+	h(x) = \phi_h(x) - \phi_h(x^*) + 1
+\end{align}
+which trivially satisfies the condition $h(x^*) > 0$.
+
 \end{document}
