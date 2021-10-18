@@ -194,4 +194,10 @@ We design our control barrier function as
 \end{align}
 which trivially satisfies the condition $h(x^*) > 0$.
 
+By formulating the verification as MILP, we only verify the barrier function condition on a bounded set of state $\mathcal{B}$. To ensure that the invariant safe set is contained within the verified region $\mathcal{B}$, we need to add another condition
+\begin{align}
+	h(x) < 0 \forall x \in \partial\mathcal{B}
+\end{align}
+This condition can also be checked through an MILP.
+
 \end{document}
