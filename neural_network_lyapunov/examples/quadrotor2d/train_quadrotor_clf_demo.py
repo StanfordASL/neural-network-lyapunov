@@ -142,23 +142,23 @@ if __name__ == "__main__":
                              dtype=dtype)
     plant = quadrotor_2d.Quadrotor2D(dtype)
     a_val = torch.tensor([0, -plant.gravity, 0], dtype=dtype)
-    x_lo = torch.tensor([-0.5, -0.5, -np.pi / 2, -4, -4, -2.5], dtype=dtype)
+    x_lo = torch.tensor([-0.7, -0.7, -np.pi * 0.5, -6, -6, -3], dtype=dtype)
     x_up = -x_lo
     u_lo = torch.tensor([0, 0], dtype=dtype)
     u_up = torch.tensor([1, 1], dtype=dtype) * plant.mass * plant.gravity * 1.5
     x_equilibrium = torch.zeros(6, dtype=dtype)
     u_equilibrium = torch.tensor(
         [1, 1], dtype=dtype) * plant.mass * plant.gravity * 0.5
-    dynamics_model = ControlAffineQuadrotor2d(
-        x_lo,
-        x_up,
-        u_lo,
-        u_up,
-        phi_b,
-        u_equilibrium,
-        method=mip_utils.PropagateBoundsMethod.IA)
 
     if args.train_forward_model is not None:
+        dynamics_model = ControlAffineQuadrotor2d(
+            x_lo,
+            x_up,
+            u_lo,
+            u_up,
+            phi_b,
+            u_equilibrium,
+            method=mip_utils.PropagateBoundsMethod.IA)
         train_forward_model(dynamics_model, model_dataset)
         linear_layer_width_b, negative_slope_b, bias_b = \
             utils.extract_relu_structure(phi_b)
@@ -174,14 +174,22 @@ if __name__ == "__main__":
 
     elif args.load_forward_model is not None:
         dynamics_model_data = torch.load(args.load_forward_model)
-        dynamics_model.phi_b = utils.setup_relu(
+        phi_b = utils.setup_relu(
             dynamics_model_data["phi_b"]["linear_layer_width"],
             params=None,
             negative_slope=dynamics_model_data["phi_b"]["negative_slope"],
             bias=dynamics_model_data["phi_b"]["bias"],
             dtype=dtype)
-        dynamics_model.phi_b.load_state_dict(
+        phi_b.load_state_dict(
             dynamics_model_data["phi_b"]["state_dict"])
+        dynamics_model = ControlAffineQuadrotor2d(
+            x_lo,
+            x_up,
+            u_lo,
+            u_up,
+            phi_b,
+            u_equilibrium,
+            method=mip_utils.PropagateBoundsMethod.IA)
 
     if args.load_lyapunov_relu is None:
         V_lambda = 0.5
@@ -225,8 +233,10 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_epsilon = 0.1
-    dut.lyapunov_derivative_mip_clamp_min = -2.
+    dut.lyapunov_derivative_mip_clamp_min = -1.
+    dut.lyapunov_derivative_mip_cost_weight = 1.
     dut.output_flag = True
+    dut.learning_rate = 0.003
     dut.max_iterations = args.max_iterations
     dut.enable_wandb = args.enable_wandb
     state_samples_all = torch.empty((0, 6), dtype=dtype)
