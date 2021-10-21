@@ -255,37 +255,11 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
           Gt: Gt is a 2D list. len(G) = u_dim. len(G[i]) = x_dim. Gt is the
           transpose of system.G(x).
         """
-        assert (len(f) == self.system.x_dim)
-        assert (len(Gt) == self.system.u_dim)
-        # Add constraint that x_lo <= x <= x_up
-        milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=self.system.dtype)], [x],
-            gurobipy.GRB.LESS_EQUAL,
-            self.system.x_up,
-            name="x_up")
-        milp.addMConstrs(
-            [torch.eye(self.system.x_dim, dtype=self.system.dtype)], [x],
-            gurobipy.GRB.GREATER_EQUAL,
-            self.system.x_lo,
-            name="x_lo")
-        # Set the bounds of x
-        for i in range(self.system.x_dim):
-            if x[i].lb < self.system.x_lo[i].item():
-                x[i].lb = self.system.x_lo[i].item()
-            if x[i].ub > self.system.x_up[i].item():
-                x[i].ub = self.system.x_up[i].item()
-        mip_cnstr_ret = self.system.mixed_integer_constraints()
-        slack, binary = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_ret.mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq",
-            "f_eq", "f_output", binary_var_type)
-        G_flat = [None] * self.system.x_dim * self.system.u_dim
-        for i in range(self.system.x_dim):
-            for j in range(self.system.u_dim):
-                G_flat[i * self.system.u_dim + j] = Gt[j][i]
-        slack_G, binary_G = milp.add_mixed_integer_linear_constraints(
-            mip_cnstr_ret.mip_cnstr_G, x, G_flat, "slack_G", "binary_G",
-            "G_ineq", "G_eq", "G_out", binary_var_type)
-        ret = ControlAffineSystemAddConstraintReturn(slack, binary)
+        mip_cnstr_ret, slack_f, slack_G, binary_f, binary_G = \
+            control_affine_system.add_system_constraint(
+                self.system, milp, x, f, Gt, binary_var_type=binary_var_type)
+        ret = ControlAffineSystemAddConstraintReturn(slack_f + slack_G,
+                                                     binary_f + binary_G)
         ret.mip_cnstr_f = mip_cnstr_ret.mip_cnstr_f
         ret.mip_cnstr_G = mip_cnstr_ret.mip_cnstr_G
         ret.f_lo = mip_cnstr_ret.f_lo

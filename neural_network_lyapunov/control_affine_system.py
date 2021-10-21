@@ -418,3 +418,50 @@ def train_control_affine_forward_model(forward_model_f,
         additional_variable=list(forward_model_G.parameters()),
         output_fun_args=dict(forward_model_G=forward_model_G),
         verbose=verbose)
+
+
+def add_system_constraint(system: ControlPiecewiseAffineSystem,
+                          mip: gurobi_torch_mip.GurobiTorchMIP,
+                          x: list,
+                          f: list,
+                          Gt: list,
+                          *,
+                          binary_var_type=gurobipy.GRB.BINARY):
+    """
+    Add the (mixed-integer linear) constraints of f(x) and G(x) to mip.
+
+    Args:
+      x: The state variable.
+      f: The variable for f(x).
+      Gt: Gt is a 2D list. len(G) = u_dim. len(G[i]) = x_dim. Gt is the
+      transpose of system.G(x).
+    """
+    assert (len(f) == system.x_dim)
+    assert (len(Gt) == system.u_dim)
+    # Add constraint that x_lo <= x <= x_up
+    mip.addMConstrs([torch.eye(system.x_dim, dtype=system.dtype)], [x],
+                    gurobipy.GRB.LESS_EQUAL,
+                    system.x_up,
+                    name="x_up")
+    mip.addMConstrs([torch.eye(system.x_dim, dtype=system.dtype)], [x],
+                    gurobipy.GRB.GREATER_EQUAL,
+                    system.x_lo,
+                    name="x_lo")
+    # Set the bounds of x
+    for i in range(system.x_dim):
+        if x[i].lb < system.x_lo[i].item():
+            x[i].lb = system.x_lo[i].item()
+        if x[i].ub > system.x_up[i].item():
+            x[i].ub = system.x_up[i].item()
+    mip_cnstr_ret = system.mixed_integer_constraints()
+    slack_f, binary_f = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr_ret.mip_cnstr_f, x, f, "slack_f", "binary_f", "f_ineq",
+        "f_eq", "f_output", binary_var_type)
+    G_flat = [None] * system.x_dim * system.u_dim
+    for i in range(system.x_dim):
+        for j in range(system.u_dim):
+            G_flat[i * system.u_dim + j] = Gt[j][i]
+    slack_G, binary_G = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr_ret.mip_cnstr_G, x, G_flat, "slack_G", "binary_G", "G_ineq",
+        "G_eq", "G_out", binary_var_type)
+    return mip_cnstr_ret, slack_f, slack_G, binary_f, binary_G

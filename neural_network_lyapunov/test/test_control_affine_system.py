@@ -399,5 +399,104 @@ class TestTrainControlAffineSystem(unittest.TestCase):
                                        rtol=.1)
 
 
+class TestAddSystemConstraint(unittest.TestCase):
+    def constraint_tester(self, system, x_val: torch.Tensor, is_feasible):
+        mip = gurobi_torch_mip.GurobiTorchMIP(system.dtype)
+        x = mip.addVars(system.x_dim, lb=x_val, ub=x_val)
+        f = mip.addVars(system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        Gt = [None] * system.u_dim
+        for i in range(system.u_dim):
+            Gt[i] = mip.addVars(system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        mip_cnstr_ret, slack_f, slack_G, binary_f, binary_G = \
+            mut.add_system_constraint(system, mip, x, f, Gt)
+        mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        mip.gurobi_model.optimize()
+        if is_feasible:
+            self.assertEqual(mip.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            f_val = np.array([v.x for v in f])
+            Gt_val = [None] * system.u_dim
+            for i in range(system.u_dim):
+                Gt_val[i] = [v.x for v in Gt[i]]
+            G_val = np.array(Gt_val).T
+
+            f_expected = system.f(x_val)
+            G_expected = system.G(x_val)
+            np.testing.assert_allclose(f_val, f_expected.detach().numpy())
+            np.testing.assert_allclose(G_val, G_expected.detach().numpy())
+        else:
+            self.assertEqual(mip.gurobi_model.status,
+                             gurobipy.GRB.Status.INFEASIBLE)
+        return slack_f, slack_G, binary_f, binary_G
+
+    def test1(self):
+        # Test with a linear system.
+        dtype = torch.float64
+        system = mut.LinearSystem(torch.tensor([[1, 3], [2, -1]], dtype=dtype),
+                                  torch.tensor([[1, 3, -1], [2, -1, 3]],
+                                               dtype=dtype),
+                                  x_lo=torch.tensor([-2, -1], dtype=dtype),
+                                  x_up=torch.tensor([1, 4], dtype=dtype),
+                                  u_lo=torch.tensor([-1, -2, -3], dtype=dtype),
+                                  u_up=torch.tensor([1, 0, -1], dtype=dtype))
+
+        x_samples = utils.uniform_sample_in_box(system.x_lo, system.x_up, 100)
+        for i in range(x_samples.shape[0]):
+            slack_f, slack_G, binary_f, binary_G = self.constraint_tester(
+                system, x_samples[i], True)
+            self.assertEqual(len(slack_f), 0)
+            self.assertEqual(len(slack_G), 0)
+            self.assertEqual(len(binary_f), 0)
+            self.assertEqual(len(binary_G), 0)
+        self.constraint_tester(system, torch.tensor([-3, 0], dtype=dtype),
+                               False)
+        self.constraint_tester(system, torch.tensor([0, 5], dtype=dtype),
+                               False)
+
+    def test2(self):
+        # Test with a relu system
+        dtype = torch.float64
+        phi_a = utils.setup_relu((2, 2, 1),
+                                 params=None,
+                                 negative_slope=0.1,
+                                 bias=True,
+                                 dtype=dtype)
+        phi_a[0].weight.data = torch.tensor([[1, 2], [-1, -3]], dtype=dtype)
+        phi_a[0].bias.data = torch.tensor([1, 3], dtype=dtype)
+        phi_a[2].weight.data = torch.tensor([[1, -1]], dtype=dtype)
+        phi_a[2].bias.data = torch.tensor([-1], dtype=dtype)
+        phi_b = utils.setup_relu((2, 3, 2),
+                                 params=None,
+                                 negative_slope=0.1,
+                                 bias=True,
+                                 dtype=dtype)
+        phi_b[0].weight.data = torch.tensor([[1, -1], [0, 2], [-1, 0]],
+                                            dtype=dtype)
+        phi_b[0].bias.data = torch.tensor([1, 0, -1], dtype=dtype)
+        phi_b[2].weight.data = torch.tensor([[2, -1, 3], [0, 1, 2]],
+                                            dtype=dtype)
+        phi_b[2].bias.data = torch.tensor([0, 1], dtype=dtype)
+        system = mut.ReluSecondOrderControlAffineSystem(
+            x_lo=torch.tensor([-1, -2], dtype=dtype),
+            x_up=torch.tensor([1, 3], dtype=dtype),
+            u_lo=torch.tensor([-2, -1], dtype=dtype),
+            u_up=torch.tensor([2, 0], dtype=dtype),
+            phi_a=phi_a,
+            phi_b=phi_b,
+            method=mip_utils.PropagateBoundsMethod.IA)
+        x_samples = utils.uniform_sample_in_box(system.x_lo, system.x_up, 100)
+        for i in range(x_samples.shape[0]):
+            slack_f, slack_G, binary_f, binary_G = self.constraint_tester(
+                system, x_samples[i], True)
+            self.assertNotEqual(len(slack_f), 0)
+            self.assertNotEqual(len(slack_G), 0)
+            self.assertNotEqual(len(binary_f), 0)
+            self.assertNotEqual(len(binary_G), 0)
+        self.constraint_tester(system, torch.tensor([-3, 0], dtype=dtype),
+                               False)
+        self.constraint_tester(system, torch.tensor([0, 5], dtype=dtype),
+                               False)
+
+
 if __name__ == "__main__":
     unittest.main()
