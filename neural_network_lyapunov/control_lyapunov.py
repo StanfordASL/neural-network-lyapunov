@@ -754,6 +754,8 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                 ])
                 mip_cnstr_dphidx_times_G[j] = self.lyapunov_relu_free_pattern.\
                     output_gradient_times_vector(Gi_lo, Gi_up)
+        else:
+            raise NotImplementedError
         # An alternative formulation is not to introduce the variable
         # dphidx_times_G, but write it as an affine function of the slack
         # variable in mip_cnstr_dphidx_times_G.

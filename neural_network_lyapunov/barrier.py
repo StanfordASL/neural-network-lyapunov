@@ -14,7 +14,7 @@ class Barrier:
     Given an unsafe set Cᵤ, and a known safe state x*, we design a barrier
     function h(x) satisfying
     h(x) < 0 ∀ x ∈ Cᵤ
-    ḣ(x) > -ε h(x)
+    ḣ(x) ≥ -ε h(x)
     h(x*) > 0
     where ε is a positive constant. This barrier function guarantees that the
     super-level set {x | h(x) >= 0} is safe and invariant.
