@@ -637,11 +637,6 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             milp, x, relu_beta, l1_binary, l1_subgradient_binary, Gt,
             G_flat_lo, G_flat_up, RG_lo, RG_up, R, V_lambda)
 
-        u_mid = (self.system.u_lo + self.system.u_up) / 2
-        # Add ∂V/∂x*G(x) * (u_lo + u_up)/2 to Vdot
-        Vdot_coeff.append(u_mid.reshape((-1, )))
-        Vdot_vars.append(compute_dVdx_times_G_return.dVdx_times_G)
-
         dVdx_times_G_binary = milp.addVars(self.system.u_dim,
                                            vtype=gurobipy.GRB.BINARY,
                                            name="dVdx_times_G_binary")
@@ -652,28 +647,24 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             if compute_dVdx_times_G_return.dVdx_times_G_lo[i] >= 0:
                 # The binary variable equals to 1.
                 milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
-                                [dVdx_times_G_binary[i]],
+                                [[dVdx_times_G_binary[i]]],
                                 sense=gurobipy.GRB.EQUAL,
                                 rhs=1.)
                 dVdx_times_G_binary[i].lb = 1.
                 dVdx_times_G_binary[i].ub = 1.
-                Vdot_coeff.append(
-                    torch.tensor(
-                        [-(self.system.u_up[i] - self.system.u_lo[i]) / 2],
-                        dtype=self.system.dtype))
+                # Add the cost (∂V/∂x * G)[i] * u_lo(i)
+                Vdot_coeff.append(self.system.u_lo[i].reshape((1, )))
                 Vdot_vars.append([compute_dVdx_times_G_return.dVdx_times_G[i]])
             elif compute_dVdx_times_G_return.dVdx_times_G_up[i] <= 0:
                 # The binary variable equals to 0.
                 milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
-                                [dVdx_times_G_binary[i]],
+                                [[dVdx_times_G_binary[i]]],
                                 sense=gurobipy.GRB.EQUAL,
                                 rhs=0.)
                 dVdx_times_G_binary[i].lb = 0.
                 dVdx_times_G_binary[i].ub = 0.
-                Vdot_coeff.append(
-                    torch.tensor(
-                        [(self.system.u_up[i] - self.system.u_lo[i]) / 2],
-                        dtype=self.system.dtype))
+                # Add the cost (∂V/∂x * G)[i] * u_up(i)
+                Vdot_coeff.append(self.system.u_up[i].reshape((1, )))
                 Vdot_vars.append([compute_dVdx_times_G_return.dVdx_times_G[i]])
             else:
                 mip_cnstr_abs = \
@@ -686,11 +677,14 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                     [compute_dVdx_times_G_return.dVdx_times_G[i]], None,
                     f"dVdx_times_G[{i}]_abs", [dVdx_times_G_binary[i]], "", "",
                     "")
+                # Add the cost ∂V/∂x*G(x)[i] * (u_lo[i] + u_up[i])/2
+                # - |∂V/∂x*G(x)[i]| * (u_up[i] - u_lo[i])/2
                 Vdot_coeff.append(
-                    torch.tensor(
-                        [-(self.system.u_up[i] - self.system.u_lo[i]) / 2],
-                        dtype=self.system.dtype))
-                Vdot_vars.append(slack)
+                    torch.stack(
+                        ((self.system.u_lo[i] + self.system.u_up[i]) / 2,
+                         -(self.system.u_up[i] - self.system.u_lo[i]) / 2)))
+                Vdot_vars.append(
+                    [compute_dVdx_times_G_return.dVdx_times_G[i]] + slack)
 
         return compute_dVdx_times_G_return, dVdx_times_G_binary
 

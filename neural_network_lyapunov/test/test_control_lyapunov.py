@@ -74,6 +74,31 @@ class TestControlLyapunov(unittest.TestCase):
                 phi_a=phi_a,
                 phi_b=phi_b,
                 method=mip_utils.PropagateBoundsMethod.IA)
+        self.lyapunov_relu2 = utils.setup_relu((2, 2, 1),
+                                               params=None,
+                                               negative_slope=0.1,
+                                               bias=True,
+                                               dtype=self.dtype)
+        self.lyapunov_relu2[0].weight.data = torch.tensor([[1, 3], [3, 4]],
+                                                          dtype=self.dtype)
+        self.lyapunov_relu2[0].bias.data = torch.tensor([1, 2],
+                                                        dtype=self.dtype)
+        self.lyapunov_relu2[2].weight.data = torch.tensor([[1, 3]],
+                                                          dtype=self.dtype)
+        self.lyapunov_relu2[2].bias.data = torch.tensor([1], dtype=self.dtype)
+
+        self.lyapunov_relu3 = utils.setup_relu((2, 2, 1),
+                                               params=None,
+                                               negative_slope=0.1,
+                                               bias=True,
+                                               dtype=self.dtype)
+        self.lyapunov_relu3[0].weight.data = torch.tensor([[-1, -3], [-3, -4]],
+                                                          dtype=self.dtype)
+        self.lyapunov_relu3[0].bias.data = torch.tensor([1, 2],
+                                                        dtype=self.dtype)
+        self.lyapunov_relu3[2].weight.data = torch.tensor([[1, 3]],
+                                                          dtype=self.dtype)
+        self.lyapunov_relu3[2].bias.data = torch.tensor([1], dtype=self.dtype)
 
     def lyapunov_derivative_tester(self,
                                    dut,
@@ -334,11 +359,7 @@ class TestControlLyapunov(unittest.TestCase):
             Vdot_expected = x_samples_i.grad @ f_samples[i]
             np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
 
-    def test_add_dVdx_times_G(self):
-        dut = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1,
-                                  mut.SubgradientPolicy(None))
-        x_equilibrium = torch.tensor([0.1, 0.2], dtype=dut.system.dtype)
-        R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=dut.system.dtype)
+    def add_dVdx_times_G_tester(self, dut, x_equilibrium, V_lambda, R):
         milp = gurobi_torch_mip.GurobiTorchMILP(dut.system.dtype)
         x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
         l1_slack, l1_binary = dut.add_state_error_l1_constraint(milp,
@@ -352,7 +373,6 @@ class TestControlLyapunov(unittest.TestCase):
         mip_cnstr_return = dut.system.mixed_integer_constraints()
         RG_lo, RG_up = dut._compute_RG_bounds_IA(R, mip_cnstr_return.G_flat_lo,
                                                  mip_cnstr_return.G_flat_up)
-        V_lambda = 0.5
         l1_subgradient_binary = None
         Vdot_coeff = []
         Vdot_vars = []
@@ -382,6 +402,10 @@ class TestControlLyapunov(unittest.TestCase):
                     Gt[i][j].lb = G_sample[j, i]
                     Gt[i][j].ub = G_sample[j, i]
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            milp.setObjective(Vdot_coeff,
+                              Vdot_vars,
+                              0.,
+                              sense=gurobipy.GRB.MINIMIZE)
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
@@ -399,9 +423,10 @@ class TestControlLyapunov(unittest.TestCase):
             np.testing.assert_allclose(
                 dVdx_times_G_binary_sol,
                 dVdx_times_G_binary_expected.detach().numpy())
-            np.testing.assert_allclose(
-                np.array([v.x for v in dVdx_times_G_ret.dVdx_times_G]),
-                dVdx_times_G_expected.detach().numpy())
+            np.testing.assert_allclose(np.array(
+                [v.x for v in dVdx_times_G_ret.dVdx_times_G]),
+                                       dVdx_times_G_expected.detach().numpy(),
+                                       atol=1E-6)
 
             # Now check if Vdot_coeff * Vdot_vars =
             # ∂V/∂x * G * (u_lo + u_up)/2
@@ -416,6 +441,8 @@ class TestControlLyapunov(unittest.TestCase):
                     (dut.system.u_up - dut.system.u_lo) / 2,
                     p=1)
             np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
+            self.assertAlmostEqual(milp.gurobi_model.ObjVal,
+                                   Vdot_expected.item())
             # Vdot_coeff * Vdot_vars should be equal to
             # min_u ∂V/∂x * G * u
             # s.t   u_lo <= u <= u_up
@@ -429,6 +456,20 @@ class TestControlLyapunov(unittest.TestCase):
                     Vdot_expected_alternative += \
                         u_coeff[j] * dut.system.u_up[j]
             np.testing.assert_allclose(Vdot_sol.item(), Vdot_expected.item())
+
+    def test_add_dVdx_times_G(self):
+        dut1 = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu1,
+                                   mut.SubgradientPolicy(None))
+        x_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
+        R = torch.tensor([[1, 2], [-1, 1], [0, 4]], dtype=self.dtype)
+        V_lambda = 0.5
+        self.add_dVdx_times_G_tester(dut1, x_equilibrium, V_lambda, R)
+        dut2 = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu2,
+                                   mut.SubgradientPolicy(None))
+        self.add_dVdx_times_G_tester(dut2, x_equilibrium, V_lambda, R)
+        dut3 = mut.ControlLyapunov(self.linear_system, self.lyapunov_relu3,
+                                   mut.SubgradientPolicy(None))
+        self.add_dVdx_times_G_tester(dut3, x_equilibrium, V_lambda, R)
 
     def lyapunov_derivative_as_milp_tester(self, dut, x_equilibrium, V_lambda,
                                            epsilon, eps_type, R,
