@@ -142,13 +142,72 @@ class ControlBarrier(barrier.Barrier):
     def _add_dhdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP, x: list,
                           barrier_relu_binary: list, Gt: list,
                           G_flat_lo: torch.Tensor, G_flat_up: torch.Tensor,
-                          cost_coeff: list, cost_vars: list):
+                          cost_coeff: list, cost_vars: list, binary_var_type):
         """
         Add -max_u ∂h/∂x * G * u
             s.t  u_lo <= u <= u_up
         to cost
         """
-        pass
+        dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up = \
+            self._compute_dhdx_times_G(
+                milp, x, barrier_relu_binary, Gt, G_flat_lo, G_flat_up,
+                binary_var_type)
+        # We know that
+        # -max_u ∂h/∂x * G * u
+        #    s.t  u_lo <= u <= u_up
+        # equals to
+        # -(∂h/∂x*G) * (u_lo+u_up)/2 - |(∂h/∂x*G) * diag(u_up-u_lo)/2|₁
+        # Now add the terms for - |(∂h/∂x*G) * diag(u_up-u_lo)/2|₁
+        dhdx_times_G_binary = milp.addVars(self.system.u_dim,
+                                           vtype=gurobipy.GRB.BINARY,
+                                           name="dhdx_times_G_binary")
+        for i in range(self.system.u_dim):
+            if dhdx_times_G_lo[i] >= 0:
+                # Add the cost -∂h/∂x*G)[i] * u_up[i]
+                # and the constraint dhdx_times_G_binary[i] = 1
+                milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
+                                [[dhdx_times_G_binary[i]]],
+                                sense=gurobipy.GRB.EQUAL,
+                                rhs=1.)
+                dhdx_times_G_binary[i].lb = 1.
+                dhdx_times_G_binary[i].ub = 1.
+                cost_vars.append([dhdx_times_G[i]])
+                cost_coeff.append((-self.system.u_up[i]).reshape((1, )))
+            elif dhdx_times_G_up[i] < 0:
+                # Add the cost -∂h/∂x*G)[i] * u_lo[i]
+                # and the constraint dhdx_times_G_binary[i] = 0
+                milp.addLConstr([torch.tensor([1], dtype=self.system.dtype)],
+                                [[dhdx_times_G_binary[i]]],
+                                sense=gurobipy.GRB.EQUAL,
+                                rhs=0.)
+                dhdx_times_G_binary[i].lb = 0.
+                dhdx_times_G_binary[i].ub = 0.
+                cost_vars.append([dhdx_times_G[i]])
+                cost_coeff.append((-self.system.u_lo[i]).reshape((1, )))
+            else:
+                # Need to introduce new slack variable and binary variable for
+                # |(∂h/∂x*G)[i]|
+                mip_cnstr_abs = \
+                    utils.absolute_value_as_mixed_integer_constraint(
+                        dhdx_times_G_lo[i],
+                        dhdx_times_G_up[i],
+                        binary_for_zero_input=False)
+                slack, _ = milp.add_mixed_integer_linear_constraints(
+                    mip_cnstr_abs, [dhdx_times_G[i]],
+                    None,
+                    f"dhdx_times_G[{i}]_abs", [dhdx_times_G_binary[i]],
+                    "",
+                    "",
+                    "",
+                    binary_var_type=binary_var_type)
+                # Add the cost -(∂h/∂x*G)[i] * (u_lo[i]+u_up[i])/2 -
+                # |(∂h/∂x*G)[i]| * (u_up[i] - u_lo[i])/2
+                cost_vars.append([dhdx_times_G[i]] + slack)
+                cost_coeff.append(
+                    torch.stack(
+                        (-(self.system.u_lo[i] + self.system.u_up[i]) / 2,
+                         (-(self.system.u_up[i] - self.system.u_lo[i]) / 2))))
+        return dhdx_times_G, dhdx_times_G_binary
 
     def _compute_dhdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
                               x: list, barrier_relu_binary: list, Gt: list,
