@@ -254,6 +254,59 @@ class TestControlBarrier(unittest.TestCase):
         dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
         self.add_dhdx_times_G_tester(dut4)
 
+    def barrier_derivative_as_milp_tester(self, dut, x_star, c, epsilon):
+        barrier_deriv_ret = dut.barrier_derivative_as_milp(x_star, c, epsilon)
+        barrier_deriv_ret.milp.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
+        # Now maximize objective over x.
+        barrier_deriv_ret.milp.gurobi_model.optimize()
+        self.assertEqual(barrier_deriv_ret.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        x_optimal = torch.tensor([v.x for v in barrier_deriv_ret.x],
+                                 dtype=self.dtype)
+        self.assertAlmostEqual(
+            barrier_deriv_ret.milp.gurobi_model.ObjVal,
+            torch.max(-dut.barrier_derivative(x_optimal, zero_tol=1E-5) -
+                      epsilon *
+                      dut.barrier_value(x_optimal, x_star, c)).item())
+        optimal_cost = barrier_deriv_ret.milp.gurobi_model.ObjVal
+        # Sample many x, make sure the objective is correct and less than the
+        # optimal cost.
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                barrier_deriv_ret.x[j].lb = x_samples[i][j].item()
+                barrier_deriv_ret.x[j].ub = x_samples[i][j].item()
+            barrier_deriv_ret.milp.gurobi_model.optimize()
+            self.assertEqual(barrier_deriv_ret.milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            objective_expected = -dut.barrier_derivative(
+                x_samples[i]) - epsilon * dut.barrier_value(
+                    x_samples[i], x_star, c)
+            assert (objective_expected.shape[0] == 1)
+            self.assertAlmostEqual(barrier_deriv_ret.milp.gurobi_model.ObjVal,
+                                   objective_expected[0].item())
+            self.assertLessEqual(barrier_deriv_ret.milp.gurobi_model.ObjVal,
+                                 optimal_cost)
+
+    def test_barrier_derivative_as_milp(self):
+        dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+        x_star = torch.tensor([0.5, 0.2], dtype=self.dtype)
+        c = 0.3
+        epsilon = 0.5
+        self.barrier_derivative_as_milp_tester(dut1, x_star, c, epsilon)
+
+        dut2 = mut.ControlBarrier(self.relu_system, self.barrier_relu2)
+        self.barrier_derivative_as_milp_tester(dut2, x_star, c, epsilon)
+
+        dut3 = mut.ControlBarrier(self.linear_system, self.barrier_relu2)
+        self.barrier_derivative_as_milp_tester(dut3, x_star, c, epsilon)
+
+        dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
+        self.barrier_derivative_as_milp_tester(dut4, x_star, c, epsilon)
+
 
 if __name__ == "__main__":
     unittest.main()

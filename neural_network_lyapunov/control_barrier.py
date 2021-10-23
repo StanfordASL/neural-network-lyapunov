@@ -10,13 +10,23 @@ import gurobipy
 
 class BarrierDerivMilpReturn:
     def __init__(self, milp, x, barrier_relu_binary, system_mip_cnstr_ret,
-                 binary_f, binary_G):
+                 binary_f, binary_G, dhdx_times_G_binary):
+        """
+        Args:
+          barrier_relu_binary: Binary variables in computing the ReLU network
+          ϕ(x) in the barrier function.
+          binary_f: Binary variable in computing f(x) in the system dynamics.
+          binary_G: Binary variable in computing G(x) in the system dynamics
+          dhdx_times_G_binary: Binary variable in the absolute value
+          |∂h/∂x * G(x)|
+        """
         self.milp = milp
         self.x = x
         self.barrier_relu_binary = barrier_relu_binary
         self.system_mip_cnstr_ret = system_mip_cnstr_ret
         self.binary_f = binary_f
         self.binary_G = binary_G
+        self.dhdx_times_G_binary = dhdx_times_G_binary
 
 
 class ControlBarrier(barrier.Barrier):
@@ -39,7 +49,7 @@ class ControlBarrier(barrier.Barrier):
                            control_affine_system.ControlPiecewiseAffineSystem))
         super(ControlBarrier, self).__init__(system, barrier_relu)
 
-    def barrier_derivative(self, x: torch.Tensor):
+    def barrier_derivative(self, x: torch.Tensor, *, zero_tol=0.):
         """
         Evaluates maxᵤ ∂h/∂x*f(x) + ∂h/∂x*G(x)u
                   s.t u_lo <= u <= u_up
@@ -47,8 +57,8 @@ class ControlBarrier(barrier.Barrier):
         subgradients with both the left and right derivatives.
         """
         assert (x.shape == (self.system.x_dim, ))
-        barrier_grad = utils.relu_network_gradient(self.barrier_relu,
-                                                   x).squeeze(1)
+        barrier_grad = utils.relu_network_gradient(
+            self.barrier_relu, x, zero_tol=zero_tol).squeeze(1)
         u_mid = (self.system.u_lo + self.system.u_up) / 2
         delta_u = (self.system.u_up - self.system.u_lo) / 2
         f = self.system.f(x)
@@ -118,7 +128,7 @@ class ControlBarrier(barrier.Barrier):
                 binary_var_type=binary_var_type)
 
         mip_cnstr_dphidx_times_f = \
-            self.lyapunov_relu_free_pattern.output_gradient_times_vector(
+            self.barrier_relu_free_pattern.output_gradient_times_vector(
                 system_mip_cnstr_ret.f_lo, system_mip_cnstr_ret.f_up)
 
         dphidx_times_f_slack, _ = milp.add_mixed_integer_linear_constraints(
@@ -133,11 +143,25 @@ class ControlBarrier(barrier.Barrier):
         cost_coeff = [-mip_cnstr_dphidx_times_f.Aout_slack.reshape((-1, ))]
         cost_vars = [dphidx_times_f_slack]
         cost_constant = torch.tensor(0, dtype=self.system.dtype)
+        # Add -max_u ∂h/∂x * G(x) * u s.t u_lo <= u <= u_up to the cost.
+        dhdx_times_G, dhdx_times_G_binary = self._add_dhdx_times_G(
+            milp, x, barrier_relu_binary, Gt, system_mip_cnstr_ret.G_flat_lo,
+            system_mip_cnstr_ret.G_flat_up, cost_coeff, cost_vars,
+            binary_var_type)
+        # Add the term -εh(x)=−εϕ(x) + εϕ(x*)−εc to the cost
+        cost_coeff.append(-epsilon *
+                          barrier_mip_cnstr_return.Aout_slack.squeeze(0))
+        cost_vars.append(barrier_relu_slack)
+        cost_constant += -epsilon * barrier_mip_cnstr_return.Cout.squeeze(
+            0) + epsilon * self.barrier_relu(x_star).squeeze() - epsilon * c
 
         milp.setObjective(cost_coeff,
                           cost_vars,
                           cost_constant,
                           sense=gurobipy.GRB.MAXIMIZE)
+        return BarrierDerivMilpReturn(milp, x, barrier_relu_binary,
+                                      system_mip_cnstr_ret, binary_f, binary_G,
+                                      dhdx_times_G_binary)
 
     def _add_dhdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP, x: list,
                           barrier_relu_binary: list, Gt: list,
