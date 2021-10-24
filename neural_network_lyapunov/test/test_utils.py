@@ -1221,5 +1221,54 @@ class TestL1Gradient(unittest.TestCase):
                       [1., -1., -1., -0.5], [1., -1., -1., -1.]]))
 
 
+class TestBoxBoundary(unittest.TestCase):
+    def box_boundary_tester(self, x_lo, x_up):
+        dtype = x_lo.dtype
+        mixed_integer_cnstr = utils.box_boundary(x_lo, x_up)
+        milp = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        x_dim = x_lo.shape[0]
+        x = milp.addVars(x_dim, lb=-gurobipy.GRB.INFINITY)
+        slack, binary = milp.add_mixed_integer_linear_constraints(
+            mixed_integer_cnstr,
+            x,
+            None,
+            "",
+            "",
+            "",
+            "",
+            "",
+            binary_var_type=gurobipy.GRB.BINARY)
+        # I sample many points. The milp is only feasible when x is actually
+        # on the bindary.
+        torch.manual_seed(0)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        x_samples = utils.uniform_sample_in_box(x_lo - 2, x_up + 2, 1000)
+        for i in range(x_samples.shape[0]):
+            for j in range(x_dim):
+                x[j].lb = x_samples[i][j].item()
+                x[j].ub = x_samples[i][j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.INFEASIBLE)
+        for _ in range(100):
+            for j in range(x_dim):
+                if torch.rand(1) > 0.5:
+                    x[j].lb = x_up[j].item()
+                    x[j].ub = x_up[j].item()
+                else:
+                    x[j].lb = x_lo[j].item()
+                    x[j].ub = x_lo[j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+
+    def test(self):
+        dtype = torch.float64
+        self.box_boundary_tester(torch.tensor([-1, -2], dtype=dtype),
+                                 torch.tensor([0, -1], dtype=dtype))
+        self.box_boundary_tester(torch.tensor([1, -2], dtype=dtype),
+                                 torch.tensor([3, -1], dtype=dtype))
+
+
 if __name__ == "__main__":
     unittest.main()
