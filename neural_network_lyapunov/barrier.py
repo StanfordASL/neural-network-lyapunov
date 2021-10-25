@@ -51,45 +51,46 @@ class Barrier:
         assert (c > 0)
         return self.barrier_relu(x) - self.barrier_relu(x_star) + c
 
-    def barrier_unsafe_as_milp(
-            self, x_star, c: float,
-            unsafe_region_cnstr: gurobi_torch_mip.MixedIntegerConstraintsReturn
-    ):
+    def barrier_value_as_milp(
+            self,
+            x_star,
+            c: float,
+            region: gurobi_torch_mip.MixedIntegerConstraintsReturn,
+            region_name=""):
         """
         To compute the maximal violation of the constraint that h(x) is
-        negative in the unsafe region, formulate the following optimization
+        negative in the region, formulate the following optimization
         problem
         max h(x)
-        s.t x ∈ Cᵤ
-        where Cᵤ is the unsafe region.
+        s.t x ∈ C
+        where C is the region.
 
         Args:
           x_star: x* in the class documentation
           c: h(x) = ϕ(x) - ϕ(x*) + c
-          unsafe_region_cnstr: The mixed-integer constraint that describes the
-          unsafe region Cᵤ.
+          region : The mixed-integer constraint that describes the region C.
 
         Return:
           milp: The gurobi_torch_mip.GurobiTorchMILP object that captures the
           maximization problem above.
           x: The state variable.
         """
-        assert (isinstance(unsafe_region_cnstr,
+        assert (isinstance(region,
                            gurobi_torch_mip.MixedIntegerConstraintsReturn))
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
         x = milp.addVars(self.system.x_dim,
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name="x")
-        unsafe_slack, unsafe_binary = \
+        region_slack, region_binary = \
             milp.add_mixed_integer_linear_constraints(
-                unsafe_region_cnstr,
+                region,
                 x,
                 None,
-                "unsafe_s",
-                "unsafe_binary",
-                "unsafe_ineq",
-                "unsafe_eq",
+                region_name+"region_s",
+                region_name+"region_binary",
+                region_name+"region_ineq",
+                region_name+"region_eq",
                 "",
                 binary_var_type=gurobipy.GRB.BINARY)
         barrier_mip_cnstr_return = \

@@ -69,12 +69,13 @@ class ControlBarrier(barrier.Barrier):
             dim=1)
         return hdot
 
-    def barrier_derivative_as_milp(self,
-                                   x_star,
-                                   c: float,
-                                   epsilon: float,
-                                   *,
-                                   binary_var_type=gurobipy.GRB.BINARY):
+    def barrier_derivative_as_milp(
+            self,
+            x_star,
+            c: float,
+            epsilon: float,
+            *,
+            binary_var_type=gurobipy.GRB.BINARY) -> BarrierDerivMilpReturn:
         """
         Formulate the program
         maxₓ −ḣ(x)−εh(x)

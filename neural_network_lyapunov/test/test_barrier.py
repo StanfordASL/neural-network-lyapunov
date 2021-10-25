@@ -53,9 +53,8 @@ class TestBarrier(unittest.TestCase):
                              (dut.barrier_relu(x[i]) -
                               dut.barrier_relu(x_star) + c).item())
 
-    def barrier_unsafe_as_milp_tester(self, dut, x_star, c,
-                                      unsafe_region_cnstr):
-        milp, x = dut.barrier_unsafe_as_milp(x_star, c, unsafe_region_cnstr)
+    def barrier_value_as_milp_tester(self, dut, x_star, c, region_cnstr):
+        milp, x = dut.barrier_value_as_milp(x_star, c, region_cnstr)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         milp.gurobi_model.optimize()
         assert (milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
@@ -63,24 +62,24 @@ class TestBarrier(unittest.TestCase):
         x_optimal = torch.tensor([v.x for v in x], dtype=self.dtype)
         self.assertAlmostEqual(milp.gurobi_model.ObjVal,
                                dut.barrier_value(x_optimal, x_star, c).item())
-        # Now verify that x_optimal is actually in the unsafe region. We do
-        # this by creating an MILP that only contains unsafe_region_cnstr.
-        milp_unsafe = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
-        x_unsafe = milp_unsafe.addVars(
+        # Now verify that x_optimal is actually in the region. We do
+        # this by creating an MILP that only contains region_cnstr.
+        milp_region = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x_region = milp_region.addVars(
             dut.system.x_dim,
             lb=torch.from_numpy(dut.system.x_lo_all),
             ub=torch.from_numpy(dut.system.x_up_all))
-        milp_unsafe.add_mixed_integer_linear_constraints(
-            unsafe_region_cnstr, x_unsafe, None, "unsafe_s", "unsafe_binary",
-            "", "", "", gurobipy.GRB.BINARY)
+        milp_region.add_mixed_integer_linear_constraints(
+            region_cnstr, x_region, None, "region_s", "region_binary", "", "",
+            "", gurobipy.GRB.BINARY)
         for j in range(dut.system.x_dim):
-            x_unsafe[j].lb = x_optimal[j].item()
-            x_unsafe[j].ub = x_optimal[j].item()
-        milp_unsafe.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
-        milp_unsafe.gurobi_model.optimize()
-        self.assertEqual(milp_unsafe.gurobi_model.status,
+            x_region[j].lb = x_optimal[j].item()
+            x_region[j].ub = x_optimal[j].item()
+        milp_region.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp_region.gurobi_model.optimize()
+        self.assertEqual(milp_region.gurobi_model.status,
                          gurobipy.GRB.Status.OPTIMAL)
-        # Now sample many states. If they are in the unsafe region, then their
+        # Now sample many states. If they are in the region, then their
         # barrier function should be no larger than the MILP optimal cost.
         torch.manual_seed(0)
         x_samples = utils.uniform_sample_in_box(
@@ -88,15 +87,15 @@ class TestBarrier(unittest.TestCase):
             torch.from_numpy(dut.system.x_up_all), 1000)
         for i in range(x_samples.shape[0]):
             for j in range(dut.system.x_dim):
-                x_unsafe[j].lb = x_samples[i][j].item()
-                x_unsafe[j].ub = x_samples[i][j].item()
-            milp_unsafe.gurobi_model.optimize()
-            if milp_unsafe.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
+                x_region[j].lb = x_samples[i][j].item()
+                x_region[j].ub = x_samples[i][j].item()
+            milp_region.gurobi_model.optimize()
+            if milp_region.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL:
                 self.assertLessEqual(
                     dut.barrier_value(x_samples[i], x_star, c).item(),
                     milp.gurobi_model.ObjVal)
 
-    def test_barrier_unsafe_as_milp(self):
+    def test_barrier_value_as_milp(self):
         dut = barrier.Barrier(self.linear_system, self.barrier_relu1)
 
         # The unsafe region is just x[0] <= 0
@@ -108,8 +107,7 @@ class TestBarrier(unittest.TestCase):
         x_star = torch.tensor([0.2, 0.1], dtype=self.dtype)
         c = 0.5
 
-        self.barrier_unsafe_as_milp_tester(dut, x_star, c,
-                                           unsafe_region_cnstr1)
+        self.barrier_value_as_milp_tester(dut, x_star, c, unsafe_region_cnstr1)
 
         # The unsafe region is x[0] <= 0 or x[1] >= 1
         # Formulated as the mixed-integer linear constraint
@@ -123,8 +121,7 @@ class TestBarrier(unittest.TestCase):
             dtype=self.dtype)
         unsafe_region_cnstr2.rhs_in = torch.tensor(
             [0, -dut.system.x_lo_all[1]], dtype=self.dtype)
-        self.barrier_unsafe_as_milp_tester(dut, x_star, c,
-                                           unsafe_region_cnstr2)
+        self.barrier_value_as_milp_tester(dut, x_star, c, unsafe_region_cnstr2)
 
 
 if __name__ == "__main__":
