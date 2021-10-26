@@ -6,6 +6,7 @@ import neural_network_lyapunov.test.test_hybrid_linear_system as\
 import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import torch
 import torch.nn as nn
 import unittest
@@ -197,9 +198,9 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
             (derivative_state_samples_init.shape[0] +
              self.dut.lyapunov_derivative_mip_pool_solutions, 2))
         self.assertEqual(positivity_state_repeatition.shape,
-                         (positivity_state_samples.shape[0],))
+                         (positivity_state_samples.shape[0], ))
         self.assertEqual(derivative_state_repeatition.shape,
-                         (derivative_state_samples.shape[0],))
+                         (derivative_state_samples.shape[0], ))
 
 
 class TestTrainLyapunovReLU(unittest.TestCase):
@@ -311,6 +312,65 @@ class TestTrainLyapunovReLU(unittest.TestCase):
         self.assertAlmostEqual(lyapunov_derivative_mip_cost,
                                lyapunov_derivative_mip.gurobi_model.ObjVal)
 
+    def solve_boundary_gap_mip_tester(self, dut):
+        loss, V_min_milp, V_max_milp, x_min, x_max = \
+            dut.solve_boundary_gap_mip()
+        # Formulate an MILP to max/min V(x) over the boundary x∈∂ℬ
+        milp = gurobi_torch_mip.GurobiTorchMILP(
+            dut.lyapunov_hybrid_system.system.dtype)
+        x = milp.addVars(dut.lyapunov_hybrid_system.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY)
+        verify_region_boundary = utils.box_boundary(
+            torch.from_numpy(dut.lyapunov_hybrid_system.system.x_lo_all),
+            torch.from_numpy(dut.lyapunov_hybrid_system.system.x_up_all))
+        milp.add_mixed_integer_linear_constraints(verify_region_boundary, x,
+                                                  None, "", "", "", "", "")
+        z, _, a_out, b_out, _ = \
+            dut.lyapunov_hybrid_system.add_lyap_relu_output_constraint(milp, x)
+        s, gamma = dut.lyapunov_hybrid_system.add_state_error_l1_constraint(
+            milp, dut.x_equilibrium, x, R=dut.R_options.R())
+        relu_at_equilibrium = dut.lyapunov_hybrid_system.lyapunov_relu(
+            dut.x_equilibrium)
+        # The objective is V(x) = ϕ(x) - ϕ(x*) + λ*|R(x−x*)|₁
+        # = a_out * z + b_out -  ϕ(x*) + λ * s
+        dtype = dut.lyapunov_hybrid_system.system.dtype
+        milp.setObjective([
+            a_out.squeeze(), dut.V_lambda * torch.ones((len(s), ), dtype=dtype)
+        ], [z, s],
+                          constant=b_out - relu_at_equilibrium.squeeze(),
+                          sense=gurobipy.GRB.MAXIMIZE)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        milp.gurobi_model.optimize()
+        self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        self.assertEqual(milp.gurobi_model.ObjVal, V_max_milp)
+        np.testing.assert_array_equal(x_max.detach().numpy(),
+                                      np.array([v.x for v in x]))
+        milp.setObjective([
+            a_out.squeeze(), dut.V_lambda * torch.ones((len(s), ), dtype=dtype)
+        ], [z, s],
+                          constant=b_out - relu_at_equilibrium.squeeze(),
+                          sense=gurobipy.GRB.MINIMIZE)
+        milp.gurobi_model.optimize()
+        self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
+        self.assertEqual(milp.gurobi_model.ObjVal, V_min_milp)
+        np.testing.assert_array_equal(x_min.detach().numpy(),
+                                      np.array([v.x for v in x]))
+        self.assertAlmostEqual(loss.item(), V_max_milp - V_min_milp)
+
+    def test_solve_boundary_gap_mip(self):
+        system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
+        V_lambda = 0.1
+        x_equilibrium = torch.tensor([0, 0], dtype=system.dtype)
+        relu = setup_lyapunov_relu()
+        lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
+            system, relu)
+        R_options = r_options.FixedROptions(
+            torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
+        dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system,
+                                               V_lambda, x_equilibrium,
+                                               R_options)
+        self.solve_boundary_gap_mip_tester(dut)
+
 
 class TestTrainLyapunov(unittest.TestCase):
     def setUp(self):
@@ -376,8 +436,8 @@ class TestClusterAdversarialStates(unittest.TestCase):
         np.testing.assert_allclose(
             clustered_adversarial_states.detach().numpy(),
             torch.cat((x0, x1, x2)).reshape((-1, 2)).detach().numpy())
-        np.testing.assert_array_equal(
-            repeatition, torch.tensor([3, 4, 4], dtype=dtype))
+        np.testing.assert_array_equal(repeatition,
+                                      torch.tensor([3, 4, 4], dtype=dtype))
 
         adversarial_states = torch.cat((x0, x0, x0)).reshape((-1, 2))
         clustered_adversarial_states, repeatition = \
@@ -386,8 +446,8 @@ class TestClusterAdversarialStates(unittest.TestCase):
         np.testing.assert_allclose(
             clustered_adversarial_states.detach().numpy(),
             x0.reshape((-1, 2)).detach().numpy())
-        np.testing.assert_array_equal(
-            repeatition, torch.tensor([3], dtype=dtype))
+        np.testing.assert_array_equal(repeatition,
+                                      torch.tensor([3], dtype=dtype))
 
 
 if __name__ == "__main__":

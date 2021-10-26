@@ -10,6 +10,7 @@ import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.r_options as r_options
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 class TrainLyapunovReLU:
@@ -373,6 +374,63 @@ class TrainLyapunovReLU:
         return lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
             derivative_mip_adversarial, derivative_mip_adversarial_next
 
+    def solve_boundary_gap_mip(self):
+        """
+        Solve the problem
+        max_x V(x) − min_y V(y)
+        s.t x∈∂ℬ, y∈∂ℬ
+        where ℬ is the verified region (a box by default).
+        """
+        dtype = self.lyapunov_hybrid_system.system.dtype
+        milp = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        x = milp.addVars(self.lyapunov_hybrid_system.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         name="x")
+        # Now also add the constraint x∈∂ℬ
+        verify_region_boundary = utils.box_boundary(
+            torch.from_numpy(self.lyapunov_hybrid_system.system.x_lo_all),
+            torch.from_numpy(self.lyapunov_hybrid_system.system.x_up_all))
+        milp.add_mixed_integer_linear_constraints(
+            verify_region_boundary,
+            x,
+            None,
+            "verify_boundary_s",
+            "verify_boundary_binary",
+            "verify_boundary_ineq",
+            "verify_boundary_eq",
+            "",
+            binary_var_type=gurobipy.GRB.BINARY)
+        V_coeff, V_vars, V_constant, _ = \
+            self.lyapunov_hybrid_system._lyapunov_value_as_milp(
+                milp, x, self.x_equilibrium, self.V_lambda,
+                self.R_options.R())
+        # The objective of this milp is V(x)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        # First maximize V(x)
+        milp.setObjective(V_coeff,
+                          V_vars,
+                          V_constant,
+                          sense=gurobipy.GRB.MAXIMIZE)
+        milp.gurobi_model.optimize()
+        assert (milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        V_max = milp.compute_objective_from_mip_data_and_solution(
+            solution_number=0, penalty=1E-13)
+        V_max_milp = milp.gurobi_model.ObjVal
+        dtype = self.lyapunov_hybrid_system.system.dtype
+        x_max = torch.tensor([v.x for v in x], dtype=dtype)
+        # Second find minimize V(x)
+        milp.setObjective(V_coeff,
+                          V_vars,
+                          V_constant,
+                          sense=gurobipy.GRB.MINIMIZE)
+        milp.gurobi_model.optimize()
+        assert (milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        V_min = milp.compute_objective_from_mip_data_and_solution(
+            solution_number=0, penalty=1E-13)
+        V_min_milp = milp.gurobi_model.ObjVal
+        x_min = torch.tensor([v.x for v in x], dtype=dtype)
+        return V_max - V_min, V_min_milp, V_max_milp, x_min, x_max
+
     def total_loss(self, positivity_state_samples, derivative_state_samples,
                    derivative_state_samples_next,
                    lyapunov_positivity_sample_cost_weight,
@@ -385,6 +443,9 @@ class TrainLyapunovReLU:
         2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
         3. -min_x V(x) - ε₂ |x - x*|₁
         4. max_x dV(x) + ε V(x)
+        5. max_(x, y) V(x) - V(y) s.t x∈∂ℬ, y∈∂ℬ
+        Cost 5 is added to enlarge the verified region-of-attraction (as the
+        largest sub-level set inside the verified region ℬ).
         @param positivity_state_samples All sample states on which we compute
         the violation of Lyapunov positivity constraint.
         @param derivative_state_samples All sample states on which we compute
@@ -392,7 +453,7 @@ class TrainLyapunovReLU:
         @param derivative_state_samples_next. The next state(s) of the sampled
         state. derivative_state_samples_next contains next state(s) of
         derivative_state_samples[i].
-        @param loss, positivity_mip_objective, derivative_mip_objective,
+        @return loss, positivity_mip_objective, derivative_mip_objective,
         positivity_sample_loss, derivative_sample_loss, positivity_mip_loss,
         derivative_mip_loss
         positivity_mip_objective is the objective value
@@ -403,6 +464,7 @@ class TrainLyapunovReLU:
         derivative_sample_loss is weight * cost2
         positivity_mip_loss is weight * cost3
         derivative_mip_loss is weight * cost4
+        value_gap_mip_loss is value_gap_mip_cost_weight * cost5
         """
         dtype = self.lyapunov_hybrid_system.system.dtype
         if lyapunov_positivity_mip_cost_weight is not None:
@@ -932,15 +994,15 @@ class TrainLyapunovReLU:
             #     (positivity_state_repeatition,
             #      positivity_mip_adversarial_repeatition),
             #     dim=0)
-            positivity_state_repeatition = torch.ones((
-                positivity_state_samples_all.shape[0],),
+            positivity_state_repeatition = torch.ones(
+                (positivity_state_samples_all.shape[0], ),
                 dtype=positivity_state_samples_all.dtype)
             # derivative_state_repeatition = torch.cat(
             #     (derivative_state_repeatition,
             #      derivative_mip_adversarial_repeatition),
             #     dim=0)
-            derivative_state_repeatition = torch.ones((
-                derivative_state_samples_all.shape[0],),
+            derivative_state_repeatition = torch.ones(
+                (derivative_state_samples_all.shape[0], ),
                 dtype=derivative_state_samples_all.dtype)
             if positivity_state_samples_all.shape[
                     0] > options.positivity_samples_pool_size:
@@ -1104,13 +1166,15 @@ def _cluster_adversarial_states(adversarial_states, cluster_radius):
             1)[states_distance_squared > cluster_radius**2] + 1
         repeatition = new_adversarial_state_index[1:] - \
             new_adversarial_state_index[:-1]
-        if repeatition.shape == (0,):
+        if repeatition.shape == (0, ):
             repeatition = torch.tensor([adversarial_states.shape[0]])
         else:
-            repeatition = torch.cat((torch.tensor([
-                new_adversarial_state_index[0]],
-                dtype=adversarial_states.dtype), repeatition, torch.tensor(
-                    [adversarial_states.shape[0] -
-                     new_adversarial_state_index[-1]],
-                    dtype=adversarial_states.dtype)))
+            repeatition = torch.cat(
+                (torch.tensor([new_adversarial_state_index[0]],
+                              dtype=adversarial_states.dtype), repeatition,
+                 torch.tensor([
+                     adversarial_states.shape[0] -
+                     new_adversarial_state_index[-1]
+                 ],
+                              dtype=adversarial_states.dtype)))
         return clustered_adversarial_states, repeatition
