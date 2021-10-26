@@ -14,9 +14,9 @@ def check_sample_loss_grad(lyap, V_lambda, x_equilibrium, R_options, x_samples,
     dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda, x_equilibrium,
                                            R_options)
     x_next_samples = lyap.system.step_forward(x_samples)
-    total_loss = dut.total_loss(x_samples, x_samples, x_next_samples, 1., 1.,
-                                None, None)[0]
-    total_loss.backward()
+    total_loss_return = dut.total_loss(x_samples, x_samples, x_next_samples,
+                                       1., 1., None, None, 0.)
+    total_loss_return.loss.backward()
     controller_grad = utils.extract_relu_parameters_grad(
         lyap.system.controller_network)
     lyapunov_grad = utils.extract_relu_parameters_grad(lyap.lyapunov_relu)
@@ -39,7 +39,7 @@ def check_sample_loss_grad(lyap, V_lambda, x_equilibrium, R_options, x_samples,
                 dut.R_options.set_variable_value_directly(R_params)
             x_next_samples = lyap.system.step_forward(x_samples)
             return dut.total_loss(x_samples, x_samples, x_next_samples, 1., 1.,
-                                  None, None)[0].item()
+                                  None, None, 0.).loss.item()
 
     if R_options.fixed_R:
         grad_numerical = utils.compute_numerical_gradient(
@@ -85,12 +85,12 @@ def check_lyapunov_mip_loss_grad(lyap, x_equilibrium, V_lambda, V_epsilon,
         dut.lyapunov_positivity_mip_pool_solutions = 1
         dut.lyapunov_positivity_epsilon = V_epsilon
         total_loss = dut.total_loss(x_samples, x_samples, x_next_samples, 0.,
-                                    0., 1., None)[0]
+                                    0., 1., None, 0.).loss
     else:
         dut.lyapunov_derivative_mip_pool_solutions = 1
         dut.lyapunov_derivative_epsilon = V_epsilon
         total_loss = dut.total_loss(x_samples, x_samples, x_next_samples, 0.,
-                                    0., None, 1.)[0]
+                                    0., None, 1., 0.).loss
     total_loss.backward()
 
     controller_grad = utils.extract_relu_parameters_grad(
@@ -117,11 +117,11 @@ def check_lyapunov_mip_loss_grad(lyap, x_equilibrium, V_lambda, V_epsilon,
             if positivity_flag:
                 dut.lyapunov_positivity_epsilon = V_epsilon
                 return dut.total_loss(x_samples, x_samples, x_next_samples, 0.,
-                                      0., 1., None)[0].item()
+                                      0., 1., None, 0.).loss.item()
             else:
                 dut.lyapunov_derivative_epsilon = V_epsilon
                 return dut.total_loss(x_samples, x_samples, x_next_samples, 0.,
-                                      0., None, 1.)[0].item()
+                                      0., None, 1., 0.).loss.item()
 
     if R_options.fixed_R:
         grad_numerical = utils.compute_numerical_gradient(

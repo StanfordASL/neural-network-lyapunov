@@ -371,9 +371,10 @@ class TestLyapunov(unittest.TestCase):
                 for i in range(state_samples.shape[0])
             ],
                                              dim=0)
-            loss = trainer.total_loss(state_samples, state_samples,
-                                      state_samples_next, 1., 1., 1, 1)
-            loss[0].backward()
+            loss_return = trainer.total_loss(state_samples, state_samples,
+                                             state_samples_next, 1., 1., 1, 1,
+                                             0.)
+            loss_return.loss.backward()
 
     def test_total_loss1(self):
         state_samples = torch.tensor(
