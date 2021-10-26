@@ -298,6 +298,24 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             setup_johansson_continuous_time_system1()
         self.x_equilibrium3 = torch.tensor([0, 0], dtype=self.dtype)
 
+        self.lyapunov_relu1 = utils.setup_relu((2, 3, 4, 1),
+                                               params=None,
+                                               negative_slope=0.1,
+                                               bias=True,
+                                               dtype=self.dtype)
+        self.lyapunov_relu1[0].weight.data = torch.tensor(
+            [[1, 2], [3, 4], [5, 6]], dtype=self.dtype)
+        self.lyapunov_relu1[0].bias.data = torch.tensor([-11, 10, 5],
+                                                        dtype=self.dtype)
+        self.lyapunov_relu1[2].weight.data = torch.tensor(
+            [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
+            dtype=self.dtype)
+        self.lyapunov_relu1[2].bias.data = torch.tensor([-3, 2, 0.7, 1.5],
+                                                        dtype=self.dtype)
+        self.lyapunov_relu1[4].weight.data = torch.tensor([[4, 5, 6, 7]],
+                                                          dtype=self.dtype)
+        self.lyapunov_relu1[4].bias.data = torch.tensor([-9], dtype=self.dtype)
+
     def test_add_system_constraint(self):
         def test_fun(system, x_val, is_x_valid):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
@@ -645,26 +663,11 @@ class TestLyapunovHybridSystem(unittest.TestCase):
                                        x_val=x_val)
 
     def test_lyapunov_positivity_loss_at_samples(self):
-        # Construct a simple ReLU model with 2 hidden layers
-        linear1 = nn.Linear(2, 3)
-        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
-                                           dtype=self.dtype)
-        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=self.dtype)
-        linear2 = nn.Linear(3, 4)
-        linear2.weight.data = torch.tensor(
-            [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
-            dtype=self.dtype)
-        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=self.dtype)
-        linear3 = nn.Linear(4, 1)
-        linear3.weight.data = torch.tensor([[4, 5, 6, 7]], dtype=self.dtype)
-        linear3.bias.data = torch.tensor([-9], dtype=self.dtype)
-        lyapunov_relu1 = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(),
-                                       linear3)
         dut = lyapunov.LyapunovDiscreteTimeHybridSystem(
-            self.system1, lyapunov_relu1)
+            self.system1, self.lyapunov_relu1)
 
         x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
-        relu_at_equilibrium = lyapunov_relu1.forward(x_equilibrium)
+        relu_at_equilibrium = self.lyapunov_relu1.forward(x_equilibrium)
 
         V_lambda = 0.01
         margin = 2.
@@ -674,7 +677,7 @@ class TestLyapunovHybridSystem(unittest.TestCase):
         def test_fun(x_samples):
             losses = torch.zeros((x_samples.shape[0], ), dtype=x_samples.dtype)
             for i in range(x_samples.shape[0]):
-                relu_x = lyapunov_relu1.forward(x_samples[i])
+                relu_x = self.lyapunov_relu1.forward(x_samples[i])
                 v = (relu_x - relu_at_equilibrium) + V_lambda * torch.norm(
                     R @ (x_samples[i] - x_equilibrium), p=1)
                 v_minus_l1 = v - epsilon * torch.norm(
@@ -729,6 +732,40 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             torch.tensor([[0, 0], [0, 1], [1, 0], [0.5, 0.4], [0.2, -0.1],
                           [0.4, 0.3], [-0.2, 0.3]],
                          dtype=self.dtype))
+
+    def test_lyapunov_value_as_milp(self):
+        dut = lyapunov.LyapunovDiscreteTimeHybridSystem(
+            self.system1, self.lyapunov_relu1)
+        mip = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x = mip.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        x_equilibrium = torch.tensor([0.5, 0.2], dtype=self.dtype)
+        V_lambda = 0.4
+        R = torch.tensor([[0.4, 1], [0.2, -1], [1, 3]], dtype=self.dtype)
+        V_coeff, V_vars, V_constant, s = dut._lyapunov_value_as_milp(
+            mip, x, x_equilibrium, V_lambda, R)
+        mip.setObjective(V_coeff,
+                         V_vars,
+                         V_constant,
+                         sense=gurobipy.GRB.MAXIMIZE)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(
+            torch.from_numpy(dut.system.x_lo_all),
+            torch.from_numpy(dut.system.x_up_all), 100)
+        mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i][j].item()
+                x[j].ub = x_samples[i][j].item()
+            mip.gurobi_model.optimize()
+            self.assertEqual(mip.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(
+                mip.gurobi_model.ObjVal,
+                dut.lyapunov_value(x_samples[i], x_equilibrium, V_lambda,
+                                   R=R).item())
+            s_expected = torch.abs(R @ (x_samples[i] - x_equilibrium))
+            np.testing.assert_allclose(np.array([v.x for v in s]),
+                                       s_expected.detach().numpy())
 
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
