@@ -243,6 +243,42 @@ class LyapunovHybridLinearSystem:
                     x - x_equilibrium).T, p=1,
                     dim=0)
 
+    def _lyapunov_value_as_milp(self, mip, x, x_equilibrium, V_lambda,
+                                R) -> (list, list, torch.Tensor, list):
+        """
+        For an MILP, add the constraints such that we can compute
+        V(x) = V_coeff * V_vars + V_constant
+
+        Return:
+          V_coeff, V_vars, V_constant: V(x) = V_coeff * V_vars + V_constant
+          s: s[i] = |R.row(i)*(x-x*)|
+        """
+        assert (isinstance(mip, gurobi_torch_mip.GurobiTorchMIP))
+        assert (isinstance(x, list))
+        assert (len(x) == self.system.x_dim)
+        # z is the slack variable to write the output of ReLU network as mixed
+        # integer constraints.
+        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
+            mip, x)
+        # Now write the 1-norm |R*(x - x*)|₁ as mixed-integer linear
+        # constraints.
+        s, gamma = self.add_state_error_l1_constraint(mip,
+                                                      x_equilibrium,
+                                                      x,
+                                                      R=R,
+                                                      slack_name="s",
+                                                      binary_var_name="gamma")
+        # Now set the V(x) = ϕ(x) - ϕ(x*) + λ*|R(x−x*)|₁
+        # = a_out * z + b_out - ϕ(x*) + λ * s
+        relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
+        V_coeff = [
+            a_out.squeeze(0), V_lambda * torch.ones(
+                (len(s), ), dtype=self.system.dtype)
+        ]
+        V_vars = [z, s]
+        V_constant = b_out.squeeze() - relu_at_equilibrium.squeeze()
+        return V_coeff, V_vars, V_constant, s
+
     def lyapunov_positivity_as_milp(self,
                                     x_equilibrium,
                                     V_lambda,
