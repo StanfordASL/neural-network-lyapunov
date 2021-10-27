@@ -47,6 +47,19 @@ class MixedIntegerConstraintsReturn:
         self.binary_up = None
         self.binary_lo = None
 
+    def num_out(self):
+        if self.Aout_input is None and self.Aout_slack is None and\
+                self.Aout_binary is None and self.Cout is None:
+            return 0
+        matrices = (self.Aout_input, self.Aout_slack, self.Aout_binary,
+                    self.Cout)
+        for i in range(4):
+            if matrices[i] is not None:
+                for j in range(i, 4):
+                    assert (matrices[j] is None
+                            or matrices[j].shape[0] == matrices[i].shape[0])
+                return matrices[i].shape[0]
+
     def num_ineq(self):
         if self.rhs_in is None:
             assert (self.Ain_input is None and self.Ain_slack is None
@@ -74,6 +87,28 @@ class MixedIntegerConstraintsReturn:
         if self.Aeq_binary is not None:
             assert (self.Aeq_binary.shape[0] == self.rhs_eq.shape[0])
         return self.rhs_eq.shape[0]
+
+    def _num_var(self, Aout, Ain, Aeq):
+        if Aout is None and Ain is None and Aeq is None:
+            return 0
+        if Aout is not None:
+            for mat in (Ain, Aeq):
+                assert (mat is None or Aout.shape[1] == mat.shape[1])
+            return Aout.shape[1]
+        if Ain is not None:
+            assert (Aeq is None or Aeq.shape[1] == Ain.shape[1])
+            return Ain.shape[1]
+        return Aeq.shape[1]
+
+    def num_input(self):
+        return self._num_var(self.Aout_input, self.Ain_input, self.Aeq_input)
+
+    def num_slack(self):
+        return self._num_var(self.Aout_slack, self.Ain_slack, self.Aeq_slack)
+
+    def num_binary(self):
+        return self._num_var(self.Aout_binary, self.Ain_binary,
+                             self.Aeq_binary)
 
     def clone(self):
         other = MixedIntegerConstraintsReturn()
@@ -114,8 +149,8 @@ class MixedIntegerConstraintsReturn:
                 self.Cout = self.Aout_input @ b
             self.Aout_input = self.Aout_input @ A
         if self.input_lo is not None or self.input_up is not None:
-            assert("transform_input(): cannot handle non-empty input_lo or " +
-                   "input_up")
+            assert ("transform_input(): cannot handle non-empty input_lo or " +
+                    "input_up")
 
 
 """

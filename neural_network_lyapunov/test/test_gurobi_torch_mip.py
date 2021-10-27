@@ -9,19 +9,48 @@ import numpy as np
 class TestMixedIntegerConstraintsReturn(unittest.TestCase):
     def test_constructor(self):
         dut = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        self.assertEqual(dut.num_out(), 0)
         self.assertEqual(dut.num_eq(), 0)
         self.assertEqual(dut.num_ineq(), 0)
+        self.assertEqual(dut.num_input(), 0)
+        self.assertEqual(dut.num_slack(), 0)
+        self.assertEqual(dut.num_binary(), 0)
         dtype = torch.float64
 
         dut.Ain_input = torch.tensor([[2], [3]], dtype=dtype)
         dut.rhs_in = torch.tensor([2, 5], dtype=dtype)
+        self.assertEqual(dut.num_out(), 0)
         self.assertEqual(dut.num_ineq(), 2)
         self.assertEqual(dut.num_eq(), 0)
+        self.assertEqual(dut.num_input(), 1)
+        self.assertEqual(dut.num_slack(), 0)
+        self.assertEqual(dut.num_binary(), 0)
 
         dut.Aeq_slack = torch.tensor([[1, 2], [2, 3], [3, 4]], dtype=dtype)
         dut.rhs_eq = torch.tensor([1, 2, 3], dtype=dtype)
+        self.assertEqual(dut.num_out(), 0)
         self.assertEqual(dut.num_ineq(), 2)
         self.assertEqual(dut.num_eq(), 3)
+        self.assertEqual(dut.num_input(), 1)
+        self.assertEqual(dut.num_slack(), 2)
+        self.assertEqual(dut.num_binary(), 0)
+
+        dut.Aout_binary = torch.tensor([[2, 1, 3], [3, 2, 1]], dtype=dtype)
+        self.assertEqual(dut.num_out(), 2)
+        self.assertEqual(dut.num_ineq(), 2)
+        self.assertEqual(dut.num_eq(), 3)
+        self.assertEqual(dut.num_input(), 1)
+        self.assertEqual(dut.num_slack(), 2)
+        self.assertEqual(dut.num_binary(), 3)
+
+        dut.Aout_binary = None
+        dut.Cout = torch.tensor([2, 1, 3, 4], dtype=dtype)
+        self.assertEqual(dut.num_out(), 4)
+        self.assertEqual(dut.num_ineq(), 2)
+        self.assertEqual(dut.num_eq(), 3)
+        self.assertEqual(dut.num_input(), 1)
+        self.assertEqual(dut.num_slack(), 2)
+        self.assertEqual(dut.num_binary(), 0)
 
     def test_clone(self):
         dtype = torch.float64
