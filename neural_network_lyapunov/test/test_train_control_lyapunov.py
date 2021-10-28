@@ -60,11 +60,13 @@ class TestTrainControlLyapunov(unittest.TestCase):
         derivative_sample_cost_weight = 3.
         positivity_mip_cost_weight = 2.
         derivative_mip_cost_weight = 4.
+        boundary_value_gap_mip_cost_weight = 0.
         dut.lyapunov_derivative_mip_clamp_min = 0.
-        loss, _, _, _, _, _, _, _, _, _ = dut.total_loss(
+        total_loss_return = dut.total_loss(
             positivity_state_samples, derivative_state_samples, None,
             positivity_sample_cost_weight, derivative_sample_cost_weight,
-            positivity_mip_cost_weight, derivative_mip_cost_weight)
+            positivity_mip_cost_weight, derivative_mip_cost_weight,
+            boundary_value_gap_mip_cost_weight)
         loss_expected = 0
         positivity_milp, positivity_x = clf.lyapunov_positivity_as_milp(
             x_equilibrium, V_lambda, dut.lyapunov_positivity_epsilon, R=R)
@@ -110,7 +112,8 @@ class TestTrainControlLyapunov(unittest.TestCase):
                 x_equilibrium,
                 dut.lyapunov_derivative_eps_type,
                 R=R)
-        self.assertAlmostEqual(loss_expected.item(), loss.item())
+        self.assertAlmostEqual(loss_expected.item(),
+                               total_loss_return.loss.item())
 
     def test_total_loss2(self):
         # Test with the Lyapunov derivative constraint max V̇(x)+εV(x) is
@@ -159,14 +162,14 @@ class TestTrainControlLyapunov(unittest.TestCase):
 
         dut.lyapunov_derivative_mip_clamp_min = 0.
 
-        loss, _, derivative_mip_obj, _, _, positivity_mip_loss,\
-            derivative_mip_loss, _, _, _ = dut.total_loss(
-                torch.empty((0, 2), dtype=self.dtype),
-                torch.empty((0, 2), dtype=self.dtype),
-                None, None, None, 1., 1.)
-        self.assertLess(derivative_mip_obj, 0)
-        self.assertEqual(derivative_mip_loss.item(), 0)
-        self.assertEqual(loss.item(), positivity_mip_loss.item())
+        total_loss_return = dut.total_loss(
+            torch.empty((0, 2), dtype=self.dtype),
+            torch.empty((0, 2), dtype=self.dtype), None, None, None, 1., 1.,
+            0.)
+        self.assertLess(total_loss_return.lyapunov_derivative_mip_obj, 0)
+        self.assertEqual(total_loss_return.derivative_mip_loss.item(), 0)
+        self.assertEqual(total_loss_return.loss.item(),
+                         total_loss_return.positivity_mip_loss.item())
 
     def test_train(self):
         clf = control_lyapunov.ControlLyapunov(
