@@ -105,9 +105,19 @@ class TrainBarrier:
                 gurobipy.GRB.Status.OPTIMAL)
         return deriv_return.milp, deriv_return.x
 
+    class TotalLossReturn:
+        def __init__(self, loss, unsafe_mip_objective,
+                     verify_region_boundary_mip_objective,
+                     barrier_deriv_mip_objective):
+            self.loss = loss
+            self.unsafe_mip_objective = unsafe_mip_objective
+            self.verify_region_boundary_mip_objective = \
+                verify_region_boundary_mip_objective
+            self.barrier_deriv_mip_objective = barrier_deriv_mip_objective
+
     def total_loss(self, unsafe_mip_cost_weight,
                    verify_region_boundary_mip_cost_weight,
-                   barrier_deriv_mip_cost_weight):
+                   barrier_deriv_mip_cost_weight) -> TotalLossReturn:
         """
         Compute the total loss as the summation of
         1. hinge(max h(x), x∈Cᵤ)
@@ -144,5 +154,6 @@ class TrainBarrier:
                 barrier_deriv_mip.compute_objective_from_mip_data_and_solution(
                     solution_number=0, penalty=1E-13))
 
-        return loss, unsafe_mip_objective,\
-            verify_region_boundary_mip_objective, barrier_deriv_mip_objective
+        return TrainBarrier.TotalLossReturn(
+            loss, unsafe_mip_objective, verify_region_boundary_mip_objective,
+            barrier_deriv_mip_objective)

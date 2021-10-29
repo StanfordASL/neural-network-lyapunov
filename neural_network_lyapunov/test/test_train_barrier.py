@@ -94,10 +94,9 @@ class TestTrainBarrier(unittest.TestCase):
     def total_loss_tester(self, dut, unsafe_mip_cost_weight,
                           verify_region_boundary_mip_cost_weight,
                           barrier_deriv_mip_cost_weight):
-        loss, unsafe_mip_objective, verify_region_boundary_mip_objective,\
-            barrier_deriv_mip_objective = dut.total_loss(
-                unsafe_mip_cost_weight, verify_region_boundary_mip_cost_weight,
-                barrier_deriv_mip_cost_weight)
+        total_loss_return = dut.total_loss(
+            unsafe_mip_cost_weight, verify_region_boundary_mip_cost_weight,
+            barrier_deriv_mip_cost_weight)
 
         loss_expected = torch.tensor(0, dtype=self.dtype)
         unsafe_mip, unsafe_x = dut.barrier_system.barrier_value_as_milp(
@@ -105,7 +104,8 @@ class TestTrainBarrier(unittest.TestCase):
         for param, val in dut.unsafe_mip_params.items():
             unsafe_mip.gurobi_model.setParam(param, val)
         unsafe_mip.gurobi_model.optimize()
-        self.assertEqual(unsafe_mip_objective, unsafe_mip.gurobi_model.ObjVal)
+        self.assertEqual(total_loss_return.unsafe_mip_objective,
+                         unsafe_mip.gurobi_model.ObjVal)
         loss_expected += unsafe_mip_cost_weight * torch.maximum(
             torch.tensor(0, dtype=self.dtype),
             unsafe_mip.compute_objective_from_mip_data_and_solution(
@@ -117,8 +117,9 @@ class TestTrainBarrier(unittest.TestCase):
         for param, val in dut.verify_region_boundary_mip_params.items():
             verify_region_boundary_mip.gurobi_model.setParam(param, val)
         verify_region_boundary_mip.gurobi_model.optimize()
-        self.assertEqual(verify_region_boundary_mip_objective,
-                         verify_region_boundary_mip.gurobi_model.ObjVal)
+        self.assertEqual(
+            total_loss_return.verify_region_boundary_mip_objective,
+            verify_region_boundary_mip.gurobi_model.ObjVal)
         loss_expected += verify_region_boundary_mip_cost_weight *\
             torch.maximum(
                 torch.tensor(0, dtype=self.dtype),
@@ -131,7 +132,7 @@ class TestTrainBarrier(unittest.TestCase):
         for param, val in dut.barrier_deriv_mip_params.items():
             barrier_deriv_mip_ret.milp.gurobi_model.setParam(param, val)
         barrier_deriv_mip_ret.milp.gurobi_model.optimize()
-        self.assertEqual(barrier_deriv_mip_objective,
+        self.assertEqual(total_loss_return.barrier_deriv_mip_objective,
                          barrier_deriv_mip_ret.milp.gurobi_model.ObjVal)
         loss_expected += barrier_deriv_mip_cost_weight * torch.maximum(
             torch.tensor(0, dtype=self.dtype),
@@ -139,7 +140,8 @@ class TestTrainBarrier(unittest.TestCase):
             compute_objective_from_mip_data_and_solution(solution_number=0,
                                                          penalty=1E-13))
 
-        self.assertAlmostEqual(loss.item(), loss_expected.item())
+        self.assertAlmostEqual(total_loss_return.loss.item(),
+                               loss_expected.item())
 
     def test_total_loss(self):
         c = 0.5
