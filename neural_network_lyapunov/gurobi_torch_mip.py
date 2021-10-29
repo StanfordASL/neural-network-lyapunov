@@ -153,6 +153,195 @@ class MixedIntegerConstraintsReturn:
                     "input_up")
 
 
+def concatenate_mixed_integer_constraints(
+        cnstr1: MixedIntegerConstraintsReturn,
+        cnstr2: MixedIntegerConstraintsReturn, same_slack: bool,
+        same_binary: bool,
+        stack_output: bool) -> MixedIntegerConstraintsReturn:
+    """
+    Given two MixedIntegerConstraintsReturn objects, stack the constraints.
+    I assume the input variable for cnstr1 and cnstr2 are the same.
+
+    Args:
+      same_slack: cnstr1 and cnstr2 have the same slack variables.
+      same_binary: cnstr1 and cnstr2 have the same binary variables.
+      stack_output: Set to True if we stack the output of cnstr1 and cnstr2.
+      Set to False then we will leave the output of the returned
+      MixedIntegerConstraintsReturn object to be empty.
+    """
+    assert (cnstr1.num_input() == cnstr2.num_input())
+    ret = MixedIntegerConstraintsReturn()
+
+    def stack_rhs(rhs1, rhs2):
+        if rhs1 is None and rhs2 is None:
+            return None
+        if rhs1 is None and rhs2 is not None:
+            return rhs2
+        if rhs1 is not None and rhs2 is None:
+            return rhs1
+        return torch.cat((rhs1, rhs2))
+
+    def stack_matrix(mat1, mat2, num_cnstr1, num_cnstr2):
+        if mat1 is None and mat2 is None:
+            return None
+        if mat1 is not None and mat2 is None:
+            return torch.cat(
+                (mat1,
+                 torch.zeros((num_cnstr2, mat1.shape[1]), dtype=mat1.dtype)),
+                dim=0)
+        if mat1 is None and mat2 is not None:
+            return torch.cat((torch.zeros(
+                (num_cnstr1, mat2.shape[1]), dtype=mat2.dtype), mat2),
+                             dim=0)
+            return mat2
+        return torch.cat((mat1, mat2), dim=0)
+
+    def blk_diagonize_matrix(mat1, mat2, num_cnstr1, num_cnstr2, num_var1,
+                             num_var2):
+        if mat1 is None and mat2 is None:
+            return None
+        if mat1 is not None and mat2 is None:
+            assert (mat1.shape == (num_cnstr1, num_var1))
+            return torch.block_diag(
+                mat1, torch.zeros((num_cnstr2, num_var2), dtype=mat1.dtype))
+        if mat1 is None and mat2 is not None:
+            assert (mat2.shape == (num_cnstr2, num_var2))
+            return torch.block_diag(
+                torch.zeros((num_cnstr1, num_var1), dtype=mat2.dtype), mat2)
+        assert (mat1.shape == (num_cnstr1, num_var1))
+        assert (mat2.shape == (num_cnstr2, num_var2))
+        return torch.block_diag(mat1, mat2)
+
+    num_eq1 = cnstr1.num_eq()
+    num_eq2 = cnstr2.num_eq()
+    num_ineq1 = cnstr1.num_ineq()
+    num_ineq2 = cnstr2.num_ineq()
+    num_slack1 = cnstr1.num_slack()
+    num_slack2 = cnstr2.num_slack()
+    num_binary1 = cnstr1.num_binary()
+    num_binary2 = cnstr2.num_binary()
+    num_out1 = cnstr1.num_out()
+    num_out2 = cnstr2.num_out()
+
+    ret.Ain_input = stack_matrix(cnstr1.Ain_input, cnstr2.Ain_input, num_ineq1,
+                                 num_ineq2)
+    ret.Aeq_input = stack_matrix(cnstr1.Aeq_input, cnstr2.Aeq_input, num_eq1,
+                                 num_eq2)
+    ret.rhs_in = stack_rhs(cnstr1.rhs_in, cnstr2.rhs_in)
+    ret.rhs_eq = stack_rhs(cnstr1.rhs_eq, cnstr2.rhs_eq)
+
+    if same_slack:
+        assert (cnstr1.num_slack() == cnstr2.num_slack())
+        ret.Ain_slack = stack_matrix(cnstr1.Ain_slack, cnstr2.Ain_slack,
+                                     num_ineq1, num_ineq2)
+        ret.Aeq_slack = stack_matrix(cnstr1.Aeq_slack, cnstr2.Aeq_slack,
+                                     num_eq1, num_eq2)
+    else:
+        ret.Ain_slack = blk_diagonize_matrix(cnstr1.Ain_slack,
+                                             cnstr2.Ain_slack, num_ineq1,
+                                             num_ineq2, num_slack1, num_slack2)
+        ret.Aeq_slack = blk_diagonize_matrix(cnstr1.Aeq_slack,
+                                             cnstr2.Aeq_slack, num_eq1,
+                                             num_eq2, num_slack1, num_slack2)
+
+    if same_binary:
+        assert (cnstr1.num_binary() == cnstr2.num_binary())
+        ret.Ain_binary = stack_matrix(cnstr1.Ain_binary, cnstr2.Ain_binary,
+                                      num_ineq1, num_ineq2)
+        ret.Aeq_binary = stack_matrix(cnstr1.Aeq_binary, cnstr2.Aeq_binary,
+                                      num_eq1, num_eq2)
+    else:
+        ret.Ain_binary = blk_diagonize_matrix(cnstr1.Ain_binary,
+                                              cnstr2.Ain_binary, num_ineq1,
+                                              num_ineq2, num_binary1,
+                                              num_binary2)
+        ret.Aeq_binary = blk_diagonize_matrix(cnstr1.Aeq_binary,
+                                              cnstr2.Aeq_binary, num_eq1,
+                                              num_eq2, num_binary1,
+                                              num_binary2)
+
+    if stack_output:
+        ret.Aout_input = stack_matrix(cnstr1.Aout_input, cnstr2.Aout_input,
+                                      num_out1, num_out2)
+        ret.Cout = stack_matrix(cnstr1.Cout, cnstr2.Cout, num_out1, num_out2)
+        if same_slack:
+            ret.Aout_slack = stack_matrix(cnstr1.Aout_slack, cnstr2.Aout_slack,
+                                          num_out1, num_out2)
+        else:
+            ret.Aout_slack = blk_diagonize_matrix(cnstr1.Aout_slack,
+                                                  cnstr2.Aout_slack, num_out1,
+                                                  num_out2, num_slack1,
+                                                  num_slack2)
+        if same_binary:
+            ret.Aout_binary = stack_matrix(cnstr1.Aout_binary,
+                                           cnstr2.Aout_binary, num_out1,
+                                           num_out2)
+        else:
+            ret.Aout_binary = blk_diagonize_matrix(cnstr1.Aout_binary,
+                                                   cnstr2.Aout_binary,
+                                                   num_out1, num_out2,
+                                                   num_binary1, num_binary2)
+
+    def take_maximum(tensor1, tensor2):
+        if tensor1 is None and tensor2 is None:
+            return None
+        if tensor1 is not None and tensor2 is None:
+            return tensor1
+        if tensor1 is None and tensor2 is not None:
+            return tensor2
+        return torch.maximum(tensor1, tensor2)
+
+    def take_minimum(tensor1, tensor2):
+        if tensor1 is None and tensor2 is None:
+            return None
+        if tensor1 is not None and tensor2 is None:
+            return tensor1
+        if tensor1 is None and tensor2 is not None:
+            return tensor2
+        return torch.minimum(tensor1, tensor2)
+
+    def stack_bounds(bnd1, bnd2, num_var1, num_var2, upper_bound):
+        if bnd1 is None and bnd2 is None:
+            return None
+        bnd_default_val = np.inf if upper_bound else -np.inf
+        if bnd1 is not None and bnd2 is None:
+            assert (bnd1.shape == (num_var1, ))
+            return torch.cat((bnd1,
+                              torch.full((num_var2, ),
+                                         bnd_default_val,
+                                         dtype=bnd1.dtype)))
+        if bnd1 is None and bnd2 is not None:
+            assert (bnd2.shape == (num_var2, ))
+            return torch.cat((torch.full((num_var1, ),
+                                         bnd_default_val,
+                                         dtype=bnd2.dtype), bnd2))
+        return torch.cat((bnd1, bnd2))
+
+    ret.input_lo = take_maximum(cnstr1.input_lo, cnstr2.input_lo)
+    ret.input_up = take_minimum(cnstr1.input_up, cnstr2.input_up)
+    if same_slack:
+        ret.slack_lo = take_maximum(cnstr1.slack_lo, cnstr2.slack_lo)
+        ret.slack_up = take_minimum(cnstr1.slack_up, cnstr2.slack_up)
+    else:
+        num_slack1 = cnstr1.num_slack()
+        num_slack2 = cnstr2.num_slack()
+        ret.slack_lo = stack_bounds(cnstr1.slack_lo, cnstr2.slack_lo,
+                                    num_slack1, num_slack2, False)
+        ret.slack_up = stack_bounds(cnstr1.slack_up, cnstr2.slack_up,
+                                    num_slack1, num_slack2, True)
+    if same_binary:
+        ret.binary_lo = take_maximum(cnstr1.binary_lo, cnstr2.binary_lo)
+        ret.binary_up = take_minimum(cnstr1.binary_up, cnstr2.binary_up)
+    else:
+        num_binary1 = cnstr1.num_binary()
+        num_binary2 = cnstr1.num_binary()
+        ret.binary_lo = stack_bounds(cnstr1.binary_lo, cnstr2.binary_lo,
+                                     num_binary1, num_binary2, False)
+        ret.binary_up = stack_bounds(cnstr1.binary_up, cnstr2.binary_up,
+                                     num_binary1, num_binary2, True)
+    return ret
+
+
 """
 binary relaxed variables. This variable is registered as continuous
 variable in the range of [0, 1] in Gurobi, but GurobiTorchMIP regards
