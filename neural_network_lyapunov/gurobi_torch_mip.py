@@ -181,17 +181,14 @@ def concatenate_mixed_integer_constraints(
             return rhs1
         return torch.cat((rhs1, rhs2))
 
-    def stack_matrix(mat1, mat2, num_cnstr1, num_cnstr2):
+    def stack_matrix(mat1, mat2, mat1_size, mat2_size):
         if mat1 is None and mat2 is None:
             return None
         if mat1 is not None and mat2 is None:
-            return torch.cat(
-                (mat1,
-                 torch.zeros((num_cnstr2, mat1.shape[1]), dtype=mat1.dtype)),
-                dim=0)
+            return torch.cat((mat1, torch.zeros(mat2_size, dtype=mat1.dtype)),
+                             dim=0)
         if mat1 is None and mat2 is not None:
-            return torch.cat((torch.zeros(
-                (num_cnstr1, mat2.shape[1]), dtype=mat2.dtype), mat2),
+            return torch.cat((torch.zeros(mat1_size, dtype=mat2.dtype), mat2),
                              dim=0)
             return mat2
         return torch.cat((mat1, mat2), dim=0)
@@ -212,6 +209,7 @@ def concatenate_mixed_integer_constraints(
         assert (mat2.shape == (num_cnstr2, num_var2))
         return torch.block_diag(mat1, mat2)
 
+    num_input = cnstr1.num_input()
     num_eq1 = cnstr1.num_eq()
     num_eq2 = cnstr2.num_eq()
     num_ineq1 = cnstr1.num_ineq()
@@ -223,19 +221,22 @@ def concatenate_mixed_integer_constraints(
     num_out1 = cnstr1.num_out()
     num_out2 = cnstr2.num_out()
 
-    ret.Ain_input = stack_matrix(cnstr1.Ain_input, cnstr2.Ain_input, num_ineq1,
-                                 num_ineq2)
-    ret.Aeq_input = stack_matrix(cnstr1.Aeq_input, cnstr2.Aeq_input, num_eq1,
-                                 num_eq2)
+    ret.Ain_input = stack_matrix(cnstr1.Ain_input, cnstr2.Ain_input,
+                                 (num_ineq1, num_input),
+                                 (num_ineq2, num_input))
+    ret.Aeq_input = stack_matrix(cnstr1.Aeq_input, cnstr2.Aeq_input,
+                                 (num_eq1, num_input), (num_eq2, num_input))
     ret.rhs_in = stack_rhs(cnstr1.rhs_in, cnstr2.rhs_in)
     ret.rhs_eq = stack_rhs(cnstr1.rhs_eq, cnstr2.rhs_eq)
 
     if same_slack:
         assert (cnstr1.num_slack() == cnstr2.num_slack())
         ret.Ain_slack = stack_matrix(cnstr1.Ain_slack, cnstr2.Ain_slack,
-                                     num_ineq1, num_ineq2)
+                                     (num_ineq1, num_slack1),
+                                     (num_ineq2, num_slack2))
         ret.Aeq_slack = stack_matrix(cnstr1.Aeq_slack, cnstr2.Aeq_slack,
-                                     num_eq1, num_eq2)
+                                     (num_eq1, num_slack1),
+                                     (num_eq2, num_slack2))
     else:
         ret.Ain_slack = blk_diagonize_matrix(cnstr1.Ain_slack,
                                              cnstr2.Ain_slack, num_ineq1,
@@ -247,9 +248,11 @@ def concatenate_mixed_integer_constraints(
     if same_binary:
         assert (cnstr1.num_binary() == cnstr2.num_binary())
         ret.Ain_binary = stack_matrix(cnstr1.Ain_binary, cnstr2.Ain_binary,
-                                      num_ineq1, num_ineq2)
+                                      (num_ineq1, num_binary1),
+                                      (num_ineq2, num_binary2))
         ret.Aeq_binary = stack_matrix(cnstr1.Aeq_binary, cnstr2.Aeq_binary,
-                                      num_eq1, num_eq2)
+                                      (num_eq1, num_binary1),
+                                      (num_eq2, num_binary2))
     else:
         ret.Ain_binary = blk_diagonize_matrix(cnstr1.Ain_binary,
                                               cnstr2.Ain_binary, num_ineq1,
@@ -262,11 +265,14 @@ def concatenate_mixed_integer_constraints(
 
     if stack_output:
         ret.Aout_input = stack_matrix(cnstr1.Aout_input, cnstr2.Aout_input,
-                                      num_out1, num_out2)
-        ret.Cout = stack_matrix(cnstr1.Cout, cnstr2.Cout, num_out1, num_out2)
+                                      (num_out1, num_input),
+                                      (num_out2, num_input))
+        ret.Cout = stack_matrix(cnstr1.Cout, cnstr2.Cout, (num_out1, ),
+                                (num_out2, ))
         if same_slack:
             ret.Aout_slack = stack_matrix(cnstr1.Aout_slack, cnstr2.Aout_slack,
-                                          num_out1, num_out2)
+                                          (num_out1, num_slack1),
+                                          (num_out2, num_slack2))
         else:
             ret.Aout_slack = blk_diagonize_matrix(cnstr1.Aout_slack,
                                                   cnstr2.Aout_slack, num_out1,
@@ -274,8 +280,9 @@ def concatenate_mixed_integer_constraints(
                                                   num_slack2)
         if same_binary:
             ret.Aout_binary = stack_matrix(cnstr1.Aout_binary,
-                                           cnstr2.Aout_binary, num_out1,
-                                           num_out2)
+                                           cnstr2.Aout_binary,
+                                           (num_out1, num_binary1),
+                                           (num_out2, num_binary2))
         else:
             ret.Aout_binary = blk_diagonize_matrix(cnstr1.Aout_binary,
                                                    cnstr2.Aout_binary,

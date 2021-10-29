@@ -276,6 +276,7 @@ class TestConcatenateMixedIntegerConstraints(unittest.TestCase):
         cnstr1.Ain_input = torch.tensor([[2, 3, 4], [1, 2, 4]], dtype=dtype)
         cnstr1.rhs_in = torch.tensor([2, 3], dtype=dtype)
         cnstr2.Aout_input = torch.tensor([[1, 2, 3]], dtype=dtype)
+        cnstr2.Cout = torch.tensor([1], dtype=dtype)
         self.concatenate_tester(cnstr1,
                                 cnstr2,
                                 same_slack=False,
