@@ -122,6 +122,252 @@ class TestMixedIntegerConstraintsReturn(unittest.TestCase):
         self.transform_input_tester(dut, x_eq)
 
 
+class TestConcatenateMixedIntegerConstraints(unittest.TestCase):
+    def concatenate_tester(self, cnstr1, cnstr2, same_slack, same_binary,
+                           stack_output):
+        dtype = torch.float64
+        ret = gurobi_torch_mip.concatenate_mixed_integer_constraints(
+            cnstr1, cnstr2, same_slack, same_binary, stack_output)
+        if stack_output:
+            self.assertEqual(ret.num_out(),
+                             cnstr1.num_out() + cnstr2.num_out())
+        self.assertEqual(ret.num_ineq(), cnstr1.num_ineq() + cnstr2.num_ineq())
+        self.assertEqual(ret.num_eq(), cnstr1.num_eq() + cnstr2.num_eq())
+        self.assertEqual(ret.num_input(), cnstr1.num_input())
+        if same_slack:
+            self.assertEqual(ret.num_slack(), cnstr1.num_slack())
+        else:
+            self.assertEqual(ret.num_slack(),
+                             cnstr1.num_slack() + cnstr2.num_slack())
+        if same_binary:
+            self.assertEqual(ret.num_binary(), cnstr1.num_binary())
+        else:
+            self.assertEqual(ret.num_binary(),
+                             cnstr1.num_binary() + cnstr2.num_binary())
+
+        def get_matrix(mat, mat_size):
+            if mat is not None:
+                return mat
+            else:
+                return torch.zeros(mat_size, dtype=dtype)
+
+        def check_cat(mat1, mat2, mat_cat, mat1_size, mat2_size, same_var):
+            if mat1 is None and mat2 is None:
+                self.assertIsNone(mat_cat)
+            else:
+                mat1_tensor = get_matrix(mat1, mat1_size)
+                mat2_tensor = get_matrix(mat2, mat2_size)
+                if same_var:
+                    np.testing.assert_allclose(
+                        mat_cat.detach().numpy(),
+                        torch.cat((mat1_tensor, mat2_tensor),
+                                  dim=0).detach().numpy())
+                else:
+                    np.testing.assert_allclose(
+                        mat_cat.detach().numpy(),
+                        torch.block_diag(mat1_tensor,
+                                         mat2_tensor).detach().numpy())
+
+        if stack_output:
+            check_cat(cnstr1.Aout_input, cnstr2.Aout_input, ret.Aout_input,
+                      (cnstr1.num_out(), cnstr1.num_input()),
+                      (cnstr2.num_out(), cnstr2.num_input()), True)
+            check_cat(cnstr1.Aout_slack, cnstr2.Aout_slack, ret.Aout_slack,
+                      (cnstr1.num_out(), cnstr1.num_slack()),
+                      (cnstr2.num_out(), cnstr2.num_slack()), same_slack)
+            check_cat(cnstr1.Aout_binary, cnstr2.Aout_binary, ret.Aout_binary,
+                      (cnstr1.num_out(), cnstr1.num_binary()),
+                      (cnstr2.num_out(), cnstr2.num_binary()), same_binary)
+            check_cat(cnstr1.Cout, cnstr2.Cout, ret.Cout, (cnstr1.num_out(), ),
+                      (cnstr2.num_out(), ), True)
+
+        check_cat(cnstr1.Ain_input, cnstr2.Ain_input, ret.Ain_input,
+                  (cnstr1.num_ineq(), cnstr1.num_input()),
+                  (cnstr2.num_ineq(), cnstr2.num_input()), True)
+        check_cat(cnstr1.Ain_slack, cnstr2.Ain_slack, ret.Ain_slack,
+                  (cnstr1.num_ineq(), cnstr1.num_slack()),
+                  (cnstr2.num_ineq(), cnstr2.num_slack()), same_slack)
+        check_cat(cnstr1.Ain_binary, cnstr2.Ain_binary, ret.Ain_binary,
+                  (cnstr1.num_ineq(), cnstr1.num_binary()),
+                  (cnstr2.num_ineq(), cnstr2.num_binary()), same_binary)
+        check_cat(cnstr1.rhs_in, cnstr2.rhs_in, ret.rhs_in,
+                  (cnstr1.num_ineq(), ), (cnstr2.num_ineq(), ), True)
+
+        check_cat(cnstr1.Aeq_input, cnstr2.Aeq_input, ret.Aeq_input,
+                  (cnstr1.num_eq(), cnstr1.num_input()),
+                  (cnstr2.num_eq(), cnstr2.num_input()), True)
+        check_cat(cnstr1.Aeq_slack, cnstr2.Aeq_slack, ret.Aeq_slack,
+                  (cnstr1.num_eq(), cnstr1.num_slack()),
+                  (cnstr2.num_eq(), cnstr2.num_slack()), same_slack)
+        check_cat(cnstr1.Aeq_binary, cnstr2.Aeq_binary, ret.Aeq_binary,
+                  (cnstr1.num_eq(), cnstr1.num_binary()),
+                  (cnstr2.num_eq(), cnstr2.num_binary()), same_binary)
+        check_cat(cnstr1.rhs_eq, cnstr2.rhs_eq, ret.rhs_eq,
+                  (cnstr1.num_eq(), ), (cnstr2.num_eq(), ), True)
+
+        def check_bnd(bnd1, bnd2, bnd_cat, num_bnd1, num_bnd2, same_var,
+                      upper_bound):
+            if bnd1 is None and bnd2 is None:
+                self.assertIsNone(bnd_cat)
+            else:
+                bnd_default_val = np.inf if upper_bound else -np.inf
+                if bnd1 is None:
+                    bnd1_tensor = torch.full((num_bnd1, ),
+                                             bnd_default_val,
+                                             dtype=dtype)
+                else:
+                    bnd1_tensor = bnd1
+                if bnd2 is None:
+                    bnd2_tensor = torch.full((num_bnd2, ),
+                                             bnd_default_val,
+                                             dtype=dtype)
+                else:
+                    bnd2_tensor = bnd2
+                if same_var:
+                    if upper_bound:
+                        np.testing.assert_allclose(
+                            bnd_cat.detach().numpy(),
+                            torch.minimum(bnd1_tensor,
+                                          bnd2_tensor).detach().numpy())
+                    else:
+                        np.testing.assert_allclose(
+                            bnd_cat.detach().numpy(),
+                            torch.maximum(bnd1_tensor,
+                                          bnd2_tensor).detach().numpy())
+                else:
+                    np.testing.assert_allclose(
+                        bnd_cat.detach().numpy(),
+                        torch.cat((bnd1_tensor, bnd2_tensor)).detach().numpy())
+
+        check_bnd(cnstr1.input_lo, cnstr2.input_lo, ret.input_lo,
+                  cnstr1.num_input(), cnstr2.num_input(), True, False)
+        check_bnd(cnstr1.input_up, cnstr2.input_up, ret.input_up,
+                  cnstr1.num_input(), cnstr2.num_input(), True, True)
+        check_bnd(cnstr1.slack_lo, cnstr2.slack_lo, ret.slack_lo,
+                  cnstr1.num_slack(), cnstr2.num_slack(), same_slack, False)
+        check_bnd(cnstr1.slack_up, cnstr2.slack_up, ret.slack_up,
+                  cnstr1.num_slack(), cnstr2.num_slack(), same_slack, True)
+        check_bnd(cnstr1.binary_lo, cnstr2.binary_lo, ret.binary_lo,
+                  cnstr1.num_binary(), cnstr2.num_binary(), same_binary, False)
+        check_bnd(cnstr1.binary_up, cnstr2.binary_up, ret.binary_up,
+                  cnstr1.num_binary(), cnstr2.num_binary(), same_binary, True)
+
+    def test1(self):
+        cnstr1 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr2 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        ret = gurobi_torch_mip.concatenate_mixed_integer_constraints(
+            cnstr1,
+            cnstr2,
+            same_slack=True,
+            same_binary=True,
+            stack_output=True)
+        self.assertEqual(ret.num_out(), 0)
+        self.assertEqual(ret.num_ineq(), 0)
+        self.assertEqual(ret.num_eq(), 0)
+        self.assertEqual(ret.num_input(), 0)
+        self.assertEqual(ret.num_slack(), 0)
+        self.assertEqual(ret.num_binary(), 0)
+
+    def test2(self):
+        # Test the input
+        dtype = torch.float64
+        cnstr1 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr2 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr1.Ain_input = torch.tensor([[2, 3, 4], [1, 2, 4]], dtype=dtype)
+        cnstr1.rhs_in = torch.tensor([2, 3], dtype=dtype)
+        cnstr2.Aout_input = torch.tensor([[1, 2, 3]], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=False,
+                                stack_output=False)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=True,
+                                stack_output=True)
+
+        cnstr1.input_lo = torch.tensor([-2, -3, -1], dtype=dtype)
+        cnstr2.input_lo = torch.tensor([-1, -4, 2], dtype=dtype)
+        cnstr1.input_up = None
+        cnstr2.input_up = torch.tensor([3, 4, 5], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=True,
+                                stack_output=True)
+
+    def test3(self):
+        # test the slack.
+        dtype = torch.float64
+        cnstr1 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr2 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr1.Ain_input = torch.tensor([[2, 3, 4], [1, 2, 4]], dtype=dtype)
+        cnstr1.rhs_in = torch.tensor([2, 3], dtype=dtype)
+        cnstr1.Ain_slack = torch.tensor([[1, 3], [2, 5]], dtype=dtype)
+        cnstr2.Aout_input = torch.tensor([[1, 2, 3]], dtype=dtype)
+        cnstr2.Ain_input = torch.tensor([[2, 1, 0]], dtype=dtype)
+        cnstr2.rhs_in = torch.tensor([1], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=False,
+                                stack_output=True)
+
+        cnstr2.Aeq_slack = torch.tensor([[1, 3], [2, 4]], dtype=dtype)
+        cnstr2.rhs_eq = torch.tensor([1, 3], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=False,
+                                stack_output=True)
+
+        cnstr1.Aeq_slack = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dtype)
+        cnstr1.rhs_eq = torch.tensor([1, 2, 3], dtype=dtype)
+        cnstr1.slack_lo = torch.tensor([1, 3], dtype=dtype)
+        cnstr1.slack_up = torch.tensor([2, 5], dtype=dtype)
+        cnstr2.slack_lo = None
+        cnstr2.slack_up = torch.tensor([1, 6], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=False,
+                                same_binary=False,
+                                stack_output=True)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=True,
+                                same_binary=False,
+                                stack_output=True)
+
+    def test4(self):
+        dtype = torch.float64
+        cnstr1 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr2 = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        cnstr1.Ain_input = torch.tensor([[2, 3, 4], [1, 2, 4]], dtype=dtype)
+        cnstr1.rhs_in = torch.tensor([2, 3], dtype=dtype)
+        cnstr1.Aout_binary = torch.tensor([[1, 3]], dtype=dtype)
+        cnstr2.Aout_input = torch.tensor([[1, 2, 3]], dtype=dtype)
+        cnstr2.Ain_binary = torch.tensor([[2, 3], [1, 4], [5, 6]], dtype=dtype)
+        cnstr2.rhs_in = torch.tensor([1, 3, 4], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=True,
+                                same_binary=True,
+                                stack_output=False)
+        cnstr2.binary_lo = torch.tensor([0, 1], dtype=dtype)
+        cnstr1.binary_up = torch.tensor([1, 0], dtype=dtype)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=True,
+                                same_binary=True,
+                                stack_output=False)
+        self.concatenate_tester(cnstr1,
+                                cnstr2,
+                                same_slack=True,
+                                same_binary=False,
+                                stack_output=True)
+
+
 def setup_mip1(dut):
     dtype = torch.float64
     # The constraints are
@@ -1244,8 +1490,8 @@ class TestGurobiTorchMILP(unittest.TestCase):
                            sense=gurobipy.GRB.LESS_EQUAL,
                            rhs=a[0] + 2 * a[2] * a[1])
             dut.addLConstr([
-                torch.stack((torch.tensor(2., dtype=dtype), a[1]**2,
-                            torch.tensor(0.5, dtype=dtype))),
+                torch.stack((torch.tensor(2., dtype=dtype), a[1] ** 2,
+                             torch.tensor(0.5, dtype=dtype))),
                 torch.tensor([1., 1.], dtype=dtype)
             ], [x, alpha],
                            sense=gurobipy.GRB.EQUAL,
