@@ -11,7 +11,7 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
     """
     The dynamics is
     rpy_dot = ϕ_a(rpy, omega) - ϕ_a(rpy, 0)
-    pos_ddot = ϕ_b(rpy) * u - ϕ_b(0) * u*
+    pos_ddot = ϕ_b(rpy) * [1 1 1 1] * u - ϕ_b(0) * [1 1 1 1] * u*
     omega_dot = ϕ_c(omega) - ϕ_c(0) - C*u* + C*u
     """
     def __init__(self, x_lo, x_up, u_lo, u_up, phi_a, phi_b, phi_c,
@@ -24,7 +24,7 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         assert (phi_a[-1].out_features == 3)
         self.phi_a = phi_a
         assert (phi_b[0].in_features == 3)
-        assert (phi_b[-1].out_features == 12)
+        assert (phi_b[-1].out_features == 3)
         self.phi_b = phi_b
         assert (phi_c[0].in_features == 3)
         assert (phi_c[-1].out_features == 3)
@@ -51,8 +51,8 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         f_val = torch.empty((12, ), dtype=self.dtype)
         f_val[:3] = pos_dot
         f_val[3:6] = rpy_dot
-        f_val[6:9] = -self.phi_b(torch.zeros((3, ), dtype=self.dtype)).reshape(
-            (3, 4)) @ self.u_equilibrium
+        f_val[6:9] = -self.phi_b(torch.zeros(
+            (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
         f_val[9:12] = self.phi_c(omega) - self.phi_c(
             torch.zeros((3, ), dtype=self.dtype)) - self.C @ self.u_equilibrium
         return f_val
@@ -60,7 +60,7 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
     def G(self, x):
         rpy = x[3:6]
         G_val = torch.zeros((self.x_dim, self.u_dim), dtype=self.dtype)
-        G_val[6:9, :] = self.phi_b(rpy).reshape((3, 4))
+        G_val[6:9, :] = self.phi_b(rpy).repeat(4, 1).T
         G_val[9:12, :] = self.C
         return G_val
 
@@ -115,11 +115,11 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         mip_cnstr_rpydot_G.Cout = torch.zeros((12, ), dtype=self.dtype)
         mip_cnstr_rpydot_G.Aout_input = torch.zeros((12, 12), dtype=self.dtype)
 
-        # pos_ddot = ϕ_b(rpy) * u - ϕ_b(0) * u*
+        # pos_ddot = ϕ_b(rpy) * [1 1 1 1] * u - ϕ_b(0) * [1 1 1 1] * u*
         mip_cnstr_posddot_f = gurobi_torch_mip.MixedIntegerConstraintsReturn()
         mip_cnstr_posddot_f.Cout = -self.phi_b(
-            torch.zeros((3, ), dtype=self.dtype)).reshape(
-                (3, 4)) @ self.u_equilibrium
+            torch.zeros(
+                (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
         mip_cnstr_posddot_f.Aout_input = torch.zeros((3, 3), dtype=self.dtype)
         x_to_rpy_transform = torch.zeros((3, 12), dtype=self.dtype)
         x_to_rpy_transform[:, 3:6] = torch.eye(3, dtype=self.dtype)
@@ -129,6 +129,13 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
             rpy_lo, rpy_up, self.method)
         mip_cnstr_posddot_G.transform_input(
             x_to_rpy_transform, torch.zeros((3, ), dtype=self.dtype))
+        assert (mip_cnstr_posddot_G.Aout_input is None)
+        assert (mip_cnstr_posddot_G.Aout_binary is None)
+        mip_cnstr_posddot_G.Aout_slack = mip_cnstr_posddot_G.Aout_slack.repeat(
+            1, 4).reshape((mip_cnstr_posddot_G.Aout_slack.shape[0] * 4,
+                           mip_cnstr_posddot_G.Aout_slack.shape[1]))
+        mip_cnstr_posddot_G.Cout = mip_cnstr_posddot_G.Cout.repeat(
+            4, 1).T.reshape((-1, ))
 
         # omega_dot = ϕ_c(omega) - ϕ_c(0) - C*u* + C*u
         mip_cnstr_omegadot_f = self.relu_free_pattern_c.output_constraint(
@@ -202,11 +209,13 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         rpydot_up = mip_cnstr_ret_a1.nn_output_up - \
             mip_cnstr_ret_a2.nn_output_lo
         posddot_f_lo = -self.phi_b(torch.zeros(
-            (3, ), dtype=self.dtype)).reshape((3, 4)) @ self.u_equilibrium
+            (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
         posddot_f_up = -self.phi_b(torch.zeros(
-            (3, ), dtype=self.dtype)).reshape((3, 4)) @ self.u_equilibrium
-        posddot_G_lo = mip_cnstr_posddot_G.nn_output_lo
-        posddot_G_up = mip_cnstr_posddot_G.nn_output_up
+            (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
+        posddot_G_lo = mip_cnstr_posddot_G.nn_output_lo.repeat(4, 1).T.reshape(
+            (-1, ))
+        posddot_G_up = mip_cnstr_posddot_G.nn_output_up.repeat(4, 1).T.reshape(
+            (-1, ))
 
         omegadot_f_lo = mip_cnstr_omegadot_f.nn_output_lo - self.phi_c(
             torch.zeros((3, ), dtype=self.dtype)) - self.C @ self.u_equilibrium

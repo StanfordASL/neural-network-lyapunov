@@ -28,7 +28,7 @@ class TestControlAffineQuadrotor(unittest.TestCase):
             [[1, 2, 3, 4], [-1, -2, 0, 1], [0, 2, 1, -1]], dtype=self.dtype)
         self.phi_a[2].bias.data = torch.tensor([1, 2, 3], dtype=self.dtype)
 
-        self.phi_b = utils.setup_relu((3, 4, 12),
+        self.phi_b = utils.setup_relu((3, 4, 3),
                                       params=None,
                                       negative_slope=0.1,
                                       bias=True,
@@ -37,12 +37,8 @@ class TestControlAffineQuadrotor(unittest.TestCase):
             [[1, 2, 3], [2, 3, -1], [0, 1, -1], [1, 0, -2]], dtype=self.dtype)
         self.phi_b[0].bias.data = torch.tensor([1, -1, 2, 0], dtype=self.dtype)
         self.phi_b[2].weight.data = torch.tensor(
-            [[1, 2, 3, 0], [-1, -3, 2, 1], [0, 1, 0, 2], [0, 1, 2, 3],
-             [-1, -3, 2, 1], [0, 2, 1, -1], [1, -1, 0, 2], [-1, -2, -1, 1],
-             [1, 0, 1, 2], [0, 2, -1, -3], [1, -1, 2, -2], [1, 0, 1, -3]],
-            dtype=self.dtype)
-        self.phi_b[2].bias.data = torch.tensor(
-            [1, -1, 0, 1, 2, -3, 2, -2, 0, 1, 1, 3], dtype=self.dtype)
+            [[1, 2, 3, 0], [-1, -3, 2, 1], [0, 1, 0, 2]], dtype=self.dtype)
+        self.phi_b[2].bias.data = torch.tensor([1, -1, 0], dtype=self.dtype)
         self.phi_c = utils.setup_relu((3, 2, 3),
                                       params=None,
                                       negative_slope=0.1,
@@ -77,15 +73,15 @@ class TestControlAffineQuadrotor(unittest.TestCase):
             zero3 = torch.zeros((3, ), dtype=self.dtype)
             f_expected = torch.cat(
                 (x_samples[i, 6:9], self.phi_a(torch.cat(
-                    (rpy, omega))) - self.phi_a(torch.cat(
-                        (rpy, zero3))), -self.phi_b(zero3).reshape(
-                            (3, 4)) @ u_equilibrium, self.phi_c(omega) -
-                 self.phi_c(zero3) - self.C @ u_equilibrium))
+                    (rpy, omega))) - self.phi_a(torch.cat((rpy, zero3))),
+                 -self.phi_b(zero3) * torch.sum(u_equilibrium),
+                 self.phi_c(omega) - self.phi_c(zero3) -
+                 self.C @ u_equilibrium))
             np.testing.assert_allclose(f.detach().numpy(),
                                        f_expected.detach().numpy())
             G = dut.G(x_samples[i])
             G_expected = torch.zeros((12, 4), dtype=self.dtype)
-            G_expected[6:9, :] = self.phi_b(rpy).reshape((3, 4))
+            G_expected[6:9, :] = self.phi_b(rpy).reshape((3, 1)).repeat(1, 4)
             G_expected[9:12, :] = self.C
             np.testing.assert_allclose(G.detach().numpy(),
                                        G_expected.detach().numpy())
