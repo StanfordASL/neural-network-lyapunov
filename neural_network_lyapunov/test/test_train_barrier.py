@@ -178,6 +178,29 @@ class TestTrainBarrier(unittest.TestCase):
                                    self.relu_system.x_up), epsilon)
             self.total_loss_tester(dut, 2., 3., 4.)
 
+    def test_train(self):
+        c = 0.5
+        epsilon = 0.5
+
+        for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
+                             self.barrier_relu3):
+            x_star = torch.tensor([0.5, 0.1], dtype=self.dtype)
+            unsafe_region_cnstr1 = \
+                gurobi_torch_mip.MixedIntegerConstraintsReturn()
+            unsafe_region_cnstr1.Ain_input = torch.tensor([[1, 0]],
+                                                          dtype=self.dtype)
+            unsafe_region_cnstr1.rhs_in = torch.tensor([1], dtype=self.dtype)
+            dut = mut.TrainBarrier(
+                control_barrier.ControlBarrier(self.linear_system,
+                                               barrier_relu), x_star, c,
+                unsafe_region_cnstr1,
+                utils.box_boundary(self.linear_system.x_lo,
+                                   self.linear_system.x_up), epsilon)
+            state_samples_all = torch.empty(
+                (0, dut.barrier_system.system.x_dim), dtype=self.dtype)
+            dut.max_iterations = 3
+            dut.train(state_samples_all)
+
 
 if __name__ == "__main__":
     unittest.main()

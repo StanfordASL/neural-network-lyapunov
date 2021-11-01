@@ -3,6 +3,9 @@ import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 import torch
 import gurobipy
+import inspect
+import time
+import wandb
 
 
 class TrainBarrier:
@@ -52,6 +55,8 @@ class TrainBarrier:
         self.epsilon = epsilon
 
         self.learning_rate = 0.003
+        # momentum used in SGD.
+        self.momentum = 0.
         self.max_iterations = 1000
         # The weight of the MIP cost hinge(max h(x), x∈Cᵤ)
         self.unsafe_region_mip_cost_weight = 1.
@@ -73,6 +78,8 @@ class TrainBarrier:
 
         # Enable wandb to log the data.
         self.enable_wandb = False
+
+        self.output_flag = True
 
     def _solve_barrier_value_mip(self, region_cnstr, region_name, mip_params):
         milp, x = self.barrier_system.barrier_value_as_milp(
@@ -157,3 +164,78 @@ class TrainBarrier:
         return TrainBarrier.TotalLossReturn(
             loss, unsafe_mip_objective, verify_region_boundary_mip_objective,
             barrier_deriv_mip_objective)
+
+    def print(self):
+        for attr in inspect.getmembers(self):
+            if not attr[0].startswith('_') and not inspect.ismethod(attr[1]):
+                if attr[0] not in ('barrier_system'):
+                    print(f"{attr[0]}: {attr[1]}")
+                    if self.enable_wandb:
+                        wandb.config.update({attr[0]: f"{attr[1]}"})
+
+    def _training_params(self):
+        training_params = list(self.barrier_system.barrier_relu.parameters())
+        return training_params
+
+    def train(self, state_samples_all: torch.Tensor):
+        train_start_time = time.time()
+        if self.output_flag:
+            self.print()
+
+        assert (isinstance(state_samples_all, torch.Tensor))
+        assert (state_samples_all.shape[1] == self.barrier_system.system.x_dim)
+
+        iter_count = 0
+        training_params = self._training_params()
+
+        if self.optimizer == "Adam":
+            optimizer = torch.optim.Adam(training_params,
+                                         lr=self.learning_rate)
+        elif self.optimizer == "SGD":
+            optimizer = torch.optim.SGD(training_params,
+                                        lr=self.learning_rate,
+                                        momentum=self.momentum)
+        else:
+            raise Exception(
+                "train(): unknown optimizer. Only support Adam or SGD.")
+
+        while iter_count < self.max_iterations:
+            optimizer.zero_grad()
+            total_loss_return = self.total_loss(
+                self.unsafe_region_mip_cost_weight,
+                self.verify_region_boundary_mip_cost_weight,
+                self.barrier_deriv_mip_cost_weight)
+            if self.enable_wandb:
+                wandb.log({
+                    "loss":
+                    total_loss_return.loss.item(),
+                    "unsafe_mip_objective":
+                    total_loss_return.unsafe_mip_objective,
+                    "barrier_deriv_mip_objective":
+                    total_loss_return.barrier_deriv_mip_objective,
+                    "verify_region_boundary_mip_objective":
+                    total_loss_return.verify_region_boundary_mip_objective,
+                    "time":
+                    time.time() - train_start_time
+                })
+            if self.output_flag:
+                print(
+                    f"Iter {iter_count}," +
+                    f"loss {total_loss_return.loss.item()}," +
+                    "unsafe_mip_objective " +
+                    f"{total_loss_return.unsafe_mip_objective}," +
+                    "barrier_deriv_mip_objective " +
+                    f"{total_loss_return.barrier_deriv_mip_objective}," +
+                    "verify_region_boundary_mip_objective " +
+                    f"{total_loss_return.verify_region_boundary_mip_objective}"
+                )
+
+            if total_loss_return.unsafe_mip_objective <= 0 and\
+                total_loss_return.barrier_deriv_mip_objective <= 0 and\
+                    total_loss_return.verify_region_boundary_mip_objective <= 0:  # noqa
+                return True
+
+            total_loss_return.loss.backward()
+            optimizer.step()
+            iter_count += 1
+        return False
