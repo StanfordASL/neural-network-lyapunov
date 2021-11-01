@@ -3,10 +3,15 @@ import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 import neural_network_lyapunov.examples.quadrotor3d.control_affine_quadrotor \
     as control_affine_quadrotor
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.control_lyapunov as control_lyapunov
+import neural_network_lyapunov.r_options as r_options
+import neural_network_lyapunov.train_utils as train_utils
+import neural_network_lyapunov.train_lyapunov as train_lyapunov
 
 import torch
 import numpy as np
 import argparse
+import gurobipy
 
 
 def generate_quadrotor_dynamics_data():
@@ -28,7 +33,7 @@ def generate_quadrotor_dynamics_data():
     return torch.utils.data.TensorDataset(xu_samples, xdot)
 
 
-def train_phi_a(phi_a, model_dataset):
+def train_phi_a(phi_a, model_dataset, num_epochs=200, lr=0.001):
     # Train phi_a(x) network in the forward dynamics.
     (xu_inputs, xdot_outputs) = model_dataset[:]
 
@@ -47,11 +52,11 @@ def train_phi_a(phi_a, model_dataset):
                              phi_a,
                              compute_rpydot,
                              batch_size=50,
-                             num_epochs=200,
-                             lr=0.001)
+                             num_epochs=num_epochs,
+                             lr=lr)
 
 
-def train_phi_b(phi_b, model_dataset, u_equilibrium):
+def train_phi_b(phi_b, model_dataset, u_equilibrium, num_epochs=200, lr=0.001):
     # Train phi_b(x) network in the forward dynamics.
     (xu_inputs, xdot_outputs) = model_dataset[:]
 
@@ -68,8 +73,8 @@ def train_phi_b(phi_b, model_dataset, u_equilibrium):
                              phi_b,
                              compute_pos_ddot,
                              batch_size=50,
-                             num_epochs=200,
-                             lr=0.001)
+                             num_epochs=num_epochs,
+                             lr=lr)
 
 
 def train_phi_c(phi_c, C, model_dataset, u_equilibrium):
@@ -173,18 +178,18 @@ if __name__ == "__main__":
         -0.5, -0.5, -0.5, -np.pi, -0.4 * np.pi, -np.pi, -1, -1, -1, -np.pi,
         -np.pi, -np.pi
     ],
-                        dtype=dtype)
+                        dtype=dtype) * 0.1
     x_up = -x_lo
     u_lo = torch.zeros((4, ), dtype=dtype)
     u_up = torch.ones((4, ), dtype=dtype) * 3 * plant.hover_thrust
     u_equilibrium = torch.ones((4, ), dtype=dtype) * plant.hover_thrust
     if args.train_forward_model is not None:
-        phi_a = utils.setup_relu((6, 12, 9, 3),
+        phi_a = utils.setup_relu((6, 12, 12, 6, 3),
                                  params=None,
                                  negative_slope=0.01,
                                  bias=True,
                                  dtype=dtype)
-        phi_b = utils.setup_relu((3, 10, 10, 3),
+        phi_b = utils.setup_relu((3, 12, 12, 6, 3),
                                  params=None,
                                  negative_slope=0.01,
                                  bias=True,
@@ -229,4 +234,55 @@ if __name__ == "__main__":
         dynamics_model = control_affine_quadrotor.ControlAffineQuadrotor(
             x_lo, x_up, u_lo, u_up, phi_a, phi_b, phi_c, C, u_equilibrium,
             mip_utils.PropagateBoundsMethod.IA)
+
+    if args.load_lyapunov_relu is None:
+        V_lambda = 0.5
+        lyapunov_relu = utils.setup_relu((12, 20, 20, 1),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=dtype)
+        x_equilibrium = torch.zeros((12, ), dtype=dtype)
+        _, S = plant.lqr_control(
+            np.diag([1, 1, 1, 1, 1, 1, 10, 10, 10, 10, 10, 10.]),
+            np.diag([10., 10, 10, 10]), x_equilibrium, u_equilibrium)
+        R = torch.from_numpy(S)
+    else:
+        lyapunov_data = torch.load(args.load_lyapunov_relu)
+        lyapunov_relu = utils.setup_relu(
+            lyapunov_data["linear_layer_width"],
+            params=None,
+            negative_slope=lyapunov_data["negative_slope"],
+            bias=True,
+            dtype=dtype)
+        lyapunov_relu.load_state_dict(lyapunov_data["state_dict"])
+        V_lambda = lyapunov_data["V_lambda"]
+        R = lyapunov_data["R"]
+
+    lyapunov_hybrid_system = control_lyapunov.ControlLyapunov(
+        dynamics_model, lyapunov_relu,
+        control_lyapunov.SubgradientPolicy(np.array([0.])))
+
+    R_options = r_options.SearchRfreeOptions(R.shape)
+    R_options.set_variable_value(R.detach().numpy())
+
+    if args.enable_wandb:
+        train_utils.wandb_config_update(args, lyapunov_relu, None, x_lo, x_up,
+                                        u_lo, u_up)
+
+    dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system, V_lambda,
+                                           x_equilibrium, R_options)
+
+    dut.lyapunov_positivity_mip_pool_solutions = 1
+    dut.lyapunov_derivative_mip_pool_solutions = 1
+    dut.lyapunov_derivative_epsilon = 0.1
+    dut.lyapunov_derivative_mip_clamp_min = -1.
+    dut.lyapunov_derivative_mip_cost_weight = 1.
+    dut.output_flag = True
+    dut.learning_rate = 0.003
+    dut.max_iterations = args.max_iterations
+    dut.lyapunov_derivative_mip_params = {gurobipy.GRB.Param.OutputFlag: True}
+    dut.enable_wandb = args.enable_wandb
+    state_samples_all = torch.empty((0, 12), dtype=dtype)
+    dut.train(state_samples_all)
     pass

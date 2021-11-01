@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import scipy
 import gurobipy
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.relu_system as relu_system
@@ -185,6 +186,14 @@ class Quadrotor:
             self.z_torque_to_force_factor, -self.z_torque_to_force_factor
         ]) / self.inertia[2]
         return A, B
+
+    def lqr_control(self, Q, R, x, u):
+        x_np = x if isinstance(x, np.ndarray) else x.detach().numpy()
+        u_np = x if isinstance(u, np.ndarray) else u.detach().numpy()
+        A, B = self.dynamics_gradient(x_np, u_np)
+        S = scipy.linalg.solve_continuous_are(A, B, Q, R)
+        K = -np.linalg.solve(R, B.T @ S)
+        return K, S
 
 
 class QuadrotorWithPixhawkReLUSystem:
