@@ -988,6 +988,20 @@ class TestUniformSampleInBox(unittest.TestCase):
         self.assertEqual(samples.shape, (2, 2))
 
 
+class TestUniformSampleOnBoxBoundary(unittest.TestCase):
+    def test(self):
+        dtype = torch.float64
+        lo = torch.tensor([-2, -1], dtype=dtype)
+        up = torch.tensor([-1, 2], dtype=dtype)
+        samples = utils.uniform_sample_on_box_boundary(lo, up, 10)
+        self.assertEqual(samples.shape, (10, 2))
+        for i in range(10):
+            self.assertTrue(samples[i][0].item() == -2
+                            or samples[i][0].item() == -1
+                            or samples[i][1].item() == -1
+                            or samples[i][1].item() == 2)
+
+
 class TestReluNetworkGradient(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64

@@ -1287,6 +1287,23 @@ def uniform_sample_in_box(lo: torch.Tensor, hi: torch.Tensor,
     return samples
 
 
+def uniform_sample_on_box_boundary(lo: torch.Tensor, hi: torch.Tensor,
+                                   num_samples) -> torch.Tensor:
+    """
+    Uniformly samples on the boundary of the box lo <= x <= hi
+    """
+    samples_in_box = uniform_sample_in_box(lo, hi, num_samples)
+    x_dim = lo.numel()
+    boundary_face_rand = torch.rand((num_samples, )) * 2 - 1
+    for i in range(num_samples):
+        boundary_face_index = int(
+            (torch.abs(boundary_face_rand[i]) * x_dim).item())
+        samples_in_box[i, boundary_face_index] = lo[
+            boundary_face_index] if boundary_face_rand[i] < 0 else hi[
+                boundary_face_index]
+    return samples_in_box
+
+
 def relu_network_gradient(relu_network,
                           x: torch.Tensor,
                           *,
