@@ -65,6 +65,11 @@ class TrainBarrier:
         # The weight of the MIP cost hinge(max -ḣ(x) −εh(x))
         self.barrier_deriv_mip_cost_weight = 1.
 
+        # weight on the loss of the sampled states.
+        self.unsafe_state_samples_weight = None
+        self.boundary_state_samples_weight = None
+        self.derivative_state_samples_weight = None
+
         # We support Adam or SGD.
         self.optimizer = "Adam"
 
@@ -138,8 +143,9 @@ class TrainBarrier:
                     -h_boundary, torch.tensor(-1))
         if derivative_state_samples_weight is not None:
             hdot = torch.stack([
-                torch.min(self.barrier_system.barrier_derivative(
-                    derivative_state_samples[i]))
+                torch.min(
+                    self.barrier_system.barrier_derivative(
+                        derivative_state_samples[i]))
                 for i in range(derivative_state_samples.shape[0])
             ])
             h = self.barrier_system.barrier_value(derivative_state_samples,
@@ -152,16 +158,20 @@ class TrainBarrier:
     class TotalLossReturn:
         def __init__(self, loss, unsafe_mip_objective,
                      verify_region_boundary_mip_objective,
-                     barrier_deriv_mip_objective):
+                     barrier_deriv_mip_objective, sample_loss):
             self.loss = loss
             self.unsafe_mip_objective = unsafe_mip_objective
             self.verify_region_boundary_mip_objective = \
                 verify_region_boundary_mip_objective
             self.barrier_deriv_mip_objective = barrier_deriv_mip_objective
+            self.sample_loss = sample_loss
 
-    def total_loss(self, unsafe_mip_cost_weight,
-                   verify_region_boundary_mip_cost_weight,
-                   barrier_deriv_mip_cost_weight) -> TotalLossReturn:
+    def total_loss(self, unsafe_mip_cost_weight: float,
+                   verify_region_boundary_mip_cost_weight: float,
+                   barrier_deriv_mip_cost_weight: float,
+                   unsafe_state_samples: torch.Tensor,
+                   boundary_state_samples: torch.Tensor,
+                   deriv_state_samples: torch.Tensor) -> TotalLossReturn:
         """
         Compute the total loss as the summation of
         1. hinge(max h(x), x∈Cᵤ)
@@ -169,7 +179,7 @@ class TrainBarrier:
         3. hinge(max −ḣ(x) − εh(x), x∈ℬ)
         4. hinge(h(xⁱ)), xⁱ in unsafe_state_samples
         5. hinge(h(xⁱ)), xⁱ in boundary_state_samples
-        6. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in state_samples
+        6. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in deriv_state_samples
         """
         dtype = self.barrier_system.system.dtype
         loss = torch.tensor(0, dtype=dtype)
@@ -210,9 +220,16 @@ class TrainBarrier:
         else:
             barrier_deriv_mip_objective = None
 
+        sample_loss = self.compute_sample_loss(
+            unsafe_state_samples, boundary_state_samples, deriv_state_samples,
+            self.unsafe_state_samples_weight,
+            self.boundary_state_samples_weight,
+            self.derivative_state_samples_weight)
+        loss += sample_loss
+
         return TrainBarrier.TotalLossReturn(
             loss, unsafe_mip_objective, verify_region_boundary_mip_objective,
-            barrier_deriv_mip_objective)
+            barrier_deriv_mip_objective, sample_loss)
 
     def print(self):
         for attr in inspect.getmembers(self):
@@ -226,13 +243,11 @@ class TrainBarrier:
         training_params = list(self.barrier_system.barrier_relu.parameters())
         return training_params
 
-    def train(self, state_samples_all: torch.Tensor):
+    def train(self, unsafe_state_samples, boundary_state_samples,
+              deriv_state_samples):
         train_start_time = time.time()
         if self.output_flag:
             self.print()
-
-        assert (isinstance(state_samples_all, torch.Tensor))
-        assert (state_samples_all.shape[1] == self.barrier_system.system.x_dim)
 
         iter_count = 0
         training_params = self._training_params()
@@ -253,7 +268,8 @@ class TrainBarrier:
             total_loss_return = self.total_loss(
                 self.unsafe_region_mip_cost_weight,
                 self.verify_region_boundary_mip_cost_weight,
-                self.barrier_deriv_mip_cost_weight)
+                self.barrier_deriv_mip_cost_weight, unsafe_state_samples,
+                boundary_state_samples, deriv_state_samples)
             if self.enable_wandb:
                 wandb.log({
                     "loss":
@@ -290,7 +306,40 @@ class TrainBarrier:
         return False
 
     def train_on_samples(self, unsafe_state_samples, boundary_state_samples,
-                         state_samples):
+                         deriv_state_samples):
         """
         Train the barrier function on the samples
         """
+        if self.unsafe_state_samples_weight is None or\
+            self.boundary_state_samples_weight is None or\
+                self.derivative_state_samples_weight is None:
+            raise Warning("The sample cost weight is None. Better to set " +
+                          "it to a positive scalar.")
+        training_params = self._training_params()
+        if self.optimizer == "Adam":
+            optimizer = torch.optim.Adam(training_params,
+                                         lr=self.learning_rate)
+        elif self.optimizer == "SGD":
+            optimizer = torch.optim.SGD(training_params,
+                                        lr=self.learning_rate,
+                                        momentum=self.momentum)
+        else:
+            raise Exception(
+                "train(): unknown optimizer. Only support Adam or SGD.")
+
+        iter_count = 0
+        while iter_count < self.max_iterations:
+            optimizer.zero_grad()
+            total_loss_return = self.total_loss(None, None, None,
+                                                unsafe_state_samples,
+                                                boundary_state_samples,
+                                                deriv_state_samples)
+            if self.output_flag:
+                print(f"Iter {iter_count}, " +
+                      f"loss {total_loss_return.loss.item()},")
+            if total_loss_return.loss < 0:
+                return
+            total_loss_return.loss.backward()
+            optimizer.step()
+            iter_count += 1
+        return

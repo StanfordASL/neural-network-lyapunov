@@ -51,7 +51,7 @@ if __name__ == "__main__":
         phi_b,
         u_equilibrium,
         method=mip_utils.PropagateBoundsMethod.IA)
-    x_equilibrium = torch.zeros((6,), dtype=dtype)
+    x_equilibrium = torch.zeros((6, ), dtype=dtype)
 
     if args.load_barrier_relu is None:
         barrier_relu = utils.setup_relu((6, 15, 15, 1),
@@ -92,5 +92,9 @@ if __name__ == "__main__":
     dut.max_iterations = args.max_iterations
     dut.enable_wandb = args.enable_wandb
 
-    dut.train(torch.zeros((0, 6), dtype=dtype))
+    unsafe_state_samples = torch.zeros((0, 6), dtype=dtype)
+    boundary_state_samples = torch.zeros((0, 6), dtype=dtype)
+    deriv_state_samples = torch.zeros((0, 6), dtype=dtype)
+    dut.train(unsafe_state_samples, boundary_state_samples,
+              deriv_state_samples)
     pass

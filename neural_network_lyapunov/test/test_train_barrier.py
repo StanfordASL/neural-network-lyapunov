@@ -93,10 +93,12 @@ class TestTrainBarrier(unittest.TestCase):
 
     def total_loss_tester(self, dut, unsafe_mip_cost_weight,
                           verify_region_boundary_mip_cost_weight,
-                          barrier_deriv_mip_cost_weight):
+                          barrier_deriv_mip_cost_weight, unsafe_state_samples,
+                          boundary_state_samples, deriv_state_samples):
         total_loss_return = dut.total_loss(
             unsafe_mip_cost_weight, verify_region_boundary_mip_cost_weight,
-            barrier_deriv_mip_cost_weight)
+            barrier_deriv_mip_cost_weight, unsafe_state_samples,
+            boundary_state_samples, deriv_state_samples)
 
         loss_expected = torch.tensor(0, dtype=self.dtype)
         unsafe_mip, unsafe_x = dut.barrier_system.barrier_value_as_milp(
@@ -139,6 +141,11 @@ class TestTrainBarrier(unittest.TestCase):
             barrier_deriv_mip_ret.milp.
             compute_objective_from_mip_data_and_solution(solution_number=0,
                                                          penalty=1E-13))
+        sample_loss = dut.compute_sample_loss(
+            unsafe_state_samples, boundary_state_samples, deriv_state_samples,
+            dut.unsafe_state_samples_weight, dut.boundary_state_samples_weight,
+            dut.derivative_state_samples_weight)
+        loss_expected += sample_loss
 
         self.assertAlmostEqual(total_loss_return.loss.item(),
                                loss_expected.item())
@@ -146,6 +153,11 @@ class TestTrainBarrier(unittest.TestCase):
     def test_total_loss(self):
         c = 0.5
         epsilon = 0.5
+
+        boundary_state_samples = utils.uniform_sample_on_box_boundary(
+            self.linear_system.x_lo, self.linear_system.x_up, 100)
+        deriv_state_samples = utils.uniform_sample_in_box(
+            self.linear_system.x_lo, self.linear_system.x_up, 20)
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -155,13 +167,19 @@ class TestTrainBarrier(unittest.TestCase):
             unsafe_region_cnstr1.Ain_input = torch.tensor([[1, 0]],
                                                           dtype=self.dtype)
             unsafe_region_cnstr1.rhs_in = torch.tensor([1], dtype=self.dtype)
+            unsafe_state_samples = torch.tensor([[-2, 0], [0, 1]],
+                                                dtype=self.dtype)
             dut = mut.TrainBarrier(
                 control_barrier.ControlBarrier(self.linear_system,
                                                barrier_relu), x_star, c,
                 unsafe_region_cnstr1,
                 utils.box_boundary(self.linear_system.x_lo,
                                    self.linear_system.x_up), epsilon)
-            self.total_loss_tester(dut, 2., 3., 4.)
+            dut.unsafe_state_samples_weight = 3.
+            dut.derivative_state_samples_weight = 5.
+            dut.boundary_state_samples_weight = 2.
+            self.total_loss_tester(dut, 2., 3., 4., unsafe_state_samples,
+                                   boundary_state_samples, deriv_state_samples)
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -171,16 +189,24 @@ class TestTrainBarrier(unittest.TestCase):
             unsafe_region_cnstr2.Ain_input = torch.tensor([[0, 1]],
                                                           dtype=self.dtype)
             unsafe_region_cnstr2.rhs_in = torch.tensor([1.5], dtype=self.dtype)
+            unsafe_state_samples = torch.tensor([[0, 1], [0.5, 0]],
+                                                dtype=self.dtype)
             dut = mut.TrainBarrier(
                 control_barrier.ControlBarrier(self.relu_system, barrier_relu),
                 x_star, c, unsafe_region_cnstr2,
                 utils.box_boundary(self.relu_system.x_lo,
                                    self.relu_system.x_up), epsilon)
-            self.total_loss_tester(dut, 2., 3., 4.)
+            self.total_loss_tester(dut, 2., 3., 4., unsafe_state_samples,
+                                   boundary_state_samples, deriv_state_samples)
 
     def test_train(self):
         c = 0.5
         epsilon = 0.5
+
+        boundary_state_samples = utils.uniform_sample_on_box_boundary(
+            self.linear_system.x_lo, self.linear_system.x_up, 100)
+        deriv_state_samples = utils.uniform_sample_in_box(
+            self.linear_system.x_lo, self.linear_system.x_up, 10)
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -190,16 +216,16 @@ class TestTrainBarrier(unittest.TestCase):
             unsafe_region_cnstr1.Ain_input = torch.tensor([[1, 0]],
                                                           dtype=self.dtype)
             unsafe_region_cnstr1.rhs_in = torch.tensor([1], dtype=self.dtype)
+            unsafe_state_samples = torch.tensor([[1, 0]], dtype=self.dtype)
             dut = mut.TrainBarrier(
                 control_barrier.ControlBarrier(self.linear_system,
                                                barrier_relu), x_star, c,
                 unsafe_region_cnstr1,
                 utils.box_boundary(self.linear_system.x_lo,
                                    self.linear_system.x_up), epsilon)
-            state_samples_all = torch.empty(
-                (0, dut.barrier_system.system.x_dim), dtype=self.dtype)
             dut.max_iterations = 3
-            dut.train(state_samples_all)
+            dut.train(unsafe_state_samples, boundary_state_samples,
+                      deriv_state_samples)
 
     def compute_sample_loss_tester(self, dut, unsafe_state_samples,
                                    boundary_state_samples,
@@ -275,6 +301,37 @@ class TestTrainBarrier(unittest.TestCase):
                                             boundary_state_samples,
                                             derivative_state_samples, 0.5, 2.,
                                             None)
+
+    def test_train_on_samples(self):
+        c = 0.5
+        epsilon = 0.5
+        x_star = torch.tensor([0.5, 0.1], dtype=self.dtype)
+        unsafe_region_cnstr = \
+            gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        unsafe_region_cnstr.Ain_input = torch.tensor([[1, 0]],
+                                                     dtype=self.dtype)
+        unsafe_region_cnstr.rhs_in = torch.tensor([1], dtype=self.dtype)
+
+        unsafe_state_samples = utils.uniform_sample_in_box(
+            self.linear_system.x_lo, torch.tensor([1, 2], dtype=self.dtype),
+            100)
+        boundary_state_samples = utils.uniform_sample_on_box_boundary(
+            self.linear_system.x_lo, self.linear_system.x_up, 200)
+        deriv_state_samples = utils.uniform_sample_in_box(
+            self.linear_system.x_lo, self.linear_system.x_up, 1000)
+
+        dut = mut.TrainBarrier(
+            control_barrier.ControlBarrier(self.linear_system,
+                                           self.barrier_relu1), x_star, c,
+            unsafe_region_cnstr,
+            utils.box_boundary(self.linear_system.x_lo,
+                               self.linear_system.x_up), epsilon)
+        dut.derivative_state_samples_weight = 2.
+        dut.boundary_state_samples_weight = 3.
+        dut.unsafe_state_samples_weight = 4.
+        dut.max_iterations = 3
+        dut.train_on_samples(unsafe_state_samples, boundary_state_samples,
+                             deriv_state_samples)
 
 
 if __name__ == "__main__":
