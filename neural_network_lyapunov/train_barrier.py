@@ -112,6 +112,43 @@ class TrainBarrier:
                 gurobipy.GRB.Status.OPTIMAL)
         return deriv_return.milp, deriv_return.x
 
+    def compute_sample_loss(self, unsafe_state_samples, boundary_state_samples,
+                            derivative_state_samples,
+                            unsafe_state_samples_weight,
+                            boundary_state_samples_weight,
+                            derivative_state_samples_weight):
+        """
+        Compute the sum of these losses.
+        1. hinge(h(xⁱ)), xⁱ in unsafe_state_samples
+        2. hinge(h(xⁱ)), xⁱ in boundary_state_samples
+        3. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in derivative_state_samples
+        """
+        total_loss = torch.tensor(0, dtype=self.barrier_system.system.dtype)
+        if unsafe_state_samples_weight is not None:
+            h_unsafe = self.barrier_system.barrier_value(
+                unsafe_state_samples, self.x_star, self.c)
+            total_loss += unsafe_state_samples_weight * \
+                torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
+                    -h_unsafe, torch.tensor(-1))
+        if boundary_state_samples_weight is not None:
+            h_boundary = self.barrier_system.barrier_value(
+                boundary_state_samples, self.x_star, self.c)
+            total_loss += boundary_state_samples_weight * \
+                torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
+                    -h_boundary, torch.tensor(-1))
+        if derivative_state_samples_weight is not None:
+            hdot = torch.stack([
+                torch.min(self.barrier_system.barrier_derivative(
+                    derivative_state_samples[i]))
+                for i in range(derivative_state_samples.shape[0])
+            ])
+            h = self.barrier_system.barrier_value(derivative_state_samples,
+                                                  self.x_star, self.c)
+            total_loss += derivative_state_samples_weight * \
+                torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
+                    hdot + self.epsilon * h, torch.tensor(-1))
+        return total_loss
+
     class TotalLossReturn:
         def __init__(self, loss, unsafe_mip_objective,
                      verify_region_boundary_mip_objective,
@@ -130,36 +167,48 @@ class TrainBarrier:
         1. hinge(max h(x), x∈Cᵤ)
         2. hinge(max h(x), x∈∂ℬ)
         3. hinge(max −ḣ(x) − εh(x), x∈ℬ)
+        4. hinge(h(xⁱ)), xⁱ in unsafe_state_samples
+        5. hinge(h(xⁱ)), xⁱ in boundary_state_samples
+        6. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in state_samples
         """
         dtype = self.barrier_system.system.dtype
         loss = torch.tensor(0, dtype=dtype)
-        unsafe_mip, unsafe_x = self.solve_unsafe_region_mip()
-        unsafe_mip_objective = unsafe_mip.gurobi_model.ObjVal
+        if unsafe_mip_cost_weight is not None:
+            unsafe_mip, unsafe_x = self.solve_unsafe_region_mip()
+            unsafe_mip_objective = unsafe_mip.gurobi_model.ObjVal
+            if unsafe_mip_cost_weight > 0:
+                loss += unsafe_mip_cost_weight * torch.maximum(
+                    torch.tensor(0, dtype=dtype),
+                    unsafe_mip.compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1E-13))
+        else:
+            unsafe_mip_objective = None
 
-        if unsafe_mip_cost_weight > 0:
-            loss += unsafe_mip_cost_weight * torch.maximum(
-                torch.tensor(0, dtype=dtype),
-                unsafe_mip.compute_objective_from_mip_data_and_solution(
-                    solution_number=0, penalty=1E-13))
+        if verify_region_boundary_mip_cost_weight is not None:
+            verify_region_boundary_mip, verify_region_boundary_x = \
+                self.solve_verify_region_boundary_mip()
+            verify_region_boundary_mip_objective = \
+                verify_region_boundary_mip.gurobi_model.ObjVal
+            if verify_region_boundary_mip_cost_weight > 0:
+                loss += verify_region_boundary_mip_cost_weight * torch.maximum(
+                    torch.tensor(0, dtype=dtype),
+                    verify_region_boundary_mip.
+                    compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1E-13))
+        else:
+            verify_region_boundary_mip_objective = None
 
-        verify_region_boundary_mip, verify_region_boundary_x = \
-            self.solve_verify_region_boundary_mip()
-        verify_region_boundary_mip_objective = \
-            verify_region_boundary_mip.gurobi_model.ObjVal
-        if verify_region_boundary_mip_cost_weight > 0:
-            loss += verify_region_boundary_mip_cost_weight * torch.maximum(
-                torch.tensor(0, dtype=dtype),
-                verify_region_boundary_mip.
-                compute_objective_from_mip_data_and_solution(solution_number=0,
-                                                             penalty=1E-13))
-
-        barrier_deriv_mip, barrier_deriv_x = self.solve_barrier_deriv_mip()
-        barrier_deriv_mip_objective = barrier_deriv_mip.gurobi_model.ObjVal
-        if barrier_deriv_mip_cost_weight > 0:
-            loss += barrier_deriv_mip_cost_weight * torch.maximum(
-                torch.tensor(0, dtype=dtype),
-                barrier_deriv_mip.compute_objective_from_mip_data_and_solution(
-                    solution_number=0, penalty=1E-13))
+        if barrier_deriv_mip_cost_weight is not None:
+            barrier_deriv_mip, barrier_deriv_x = self.solve_barrier_deriv_mip()
+            barrier_deriv_mip_objective = barrier_deriv_mip.gurobi_model.ObjVal
+            if barrier_deriv_mip_cost_weight > 0:
+                loss += barrier_deriv_mip_cost_weight * torch.maximum(
+                    torch.tensor(0, dtype=dtype),
+                    barrier_deriv_mip.
+                    compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1E-13))
+        else:
+            barrier_deriv_mip_objective = None
 
         return TrainBarrier.TotalLossReturn(
             loss, unsafe_mip_objective, verify_region_boundary_mip_objective,
@@ -239,3 +288,9 @@ class TrainBarrier:
             optimizer.step()
             iter_count += 1
         return False
+
+    def train_on_samples(self, unsafe_state_samples, boundary_state_samples,
+                         state_samples):
+        """
+        Train the barrier function on the samples
+        """
