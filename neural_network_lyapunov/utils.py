@@ -1438,17 +1438,26 @@ def box_boundary(x_lo, x_up) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
     """
     Given a box region x_lo <= x <= x_up, return the mixed-integer constraint
     that x is on the boundary of this box region.
-    For each x[i], we introduce a binary variable b[i], with the constraint
-    x[i] = x_lo[i]*b[i] + x_up[i]*(1-b[i])
-    hence when b[i] = 1, x[i] = x_lo[i]; when b[i] = 0, x[i] = x_up[i]
+    For each x[i], we introduce  binary variable b1[i], b2[i], with the
+    constraint
+    x[i] >= x_lo[i] + (x_up[i] - x_lo[i]) * b1[i]
+    x[i] <= x_up[i] - (x_up[i] - x_lo[i]) * b2[i]
+    ∑ᵢ b1[i] + ∑ᵢb2[i] = 1
     """
     mixed_integer_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-    # The constraint is x[i] + (x_up[i] - x_lo[i])*b[i] = x_up[i]
     nx = x_lo.shape[0]
     assert (x_lo.shape == (nx, ))
     assert (x_up.shape == (nx, ))
     dtype = x_lo.dtype
-    mixed_integer_cnstr.Aeq_input = torch.eye(nx, dtype=dtype)
-    mixed_integer_cnstr.Aeq_binary = torch.diag(x_up - x_lo)
-    mixed_integer_cnstr.rhs_eq = x_up
+    # The constraint is
+    # -x[i] + (x_up[i] - x_lo[i])*b1[i] <= -x_lo[i]
+    # x[i] + (x_up[i] - x_lo[i])*b2[i] <= x_up[i]
+    mixed_integer_cnstr.Ain_input = torch.cat(
+        (-torch.eye(nx, dtype=dtype), torch.eye(nx, dtype=dtype)), dim=0)
+    mixed_integer_cnstr.Ain_binary = torch.block_diag(torch.diag(x_up - x_lo),
+                                                      torch.diag(x_up - x_lo))
+    mixed_integer_cnstr.rhs_in = torch.cat((-x_lo, x_up))
+    # ∑ᵢ b1[i] + ∑ᵢb2[i] = 1
+    mixed_integer_cnstr.Aeq_binary = torch.ones((1, 2 * nx), dtype=dtype)
+    mixed_integer_cnstr.rhs_eq = torch.tensor([1], dtype=dtype)
     return mixed_integer_cnstr
