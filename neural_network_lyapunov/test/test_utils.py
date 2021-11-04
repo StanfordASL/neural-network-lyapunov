@@ -1264,14 +1264,14 @@ class TestBoxBoundary(unittest.TestCase):
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.INFEASIBLE)
-        for _ in range(100):
+        x_boundary_sample = utils.uniform_sample_on_box_boundary(
+            x_lo, x_up, 100)
+        x_boundary_sample[-1] = x_lo
+        x_boundary_sample[-1, 1:] = (x_lo[1:] + x_up[1:])/2
+        for i in range(x_boundary_sample.shape[0]):
             for j in range(x_dim):
-                if torch.rand(1) > 0.5:
-                    x[j].lb = x_up[j].item()
-                    x[j].ub = x_up[j].item()
-                else:
-                    x[j].lb = x_lo[j].item()
-                    x[j].ub = x_lo[j].item()
+                x[j].lb = x_boundary_sample[i][j].item()
+                x[j].ub = x_boundary_sample[i][j].item()
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
