@@ -1161,6 +1161,24 @@ def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
         }, file_path)
 
 
+def save_control_barrier_function(barrier_relu, x_star, c, epsilon, x_lo, x_up,
+                                  u_lo, u_up, save_path):
+    linear_layer_width, negative_slope, bias = extract_relu_structure(
+        barrier_relu)
+    torch.save(
+        {
+            "linear_layer_width": linear_layer_width,
+            "negative_slope": negative_slope,
+            "bias": bias,
+            "x_star": x_star,
+            "c": c,
+            "x_lo": x_lo,
+            "x_up": x_up,
+            "u_lo": u_lo,
+            "u_up": u_up
+        }, save_path)
+
+
 def get_gurobi_terminate_if_callback(threshold=0.):
     """
     helper function that returns a callback that terminates gurobi as

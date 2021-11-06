@@ -111,7 +111,7 @@ class TestTrainBarrier(unittest.TestCase):
         loss_expected += unsafe_mip_cost_weight * torch.maximum(
             torch.tensor(0, dtype=self.dtype),
             unsafe_mip.compute_objective_from_mip_data_and_solution(
-                solution_number=0, penalty=1E-13))
+                solution_number=0, penalty=1E-13) + dut.unsafe_mip_margin)
 
         verify_region_boundary_mip, verify_region_boundary_x = \
             dut.barrier_system.barrier_value_as_milp(
@@ -126,8 +126,9 @@ class TestTrainBarrier(unittest.TestCase):
             torch.maximum(
                 torch.tensor(0, dtype=self.dtype),
                 verify_region_boundary_mip.
-                compute_objective_from_mip_data_and_solution(solution_number=0,
-                                                             penalty=1E-13))
+                compute_objective_from_mip_data_and_solution(
+                    solution_number=0, penalty=1E-13)
+                + dut.boundary_mip_margin)
 
         barrier_deriv_mip_ret = dut.barrier_system.barrier_derivative_as_milp(
             dut.x_star, dut.c, dut.epsilon)
@@ -139,8 +140,8 @@ class TestTrainBarrier(unittest.TestCase):
         loss_expected += barrier_deriv_mip_cost_weight * torch.maximum(
             torch.tensor(0, dtype=self.dtype),
             barrier_deriv_mip_ret.milp.
-            compute_objective_from_mip_data_and_solution(solution_number=0,
-                                                         penalty=1E-13))
+            compute_objective_from_mip_data_and_solution(
+                solution_number=0, penalty=1E-13) + dut.deriv_mip_margin)
         sample_loss = dut.compute_sample_loss(
             unsafe_state_samples, boundary_state_samples, deriv_state_samples,
             dut.unsafe_state_samples_weight, dut.boundary_state_samples_weight,
@@ -154,6 +155,7 @@ class TestTrainBarrier(unittest.TestCase):
         c = 0.5
         epsilon = 0.5
 
+        torch.manual_seed(0)
         boundary_state_samples = utils.uniform_sample_on_box_boundary(
             self.linear_system.x_lo, self.linear_system.x_up, 100)
         deriv_state_samples = utils.uniform_sample_in_box(
@@ -178,6 +180,9 @@ class TestTrainBarrier(unittest.TestCase):
             dut.unsafe_state_samples_weight = 3.
             dut.derivative_state_samples_weight = 5.
             dut.boundary_state_samples_weight = 2.
+            dut.unsafe_mip_margin = 10.
+            dut.boundary_mip_margin = 20.
+            dut.deriv_mip_margin = 30.
             self.total_loss_tester(dut, 2., 3., 4., unsafe_state_samples,
                                    boundary_state_samples, deriv_state_samples)
 

@@ -70,6 +70,12 @@ class TrainBarrier:
         self.boundary_state_samples_weight = None
         self.derivative_state_samples_weight = None
 
+        # The margin used to penalize the unsafe MIP cost. We use
+        # max(mip_cost + margin, 0)
+        self.unsafe_mip_margin = 0.
+        self.boundary_mip_margin = 0.
+        self.deriv_mip_margin = 0.
+
         # We support Adam or SGD.
         self.optimizer = "Adam"
 
@@ -129,19 +135,22 @@ class TrainBarrier:
         3. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in derivative_state_samples
         """
         total_loss = torch.tensor(0, dtype=self.barrier_system.system.dtype)
-        if unsafe_state_samples_weight is not None:
+        if unsafe_state_samples_weight is not None and\
+                unsafe_state_samples.shape[0] > 0:
             h_unsafe = self.barrier_system.barrier_value(
                 unsafe_state_samples, self.x_star, self.c)
             total_loss += unsafe_state_samples_weight * \
                 torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
                     -h_unsafe, torch.tensor(-1))
-        if boundary_state_samples_weight is not None:
+        if boundary_state_samples_weight is not None and\
+                boundary_state_samples.shape[0] > 0:
             h_boundary = self.barrier_system.barrier_value(
                 boundary_state_samples, self.x_star, self.c)
             total_loss += boundary_state_samples_weight * \
                 torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
                     -h_boundary, torch.tensor(-1))
-        if derivative_state_samples_weight is not None:
+        if derivative_state_samples_weight is not None and\
+                derivative_state_samples.shape[0] > 0:
             hdot = torch.stack([
                 torch.min(
                     self.barrier_system.barrier_derivative(
@@ -183,14 +192,17 @@ class TrainBarrier:
         """
         dtype = self.barrier_system.system.dtype
         loss = torch.tensor(0, dtype=dtype)
-        if unsafe_mip_cost_weight is not None:
+        if unsafe_mip_cost_weight is not None and (
+                self.unsafe_region_cnstr.num_ineq() > 0
+                or self.unsafe_region_cnstr.num_eq() > 0):
             unsafe_mip, unsafe_x = self.solve_unsafe_region_mip()
             unsafe_mip_objective = unsafe_mip.gurobi_model.ObjVal
             if unsafe_mip_cost_weight > 0:
                 loss += unsafe_mip_cost_weight * torch.maximum(
                     torch.tensor(0, dtype=dtype),
                     unsafe_mip.compute_objective_from_mip_data_and_solution(
-                        solution_number=0, penalty=1E-13))
+                        solution_number=0, penalty=1E-13) +
+                    self.unsafe_mip_margin)
         else:
             unsafe_mip_objective = None
 
@@ -204,7 +216,8 @@ class TrainBarrier:
                     torch.tensor(0, dtype=dtype),
                     verify_region_boundary_mip.
                     compute_objective_from_mip_data_and_solution(
-                        solution_number=0, penalty=1E-13))
+                        solution_number=0, penalty=1E-13) +
+                    self.boundary_mip_margin)
         else:
             verify_region_boundary_mip_objective = None
 
@@ -216,7 +229,8 @@ class TrainBarrier:
                     torch.tensor(0, dtype=dtype),
                     barrier_deriv_mip.
                     compute_objective_from_mip_data_and_solution(
-                        solution_number=0, penalty=1E-13))
+                        solution_number=0, penalty=1E-13) +
+                    self.deriv_mip_margin)
         else:
             barrier_deriv_mip_objective = None
 
@@ -285,19 +299,21 @@ class TrainBarrier:
                 })
             if self.output_flag:
                 print(
-                    f"Iter {iter_count}," +
-                    f"loss {total_loss_return.loss.item()}," +
+                    f"Iter {iter_count}, " +
+                    f"loss {total_loss_return.loss.item()}, " +
                     "unsafe_mip_objective " +
-                    f"{total_loss_return.unsafe_mip_objective}," +
+                    f"{total_loss_return.unsafe_mip_objective}, " +
                     "barrier_deriv_mip_objective " +
-                    f"{total_loss_return.barrier_deriv_mip_objective}," +
+                    f"{total_loss_return.barrier_deriv_mip_objective}, " +
                     "verify_region_boundary_mip_objective " +
                     f"{total_loss_return.verify_region_boundary_mip_objective}"
                 )
 
-            if total_loss_return.unsafe_mip_objective <= 0 and\
+            if (total_loss_return.unsafe_mip_objective is None or
+                total_loss_return.unsafe_mip_objective <= 0) and\
                 total_loss_return.barrier_deriv_mip_objective <= 0 and\
-                    total_loss_return.verify_region_boundary_mip_objective <= 0:  # noqa
+                (total_loss_return.verify_region_boundary_mip_objective is None
+                 or total_loss_return.verify_region_boundary_mip_objective <= 0):  # noqa
                 return True
 
             total_loss_return.loss.backward()
