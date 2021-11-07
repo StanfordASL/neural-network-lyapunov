@@ -88,8 +88,15 @@ class ControlPiecewiseAffineSystem:
         """
         Computes ẋ=f(x)+G(x) * clamp(u, u_lo, u_up)
         """
-        u_clamped = torch.max(torch.min(u, self.u_up), self.u_lo)
-        return self.f(x) + self.G(x) @ u_clamped
+        if len(x.shape) == 1 and len(u.shape) == 1:
+            u_clamped = torch.max(torch.min(u, self.u_up), self.u_lo)
+            return self.f(x) + self.G(x) @ u_clamped
+        else:
+            nx = x.shape[0]
+            u_clamped = torch.clamp(u,
+                                    min=self.u_lo.repeat(nx, 1),
+                                    max=self.u_up.repeat(nx, 1))
+            return self.f(x) + (self.G(x) @ u_clamped.unsqueeze(2)).squeeze(2)
 
     def f(self, x):
         """
@@ -154,10 +161,16 @@ class LinearSystem(ControlPiecewiseAffineSystem):
         return ret
 
     def f(self, x):
-        return self.A @ x
+        if len(x.shape) == 1:
+            return self.A @ x
+        else:
+            return (self.A @ x.T).T
 
     def G(self, x):
-        return self.B
+        if len(x.shape) == 1:
+            return self.B
+        else:
+            return self.B.repeat(x.shape[0], 1, 1)
 
 
 class SecondOrderControlAffineSystem(ControlPiecewiseAffineSystem):
@@ -180,12 +193,21 @@ class SecondOrderControlAffineSystem(ControlPiecewiseAffineSystem):
         raise NotImplementedError
 
     def f(self, x):
-        v = x[self.nq:]
-        return torch.cat((v, self.a(x)))
+        if len(x.shape) == 1:
+            v = x[self.nq:]
+            return torch.cat((v, self.a(x)))
+        else:
+            v = x[:, self.nq:]
+            return torch.cat((v, self.a(x)), dim=1)
 
     def G(self, x):
-        return torch.vstack((torch.zeros((self.nq, self.u_dim),
-                                         dtype=self.dtype), self.b(x)))
+        if len(x.shape) == 1:
+            return torch.vstack((torch.zeros((self.nq, self.u_dim),
+                                             dtype=self.dtype), self.b(x)))
+        else:
+            return torch.cat((torch.zeros((x.shape[0], self.nq, self.u_dim),
+                                          dtype=self.dtype), self.b(x)),
+                             dim=1)
 
     def _mixed_integer_constraints_v(self):
         """
@@ -292,7 +314,10 @@ class ReluSecondOrderControlAffineSystem(SecondOrderControlAffineSystem):
         return self.phi_a(x)
 
     def b(self, x):
-        return self.phi_b(x).reshape((self.nq, self.u_dim))
+        if len(x.shape) == 1:
+            return self.phi_b(x).reshape((self.nq, self.u_dim))
+        else:
+            return self.phi_b(x).reshape((x.shape[0], self.nq, self.u_dim))
 
     def _mixed_integer_constraints_v(self):
         mip_cnstr_a = self.relu_free_pattern_a.output_constraint(
@@ -356,7 +381,10 @@ class SecondOrderControlAffineWEquilibriumSystem(SecondOrderControlAffineSystem
                 (self.nq, self.u_dim)) @ self.u_equilibrium
 
     def b(self, x):
-        return self.phi_b(x).reshape((self.nq, self.u_dim))
+        if len(x.shape) == 1:
+            return self.phi_b(x).reshape((self.nq, self.u_dim))
+        else:
+            return self.phi_b(x).reshape((x.shape[0], self.nq, self.u_dim))
 
     def _mixed_integer_constraints_v(self):
         mip_cnstr_a = self.relu_free_pattern_a.output_constraint(

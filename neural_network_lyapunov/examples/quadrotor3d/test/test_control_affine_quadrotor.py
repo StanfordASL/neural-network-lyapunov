@@ -66,6 +66,8 @@ class TestControlAffineQuadrotor(unittest.TestCase):
                                          mip_utils.PropagateBoundsMethod.IA)
 
         x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+        u_samples = utils.uniform_sample_in_box(u_lo, u_up, 100)
+        xdot_batch = dut.dynamics(x_samples, u_samples)
         for i in range(x_samples.shape[0]):
             rpy = x_samples[i, 3:6]
             omega = x_samples[i, 9:12]
@@ -85,6 +87,9 @@ class TestControlAffineQuadrotor(unittest.TestCase):
             G_expected[9:12, :] = self.C
             np.testing.assert_allclose(G.detach().numpy(),
                                        G_expected.detach().numpy())
+
+            np.testing.assert_allclose(xdot_batch[i].detach().numpy(),
+                                       (f + G @ u_samples[i]).detach().numpy())
 
     def mixed_integer_constraints_tester(self, dut):
         ret = dut.mixed_integer_constraints()

@@ -67,6 +67,42 @@ class TestLinearSystem(unittest.TestCase):
             np.array([Gi.x for Gi in G_flat]).reshape((dut.x_dim, dut.u_dim)),
             G_expected)
 
+    def test_dynamics(self):
+        dtype = torch.float64
+        A = torch.tensor([[1, 2], [3, 4]], dtype=dtype)
+        B = torch.tensor([[1, 0, 0], [0, 1, 2]], dtype=dtype)
+        x_lo = torch.tensor([-1, -3], dtype=dtype)
+        x_up = -x_lo
+        u_lo = torch.tensor([1, 3, -2], dtype=dtype)
+        u_up = torch.tensor([4, 5, 1], dtype=dtype)
+        dut = mut.LinearSystem(A, B, x_lo, x_up, u_lo, u_up)
+
+        x = torch.tensor([1, 3], dtype=dtype)
+        np.testing.assert_allclose(
+            dut.f(x).detach().numpy(), (A @ x).detach().numpy())
+        np.testing.assert_allclose(
+            dut.G(x).detach().numpy(),
+            B.detach().numpy())
+        u = torch.tensor([2, 6, -3], dtype=dtype)
+        np.testing.assert_allclose(
+            dut.dynamics(x, u).detach().numpy(),
+            (A @ x + B @ torch.clamp(u, u_lo, u_up)).detach().numpy())
+
+        # Test a batch of x
+        x = torch.tensor([[1, 3], [2, 4], [3, 1]], dtype=dtype)
+        np.testing.assert_allclose(
+            dut.f(x).detach().numpy(), (A @ x.T).T.detach().numpy())
+        np.testing.assert_allclose(
+            dut.G(x).detach().numpy(),
+            B.repeat(3, 1, 1).detach().numpy())
+        u = torch.tensor([[1, 3, 2], [0, 1, 5], [1, 4, 2]], dtype=dtype)
+        xdot = dut.dynamics(x, u)
+        self.assertEqual(xdot.shape, (3, 2))
+        for i in range(3):
+            np.testing.assert_allclose(
+                xdot[i].detach().numpy(),
+                dut.dynamics(x[i], u[i]).detach().numpy())
+
     def test_is_x_stabilizable(self):
         dtype = torch.float64
         A = torch.tensor([[1, 2], [-1, 2]], dtype=dtype)
@@ -131,6 +167,8 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
         x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
         u_samples = utils.uniform_sample_in_box(dut.u_lo, dut.u_up,
                                                 x_samples.shape[0])
+        xdot_batch = dut.dynamics(x_samples, u_samples)
+        self.assertEqual(xdot_batch.shape, x_samples.shape)
         for i in range(x_samples.shape[0]):
             phi_a_val = self.phi_a(x_samples[i])
             phi_b_val = self.phi_b(x_samples[i])
@@ -140,6 +178,8 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
             np.testing.assert_allclose(
                 dut.dynamics(x_samples[i], u_samples[i]).detach().numpy(),
                 xdot.detach().numpy())
+            np.testing.assert_allclose(xdot_batch[i].detach().numpy(),
+                                       xdot.detach().numpy())
 
     def test_dynamics_w_equilibrium(self):
         x_equilibrium = torch.tensor([0.5, 0], dtype=self.dtype)
@@ -155,6 +195,8 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
         # Now sample many x and u.
         x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
         u_samples = utils.uniform_sample_in_box(u_lo, u_up, 100)
+        xdot_batch = dut.dynamics(x_samples, u_samples)
+        self.assertEqual(xdot_batch.shape, x_samples.shape)
         for i in range(x_samples.shape[0]):
             xdot = dut.dynamics(x_samples[i], u_samples[i])
             vdot_expected = self.phi_a(x_samples[i]) - self.phi_a(
@@ -166,6 +208,8 @@ class TestSecondOrderControlAffineSystem(unittest.TestCase):
                 xdot.detach().numpy(),
                 torch.cat(
                     (x_samples[i][dut.nq:], vdot_expected)).detach().numpy())
+            np.testing.assert_allclose(xdot_batch[i].detach().numpy(),
+                                       xdot.detach().numpy())
 
         np.testing.assert_allclose(
             dut.dynamics(x_equilibrium, u_equilibrium).detach().numpy(),

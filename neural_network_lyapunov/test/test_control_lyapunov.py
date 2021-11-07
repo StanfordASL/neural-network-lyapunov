@@ -735,7 +735,7 @@ class TestControlLyapunov(unittest.TestCase):
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
-            G = dut.system.G(x_samples)
+            G = dut.system.G(x_samples[i])
             dphidx = utils.relu_network_gradient(dut.lyapunov_relu,
                                                  x_samples[i])
             assert (dphidx.shape[0] == 1)

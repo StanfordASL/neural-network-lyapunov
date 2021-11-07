@@ -42,27 +42,54 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
             self.phi_c, self.dtype)
 
     def f(self, x):
-        rpy = x[3:6]
-        omega = x[9:12]
+        if len(x.shape) == 1:
+            rpy = x[3:6]
+            omega = x[9:12]
 
-        pos_dot = x[6:9]
-        rpy_dot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
-            torch.cat((rpy, torch.zeros((3, ), dtype=self.dtype))))
-        f_val = torch.empty((12, ), dtype=self.dtype)
-        f_val[:3] = pos_dot
-        f_val[3:6] = rpy_dot
-        f_val[6:9] = -self.phi_b(torch.zeros(
-            (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
-        f_val[9:12] = self.phi_c(omega) - self.phi_c(
-            torch.zeros((3, ), dtype=self.dtype)) - self.C @ self.u_equilibrium
+            pos_dot = x[6:9]
+            rpy_dot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
+                torch.cat((rpy, torch.zeros((3, ), dtype=self.dtype))))
+            f_val = torch.empty((12, ), dtype=self.dtype)
+            f_val[:3] = pos_dot
+            f_val[3:6] = rpy_dot
+            f_val[6:9] = -self.phi_b(torch.zeros(
+                (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
+            f_val[9:12] = self.phi_c(omega) - self.phi_c(
+                torch.zeros(
+                    (3, ), dtype=self.dtype)) - self.C @ self.u_equilibrium
+            return f_val
+        else:
+            rpy = x[:, 3:6]
+            omega = x[:, 9:12]
+            pos_dot = x[:, 6:9]
+            rpy_dot = self.phi_a(torch.cat((rpy, omega), dim=1)) - self.phi_a(
+                torch.cat(
+                    (rpy, torch.zeros_like(omega, dtype=self.dtype)), dim=1))
+            f_val = torch.empty((x.shape[0], 12), dtype=self.dtype)
+            f_val[:, :3] = pos_dot
+            f_val[:, 3:6] = rpy_dot
+            f_val[:,
+                  6:9] = (-self.phi_b(torch.zeros((3, ), dtype=self.dtype)) *
+                          torch.sum(self.u_equilibrium)).repeat(x.shape[0], 1)
+            f_val[:, 9:12] = self.phi_c(omega) - self.phi_c(
+                torch.zeros(
+                    (3, ), dtype=self.dtype)) - self.C @ self.u_equilibrium
         return f_val
 
     def G(self, x):
-        rpy = x[3:6]
-        G_val = torch.zeros((self.x_dim, self.u_dim), dtype=self.dtype)
-        G_val[6:9, :] = self.phi_b(rpy).repeat(4, 1).T
-        G_val[9:12, :] = self.C
-        return G_val
+        if len(x.shape) == 1:
+            rpy = x[3:6]
+            G_val = torch.zeros((self.x_dim, self.u_dim), dtype=self.dtype)
+            G_val[6:9, :] = self.phi_b(rpy).repeat(4, 1).T
+            G_val[9:12, :] = self.C
+            return G_val
+        else:
+            rpy = x[:, 3:6]
+            G_val = torch.zeros((x.shape[0], self.x_dim, self.u_dim),
+                                dtype=self.dtype)
+            G_val[:, 6:9, :] = self.phi_b(rpy).unsqueeze(2).repeat(1, 1, 4)
+            G_val[:, 9:12, :] = self.C.repeat(x.shape[0], 1, 1)
+            return G_val
 
     def mixed_integer_constraints(self):
         ret = control_affine_system.ControlAffineSystemConstraintReturn()

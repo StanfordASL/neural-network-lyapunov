@@ -32,10 +32,17 @@ class ControlAffineQuadrotor2d(
                 (self.nq, self.u_dim)) @ self.u_equilibrium
 
     def a(self, x):
-        return self.a_val
+        if len(x.shape) == 1:
+            return self.a_val
+        else:
+            return self.a_val.repeat(x.shape[0], 1)
 
     def b(self, x):
-        return self.phi_b(x[2].unsqueeze(0)).reshape((self.nq, self.u_dim))
+        if len(x.shape) == 1:
+            return self.phi_b(x[2].unsqueeze(0)).reshape((self.nq, self.u_dim))
+        else:
+            return self.phi_b(x[:, 2].unsqueeze(1)).reshape(
+                (x.shape[0], self.nq, self.u_dim))
 
     def _mixed_integer_constraints_v(self):
         mip_cnstr_a = gurobi_torch_mip.MixedIntegerConstraintsReturn()
