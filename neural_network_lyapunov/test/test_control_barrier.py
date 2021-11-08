@@ -307,6 +307,34 @@ class TestControlBarrier(unittest.TestCase):
         dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
         self.barrier_derivative_as_milp_tester(dut4, x_star, c, epsilon)
 
+    def test_barrier_derivative_given_action(self):
+        dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+
+        x_samples = utils.uniform_sample_in_box(dut1.system.x_lo,
+                                                dut1.system.x_up, 100)
+        u_samples = utils.uniform_sample_in_box(dut1.system.u_lo,
+                                                dut1.system.u_up, 100)
+        hdot_batch = dut1.barrier_derivative_given_action(x_samples, u_samples)
+        self.assertEqual(hdot_batch.shape, (x_samples.shape[0], ))
+        for i in range(x_samples.shape[0]):
+            xdot = dut1.system.dynamics(x_samples[i], u_samples[i])
+            dhdx = utils.relu_network_gradient(dut1.barrier_relu,
+                                               x_samples[i]).squeeze(1)
+            hdot_expected = torch.min(dhdx @ xdot)
+            self.assertAlmostEqual(
+                hdot_expected.item(),
+                dut1.barrier_derivative_given_action(x_samples[i],
+                                                     u_samples[i]).item())
+            self.assertAlmostEqual(hdot_batch[i].item(), hdot_expected)
+
+        # Test x such that dhdx has multiple values.
+        x = torch.tensor([1, 1], dtype=self.dtype)
+        u = torch.tensor([1, 2, 3], dtype=self.dtype)
+        hdot = dut1.barrier_derivative_given_action(x, u)
+        dhdx = utils.relu_network_gradient(dut1.barrier_relu, x).squeeze(1)
+        hdot_expected = torch.min(dhdx @ dut1.system.dynamics(x, u))
+        self.assertAlmostEqual(hdot.item(), hdot_expected.item())
+
 
 if __name__ == "__main__":
     unittest.main()

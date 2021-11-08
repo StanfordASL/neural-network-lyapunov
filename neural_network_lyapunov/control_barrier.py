@@ -281,3 +281,23 @@ class ControlBarrier(barrier.Barrier):
             for i in range(self.system.u_dim)
         ])
         return dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up
+
+    def barrier_derivative_given_action(self, x: torch.Tensor,
+                                        u: torch.Tensor):
+        """
+        Compute ḣ = ∂h/∂x*ẋ
+        When there are multiple ∂h/∂x, we return the minimal ḣ
+        """
+        assert (isinstance(x, torch.Tensor))
+        assert (isinstance(u, torch.Tensor))
+        xdot = self.system.dynamics(x, u)
+        if (len(x.shape) == 1 and len(u.shape) == 1):
+            dhdx = utils.relu_network_gradient(self.barrier_relu, x).squeeze(1)
+            return torch.min(dhdx @ xdot)
+        else:
+            hdot_batch = torch.empty(x.shape[0], dtype=self.system.dtype)
+            for i in range(x.shape[0]):
+                dhdx = utils.relu_network_gradient(self.barrier_relu,
+                                                   x[i]).squeeze(1)
+                hdot_batch[i] = torch.min(dhdx @ xdot[i])
+            return hdot_batch
