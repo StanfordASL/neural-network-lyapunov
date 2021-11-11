@@ -53,32 +53,26 @@ class TestControlAffineQuadrotor(unittest.TestCase):
         self.C = torch.tensor([[1, 2, -1, 2], [0, 1, -2, 2], [2, 1, 3, 2]],
                               dtype=self.dtype)
 
-    def test_dynamics(self):
-        x_lo = torch.tensor([-2, -2, -2, -1, -1, -1, -3, -3, -3, -2, -2, -2],
-                            dtype=self.dtype)
-        x_up = -x_lo
-        u_lo = torch.tensor([0, 0, 0, 0], dtype=self.dtype)
-        u_up = torch.tensor([2, 2, 2, 2], dtype=self.dtype)
-        u_equilibrium = torch.ones((4, ), dtype=self.dtype)
-        dut = mut.ControlAffineQuadrotor(x_lo, x_up, u_lo, u_up, self.phi_a,
-                                         self.phi_b, self.phi_c, self.C,
-                                         u_equilibrium,
-                                         mip_utils.PropagateBoundsMethod.IA)
-
-        x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
-        u_samples = utils.uniform_sample_in_box(u_lo, u_up, 100)
+    def dynamics_tester(self, dut):
+        x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
+        u_samples = utils.uniform_sample_in_box(dut.u_lo, dut.u_up, 100)
         xdot_batch = dut.dynamics(x_samples, u_samples)
         for i in range(x_samples.shape[0]):
             rpy = x_samples[i, 3:6]
             omega = x_samples[i, 9:12]
             f = dut.f(x_samples[i])
             zero3 = torch.zeros((3, ), dtype=self.dtype)
+            if dut.formulation == 1:
+                rpydot = self.phi_a(torch.cat(
+                    (rpy, omega))) - self.phi_a(torch.cat((rpy, zero3)))
+            elif dut.formulation == 2:
+                rpydot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
+                    torch.zeros((6, ), dtype=self.dtype))
             f_expected = torch.cat(
-                (x_samples[i, 6:9], self.phi_a(torch.cat(
-                    (rpy, omega))) - self.phi_a(torch.cat((rpy, zero3))),
-                 -self.phi_b(zero3) * torch.sum(u_equilibrium),
+                (x_samples[i, 6:9], rpydot,
+                 -self.phi_b(zero3) * torch.sum(dut.u_equilibrium),
                  self.phi_c(omega) - self.phi_c(zero3) -
-                 self.C @ u_equilibrium))
+                 self.C @ dut.u_equilibrium))
             np.testing.assert_allclose(f.detach().numpy(),
                                        f_expected.detach().numpy())
             G = dut.G(x_samples[i])
@@ -90,6 +84,38 @@ class TestControlAffineQuadrotor(unittest.TestCase):
 
             np.testing.assert_allclose(xdot_batch[i].detach().numpy(),
                                        (f + G @ u_samples[i]).detach().numpy())
+
+    def test_dynamics(self):
+        x_lo = torch.tensor([-2, -2, -2, -1, -1, -1, -3, -3, -3, -2, -2, -2],
+                            dtype=self.dtype)
+        x_up = -x_lo
+        u_lo = torch.tensor([0, 0, 0, 0], dtype=self.dtype)
+        u_up = torch.tensor([2, 2, 2, 2], dtype=self.dtype)
+        u_equilibrium = torch.ones((4, ), dtype=self.dtype)
+        dut1 = mut.ControlAffineQuadrotor(x_lo,
+                                          x_up,
+                                          u_lo,
+                                          u_up,
+                                          self.phi_a,
+                                          self.phi_b,
+                                          self.phi_c,
+                                          self.C,
+                                          u_equilibrium,
+                                          mip_utils.PropagateBoundsMethod.IA,
+                                          formulation=1)
+        self.dynamics_tester(dut1)
+        dut2 = mut.ControlAffineQuadrotor(x_lo,
+                                          x_up,
+                                          u_lo,
+                                          u_up,
+                                          self.phi_a,
+                                          self.phi_b,
+                                          self.phi_c,
+                                          self.C,
+                                          u_equilibrium,
+                                          mip_utils.PropagateBoundsMethod.IA,
+                                          formulation=2)
+        self.dynamics_tester(dut2)
 
     def mixed_integer_constraints_tester(self, dut):
         ret = dut.mixed_integer_constraints()
@@ -150,22 +176,38 @@ class TestControlAffineQuadrotor(unittest.TestCase):
         u_lo = torch.tensor([0, 0, 0, 0], dtype=self.dtype)
         u_up = torch.tensor([2, 2, 2, 2], dtype=self.dtype)
         u_equilibrium = torch.ones((4, ), dtype=self.dtype)
-        dut1 = mut.ControlAffineQuadrotor(x_lo, x_up, u_lo, u_up, self.phi_a,
-                                          self.phi_b, self.phi_c, self.C,
-                                          u_equilibrium,
-                                          mip_utils.PropagateBoundsMethod.IA)
-        self.mixed_integer_constraints_tester(dut1)
-        dut2 = mut.ControlAffineQuadrotor(x_lo, x_up, u_lo, u_up, self.phi_a,
-                                          self.phi_b, self.phi_c, self.C,
-                                          u_equilibrium,
-                                          mip_utils.PropagateBoundsMethod.LP)
-        self.mixed_integer_constraints_tester(dut2)
-        self.phi_b[-1].weight.data *= 0.01
-        dut3 = mut.ControlAffineQuadrotor(x_lo, x_up, u_lo, u_up, self.phi_a,
-                                          self.phi_b, self.phi_c, self.C,
-                                          u_equilibrium,
-                                          mip_utils.PropagateBoundsMethod.MIP)
-        self.mixed_integer_constraints_tester(dut3)
+        for method in (mip_utils.PropagateBoundsMethod.IA,
+                       mip_utils.PropagateBoundsMethod.LP,
+                       mip_utils.PropagateBoundsMethod.MIP):
+
+            dut = mut.ControlAffineQuadrotor(x_lo,
+                                             x_up,
+                                             u_lo,
+                                             u_up,
+                                             self.phi_a,
+                                             self.phi_b,
+                                             self.phi_c,
+                                             self.C,
+                                             u_equilibrium,
+                                             method,
+                                             formulation=1)
+            self.mixed_integer_constraints_tester(dut)
+        for method in (mip_utils.PropagateBoundsMethod.IA,
+                       mip_utils.PropagateBoundsMethod.LP,
+                       mip_utils.PropagateBoundsMethod.MIP):
+
+            dut = mut.ControlAffineQuadrotor(x_lo,
+                                             x_up,
+                                             u_lo,
+                                             u_up,
+                                             self.phi_a,
+                                             self.phi_b,
+                                             self.phi_c,
+                                             self.C,
+                                             u_equilibrium,
+                                             method,
+                                             formulation=2)
+            self.mixed_integer_constraints_tester(dut)
 
 
 if __name__ == "__main__":

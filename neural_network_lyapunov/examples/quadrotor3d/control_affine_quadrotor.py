@@ -10,13 +10,25 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
                              ):
     """
     The dynamics is
-    rpy_dot = ϕ_a(rpy, omega) - ϕ_a(rpy, 0)
+    rpy_dot = ϕ_a(rpy, omega) - ϕ_a(rpy, 0) if fomulation=1
+    rpy_dot = ϕ_a(rpy, omega) - ϕ_a(0, 0) if formulation=2
     pos_ddot = ϕ_b(rpy) * [1 1 1 1] * u - ϕ_b(0) * [1 1 1 1] * u*
     omega_dot = ϕ_c(omega) - ϕ_c(0) - C*u* + C*u
+    Note that formulation 1 guarantees that rpy_dot = 0 when omega=0 for any
+    rpy, but it requires more binary variables.
     """
-    def __init__(self, x_lo, x_up, u_lo, u_up, phi_a, phi_b, phi_c,
-                 C: torch.Tensor, u_equilibrium: torch.Tensor,
-                 method: mip_utils.PropagateBoundsMethod):
+    def __init__(self,
+                 x_lo,
+                 x_up,
+                 u_lo,
+                 u_up,
+                 phi_a,
+                 phi_b,
+                 phi_c,
+                 C: torch.Tensor,
+                 u_equilibrium: torch.Tensor,
+                 method: mip_utils.PropagateBoundsMethod,
+                 formulation=2):
         super(ControlAffineQuadrotor, self).__init__(x_lo, x_up, u_lo, u_up)
         assert (self.x_dim == 12)
         assert (self.u_dim == 4)
@@ -40,6 +52,8 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
             self.phi_b, self.dtype)
         self.relu_free_pattern_c = relu_to_optimization.ReLUFreePattern(
             self.phi_c, self.dtype)
+        assert (formulation == 1 or formulation == 2)
+        self.formulation = formulation
 
     def f(self, x):
         if len(x.shape) == 1:
@@ -47,8 +61,12 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
             omega = x[9:12]
 
             pos_dot = x[6:9]
-            rpy_dot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
-                torch.cat((rpy, torch.zeros((3, ), dtype=self.dtype))))
+            if self.formulation == 1:
+                rpy_dot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
+                    torch.cat((rpy, torch.zeros((3, ), dtype=self.dtype))))
+            elif self.formulation == 2:
+                rpy_dot = self.phi_a(torch.cat((rpy, omega))) - self.phi_a(
+                    torch.zeros((6, ), dtype=self.dtype))
             f_val = torch.empty((12, ), dtype=self.dtype)
             f_val[:3] = pos_dot
             f_val[3:6] = rpy_dot
@@ -62,9 +80,17 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
             rpy = x[:, 3:6]
             omega = x[:, 9:12]
             pos_dot = x[:, 6:9]
-            rpy_dot = self.phi_a(torch.cat((rpy, omega), dim=1)) - self.phi_a(
-                torch.cat(
-                    (rpy, torch.zeros_like(omega, dtype=self.dtype)), dim=1))
+            if self.formulation == 1:
+                rpy_dot = self.phi_a(torch.cat(
+                    (rpy, omega), dim=1)) - self.phi_a(
+                        torch.cat(
+                            (rpy, torch.zeros_like(omega, dtype=self.dtype)),
+                            dim=1))
+            elif self.formulation == 2:
+                rpy_dot = self.phi_a(torch.cat(
+                    (rpy, omega), dim=1)) - self.phi_a(
+                        torch.zeros((6, ), dtype=self.dtype))
+
             f_val = torch.empty((x.shape[0], 12), dtype=self.dtype)
             f_val[:, :3] = pos_dot
             f_val[:, 3:6] = rpy_dot
@@ -116,28 +142,38 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         x_to_rpyomega_transform1[3:6, 9:12] = torch.eye(3, dtype=self.dtype)
         mip_cnstr_ret_a1.transform_input(x_to_rpyomega_transform1,
                                          torch.zeros(6, dtype=self.dtype))
-        mip_cnstr_ret_a2 = self.relu_free_pattern_a.output_constraint(
-            torch.cat((rpy_lo, torch.zeros(3, dtype=self.dtype))),
-            torch.cat((rpy_up, torch.zeros(3, dtype=self.dtype))), self.method)
-        x_to_rpyomega_transform2 = torch.zeros((6, 12), dtype=self.dtype)
-        x_to_rpyomega_transform2[:3, 3:6] = torch.eye(3, dtype=self.dtype)
-        mip_cnstr_ret_a2.transform_input(x_to_rpyomega_transform2,
-                                         torch.zeros(6, dtype=self.dtype))
+        if self.formulation == 1:
+            mip_cnstr_ret_a2 = self.relu_free_pattern_a.output_constraint(
+                torch.cat((rpy_lo, torch.zeros(3, dtype=self.dtype))),
+                torch.cat((rpy_up, torch.zeros(3, dtype=self.dtype))),
+                self.method)
+            x_to_rpyomega_transform2 = torch.zeros((6, 12), dtype=self.dtype)
+            x_to_rpyomega_transform2[:3, 3:6] = torch.eye(3, dtype=self.dtype)
+            mip_cnstr_ret_a2.transform_input(x_to_rpyomega_transform2,
+                                             torch.zeros(6, dtype=self.dtype))
 
-        mip_cnstr_rpydot_f = \
-            gurobi_torch_mip.concatenate_mixed_integer_constraints(
-                mip_cnstr_ret_a1,
-                mip_cnstr_ret_a2,
-                same_slack=False,
-                same_binary=False,
-                stack_output=False)
+            mip_cnstr_rpydot_f = \
+                gurobi_torch_mip.concatenate_mixed_integer_constraints(
+                    mip_cnstr_ret_a1,
+                    mip_cnstr_ret_a2,
+                    same_slack=False,
+                    same_binary=False,
+                    stack_output=False)
+            assert (mip_cnstr_ret_a2.Aout_input is None)
+            assert (mip_cnstr_ret_a2.Aout_binary is None)
+        elif self.formulation == 2:
+            mip_cnstr_rpydot_f = mip_cnstr_ret_a1
         assert (mip_cnstr_ret_a1.Aout_input is None)
-        assert (mip_cnstr_ret_a2.Aout_input is None)
         assert (mip_cnstr_ret_a1.Aout_binary is None)
-        assert (mip_cnstr_ret_a2.Aout_binary is None)
-        mip_cnstr_rpydot_f.Aout_slack = torch.cat(
-            (mip_cnstr_ret_a1.Aout_slack, -mip_cnstr_ret_a2.Aout_slack), dim=1)
-        mip_cnstr_rpydot_f.Cout = mip_cnstr_ret_a1.Cout - mip_cnstr_ret_a2.Cout
+        if self.formulation == 1:
+            mip_cnstr_rpydot_f.Aout_slack = torch.cat(
+                (mip_cnstr_ret_a1.Aout_slack, -mip_cnstr_ret_a2.Aout_slack),
+                dim=1)
+            mip_cnstr_rpydot_f.Cout = mip_cnstr_ret_a1.Cout - \
+                mip_cnstr_ret_a2.Cout
+        elif self.formulation == 2:
+            phi_a_at_zero = self.phi_a(torch.zeros((6, ), dtype=self.dtype))
+            mip_cnstr_rpydot_f.Cout = mip_cnstr_ret_a1.Cout - phi_a_at_zero
         mip_cnstr_rpydot_G = gurobi_torch_mip.MixedIntegerConstraintsReturn()
         mip_cnstr_rpydot_G.Cout = torch.zeros((12, ), dtype=self.dtype)
         mip_cnstr_rpydot_G.Aout_input = torch.zeros((12, 12), dtype=self.dtype)
@@ -231,10 +267,14 @@ class ControlAffineQuadrotor(control_affine_system.ControlPiecewiseAffineSystem
         posdot_up = self.x_up[6:9]
         # TODO(hongkai.dai): when method = LP or MIP, compute rpydot_lo and
         # rpydot_up through another optimization problem.
-        rpydot_lo = mip_cnstr_ret_a1.nn_output_lo - \
-            mip_cnstr_ret_a2.nn_output_up
-        rpydot_up = mip_cnstr_ret_a1.nn_output_up - \
-            mip_cnstr_ret_a2.nn_output_lo
+        if self.formulation == 1:
+            rpydot_lo = mip_cnstr_ret_a1.nn_output_lo - \
+                mip_cnstr_ret_a2.nn_output_up
+            rpydot_up = mip_cnstr_ret_a1.nn_output_up - \
+                mip_cnstr_ret_a2.nn_output_lo
+        elif self.formulation == 2:
+            rpydot_lo = mip_cnstr_ret_a1.nn_output_lo - phi_a_at_zero
+            rpydot_up = mip_cnstr_ret_a1.nn_output_up - phi_a_at_zero
         posddot_f_lo = -self.phi_b(torch.zeros(
             (3, ), dtype=self.dtype)) * torch.sum(self.u_equilibrium)
         posddot_f_up = -self.phi_b(torch.zeros(
