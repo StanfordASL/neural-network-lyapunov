@@ -1,5 +1,6 @@
 import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.nominal_controller as nominal_controller
 
 import torch
 import gurobipy
@@ -359,3 +360,27 @@ class TrainBarrier:
             optimizer.step()
             iter_count += 1
         return
+
+    def nominal_controller_loss(
+            self, controller: nominal_controller.NominalController,
+            sample_states: torch.Tensor, weight: float):
+        """
+        When we train a control barrier function, we can also search for a
+        nominal controller that is consistent with this CBF, namely
+        ∂h/∂x*(f(x)+G(x)π(x)) ≥ −εh(x) should hold on the sample states. We
+        penalize the violation of this condition on the sample states. Adding
+        this loss will help the CBF-induced controller to take more smooth
+        actions.
+        """
+        assert (isinstance(controller, nominal_controller.NominalController))
+        sample_actions = controller.output(sample_states)
+        assert (isinstance(sample_states, torch.Tensor))
+        assert (len(sample_states.shape) == 2
+                and sample_states.shape[1] == self.barrier_system.system.x_dim)
+        sample_loss = -self.epsilon * self.barrier_system.barrier_value(
+            sample_states, self.x_star,
+            self.c) - self.barrier_system.barrier_derivative_given_action(
+                sample_states, sample_actions)
+
+        return weight * torch.nn.HingeEmbeddingLoss(
+            margin=0., reduction="mean")(-sample_loss, torch.tensor(-1))

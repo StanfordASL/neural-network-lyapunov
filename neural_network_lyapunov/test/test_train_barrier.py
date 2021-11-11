@@ -4,6 +4,7 @@ import neural_network_lyapunov.control_barrier as control_barrier
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.nominal_controller as nominal_controller
 
 import torch
 import unittest
@@ -337,6 +338,47 @@ class TestTrainBarrier(unittest.TestCase):
         dut.max_iterations = 3
         dut.train_on_samples(unsafe_state_samples, boundary_state_samples,
                              deriv_state_samples)
+
+    def test_nominal_controller_loss(self):
+        c = 0.5
+        epsilon = 1.5
+        x_star = torch.tensor([0.5, 0.1], dtype=self.dtype)
+        dut = mut.TrainBarrier(
+            control_barrier.ControlBarrier(self.linear_system,
+                                           self.barrier_relu1), x_star, c,
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(),
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon)
+        controller_network = utils.setup_relu((2, 4, 3),
+                                              params=None,
+                                              negative_slope=0.1,
+                                              bias=True,
+                                              dtype=self.dtype)
+        controller_network[0].weight.data = torch.tensor(
+            [[3, 2], [-1, 3], [0, 1], [-1, -2]], dtype=self.dtype)
+        controller_network[0].bias.data = torch.tensor([1, -2, 3, -1],
+                                                       dtype=self.dtype)
+        controller_network[2].weight.data = torch.tensor(
+            [[3, -1, -2, 0], [1, 2, -1, -2], [0, 1, -1, 2]], dtype=self.dtype)
+        controller_network[2].bias.data = torch.tensor([1, 3, 2],
+                                                       dtype=self.dtype)
+        controller = nominal_controller.NominalNNController(
+            controller_network, None, None, dut.barrier_system.system.u_lo,
+            dut.barrier_system.system.u_up)
+        x_samples = utils.uniform_sample_in_box(dut.barrier_system.system.x_lo,
+                                                dut.barrier_system.system.x_up,
+                                                100)
+        weight = 0.2
+        loss = dut.nominal_controller_loss(controller, x_samples, weight)
+
+        u_samples = controller.output(x_samples)
+        hdot = dut.barrier_system.barrier_derivative_given_action(
+            x_samples, u_samples)
+        loss_expected = weight * torch.mean(
+            torch.maximum(
+                -hdot - epsilon *
+                dut.barrier_system.barrier_value(x_samples, x_star, c),
+                torch.zeros_like(hdot, dtype=self.dtype)))
+        self.assertAlmostEqual(loss.item(), loss_expected.item())
 
 
 if __name__ == "__main__":
