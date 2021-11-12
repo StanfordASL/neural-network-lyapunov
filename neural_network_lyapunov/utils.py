@@ -1,4 +1,3 @@
-from IPython.display import clear_output
 import numpy as np
 import torch
 import cvxpy as cp
@@ -20,7 +19,6 @@ def update_progress(progress):
 
     block = int(round(bar_length * progress))
 
-    clear_output(wait=True)
     text = "Progress: [{0}] {1:.1f}%".format(
         "#" * block + "-" * (bar_length - block), progress * 100)
     print(text)
