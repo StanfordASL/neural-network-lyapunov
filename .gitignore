@@ -144,4 +144,5 @@ notebooks/*.p
 
 *wandb
 
-lyapunov_venv/
+# virtual environment
+*_venv
