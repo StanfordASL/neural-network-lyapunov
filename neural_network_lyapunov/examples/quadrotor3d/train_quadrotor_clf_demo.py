@@ -33,7 +33,7 @@ def generate_quadrotor_dynamics_data():
     return torch.utils.data.TensorDataset(xu_samples, xdot)
 
 
-def train_phi_a(phi_a, model_dataset, num_epochs=200, lr=0.001):
+def train_phi_a(phi_a, model_dataset, num_epochs=200, lr=0.001, formulation=2):
     # Train phi_a(x) network in the forward dynamics.
     (xu_inputs, xdot_outputs) = model_dataset[:]
 
@@ -41,9 +41,13 @@ def train_phi_a(phi_a, model_dataset, num_epochs=200, lr=0.001):
         x, u = torch.split(state_action, [12, 4], dim=1)
         rpy = x[:, 3:6]
         omega = x[:, 9:12]
-        rpy_dot = phi_a(torch.cat((rpy, omega), dim=1)) - phi_a(
-            torch.cat(
-                (rpy, torch.zeros_like(omega, dtype=omega.dtype)), dim=1))
+        if formulation == 1:
+            rpy_dot = phi_a(torch.cat((rpy, omega), dim=1)) - phi_a(
+                torch.cat(
+                    (rpy, torch.zeros_like(omega, dtype=omega.dtype)), dim=1))
+        elif formulation == 2:
+            rpy_dot = phi_a(torch.cat((rpy, omega), dim=1)) - phi_a(
+                torch.zeros((6, ), dtype=omega.dtype))
         return rpy_dot
 
     rpydot_dataset = torch.utils.data.TensorDataset(xu_inputs,
@@ -106,14 +110,15 @@ def train_phi_c(phi_c, C, model_dataset, u_equilibrium):
 def train_forward_model(
         dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor,
         model_dataset):
-    train_phi_a(dynamics_model.phi_a, model_dataset)
+    train_phi_a(dynamics_model.phi_a, model_dataset,
+                dynamics_model.formulation)
     train_phi_b(dynamics_model.phi_b, model_dataset,
                 dynamics_model.u_equilibrium)
     train_phi_c(dynamics_model.phi_c, dynamics_model.C, model_dataset,
                 dynamics_model.u_equilibrium)
 
 
-def save_dynamics_model(phi_a, phi_b, phi_c, C, savepath):
+def save_dynamics_model(phi_a, phi_b, phi_c, C, formulation, savepath):
     linear_layer_width_a, negative_slope_a, bias_a = \
         utils.extract_relu_structure(phi_a)
     linear_layer_width_b, negative_slope_b, bias_b = \
@@ -140,7 +145,8 @@ def save_dynamics_model(phi_a, phi_b, phi_c, C, savepath):
                 "negative_slope": negative_slope_c,
                 "bias": bias_c
             },
-            "C": C
+            "C": C,
+            "formulation": formulation
         }, savepath)
 
 
@@ -203,8 +209,17 @@ if __name__ == "__main__":
             [[0.5, -0.5, 0.5, -0.5], [1, 2, -1, 2], [1, 0.5, 0.5, -1]],
             dtype=dtype)
         dynamics_model = control_affine_quadrotor.ControlAffineQuadrotor(
-            x_lo, x_up, u_lo, u_up, phi_a, phi_b, phi_c, C, u_equilibrium,
-            mip_utils.PropagateBoundsMethod.IA)
+            x_lo,
+            x_up,
+            u_lo,
+            u_up,
+            phi_a,
+            phi_b,
+            phi_c,
+            C,
+            u_equilibrium,
+            mip_utils.PropagateBoundsMethod.IA,
+            formulation=2)
         train_forward_model(dynamics_model, model_dataset)
         save_dynamics_model(phi_a, phi_b, phi_c, C, args.train_forward_model)
     elif args.load_forward_model is not None:
@@ -231,9 +246,10 @@ if __name__ == "__main__":
             dtype=dtype)
         phi_c.load_state_dict(dynamics_model_data["phi_c"]["state_dict"])
         C = dynamics_model_data["C"]
+        formulation = dynamics_model_data["formulation"]
         dynamics_model = control_affine_quadrotor.ControlAffineQuadrotor(
             x_lo, x_up, u_lo, u_up, phi_a, phi_b, phi_c, C, u_equilibrium,
-            mip_utils.PropagateBoundsMethod.IA)
+            mip_utils.PropagateBoundsMethod.IA, formulation)
 
     if args.load_lyapunov_relu is None:
         V_lambda = 0.5
