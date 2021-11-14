@@ -68,6 +68,58 @@ def replace_binary_continuous_product(x_lo, x_up, dtype=torch.float64):
     return (A_x, A_s, A_alpha, rhs)
 
 
+def max_as_mixed_integer_constraint(
+        x_lo: torch.Tensor,
+        x_up: torch.Tensor) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
+    """
+    Formulate y=max(x) as mixed-integer constraints on x.
+    y >= xᵢ
+    y <= xᵢ + (1-αᵢ)(max(x_up) - x_lo[i])
+    ∑ᵢ αᵢ = 1
+    The slack variable is y, which is also the output
+    """
+    assert (isinstance(x_lo, torch.Tensor))
+    assert (isinstance(x_up, torch.Tensor))
+    nx = x_lo.shape[0]
+    assert (x_lo.shape == (nx, ))
+    assert (x_up.shape == (nx, ))
+    assert (torch.all(x_up >= x_lo))
+    ret = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+    dtype = x_lo.dtype
+    ret.Aout_slack = torch.tensor([[1]], dtype=dtype)
+    ret.Ain_input = torch.cat(
+        (torch.eye(nx, dtype=dtype), -torch.eye(nx, dtype=dtype)), dim=0)
+    ret.Ain_slack = torch.cat((-torch.ones(
+        (nx, 1), dtype=dtype), torch.ones((nx, 1), dtype=dtype)),
+                              dim=0)
+    max_x_up = torch.max(x_up)
+    ret.Ain_binary = torch.cat((torch.zeros(
+        (nx, nx), dtype=dtype), torch.diag(max_x_up - x_lo)),
+                               dim=0)
+    ret.rhs_in = torch.cat((torch.zeros((nx, ), dtype=dtype), max_x_up - x_lo))
+    ret.Aeq_binary = torch.ones((1, nx), dtype=dtype)
+    ret.rhs_eq = torch.tensor([1], dtype=dtype)
+    # If a the upper bound of x[i] is less than the lower bound of another
+    # variable, then it can't be the maximal.
+    non_maximal_idx = torch.nonzero(
+        torch.any(x_up.unsqueeze(1).repeat(1, nx) -
+                  x_lo.unsqueeze(1).T.repeat(nx, 1) < 0,
+                  dim=1)).squeeze().tolist()
+    if (len(non_maximal_idx) > 0):
+        Aeq_binary_non_maximal = torch.zeros((len(non_maximal_idx), nx),
+                                             dtype=dtype)
+        for (i, idx) in enumerate(non_maximal_idx):
+            Aeq_binary_non_maximal[i, idx] = 1
+        ret.Aeq_binary = torch.cat((ret.Aeq_binary, Aeq_binary_non_maximal),
+                                   dim=0)
+        ret.rhs_eq = torch.cat(
+            (ret.rhs_eq, torch.zeros((len(non_maximal_idx), ), dtype=dtype)))
+        ret.binary_lo = torch.zeros((nx,), dtype=dtype)
+        ret.binary_up = torch.ones((nx,), dtype=dtype)
+        ret.binary_up[non_maximal_idx] = 0
+    return ret
+
+
 def leaky_relu_gradient_times_x(x_lo,
                                 x_up,
                                 negative_slope,
