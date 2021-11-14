@@ -1,4 +1,4 @@
-import neural_network_lyapunov.barrier as barrier
+import neural_network_lyapunov.barrier as mut
 import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -36,7 +36,7 @@ class TestBarrier(unittest.TestCase):
         self.barrier_relu1[4].bias.data = torch.tensor([-1], dtype=self.dtype)
 
     def test_barrier_value(self):
-        dut = barrier.Barrier(self.linear_system, self.barrier_relu1)
+        dut = mut.Barrier(self.linear_system, self.barrier_relu1)
         x = torch.tensor([2, 3], dtype=self.dtype)
         # Test a single state.
         x_star = torch.tensor([-0.2, 1], dtype=self.dtype)
@@ -52,6 +52,22 @@ class TestBarrier(unittest.TestCase):
             self.assertEqual(val[i].item(),
                              (dut.barrier_relu(x[i]) -
                               dut.barrier_relu(x_star) + c).item())
+        # Test with inf_norm_term
+        inf_norm_term = mut.InfNormTerm(R=torch.tensor(
+            [[1, 3], [-1, 2], [0, 1]], dtype=self.dtype),
+                                        p=torch.tensor([1, 2, -3],
+                                                       dtype=self.dtype))
+        val = dut.barrier_value(x, x_star, c, inf_norm_term)
+        self.assertEqual(val.shape, (x.shape[0], 1))
+        for i in range(x.shape[0]):
+            self.assertEqual(
+                val[i].item(),
+                (dut.barrier_relu(x[i]) - dut.barrier_relu(x_star) + c -
+                 torch.max(torch.abs(inf_norm_term.R @ x[i] -
+                                     inf_norm_term.p))).item())
+            self.assertEqual(
+                val[i].item(),
+                dut.barrier_value(x[i], x_star, c, inf_norm_term).item())
 
     def barrier_value_as_milp_tester(self, dut, x_star, c, region_cnstr):
         milp, x = dut.barrier_value_as_milp(x_star, c, region_cnstr)
@@ -96,7 +112,7 @@ class TestBarrier(unittest.TestCase):
                     milp.gurobi_model.ObjVal)
 
     def test_barrier_value_as_milp(self):
-        dut = barrier.Barrier(self.linear_system, self.barrier_relu1)
+        dut = mut.Barrier(self.linear_system, self.barrier_relu1)
 
         # The unsafe region is just x[0] <= 0
         unsafe_region_cnstr1 = gurobi_torch_mip.MixedIntegerConstraintsReturn()

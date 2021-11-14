@@ -6,6 +6,23 @@ import gurobipy
 import torch
 
 
+class InfNormTerm:
+    """
+    Add a term -|Rx-p|∞ to the barrier function h(x).
+    The intuition is that since we require h(x) to be negative at the boundary
+    of the verified region, which is often parameterized as the boundary of an
+    axis-aligned bounding box, we can subtrace |Rx-p|∞ to drive h(x) being
+    negative at the boundary of the box.
+    """
+    def __init__(self, R: torch.Tensor = None, p: torch.Tensor = None):
+        self.R = R
+        self.p = p
+
+    def check(self):
+        assert ((self.R is None and self.p is None)
+                or (self.R.shape[0] == self.p.shape[0]))
+
+
 class Barrier:
     """
     This is a super class for DiscreteTimeBarrier, ContinuousTimeBarrier and
@@ -26,9 +43,10 @@ class Barrier:
     where ∂ℬ is the boundary of the set ℬ.
 
     We design the barrier function as
-    h(x) = ϕ(x) − ϕ(x*) + c
+    h(x) = ϕ(x) − ϕ(x*) + c - |Rx-p|∞
     where c is a given positive constant. ϕ(x) is a neural network with (leaky)
     ReLU activations. This barrier function satisfies h(x*) > 0.
+    If either (or both) R, p are None, then we don't add the term -|Rx-p|∞
     """
     def __init__(self, system, barrier_relu):
         """
@@ -43,13 +61,28 @@ class Barrier:
         self.network_bound_propagate_method = \
             mip_utils.PropagateBoundsMethod.IA
 
-    def barrier_value(self, x, x_star, c: float):
+    def barrier_value(self,
+                      x,
+                      x_star,
+                      c: float,
+                      inf_norm_term: InfNormTerm = None):
         """
         Compute the value of ϕ(x) - ϕ(x*) + c
         """
         assert (isinstance(c, float))
         assert (c > 0)
-        return self.barrier_relu(x) - self.barrier_relu(x_star) + c
+        val = self.barrier_relu(x) - self.barrier_relu(x_star) + c
+        if (inf_norm_term is None):
+            return val
+        else:
+            if (len(x.shape) == 1):
+                return val - torch.norm(inf_norm_term.R @ x - inf_norm_term.p,
+                                        p=float("inf"))
+            else:
+                return val - torch.norm(
+                    (inf_norm_term.R @ x.T).T - inf_norm_term.p,
+                    p=float("inf"),
+                    dim=1).unsqueeze(1)
 
     def barrier_value_as_milp(
             self,
