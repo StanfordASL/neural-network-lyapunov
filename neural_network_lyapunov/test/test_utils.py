@@ -35,6 +35,50 @@ class test_replace_binary_continuous_product(unittest.TestCase):
         test_fun(-2, 1)
 
 
+class TestMaxAsMixedIntegerConstraint(unittest.TestCase):
+    def constraint_tester(self, x_lo, x_up):
+        dtype = x_lo.dtype
+        ret = utils.max_as_mixed_integer_constraint(x_lo, x_up)
+        prog = gurobi_torch_mip.GurobiTorchMIP(dtype)
+        nx = x_lo.shape[0]
+        x_var = prog.addVars(nx, lb=-gurobipy.GRB.INFINITY)
+        y = prog.addVars(1, lb=-gurobipy.GRB.INFINITY)
+        slack, binary = prog.add_mixed_integer_linear_constraints(
+            ret, x_var, y, "", "", "", "", "")
+        prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+        for i in range(x_samples.shape[0]):
+            for j in range(nx):
+                x_var[j].lb = x_samples[i, j].item()
+                x_var[j].ub = x_samples[i, j].item()
+            prog.gurobi_model.optimize()
+            self.assertEqual(prog.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(y[0].x, torch.max(x_samples[i]).item())
+            binary_val = np.array([v.x for v in binary])
+            self.assertAlmostEqual(np.sum(binary_val), 1)
+            self.assertAlmostEqual(binary_val @ x_samples[i].detach().numpy(),
+                                   y[0].x)
+
+    def test1(self):
+        dtype = torch.float64
+        self.constraint_tester(torch.tensor([-2, -3], dtype=dtype),
+                               torch.tensor([1, 4], dtype=dtype))
+
+    def test2(self):
+        dtype = torch.float64
+        self.constraint_tester(torch.tensor([-1, 3, -2], dtype=dtype),
+                               torch.tensor([4, 4, 3], dtype=dtype))
+
+    def test3(self):
+        # Some variable's upper bound is smaller than other's lower bound
+        dtype = torch.float64
+        self.constraint_tester(torch.tensor([-1, 3, -2, 1], dtype=dtype),
+                               torch.tensor([2, 5, 4, 2], dtype=dtype))
+        self.constraint_tester(torch.tensor([-1, 3, -2, 1], dtype=dtype),
+                               torch.tensor([2, 5, 2, 2], dtype=dtype))
+
+
 class TestLeakyReLUGradientTimesX(unittest.TestCase):
     def test(self):
         def test_fun(x_lo, x_up, negative_slope, x, y, alpha, satisfied):
@@ -1267,7 +1311,7 @@ class TestBoxBoundary(unittest.TestCase):
         x_boundary_sample = utils.uniform_sample_on_box_boundary(
             x_lo, x_up, 100)
         x_boundary_sample[-1] = x_lo
-        x_boundary_sample[-1, 1:] = (x_lo[1:] + x_up[1:])/2
+        x_boundary_sample[-1, 1:] = (x_lo[1:] + x_up[1:]) / 2
         for i in range(x_boundary_sample.shape[0]):
             for j in range(x_dim):
                 x[j].lb = x_boundary_sample[i][j].item()
