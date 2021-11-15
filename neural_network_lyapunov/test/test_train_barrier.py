@@ -102,31 +102,30 @@ class TestTrainBarrier(unittest.TestCase):
             boundary_state_samples, deriv_state_samples)
 
         loss_expected = torch.tensor(0, dtype=self.dtype)
-        unsafe_mip, unsafe_x = dut.barrier_system.barrier_value_as_milp(
+        unsafe_mip_ret = dut.barrier_system.barrier_value_as_milp(
             dut.x_star, dut.c, dut.unsafe_region_cnstr)
         for param, val in dut.unsafe_mip_params.items():
-            unsafe_mip.gurobi_model.setParam(param, val)
-        unsafe_mip.gurobi_model.optimize()
+            unsafe_mip_ret.milp.gurobi_model.setParam(param, val)
+        unsafe_mip_ret.milp.gurobi_model.optimize()
         self.assertEqual(total_loss_return.unsafe_mip_objective,
-                         unsafe_mip.gurobi_model.ObjVal)
+                         unsafe_mip_ret.milp.gurobi_model.ObjVal)
         loss_expected += unsafe_mip_cost_weight * torch.maximum(
             torch.tensor(0, dtype=self.dtype),
-            unsafe_mip.compute_objective_from_mip_data_and_solution(
+            unsafe_mip_ret.milp.compute_objective_from_mip_data_and_solution(
                 solution_number=0, penalty=1E-13) + dut.unsafe_mip_margin)
 
-        verify_region_boundary_mip, verify_region_boundary_x = \
-            dut.barrier_system.barrier_value_as_milp(
-                dut.x_star, dut.c, dut.verify_region_boundary)
+        boundary_mip_ret = dut.barrier_system.barrier_value_as_milp(
+            dut.x_star, dut.c, dut.verify_region_boundary)
         for param, val in dut.verify_region_boundary_mip_params.items():
-            verify_region_boundary_mip.gurobi_model.setParam(param, val)
-        verify_region_boundary_mip.gurobi_model.optimize()
+            boundary_mip_ret.milp.gurobi_model.setParam(param, val)
+        boundary_mip_ret.milp.gurobi_model.optimize()
         self.assertEqual(
             total_loss_return.verify_region_boundary_mip_objective,
-            verify_region_boundary_mip.gurobi_model.ObjVal)
+            boundary_mip_ret.milp.gurobi_model.ObjVal)
         loss_expected += verify_region_boundary_mip_cost_weight *\
             torch.maximum(
                 torch.tensor(0, dtype=self.dtype),
-                verify_region_boundary_mip.
+                boundary_mip_ret.milp.
                 compute_objective_from_mip_data_and_solution(
                     solution_number=0, penalty=1E-13)
                 + dut.boundary_mip_margin)

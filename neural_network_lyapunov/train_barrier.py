@@ -94,13 +94,13 @@ class TrainBarrier:
         self.output_flag = True
 
     def _solve_barrier_value_mip(self, region_cnstr, region_name, mip_params):
-        milp, x = self.barrier_system.barrier_value_as_milp(
+        ret = self.barrier_system.barrier_value_as_milp(
             self.x_star, self.c, region_cnstr, region_name)
         for param, val in mip_params.items():
-            milp.gurobi_model.setParam(param, val)
-        milp.gurobi_model.optimize()
-        assert (milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
-        return milp, x
+            ret.milp.gurobi_model.setParam(param, val)
+        ret.milp.gurobi_model.optimize()
+        assert (ret.milp.gurobi_model.status == gurobipy.GRB.Status.OPTIMAL)
+        return ret.milp, ret.x
 
     def solve_unsafe_region_mip(self):
         return self._solve_barrier_value_mip(self.unsafe_region_cnstr,

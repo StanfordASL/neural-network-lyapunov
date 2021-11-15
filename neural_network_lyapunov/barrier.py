@@ -1,9 +1,17 @@
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.utils as utils
 
 import gurobipy
 import torch
+
+
+class BarrierValueMilpReturn:
+    def __init__(self, milp, x):
+        self.milp = milp
+        self.x = x
+        self.inf_norm_binary = None
 
 
 class InfNormTerm:
@@ -89,7 +97,8 @@ class Barrier:
             x_star,
             c: float,
             region: gurobi_torch_mip.MixedIntegerConstraintsReturn,
-            region_name=""):
+            region_name="",
+            inf_norm_term: InfNormTerm = None) -> BarrierValueMilpReturn:
         """
         To compute the maximal violation of the constraint that h(x) is
         negative in the region, formulate the following optimization
@@ -102,6 +111,8 @@ class Barrier:
           x_star: x* in the class documentation
           c: h(x) = ϕ(x) - ϕ(x*) + c
           region : The mixed-integer constraint that describes the region C.
+          inf_norm_term: If it is not None, then the barrier function has the
+          additional term -|Rx-p|∞
 
         Return:
           milp: The gurobi_torch_mip.GurobiTorchMILP object that captures the
@@ -147,9 +158,38 @@ class Barrier:
         if barrier_mip_cnstr_return.Cout is None:
             barrier_mip_cnstr_return.Cout = torch.tensor(
                 [0], dtype=self.system.dtype)
-        milp.setObjective([barrier_mip_cnstr_return.Aout_slack.squeeze(0)],
-                          [barrier_relu_slack],
+        objective_coeff = [barrier_mip_cnstr_return.Aout_slack.squeeze(0)]
+        objective_var = [barrier_relu_slack]
+        if inf_norm_term is not None:
+            Rx_minus_p_lb, Rx_minus_p_ub = mip_utils.compute_range_by_IA(
+                inf_norm_term.R, -inf_norm_term.p, self.system.x_lo,
+                self.system.x_up)
+            # The infinity norm of R*x-p is the maximal of (R*x-p, -(R*x-p))
+            inf_norm_mip_cnstr = utils.max_as_mixed_integer_constraint(
+                torch.cat((Rx_minus_p_lb, -Rx_minus_p_ub)),
+                torch.cat((Rx_minus_p_ub, -Rx_minus_p_lb)))
+            inf_norm_mip_cnstr.transform_input(
+                torch.cat((inf_norm_term.R, -inf_norm_term.R), dim=0),
+                torch.cat((-inf_norm_term.p, inf_norm_term.p)))
+            inf_norm, inf_norm_binary = \
+                milp.add_mixed_integer_linear_constraints(
+                    inf_norm_mip_cnstr,
+                    x,
+                    None,
+                    "inf_norm",
+                    "inf_norm_binary",
+                    "inf_norm_ineq",
+                    "inf_norm_eq",
+                    "",
+                    binary_var_type=gurobipy.GRB.BINARY)
+            objective_coeff.append(torch.tensor([-1], dtype=self.system.dtype))
+            objective_var.append(inf_norm)
+        milp.setObjective(objective_coeff,
+                          objective_var,
                           barrier_mip_cnstr_return.Cout.squeeze() -
                           self.barrier_relu(x_star).squeeze() + c,
                           sense=gurobipy.GRB.MAXIMIZE)
-        return milp, x
+        ret = BarrierValueMilpReturn(milp, x)
+        if inf_norm_term is not None:
+            ret.inf_norm_binary = inf_norm_binary
+        return ret
