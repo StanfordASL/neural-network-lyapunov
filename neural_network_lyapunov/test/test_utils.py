@@ -39,12 +39,15 @@ class TestMaxAsMixedIntegerConstraint(unittest.TestCase):
     def constraint_tester(self, x_lo, x_up):
         dtype = x_lo.dtype
         ret = utils.max_as_mixed_integer_constraint(x_lo, x_up)
+        np.testing.assert_allclose(ret.Aout_slack.detach().numpy(),
+                                   np.array([[1.]]))
         prog = gurobi_torch_mip.GurobiTorchMIP(dtype)
         nx = x_lo.shape[0]
         x_var = prog.addVars(nx, lb=-gurobipy.GRB.INFINITY)
         y = prog.addVars(1, lb=-gurobipy.GRB.INFINITY)
         slack, binary = prog.add_mixed_integer_linear_constraints(
             ret, x_var, y, "", "", "", "", "")
+        self.assertEqual(len(slack), 1)
         prog.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
         for i in range(x_samples.shape[0]):
@@ -59,6 +62,7 @@ class TestMaxAsMixedIntegerConstraint(unittest.TestCase):
             self.assertAlmostEqual(np.sum(binary_val), 1)
             self.assertAlmostEqual(binary_val @ x_samples[i].detach().numpy(),
                                    y[0].x)
+            self.assertEqual(y[0].x, slack[0].x)
 
     def test1(self):
         dtype = torch.float64
