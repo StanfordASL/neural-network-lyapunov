@@ -1283,6 +1283,58 @@ class TestL1Gradient(unittest.TestCase):
                       [1., -1., -1., -0.5], [1., -1., -1., -1.]]))
 
 
+class TestLinfinityGradient(unittest.TestCase):
+    def test1(self):
+        dtype = torch.float64
+        grad = utils.l_infinity_gradient(torch.tensor([1, 2], dtype=dtype))
+        np.testing.assert_allclose(grad.detach().numpy(), np.array([[0, 1]]))
+        grad = utils.l_infinity_gradient(torch.tensor([-2, -1, 1],
+                                                      dtype=dtype))
+        np.testing.assert_allclose(grad.detach().numpy(), np.array([[-1, 0,
+                                                                     0]]))
+
+    def gradient_tester(self, x, max_tol, grad_expected):
+        grad = utils.l_infinity_gradient(x, max_tol=max_tol)
+        self.assertEqual(grad.shape, grad_expected.shape)
+        # Now check if grad is a shuffled version of grad_expected
+        for i in range(grad.shape[0]):
+            self.assertTrue(
+                torch.any(
+                    torch.norm(grad[i].repeat(grad.shape[0], 1) -
+                               grad_expected,
+                               dim=1) < 1E-10))
+
+    def test2(self):
+        # Multiple entry in x has the maximal absolute value.
+        dtype = torch.float64
+        self.gradient_tester(torch.tensor([1, 1, 0], dtype=dtype),
+                             max_tol=0.,
+                             grad_expected=torch.tensor([[1, 0, 0], [0, 1, 0]],
+                                                        dtype=dtype))
+        self.gradient_tester(torch.tensor([-2, 0, 2], dtype=dtype),
+                             max_tol=0.,
+                             grad_expected=torch.tensor(
+                                 [[-1, 0, 0], [0, 0, 1]], dtype=dtype))
+
+        self.gradient_tester(torch.tensor([2.1, 0, 2, 1], dtype=dtype),
+                             max_tol=0.5,
+                             grad_expected=torch.tensor(
+                                 [[1, 0, 0, 0], [0, 0, 1, 0]], dtype=dtype))
+
+    def test3(self):
+        dtype = torch.float64
+        self.gradient_tester(torch.tensor([0, 0], dtype=dtype),
+                             max_tol=0.,
+                             grad_expected=torch.tensor(
+                                 [[1, 0], [0, 1], [-1, 0], [0, -1]],
+                                 dtype=dtype))
+        self.gradient_tester(torch.tensor([0.1, -0.1], dtype=dtype),
+                             max_tol=0.2,
+                             grad_expected=torch.tensor(
+                                 [[1, 0], [0, 1], [-1, 0], [0, -1]],
+                                 dtype=dtype))
+
+
 class TestBoxBoundary(unittest.TestCase):
     def box_boundary_tester(self, x_lo, x_up):
         dtype = x_lo.dtype
