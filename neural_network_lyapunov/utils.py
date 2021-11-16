@@ -114,8 +114,8 @@ def max_as_mixed_integer_constraint(
                                    dim=0)
         ret.rhs_eq = torch.cat(
             (ret.rhs_eq, torch.zeros((len(non_maximal_idx), ), dtype=dtype)))
-        ret.binary_lo = torch.zeros((nx,), dtype=dtype)
-        ret.binary_up = torch.ones((nx,), dtype=dtype)
+        ret.binary_lo = torch.zeros((nx, ), dtype=dtype)
+        ret.binary_up = torch.ones((nx, ), dtype=dtype)
         ret.binary_up[non_maximal_idx] = 0
     return ret
 
@@ -1482,6 +1482,36 @@ def l1_gradient(x: torch.Tensor,
                                  grad_after.repeat(
                                      (2 + subgradient_samples.size, 1))))
         return grad
+
+
+def l_infinity_gradient(x, *, max_tol=0.) -> torch.Tensor:
+    """
+    Compute the gradient of the infinity-norm |x|∞
+    Args:
+      max_tol: If |x[i]| is within max_tol to |x|∞, then we consider the
+      gradient w.r.t x[i].
+
+    Return:
+      gradient: A (num_possible_gradient x x_dim) size tensor. gradient[i] is
+      the i'th possible gradient.
+    """
+    assert (isinstance(x, torch.Tensor))
+    x_dim = x.shape[0]
+    assert (x.shape == (x_dim, ))
+    inf_norm = torch.norm(x, p=float("inf"))
+    if inf_norm <= max_tol:
+        return torch.cat((torch.eye(
+            x_dim, dtype=x.dtype), -torch.eye(x_dim, dtype=x.dtype)),
+                         dim=0)
+    grad = torch.where(torch.abs(x - inf_norm) <= max_tol, 1, 0) + \
+        torch.where(torch.abs(x + inf_norm) <= max_tol, -1, 0)
+    nonzero_grad_indices = torch.nonzero(grad).squeeze(1).tolist()
+    if len(nonzero_grad_indices) == 1:
+        return grad.unsqueeze(0)
+    all_grad = torch.zeros((len(nonzero_grad_indices), x_dim), dtype=x.dtype)
+    for (i, grad_index) in enumerate(nonzero_grad_indices):
+        all_grad[i, grad_index] = grad[grad_index]
+    return all_grad
 
 
 def box_boundary(x_lo, x_up) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
