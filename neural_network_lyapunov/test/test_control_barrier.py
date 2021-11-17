@@ -1,4 +1,5 @@
 import neural_network_lyapunov.control_barrier as mut
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -92,10 +93,26 @@ class TestControlBarrier(unittest.TestCase):
                                                          dtype=self.dtype)
         self.barrier_relu3[2].bias.data = torch.tensor([1], dtype=self.dtype)
 
-    def barrier_derivative_tester(self, dut, x):
-        hdot = dut.barrier_derivative(x)
-        barrier_grad = utils.relu_network_gradient(dut.barrier_relu,
-                                                   x).squeeze(1)
+    def barrier_derivative_tester(self, dut, x, inf_norm_term):
+        hdot = dut.barrier_derivative(x, inf_norm_term=inf_norm_term)
+
+        relu_grad = utils.relu_network_gradient(dut.barrier_relu, x).squeeze(1)
+        if inf_norm_term is not None:
+            inf_norm_grad = utils.l_infinity_gradient(
+                inf_norm_term.R @ x - inf_norm_term.p) @ inf_norm_term.R
+            barrier_grad = utils.minikowski_sum(relu_grad, -inf_norm_grad)
+        else:
+            barrier_grad = relu_grad
+        if barrier_grad.shape[0] == 1:
+            x.requires_grad = True
+            h = dut.barrier_value(x,
+                                  torch.empty_like(x),
+                                  c=100.,
+                                  inf_norm_term=inf_norm_term)
+            h.backward()
+            np.testing.assert_allclose(barrier_grad[0].detach().numpy(),
+                                       x.grad.detach().numpy())
+            x.requires_grad = False
         f = dut.system.f(x)
         G = dut.system.G(x)
         hdot_expected = barrier_grad @ f
@@ -110,17 +127,30 @@ class TestControlBarrier(unittest.TestCase):
                                    hdot_expected.detach().numpy())
 
     def test_barrier_derivative(self):
+        torch.manual_seed(0)
         x_samples = utils.uniform_sample_in_box(self.linear_system.x_lo,
                                                 self.linear_system.x_up, 100)
         dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
         for i in range(x_samples.shape[0]):
-            self.barrier_derivative_tester(dut1, x_samples[i])
+            self.barrier_derivative_tester(dut1,
+                                           x_samples[i],
+                                           inf_norm_term=None)
 
         # Now test some x with multiple gradient.
         self.barrier_derivative_tester(dut1,
-                                       torch.tensor([1, 1], dtype=self.dtype))
+                                       torch.tensor([1, 1], dtype=self.dtype),
+                                       inf_norm_term=None)
         self.barrier_derivative_tester(dut1,
-                                       torch.tensor([1, 0], dtype=self.dtype))
+                                       torch.tensor([1, 0], dtype=self.dtype),
+                                       inf_norm_term=None)
+
+        # Test with inf_norm_term
+        for i in range(x_samples.shape[0]):
+            self.barrier_derivative_tester(
+                dut1, x_samples[i],
+                barrier.InfNormTerm(
+                    torch.tensor([[1, 3], [2, -1]], dtype=self.dtype),
+                    torch.tensor([1, 5], dtype=self.dtype)))
 
     def compute_dhdx_times_G_tester(self, dut):
         milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)

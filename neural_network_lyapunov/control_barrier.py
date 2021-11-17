@@ -49,7 +49,11 @@ class ControlBarrier(barrier.Barrier):
                            control_affine_system.ControlPiecewiseAffineSystem))
         super(ControlBarrier, self).__init__(system, barrier_relu)
 
-    def barrier_derivative(self, x: torch.Tensor, *, zero_tol=0.):
+    def barrier_derivative(self,
+                           x: torch.Tensor,
+                           *,
+                           zero_tol=0.,
+                           inf_norm_term: barrier.InfNormTerm = None):
         """
         Evaluates maxᵤ ∂h/∂x*f(x) + ∂h/∂x*G(x)u
                   s.t u_lo <= u <= u_up
@@ -57,8 +61,16 @@ class ControlBarrier(barrier.Barrier):
         subgradients with both the left and right derivatives.
         """
         assert (x.shape == (self.system.x_dim, ))
-        barrier_grad = utils.relu_network_gradient(
-            self.barrier_relu, x, zero_tol=zero_tol).squeeze(1)
+        relu_grad = utils.relu_network_gradient(self.barrier_relu,
+                                                x,
+                                                zero_tol=zero_tol).squeeze(1)
+        if inf_norm_term is not None:
+            inf_norm_grad = utils.l_infinity_gradient(
+                inf_norm_term.R @ x - inf_norm_term.p,
+                max_tol=zero_tol) @ inf_norm_term.R
+            barrier_grad = utils.minikowski_sum(relu_grad, -inf_norm_grad)
+        else:
+            barrier_grad = relu_grad
         u_mid = (self.system.u_lo + self.system.u_up) / 2
         delta_u = (self.system.u_up - self.system.u_lo) / 2
         f = self.system.f(x)
