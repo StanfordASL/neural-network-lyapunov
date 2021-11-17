@@ -1287,6 +1287,7 @@ class TestLinfinityGradient(unittest.TestCase):
     def test1(self):
         dtype = torch.float64
         grad = utils.l_infinity_gradient(torch.tensor([1, 2], dtype=dtype))
+        self.assertEqual(grad.dtype, dtype)
         np.testing.assert_allclose(grad.detach().numpy(), np.array([[0, 1]]))
         grad = utils.l_infinity_gradient(torch.tensor([-2, -1, 1],
                                                       dtype=dtype))
@@ -1295,6 +1296,7 @@ class TestLinfinityGradient(unittest.TestCase):
 
     def gradient_tester(self, x, max_tol, grad_expected):
         grad = utils.l_infinity_gradient(x, max_tol=max_tol)
+        self.assertEqual(grad.dtype, x.dtype)
         self.assertEqual(grad.shape, grad_expected.shape)
         # Now check if grad is a shuffled version of grad_expected
         for i in range(grad.shape[0]):
