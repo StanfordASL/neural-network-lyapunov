@@ -1507,7 +1507,7 @@ def l_infinity_gradient(x, *, max_tol=0.) -> torch.Tensor:
         torch.where(torch.abs(x + inf_norm) <= max_tol, -1, 0)
     nonzero_grad_indices = torch.nonzero(grad).squeeze(1).tolist()
     if len(nonzero_grad_indices) == 1:
-        return grad.unsqueeze(0)
+        return grad.unsqueeze(0).type(x.dtype)
     all_grad = torch.zeros((len(nonzero_grad_indices), x_dim), dtype=x.dtype)
     for (i, grad_index) in enumerate(nonzero_grad_indices):
         all_grad[i, grad_index] = grad[grad_index]
