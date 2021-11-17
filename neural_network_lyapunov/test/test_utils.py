@@ -1384,5 +1384,38 @@ class TestBoxBoundary(unittest.TestCase):
                                  torch.tensor([3, -1], dtype=dtype))
 
 
+class TestMinkowskiSum(unittest.TestCase):
+    def minkowski_sum_tester(self, x, y):
+        result = utils.minikowski_sum(x, y)
+        self.assertEqual(result.shape,
+                         ((x.shape[0] * y.shape[0], ) + tuple(x.shape[1:])))
+        for i in range(x.shape[0]):
+            for j in range(y.shape[0]):
+                np.testing.assert_allclose(
+                    result[i * y.shape[0] + j].detach().numpy(),
+                    (x[i] + y[j]).detach().numpy())
+
+    def test1(self):
+        # x and y are 1D tensor
+        dtype = torch.float64
+        self.minkowski_sum_tester(torch.tensor([1, 2], dtype=dtype),
+                                  torch.tensor([3], dtype=dtype))
+        self.minkowski_sum_tester(torch.tensor([1], dtype=dtype),
+                                  torch.tensor([2, 3], dtype=dtype))
+        self.minkowski_sum_tester(torch.tensor([1, 2, 3], dtype=dtype),
+                                  torch.tensor([2, 3], dtype=dtype))
+
+    def test2(self):
+        # x and y are 2D tensor
+        dtype = torch.float64
+        self.minkowski_sum_tester(torch.tensor([[1, 2], [3, 4]], dtype=dtype),
+                                  torch.tensor([[5, 6]], dtype=dtype))
+        self.minkowski_sum_tester(torch.tensor([[1, 2]], dtype=dtype),
+                                  torch.tensor([[3, 4], [5, 6]], dtype=dtype))
+        self.minkowski_sum_tester(
+            torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dtype),
+            torch.tensor([[3, 4], [5, 6]], dtype=dtype))
+
+
 if __name__ == "__main__":
     unittest.main()
