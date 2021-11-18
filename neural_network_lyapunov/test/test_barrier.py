@@ -4,6 +4,7 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 import torch
+import numpy as np
 import unittest
 import gurobipy
 
@@ -163,6 +164,41 @@ class TestBarrier(unittest.TestCase):
                                                            dtype=self.dtype),
                                               torch.tensor([1, 3],
                                                            dtype=self.dtype)))
+
+    def test_add_inf_norm_term(self):
+        dut = mut.Barrier(self.linear_system, self.barrier_relu1)
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        inf_norm_term = mut.InfNormTerm(
+            torch.tensor([[1, 3], [-2, 4], [3, 1]], dtype=self.dtype),
+            torch.tensor([1, -2, 3], dtype=self.dtype))
+        inf_norm, inf_norm_binary = dut._add_inf_norm_term(
+            milp, x, inf_norm_term)
+        self.assertEqual(len(inf_norm), 1)
+        self.assertEqual(len(inf_norm_binary), inf_norm_term.R.shape[0] * 2)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i, j].item()
+                x[j].ub = x_samples[i, j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            self.assertAlmostEqual(
+                inf_norm[0].x,
+                torch.norm(inf_norm_term.R @ x_samples[i] - inf_norm_term.p,
+                           p=float("inf")).item())
+            inf_norm_binary_expected = np.zeros(
+                (2 * inf_norm_term.R.shape[0], ))
+            inf_norm_binary_expected[torch.argmax(
+                torch.cat(
+                    (inf_norm_term.R @ x_samples[i] - inf_norm_term.p,
+                     -inf_norm_term.R @ x_samples[i] + inf_norm_term.p)))] = 1
+            np.testing.assert_allclose(
+                np.array([v.x for v in inf_norm_binary]),
+                inf_norm_binary_expected)
 
 
 if __name__ == "__main__":

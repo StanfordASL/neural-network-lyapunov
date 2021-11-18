@@ -161,27 +161,8 @@ class Barrier:
         objective_coeff = [barrier_mip_cnstr_return.Aout_slack.squeeze(0)]
         objective_var = [barrier_relu_slack]
         if inf_norm_term is not None:
-            Rx_minus_p_lb, Rx_minus_p_ub = mip_utils.compute_range_by_IA(
-                inf_norm_term.R, -inf_norm_term.p, self.system.x_lo,
-                self.system.x_up)
-            # The infinity norm of R*x-p is the maximal of (R*x-p, -(R*x-p))
-            inf_norm_mip_cnstr = utils.max_as_mixed_integer_constraint(
-                torch.cat((Rx_minus_p_lb, -Rx_minus_p_ub)),
-                torch.cat((Rx_minus_p_ub, -Rx_minus_p_lb)))
-            inf_norm_mip_cnstr.transform_input(
-                torch.cat((inf_norm_term.R, -inf_norm_term.R), dim=0),
-                torch.cat((-inf_norm_term.p, inf_norm_term.p)))
-            inf_norm, inf_norm_binary = \
-                milp.add_mixed_integer_linear_constraints(
-                    inf_norm_mip_cnstr,
-                    x,
-                    None,
-                    "inf_norm",
-                    "inf_norm_binary",
-                    "inf_norm_ineq",
-                    "inf_norm_eq",
-                    "",
-                    binary_var_type=gurobipy.GRB.BINARY)
+            inf_norm, inf_norm_binary = self._add_inf_norm_term(
+                milp, x, inf_norm_term)
             objective_coeff.append(torch.tensor([-1], dtype=self.system.dtype))
             objective_var.append(inf_norm)
         milp.setObjective(objective_coeff,
@@ -193,3 +174,36 @@ class Barrier:
         if inf_norm_term is not None:
             ret.inf_norm_binary = inf_norm_binary
         return ret
+
+    def _add_inf_norm_term(self, milp, x, inf_norm_term):
+        """
+        Add the constraint y = |Rx-p|∞ to the program.
+
+        Return:
+          inf_norm: The variable representing |Rx-p|∞
+          inf_norm_binary: inf_norm_binary is of length 2 * R.shape[0],
+          inf_norm_binary[i] = 1 if the |Rx-p|∞ = R[i]*x-p[i],
+          inf_norm_binary[R.shape[0]+i] = 1 if |Rx-p|∞ = -(R[i]*x-p[i])
+        """
+        Rx_minus_p_lb, Rx_minus_p_ub = mip_utils.compute_range_by_IA(
+            inf_norm_term.R, -inf_norm_term.p, self.system.x_lo,
+            self.system.x_up)
+        # The infinity norm of R*x-p is the maximal of (R*x-p, -(R*x-p))
+        inf_norm_mip_cnstr = utils.max_as_mixed_integer_constraint(
+            torch.cat((Rx_minus_p_lb, -Rx_minus_p_ub)),
+            torch.cat((Rx_minus_p_ub, -Rx_minus_p_lb)))
+        inf_norm_mip_cnstr.transform_input(
+            torch.cat((inf_norm_term.R, -inf_norm_term.R), dim=0),
+            torch.cat((-inf_norm_term.p, inf_norm_term.p)))
+        inf_norm, inf_norm_binary = \
+            milp.add_mixed_integer_linear_constraints(
+                inf_norm_mip_cnstr,
+                x,
+                None,
+                "inf_norm",
+                "inf_norm_binary",
+                "inf_norm_ineq",
+                "inf_norm_eq",
+                "",
+                binary_var_type=gurobipy.GRB.BINARY)
+        return inf_norm, inf_norm_binary
