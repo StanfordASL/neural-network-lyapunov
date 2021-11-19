@@ -87,6 +87,7 @@ class ControlBarrier(barrier.Barrier):
             c: float,
             epsilon: float,
             *,
+            inf_norm_term: barrier.InfNormTerm = None,
             binary_var_type=gurobipy.GRB.BINARY) -> BarrierDerivMilpReturn:
         """
         Formulate the program
@@ -100,6 +101,8 @@ class ControlBarrier(barrier.Barrier):
         Args:
           x_star, c: Our barrier function is defined as h(x) = ϕ(x) − ϕ(x*) + c
           epsilon: a positive constant.
+          inf_norm_term: When not None, we add the term -|Rx-p|∞ to the barrier
+          function.
         """
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
         x = milp.addVars(self.system.x_dim,
@@ -255,9 +258,6 @@ class ControlBarrier(barrier.Barrier):
         We introduce a new variable dhdx_times_G, add the constraint
         dhdx_times_G = ∂h/∂x * G(x).
         """
-        dhdx_times_G = milp.addVars(self.system.u_dim,
-                                    lb=-gurobipy.GRB.INFINITY,
-                                    name="dhdx_times_G")
         # The mip constraints for ∂h/∂x * G(x).col(i)
         mip_cnstr_dhdx_times_G = [None] * self.system.u_dim
         if self.network_bound_propagate_method == \
@@ -294,6 +294,47 @@ class ControlBarrier(barrier.Barrier):
         ])
         return dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up
 
+    def _compute_dinfnorm_dx_times_G(self,
+                                     milp: gurobi_torch_mip.GurobiTorchMIP,
+                                     x: list, inf_norm_binary: list, Gt: list,
+                                     R: torch.Tensor, RG_lo: torch.Tensor,
+                                     RG_up: torch.Tensor):
+        """
+        Compute the term ∂|Rx−p|∞/∂x * G(x)
+
+        Args:
+          inf_norm_binary: returned from _add_inf_norm_term.
+          RG_lo: The lower bound of the R * G(x)
+          RG_up: The upper bound of the R * G(x)
+
+        Return:
+          dinfnorm_dx_times_G: The variables representing ∂|Rx−p|∞/∂x * G(x)
+          dinfnorm_dx_times_G_lo, dinf_norm_dx_times_G_up: the lower/upper
+          bound of ∂|Rx−p|∞/∂x * G(x)
+        """
+        dinfnorm_dx_times_G = milp.addVars(self.system.u_dim,
+                                           lb=-gurobipy.GRB.INFINITY,
+                                           name="dinfnorm_dx_times_G")
+        dtype = self.system.dtype
+        for i in range(self.system.u_dim):
+            linf_binary_pos_times_RG, linf_binary_neg_times_RG = \
+                _compute_dlinfdx_times_y(
+                    milp, inf_norm_binary, Gt[i], R, RG_lo[:, i], RG_up[:, i])
+            milp.addLConstr([
+                torch.tensor([1], dtype=dtype), -torch.ones(
+                    (R.shape[0], ), dtype=dtype),
+                torch.ones((R.shape[0], ), dtype=dtype)
+            ], [[dinfnorm_dx_times_G[i]], linf_binary_pos_times_RG,
+                linf_binary_neg_times_RG],
+                            sense=gurobipy.GRB.EQUAL,
+                            rhs=0.)
+        dinfnorm_dx_times_G_lo = torch.min(torch.cat((RG_lo, -RG_up), dim=0),
+                                           dim=0)[0]
+        dinfnorm_dx_times_G_up = torch.max(torch.cat((RG_up, -RG_lo), dim=0),
+                                           dim=0)[0]
+        return dinfnorm_dx_times_G, dinfnorm_dx_times_G_lo,\
+            dinfnorm_dx_times_G_up
+
     def barrier_derivative_given_action(self, x: torch.Tensor,
                                         u: torch.Tensor):
         """
@@ -313,3 +354,54 @@ class ControlBarrier(barrier.Barrier):
                                                    x[i]).squeeze(1)
                 hdot_batch[i] = torch.min(dhdx @ xdot[i])
             return hdot_batch
+
+
+def _compute_dlinfdx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
+                             linf_binary: list, y: list, R: torch.Tensor,
+                             Ry_lo: torch.Tensor, Ry_up: torch.Tensor):
+    """
+    Utility function to help compute ∂|Rx−p|∞/∂x * y
+    Note that the authors need to impose the constraint between linf_binary and
+    |Rx−p|∞ separately.
+
+    Args:
+      linf_binary: The returned value from Barrier._add_inf_norm_term().
+      Ry_lo: The lower bound of R * y
+      Ry_up: The upper bound of R * y
+
+    Return:
+      linf_binary_pos_times_Ry: linf_binary_pos_times_Ry[i] = linf_binary[i] *
+      R[i] * y
+      linf_binary_neg_times_Ry: linf_binary_pos_times_Ry[i] =
+      linf_binary[R.shape[0] + i] * R[i] * y
+      ∂|Rx−p|∞/∂x*y = linf_binary_pos_times_Ry.sum() -
+      linf_binary_neg_times_Ry.sum()
+    """
+    assert (isinstance(y, list))
+    assert (isinstance(linf_binary, list))
+    assert (R.shape == (len(linf_binary) / 2, len(y)))
+    # ∂|Rx−p|∞/∂x = (linf_binary[:R.shape[0]] - linf_binary[R.shape[0]:]) * R.
+    # Hence
+    # ∂|Rx−p|∞/∂x*y = (linf_binary[:R.shape[0]] - linf_binary[R.shape[0]:])*R*y
+    dtype = R.dtype
+    linf_binary_pos_times_Ry = milp.addVars(R.shape[0],
+                                            lb=-gurobipy.GRB.INFINITY)
+    linf_binary_neg_times_Ry = milp.addVars(R.shape[0],
+                                            lb=-gurobipy.GRB.INFINITY)
+    for i in range(R.shape[0]):
+        A_Ry, A_slack, A_binary, rhs = utils.replace_binary_continuous_product(
+            Ry_lo[i], Ry_up[i], dtype=dtype)
+        A_y = A_Ry.reshape((-1, 1)) @ R[i, :].reshape((1, -1))
+        milp.addMConstrs(
+            [A_y, A_slack.reshape((-1, 1)),
+             A_binary.reshape((-1, 1))],
+            [y, [linf_binary_pos_times_Ry[i]], [linf_binary[i]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs)
+        milp.addMConstrs(
+            [A_y, A_slack.reshape((-1, 1)),
+             A_binary.reshape((-1, 1))],
+            [y, [linf_binary_neg_times_Ry[i]], [linf_binary[R.shape[0] + i]]],
+            sense=gurobipy.GRB.LESS_EQUAL,
+            b=rhs)
+    return linf_binary_pos_times_Ry, linf_binary_neg_times_Ry

@@ -365,6 +365,135 @@ class TestControlBarrier(unittest.TestCase):
         hdot_expected = torch.min(dhdx @ dut1.system.dynamics(x, u))
         self.assertAlmostEqual(hdot.item(), hdot_expected.item())
 
+    def test_compute_dlinfdx_times_y(self):
+        dut = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 3], [2, -1], [1, -3]], dtype=self.dtype),
+            torch.tensor([1, 3, -2], dtype=self.dtype))
+        _, linf_binary = dut._add_inf_norm_term(milp, x, inf_norm_term)
+
+        y = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        y_lo = torch.tensor([-2, -1], dtype=self.dtype)
+        y_up = torch.tensor([1, 4], dtype=self.dtype)
+        Ry_lo, Ry_up = mip_utils.compute_range_by_IA(
+            inf_norm_term.R,
+            torch.zeros((inf_norm_term.R.shape[0], ), dtype=self.dtype), y_lo,
+            y_up)
+        linf_binary_pos_times_Ry, linf_binary_neg_times_Ry = \
+            mut._compute_dlinfdx_times_y(
+                milp, linf_binary, y, inf_norm_term.R, Ry_lo, Ry_up)
+        self.assertEqual(len(linf_binary_pos_times_Ry),
+                         inf_norm_term.R.shape[0])
+        self.assertEqual(len(linf_binary_neg_times_Ry),
+                         inf_norm_term.R.shape[0])
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        y_samples = utils.uniform_sample_in_box(y_lo, y_up, 100)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i, j].item()
+                x[j].ub = x_samples[i, j].item()
+                y[j].lb = y_samples[i, j].item()
+                y[j].ub = y_samples[i, j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            linf_binary_val = torch.tensor([v.x for v in linf_binary],
+                                           dtype=self.dtype)
+            linf_binary_pos_times_Ry_val = np.array(
+                [v.x for v in linf_binary_pos_times_Ry])
+            linf_binary_neg_times_Ry_val = np.array(
+                [v.x for v in linf_binary_neg_times_Ry])
+            np.testing.assert_allclose(
+                linf_binary_pos_times_Ry_val,
+                (linf_binary_val[:inf_norm_term.R.shape[0]] *
+                 (inf_norm_term.R @ y_samples[i])).detach().numpy())
+            np.testing.assert_allclose(
+                linf_binary_neg_times_Ry_val,
+                (linf_binary_val[inf_norm_term.R.shape[0]:] *
+                 (inf_norm_term.R @ y_samples[i])).detach().numpy())
+            x_samples_clone = x_samples[i].clone()
+            x_samples_clone.requires_grad = True
+            torch.norm(inf_norm_term.R @ x_samples_clone - inf_norm_term.p,
+                       p=float("inf")).backward()
+            dlinfdx = x_samples_clone.grad
+            self.assertAlmostEqual(
+                linf_binary_pos_times_Ry_val.sum() -
+                linf_binary_neg_times_Ry_val.sum(),
+                (dlinfdx @ y_samples[i]).item())
+
+    def compute_dinfnorm_dx_times_G_tester(self, dut, inf_norm_term):
+        milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        _, inf_norm_binary = dut._add_inf_norm_term(milp, x, inf_norm_term)
+        RG_lo = torch.empty((inf_norm_term.R.shape[0], dut.system.u_dim),
+                            dtype=self.dtype)
+        RG_up = torch.empty((inf_norm_term.R.shape[0], dut.system.u_dim),
+                            dtype=self.dtype)
+        f = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        # Gt[i] is system.G(x).col(i)
+        Gt = [None] * dut.system.u_dim
+        for i in range(dut.system.u_dim):
+            Gt[i] = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        system_mip_cnstr_ret, _, _, binary_f, binary_G = \
+            control_affine_system.add_system_constraint(
+                dut.system, milp, x, f, Gt,
+                binary_var_type=gurobipy.GRB.BINARY)
+
+        G_lo = system_mip_cnstr_ret.G_flat_lo.reshape(
+            (dut.system.x_dim, dut.system.u_dim))
+        G_up = system_mip_cnstr_ret.G_flat_up.reshape(
+            (dut.system.x_dim, dut.system.u_dim))
+        for i in range(dut.system.u_dim):
+            RG_lo[:, i], RG_up[:, i] = mip_utils.compute_range_by_IA(
+                inf_norm_term.R,
+                torch.zeros((inf_norm_term.R.shape[0], ), dtype=self.dtype),
+                G_lo[:, i], G_up[:, i])
+
+        dinfnorm_dx_times_G, dinfnorm_dx_times_G_lo, dinfnorm_dx_times_G_up =\
+            dut._compute_dinfnorm_dx_times_G(
+                milp, x, inf_norm_binary, Gt, inf_norm_term.R, RG_lo, RG_up)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i, j].item()
+                x[j].ub = x_samples[i, j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            x_clone = x_samples[i].clone()
+            x_clone.requires_grad = True
+            torch.norm(inf_norm_term.R @ x_clone - inf_norm_term.p,
+                       p=float("inf")).backward()
+            G_val = dut.system.G(x_samples[i])
+            dinfnorm_dx_times_G_expected = x_clone.grad @ G_val
+            np.testing.assert_allclose(
+                np.array([v.x for v in dinfnorm_dx_times_G]),
+                dinfnorm_dx_times_G_expected.detach().numpy())
+            np.testing.assert_array_less(
+                dinfnorm_dx_times_G_expected.detach().numpy(),
+                dinfnorm_dx_times_G_up.detach().numpy() + 1E-10)
+            np.testing.assert_array_less(
+                dinfnorm_dx_times_G_lo.detach().numpy(),
+                dinfnorm_dx_times_G_expected.detach().numpy() + 1E-10)
+
+    def test_compute_dinfnorm_dx_times_G(self):
+        dut = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 3], [-1, 2], [2, -1]], dtype=self.dtype),
+            torch.tensor([0.5, -1, 1], dtype=self.dtype))
+        self.compute_dinfnorm_dx_times_G_tester(dut, inf_norm_term)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[2, -1], [0, 1], [1, 0]], dtype=self.dtype),
+            torch.tensor([0.5, -0.1, 0.1], dtype=self.dtype))
+        self.compute_dinfnorm_dx_times_G_tester(dut, inf_norm_term)
+
 
 if __name__ == "__main__":
     unittest.main()
