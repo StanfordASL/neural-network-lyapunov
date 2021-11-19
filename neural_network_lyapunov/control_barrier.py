@@ -142,6 +142,36 @@ class ControlBarrier(barrier.Barrier):
                 "barrier_relu_eq",
                 "",
                 binary_var_type=binary_var_type)
+        # cost will be cost_coeff * cost_vars + cost_constant.
+        cost_coeff = []
+        cost_vars = []
+        cost_constant = torch.tensor(0, dtype=self.system.dtype)
+        if inf_norm_term is not None:
+            # We need to compute ∂|Rx−p|∞/dx*f(x) and ∂|Rx−p|∞/dx*G(x), which
+            # requires the binary variable indicating the activeness of
+            # infinity norm.
+            inf_norm, inf_norm_binary = self._add_inf_norm_term(
+                milp, x, inf_norm_term)
+            dtype = self.system.dtype
+            Rf_lo, Rf_up = mip_utils.compute_range_by_IA(
+                inf_norm_term.R,
+                torch.zeros((inf_norm_term.R.shape[0], ), dtype=dtype),
+                system_mip_cnstr_ret.f_lo, system_mip_cnstr_ret.f_up)
+            linf_binary_pos_times_Rf, linf_binary_neg_times_Rf = \
+                _compute_dlinfdx_times_y(
+                    milp, inf_norm_binary, f, inf_norm_term.R, Rf_lo, Rf_up)
+            # Since ∂|Rx−p|∞/∂x * f = linf_binary_pos_times_Rf.sum() -
+            # linf_binary_neg_times_Rf, and the cost -hdot contains the term
+            # ∂|Rx−p|∞/∂x * f, we add linf_binary_pos_times_Rf.sum() -
+            # linf_binary_neg_times_Rf.sum() to the cost
+            cost_coeff.append(
+                torch.cat(
+                    (torch.ones((inf_norm_term.R.shape[0], ), dtype=dtype),
+                     -torch.ones((inf_norm_term.R.shape[0], ), dtype=dtype))))
+            cost_vars.append(linf_binary_pos_times_Rf +
+                             linf_binary_neg_times_Rf)
+        else:
+            inf_norm_binary = None
 
         mip_cnstr_dphidx_times_f = \
             self.barrier_relu_free_pattern.output_gradient_times_vector(
@@ -155,21 +185,22 @@ class ControlBarrier(barrier.Barrier):
         assert (mip_cnstr_dphidx_times_f.Aout_input is None)
         assert (mip_cnstr_dphidx_times_f.Aout_binary is None)
         assert (mip_cnstr_dphidx_times_f.Cout is None)
-        # cost will be cost_coeff * cost_vars + cost_constant.
-        cost_coeff = [-mip_cnstr_dphidx_times_f.Aout_slack.reshape((-1, ))]
-        cost_vars = [dphidx_times_f_slack]
-        cost_constant = torch.tensor(0, dtype=self.system.dtype)
+        cost_coeff.append(-mip_cnstr_dphidx_times_f.Aout_slack.reshape((-1, )))
+        cost_vars.append(dphidx_times_f_slack)
         # Add -max_u ∂h/∂x * G(x) * u s.t u_lo <= u <= u_up to the cost.
         dhdx_times_G, dhdx_times_G_binary = self._add_dhdx_times_G(
             milp, x, barrier_relu_binary, Gt, system_mip_cnstr_ret.G_flat_lo,
             system_mip_cnstr_ret.G_flat_up, cost_coeff, cost_vars,
-            binary_var_type)
+            binary_var_type, inf_norm_term, inf_norm_binary)
         # Add the term -εh(x)=−εϕ(x) + εϕ(x*)−εc to the cost
         cost_coeff.append(-epsilon *
                           barrier_mip_cnstr_return.Aout_slack.squeeze(0))
         cost_vars.append(barrier_relu_slack)
         cost_constant += -epsilon * barrier_mip_cnstr_return.Cout.squeeze(
             0) + epsilon * self.barrier_relu(x_star).squeeze() - epsilon * c
+        if inf_norm_term is not None:
+            cost_coeff.append(torch.tensor([epsilon], dtype=dtype))
+            cost_vars.append(inf_norm)
 
         milp.setObjective(cost_coeff,
                           cost_vars,
@@ -182,7 +213,8 @@ class ControlBarrier(barrier.Barrier):
     def _add_dhdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP, x: list,
                           barrier_relu_binary: list, Gt: list,
                           G_flat_lo: torch.Tensor, G_flat_up: torch.Tensor,
-                          cost_coeff: list, cost_vars: list, binary_var_type):
+                          cost_coeff: list, cost_vars: list, binary_var_type,
+                          inf_norm_term, inf_norm_binary):
         """
         Add -max_u ∂h/∂x * G * u
             s.t  u_lo <= u <= u_up
@@ -191,7 +223,7 @@ class ControlBarrier(barrier.Barrier):
         dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up = \
             self._compute_dhdx_times_G(
                 milp, x, barrier_relu_binary, Gt, G_flat_lo, G_flat_up,
-                binary_var_type)
+                binary_var_type, inf_norm_term, inf_norm_binary)
         # We know that
         # -max_u ∂h/∂x * G * u
         #    s.t  u_lo <= u <= u_up
@@ -252,14 +284,16 @@ class ControlBarrier(barrier.Barrier):
     def _compute_dhdx_times_G(self, milp: gurobi_torch_mip.GurobiTorchMIP,
                               x: list, barrier_relu_binary: list, Gt: list,
                               G_flat_lo: torch.Tensor, G_flat_up: torch.Tensor,
-                              binary_var_type):
+                              binary_var_type,
+                              inf_norm_term: barrier.InfNormTerm,
+                              inf_norm_binary: list):
         """
         Add constraint for ∂h/∂x * G(x) to the program.
         We introduce a new variable dhdx_times_G, add the constraint
         dhdx_times_G = ∂h/∂x * G(x).
         """
-        # The mip constraints for ∂h/∂x * G(x).col(i)
-        mip_cnstr_dhdx_times_G = [None] * self.system.u_dim
+        # The mip constraints for ∂ϕ/∂x * G(x).col(i)
+        mip_cnstr_dphidx_times_G = [None] * self.system.u_dim
         if self.network_bound_propagate_method == \
                 mip_utils.PropagateBoundsMethod.IA:
             for j in range(self.system.u_dim):
@@ -271,28 +305,61 @@ class ControlBarrier(barrier.Barrier):
                     G_flat_up[i * self.system.u_dim + j]
                     for i in range(self.system.x_dim)
                 ])
-                mip_cnstr_dhdx_times_G[j] = self.barrier_relu_free_pattern.\
+                mip_cnstr_dphidx_times_G[j] = self.barrier_relu_free_pattern.\
                     output_gradient_times_vector(Gi_lo, Gi_up)
         else:
             raise NotImplementedError
-        dhdx_times_G = milp.addVars(self.system.u_dim,
-                                    lb=-gurobipy.GRB.INFINITY,
-                                    name="dhdx_times_G")
+        dphidx_times_G = milp.addVars(self.system.u_dim,
+                                      lb=-gurobipy.GRB.INFINITY,
+                                      name="dphidx_times_G")
         for i in range(self.system.u_dim):
             milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_dhdx_times_G[i], Gt[i], [dhdx_times_G[i]],
-                f"dhdx_times_G[{i}]_slack", barrier_relu_binary,
-                f"dhdx_times_G[{i}]_ineq", f"dhdx_times_G[{i}]_eq",
-                f"dhdx_times_G[{i}]_out", binary_var_type)
-        dhdx_times_G_lo = torch.stack([
-            mip_cnstr_dhdx_times_G[i].Wz_lo[-1].squeeze()
+                mip_cnstr_dphidx_times_G[i], Gt[i], [dphidx_times_G[i]],
+                f"dphidx_times_G[{i}]_slack", barrier_relu_binary,
+                f"dphidx_times_G[{i}]_ineq", f"dphidx_times_G[{i}]_eq",
+                f"dhpidx_times_G[{i}]_out", binary_var_type)
+        dphidx_times_G_lo = torch.stack([
+            mip_cnstr_dphidx_times_G[i].Wz_lo[-1].squeeze()
             for i in range(self.system.u_dim)
         ])
-        dhdx_times_G_up = torch.stack([
-            mip_cnstr_dhdx_times_G[i].Wz_up[-1].squeeze()
+        dphidx_times_G_up = torch.stack([
+            mip_cnstr_dphidx_times_G[i].Wz_up[-1].squeeze()
             for i in range(self.system.u_dim)
         ])
-        return dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up
+        if inf_norm_term is None and inf_norm_binary is None:
+            return dphidx_times_G, dphidx_times_G_lo, dphidx_times_G_up
+        else:
+            dhdx_times_G = milp.addVars(self.system.u_dim,
+                                        lb=-gurobipy.GRB.INFINITY,
+                                        name="dhdx_times_G")
+            dtype = self.system.dtype
+            RG_lo = torch.empty((inf_norm_term.R.shape[0], self.system.u_dim),
+                                dtype=dtype)
+            RG_up = torch.empty((inf_norm_term.R.shape[0], self.system.u_dim),
+                                dtype=dtype)
+            G_lo = G_flat_lo.reshape((self.system.x_dim, self.system.u_dim))
+            G_up = G_flat_up.reshape((self.system.x_dim, self.system.u_dim))
+            for i in range(self.system.u_dim):
+                RG_lo[:, i], RG_up[:, i] = mip_utils.compute_range_by_IA(
+                    inf_norm_term.R,
+                    torch.zeros((inf_norm_term.R.shape[0], ), dtype=dtype),
+                    G_lo[:, i], G_up[:, i])
+
+            dinfnorm_dx_times_G, dinfnorm_dx_times_G_lo,\
+                dinfnorm_dx_times_G_up = self._compute_dinfnorm_dx_times_G(
+                    milp, x, inf_norm_binary, Gt, inf_norm_term.R, RG_lo,
+                    RG_up)
+            # Add constraint dhdx_times_G=dphidx_times_G - dinfnorm_dx_times_G
+            milp.addMConstrs([
+                torch.eye(self.system.u_dim, dtype=dtype),
+                -torch.eye(self.system.u_dim, dtype=dtype),
+                torch.eye(self.system.u_dim, dtype=dtype)
+            ], [dhdx_times_G, dphidx_times_G, dinfnorm_dx_times_G],
+                             sense=gurobipy.GRB.EQUAL,
+                             b=torch.zeros((self.system.u_dim, ), dtype=dtype))
+            dhdx_times_G_lo = dphidx_times_G_lo - dinfnorm_dx_times_G_up
+            dhdx_times_G_up = dphidx_times_G_up - dinfnorm_dx_times_G_lo
+            return dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up
 
     def _compute_dinfnorm_dx_times_G(self,
                                      milp: gurobi_torch_mip.GurobiTorchMIP,

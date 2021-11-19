@@ -152,7 +152,7 @@ class TestControlBarrier(unittest.TestCase):
                     torch.tensor([[1, 3], [2, -1]], dtype=self.dtype),
                     torch.tensor([1, 5], dtype=self.dtype)))
 
-    def compute_dhdx_times_G_tester(self, dut):
+    def compute_dhdx_times_G_tester(self, dut, inf_norm_term):
         milp = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
         x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
         barrier_mip_cnstr_return = dut.barrier_relu_free_pattern.\
@@ -171,11 +171,16 @@ class TestControlBarrier(unittest.TestCase):
             control_affine_system.add_system_constraint(
                 dut.system, milp, x, f, Gt,
                 binary_var_type=gurobipy.GRB.BINARY)
+        if inf_norm_term is not None:
+            _, inf_norm_binary = dut._add_inf_norm_term(milp, x, inf_norm_term)
+        else:
+            inf_norm_binary = None
         dhdx_times_G, dhdx_times_G_lo, dhdx_times_G_up = \
             dut._compute_dhdx_times_G(
                 milp, x, barrier_relu_binary, Gt,
                 system_mip_cnstr_ret.G_flat_lo,
-                system_mip_cnstr_ret.G_flat_up, gurobipy.GRB.BINARY)
+                system_mip_cnstr_ret.G_flat_up, gurobipy.GRB.BINARY,
+                inf_norm_term, inf_norm_binary)
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         torch.manual_seed(0)
         x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
@@ -187,10 +192,14 @@ class TestControlBarrier(unittest.TestCase):
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
-            dhdx = utils.relu_network_gradient(dut.barrier_relu, x_samples[i])
-            assert (dhdx.shape[0] == 1)
+            x_clone = x_samples[i].clone()
+            x_clone.requires_grad = True
+            x_star = torch.zeros_like(x_clone)
+            c = 100.
+            dut.barrier_value(x_clone, x_star, c, inf_norm_term).backward()
+            dhdx = x_clone.grad
             G = dut.system.G(x_samples[i])
-            dhdx_times_G_expected = dhdx[0][0] @ G
+            dhdx_times_G_expected = dhdx @ G
             np.testing.assert_allclose(np.array([v.x for v in dhdx_times_G]),
                                        dhdx_times_G_expected.detach().numpy())
             np.testing.assert_array_less(
@@ -201,16 +210,21 @@ class TestControlBarrier(unittest.TestCase):
                 dhdx_times_G_expected.detach().numpy() + 1E-6)
 
     def test_compute_dhdx_times_G(self):
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[0.5, 0.2], [0.1, 0.3], [0.1, 1]], dtype=self.dtype),
+            torch.tensor([0.1, 0.5, 0.2], dtype=self.dtype))
         dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
-        self.compute_dhdx_times_G_tester(dut1)
+        self.compute_dhdx_times_G_tester(dut1, inf_norm_term=None)
+        self.compute_dhdx_times_G_tester(dut1, inf_norm_term)
         dut2 = mut.ControlBarrier(self.relu_system, self.barrier_relu1)
-        self.compute_dhdx_times_G_tester(dut2)
+        self.compute_dhdx_times_G_tester(dut2, inf_norm_term=None)
+        self.compute_dhdx_times_G_tester(dut2, inf_norm_term)
         dut3 = mut.ControlBarrier(self.linear_system, self.barrier_relu2)
-        self.compute_dhdx_times_G_tester(dut3)
+        self.compute_dhdx_times_G_tester(dut3, inf_norm_term=None)
         dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
-        self.compute_dhdx_times_G_tester(dut4)
+        self.compute_dhdx_times_G_tester(dut4, inf_norm_term=None)
 
-    def add_dhdx_times_G_tester(self, dut):
+    def add_dhdx_times_G_tester(self, dut, inf_norm_term):
         milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
         barrier_mip_cnstr_return = dut.barrier_relu_free_pattern.\
@@ -231,10 +245,14 @@ class TestControlBarrier(unittest.TestCase):
                 binary_var_type=gurobipy.GRB.BINARY)
         cost_coeff = []
         cost_vars = []
+        if inf_norm_term is not None:
+            _, inf_norm_binary = dut._add_inf_norm_term(milp, x, inf_norm_term)
+        else:
+            inf_norm_binary = None
         dhdx_times_G, dhdx_times_G_binary = dut._add_dhdx_times_G(
             milp, x, barrier_relu_binary, Gt, system_mip_cnstr_ret.G_flat_lo,
             system_mip_cnstr_ret.G_flat_up, cost_coeff, cost_vars,
-            gurobipy.GRB.BINARY)
+            gurobipy.GRB.BINARY, inf_norm_term, inf_norm_binary)
         milp.setObjective(cost_coeff,
                           cost_vars,
                           0.,
@@ -254,10 +272,14 @@ class TestControlBarrier(unittest.TestCase):
             # Compute -max_u ∂h/∂x * G * u
             #    s.t  u_lo <= u <= u_up
             # in the closed form
-            dhdx = utils.relu_network_gradient(dut.barrier_relu, x_samples[i])
-            assert (dhdx.shape[0] == 1)
+            x_clone = x_samples[i].clone()
+            x_clone.requires_grad = True
+            x_star = torch.zeros_like(x_clone)
+            c = 100.
+            dut.barrier_value(x_clone, x_star, c, inf_norm_term).backward()
+            dhdx = x_clone.grad
             G = dut.system.G(x_samples[i])
-            dhdx_times_G_expected = dhdx[0][0] @ G
+            dhdx_times_G_expected = dhdx @ G
             objective_expected = 0
             for j in range(dut.system.u_dim):
                 objective_expected -= dhdx_times_G_expected[
@@ -275,17 +297,24 @@ class TestControlBarrier(unittest.TestCase):
     def test_add_dhdx_times_G(self):
         self.linear_system.B = torch.tensor([[0.5, -0.1, 2], [1, 0.5, -1]],
                                             dtype=self.dtype)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 0.5], [0.1, 0.5], [0.4, 2]], dtype=self.dtype),
+            torch.tensor([1, 0, 0.5], dtype=self.dtype))
         dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
-        self.add_dhdx_times_G_tester(dut1)
+        self.add_dhdx_times_G_tester(dut1, inf_norm_term=None)
+        self.add_dhdx_times_G_tester(dut1, inf_norm_term)
         dut2 = mut.ControlBarrier(self.relu_system, self.barrier_relu1)
-        self.add_dhdx_times_G_tester(dut2)
+        self.add_dhdx_times_G_tester(dut2, inf_norm_term=None)
+        self.add_dhdx_times_G_tester(dut2, inf_norm_term)
         dut3 = mut.ControlBarrier(self.linear_system, self.barrier_relu2)
-        self.add_dhdx_times_G_tester(dut3)
+        self.add_dhdx_times_G_tester(dut3, inf_norm_term=None)
         dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
-        self.add_dhdx_times_G_tester(dut4)
+        self.add_dhdx_times_G_tester(dut4, inf_norm_term=None)
 
-    def barrier_derivative_as_milp_tester(self, dut, x_star, c, epsilon):
-        barrier_deriv_ret = dut.barrier_derivative_as_milp(x_star, c, epsilon)
+    def barrier_derivative_as_milp_tester(self, dut, x_star, c, epsilon,
+                                          inf_norm_term):
+        barrier_deriv_ret = dut.barrier_derivative_as_milp(
+            x_star, c, epsilon, inf_norm_term=inf_norm_term)
         barrier_deriv_ret.milp.gurobi_model.setParam(
             gurobipy.GRB.Param.OutputFlag, False)
         # Now maximize objective over x.
@@ -296,9 +325,11 @@ class TestControlBarrier(unittest.TestCase):
                                  dtype=self.dtype)
         self.assertAlmostEqual(
             barrier_deriv_ret.milp.gurobi_model.ObjVal,
-            torch.max(-dut.barrier_derivative(x_optimal, zero_tol=1E-5) -
-                      epsilon *
-                      dut.barrier_value(x_optimal, x_star, c)).item())
+            torch.max(
+                -dut.barrier_derivative(
+                    x_optimal, zero_tol=1E-5, inf_norm_term=inf_norm_term) -
+                epsilon *
+                dut.barrier_value(x_optimal, x_star, c, inf_norm_term)).item())
         optimal_cost = barrier_deriv_ret.milp.gurobi_model.ObjVal
         # Sample many x, make sure the objective is correct and less than the
         # optimal cost.
@@ -313,8 +344,9 @@ class TestControlBarrier(unittest.TestCase):
             self.assertEqual(barrier_deriv_ret.milp.gurobi_model.status,
                              gurobipy.GRB.Status.OPTIMAL)
             objective_expected = -dut.barrier_derivative(
-                x_samples[i]) - epsilon * dut.barrier_value(
-                    x_samples[i], x_star, c)
+                x_samples[i],
+                inf_norm_term=inf_norm_term) - epsilon * dut.barrier_value(
+                    x_samples[i], x_star, c, inf_norm_term=inf_norm_term)
             assert (objective_expected.shape[0] == 1)
             self.assertAlmostEqual(barrier_deriv_ret.milp.gurobi_model.ObjVal,
                                    objective_expected[0].item())
@@ -326,16 +358,42 @@ class TestControlBarrier(unittest.TestCase):
         x_star = torch.tensor([0.5, 0.2], dtype=self.dtype)
         c = 0.3
         epsilon = 0.5
-        self.barrier_derivative_as_milp_tester(dut1, x_star, c, epsilon)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 0.5], [0.2, 1.5], [0.3, 0.4]], dtype=self.dtype),
+            torch.tensor([0.5, -0.1, 0.2], dtype=self.dtype))
+        self.barrier_derivative_as_milp_tester(dut1,
+                                               x_star,
+                                               c,
+                                               epsilon,
+                                               inf_norm_term=None)
+        self.barrier_derivative_as_milp_tester(dut1, x_star, c, epsilon,
+                                               inf_norm_term)
 
         dut2 = mut.ControlBarrier(self.relu_system, self.barrier_relu2)
-        self.barrier_derivative_as_milp_tester(dut2, x_star, c, epsilon)
+        self.barrier_derivative_as_milp_tester(dut2,
+                                               x_star,
+                                               c,
+                                               epsilon,
+                                               inf_norm_term=None)
+        self.barrier_derivative_as_milp_tester(dut2,
+                                               x_star,
+                                               c,
+                                               epsilon,
+                                               inf_norm_term)
 
         dut3 = mut.ControlBarrier(self.linear_system, self.barrier_relu2)
-        self.barrier_derivative_as_milp_tester(dut3, x_star, c, epsilon)
+        self.barrier_derivative_as_milp_tester(dut3,
+                                               x_star,
+                                               c,
+                                               epsilon,
+                                               inf_norm_term=None)
 
         dut4 = mut.ControlBarrier(self.linear_system, self.barrier_relu3)
-        self.barrier_derivative_as_milp_tester(dut4, x_star, c, epsilon)
+        self.barrier_derivative_as_milp_tester(dut4,
+                                               x_star,
+                                               c,
+                                               epsilon,
+                                               inf_norm_term=None)
 
     def test_barrier_derivative_given_action(self):
         dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
