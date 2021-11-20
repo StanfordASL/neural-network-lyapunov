@@ -1,4 +1,5 @@
 import neural_network_lyapunov.train_barrier as mut
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.control_affine_system as control_affine_system
 import neural_network_lyapunov.control_barrier as control_barrier
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -103,7 +104,10 @@ class TestTrainBarrier(unittest.TestCase):
 
         loss_expected = torch.tensor(0, dtype=self.dtype)
         unsafe_mip_ret = dut.barrier_system.barrier_value_as_milp(
-            dut.x_star, dut.c, dut.unsafe_region_cnstr)
+            dut.x_star,
+            dut.c,
+            dut.unsafe_region_cnstr,
+            inf_norm_term=dut.inf_norm_term)
         for param, val in dut.unsafe_mip_params.items():
             unsafe_mip_ret.milp.gurobi_model.setParam(param, val)
         unsafe_mip_ret.milp.gurobi_model.optimize()
@@ -115,7 +119,10 @@ class TestTrainBarrier(unittest.TestCase):
                 solution_number=0, penalty=1E-13) + dut.unsafe_mip_margin)
 
         boundary_mip_ret = dut.barrier_system.barrier_value_as_milp(
-            dut.x_star, dut.c, dut.verify_region_boundary)
+            dut.x_star,
+            dut.c,
+            dut.verify_region_boundary,
+            inf_norm_term=dut.inf_norm_term)
         for param, val in dut.verify_region_boundary_mip_params.items():
             boundary_mip_ret.milp.gurobi_model.setParam(param, val)
         boundary_mip_ret.milp.gurobi_model.optimize()
@@ -131,7 +138,7 @@ class TestTrainBarrier(unittest.TestCase):
                 + dut.boundary_mip_margin)
 
         barrier_deriv_mip_ret = dut.barrier_system.barrier_derivative_as_milp(
-            dut.x_star, dut.c, dut.epsilon)
+            dut.x_star, dut.c, dut.epsilon, inf_norm_term=dut.inf_norm_term)
         for param, val in dut.barrier_deriv_mip_params.items():
             barrier_deriv_mip_ret.milp.gurobi_model.setParam(param, val)
         barrier_deriv_mip_ret.milp.gurobi_model.optimize()
@@ -160,6 +167,9 @@ class TestTrainBarrier(unittest.TestCase):
             self.linear_system.x_lo, self.linear_system.x_up, 100)
         deriv_state_samples = utils.uniform_sample_in_box(
             self.linear_system.x_lo, self.linear_system.x_up, 20)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, -2], [1, 0.5], [0, 0.1]], dtype=self.dtype),
+            torch.tensor([0.5, 0.2, 0.1], dtype=self.dtype))
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -176,7 +186,8 @@ class TestTrainBarrier(unittest.TestCase):
                                                barrier_relu), x_star, c,
                 unsafe_region_cnstr1,
                 utils.box_boundary(self.linear_system.x_lo,
-                                   self.linear_system.x_up), epsilon)
+                                   self.linear_system.x_up), epsilon,
+                inf_norm_term)
             dut.unsafe_state_samples_weight = 3.
             dut.derivative_state_samples_weight = 5.
             dut.boundary_state_samples_weight = 2.
@@ -208,10 +219,16 @@ class TestTrainBarrier(unittest.TestCase):
         c = 0.5
         epsilon = 0.5
 
+        torch.manual_seed(0)
         boundary_state_samples = utils.uniform_sample_on_box_boundary(
             self.linear_system.x_lo, self.linear_system.x_up, 100)
         deriv_state_samples = utils.uniform_sample_in_box(
             self.linear_system.x_lo, self.linear_system.x_up, 10)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.diag(2. /
+                       (self.linear_system.x_up - self.linear_system.x_lo)),
+            (self.linear_system.x_up + self.linear_system.x_lo) /
+            (self.linear_system.x_up - self.linear_system.x_lo))
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -227,7 +244,8 @@ class TestTrainBarrier(unittest.TestCase):
                                                barrier_relu), x_star, c,
                 unsafe_region_cnstr1,
                 utils.box_boundary(self.linear_system.x_lo,
-                                   self.linear_system.x_up), epsilon)
+                                   self.linear_system.x_up), epsilon,
+                inf_norm_term)
             dut.max_iterations = 3
             dut.train(unsafe_state_samples, boundary_state_samples,
                       deriv_state_samples)
@@ -247,13 +265,19 @@ class TestTrainBarrier(unittest.TestCase):
         total_loss_expected = torch.tensor(0, dtype=self.dtype)
         if unsafe_state_samples_weight is not None:
             h_unsafe = dut.barrier_system.barrier_value(
-                unsafe_state_samples, dut.x_star, dut.c)
+                unsafe_state_samples,
+                dut.x_star,
+                dut.c,
+                inf_norm_term=dut.inf_norm_term)
             total_loss_expected += unsafe_state_samples_weight * torch.mean(
                 torch.maximum(h_unsafe,
                               torch.zeros_like(h_unsafe, dtype=self.dtype)))
         if boundary_state_samples_weight is not None:
             h_boundary = dut.barrier_system.barrier_value(
-                boundary_state_samples, dut.x_star, dut.c)
+                boundary_state_samples,
+                dut.x_star,
+                dut.c,
+                inf_norm_term=dut.inf_norm_term)
             total_loss_expected += boundary_state_samples_weight * torch.mean(
                 torch.maximum(h_boundary,
                               torch.zeros_like(h_boundary, dtype=self.dtype)))
@@ -261,11 +285,15 @@ class TestTrainBarrier(unittest.TestCase):
             hdot = torch.stack([
                 torch.min(
                     dut.barrier_system.barrier_derivative(
-                        derivative_state_samples[i]))
+                        derivative_state_samples[i],
+                        inf_norm_term=dut.inf_norm_term))
                 for i in range(derivative_state_samples.shape[0])
             ])
-            h_val = dut.barrier_system.barrier_value(derivative_state_samples,
-                                                     dut.x_star, dut.c)
+            h_val = dut.barrier_system.barrier_value(
+                derivative_state_samples,
+                dut.x_star,
+                dut.c,
+                inf_norm_term=dut.inf_norm_term)
             total_loss_expected += derivative_state_samples_weight * \
                 torch.mean(torch.maximum(
                     -hdot - dut.epsilon * h_val,
@@ -289,6 +317,11 @@ class TestTrainBarrier(unittest.TestCase):
             self.linear_system.x_lo, self.linear_system.x_up, 200)
         derivative_state_samples = utils.uniform_sample_in_box(
             self.linear_system.x_lo, self.linear_system.x_up, 1000)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.diag(2. /
+                       (self.linear_system.x_up - self.linear_system.x_lo)),
+            (self.linear_system.x_up + self.linear_system.x_lo) /
+            (self.linear_system.x_up - self.linear_system.x_lo))
 
         for barrier_relu in (self.barrier_relu1, self.barrier_relu2,
                              self.barrier_relu3):
@@ -297,7 +330,8 @@ class TestTrainBarrier(unittest.TestCase):
                                                barrier_relu), x_star, c,
                 unsafe_region_cnstr1,
                 utils.box_boundary(self.linear_system.x_lo,
-                                   self.linear_system.x_up), epsilon)
+                                   self.linear_system.x_up), epsilon,
+                inf_norm_term)
             self.compute_sample_loss_tester(dut, unsafe_state_samples,
                                             boundary_state_samples,
                                             derivative_state_samples, None, 2.,
@@ -324,13 +358,19 @@ class TestTrainBarrier(unittest.TestCase):
             self.linear_system.x_lo, self.linear_system.x_up, 200)
         deriv_state_samples = utils.uniform_sample_in_box(
             self.linear_system.x_lo, self.linear_system.x_up, 1000)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.diag(2. /
+                       (self.linear_system.x_up - self.linear_system.x_lo)),
+            (self.linear_system.x_up + self.linear_system.x_lo) /
+            (self.linear_system.x_up - self.linear_system.x_lo))
 
         dut = mut.TrainBarrier(
             control_barrier.ControlBarrier(self.linear_system,
                                            self.barrier_relu1), x_star, c,
             unsafe_region_cnstr,
             utils.box_boundary(self.linear_system.x_lo,
-                               self.linear_system.x_up), epsilon)
+                               self.linear_system.x_up), epsilon,
+            inf_norm_term)
         dut.derivative_state_samples_weight = 2.
         dut.boundary_state_samples_weight = 3.
         dut.unsafe_state_samples_weight = 4.
@@ -342,11 +382,17 @@ class TestTrainBarrier(unittest.TestCase):
         c = 0.5
         epsilon = 1.5
         x_star = torch.tensor([0.5, 0.1], dtype=self.dtype)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.diag(2. /
+                       (self.linear_system.x_up - self.linear_system.x_lo)),
+            (self.linear_system.x_up + self.linear_system.x_lo) /
+            (self.linear_system.x_up - self.linear_system.x_lo))
         dut = mut.TrainBarrier(
             control_barrier.ControlBarrier(self.linear_system,
                                            self.barrier_relu1), x_star, c,
             gurobi_torch_mip.MixedIntegerConstraintsReturn(),
-            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon)
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon,
+            inf_norm_term)
         controller_network = utils.setup_relu((2, 4, 3),
                                               params=None,
                                               negative_slope=0.1,
@@ -371,11 +417,11 @@ class TestTrainBarrier(unittest.TestCase):
 
         u_samples = controller.output(x_samples)
         hdot = dut.barrier_system.minimal_barrier_derivative_given_action(
-            x_samples, u_samples)
+            x_samples, u_samples, inf_norm_term=inf_norm_term)
         loss_expected = weight * torch.mean(
             torch.maximum(
-                -hdot - epsilon *
-                dut.barrier_system.barrier_value(x_samples, x_star, c),
+                -hdot - epsilon * dut.barrier_system.barrier_value(
+                    x_samples, x_star, c, inf_norm_term=inf_norm_term),
                 torch.zeros_like(hdot, dtype=self.dtype)))
         self.assertAlmostEqual(loss.item(), loss_expected.item())
 

@@ -2,6 +2,7 @@
 Consider a integrator xdot = u, -1 <= u <= 1. Train a barrier function.
 """
 import neural_network_lyapunov.control_affine_system as control_affine_system
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.control_barrier as control_barrier
 import neural_network_lyapunov.train_barrier as train_barrier
 import neural_network_lyapunov.utils as utils
@@ -65,9 +66,13 @@ if __name__ == "__main__":
     verify_region_boundary = utils.box_boundary(x_lo, x_up)
     unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
     epsilon = 0.1
+    inf_norm_term = barrier.InfNormTerm(
+        torch.diag(2. / (system.x_up - system.x_lo)),
+        (system.x_up + system.x_lo) / (system.x_up - system.x_lo))
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,
-                                     verify_region_boundary, epsilon)
+                                     verify_region_boundary, epsilon,
+                                     inf_norm_term)
 
     unsafe_state_samples = torch.zeros((0, 1), dtype=dtype)
     boundary_state_samples = torch.zeros((0, 1), dtype=dtype)

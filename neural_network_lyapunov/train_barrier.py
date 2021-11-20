@@ -23,11 +23,16 @@ class TrainBarrier:
     1. Bi-level optimization approach
     2. Adversarial training approach.
     """
-    def __init__(self, barrier_system: barrier.Barrier, x_star: torch.Tensor,
-                 c: float, unsafe_region_cnstr: gurobi_torch_mip.
+    def __init__(self,
+                 barrier_system: barrier.Barrier,
+                 x_star: torch.Tensor,
+                 c: float,
+                 unsafe_region_cnstr: gurobi_torch_mip.
                  MixedIntegerConstraintsReturn,
                  verify_region_boundary: gurobi_torch_mip.
-                 MixedIntegerConstraintsReturn, epsilon: float):
+                 MixedIntegerConstraintsReturn,
+                 epsilon: float,
+                 inf_norm_term: barrier.InfNormTerm = None):
         """
         Args:
           barrier_system: a Barrier class object.
@@ -36,6 +41,9 @@ class TrainBarrier:
           h(x) = ϕ(x) - ϕ(x*) + c.
           unsafe_region_cnstr: The constraints encoding x∈Cᵤ
           verify_region_boundary: The constraints encoding x∈∂ℬ
+          inf_norm_term: If not None, then we add the infinity term -|Rx-p|∞
+          to the barrier function. This is useful to make h(x) to be negative
+          on the boundary of the box region.
         """
         assert (isinstance(barrier_system, barrier.Barrier))
         self.barrier_system = barrier_system
@@ -54,6 +62,10 @@ class TrainBarrier:
         assert (isinstance(epsilon, float))
         assert (epsilon > 0)
         self.epsilon = epsilon
+
+        assert (inf_norm_term is None
+                or isinstance(inf_norm_term, barrier.InfNormTerm))
+        self.inf_norm_term = inf_norm_term
 
         self.learning_rate = 0.003
         # momentum used in SGD.
@@ -95,7 +107,11 @@ class TrainBarrier:
 
     def _solve_barrier_value_mip(self, region_cnstr, region_name, mip_params):
         ret = self.barrier_system.barrier_value_as_milp(
-            self.x_star, self.c, region_cnstr, region_name)
+            self.x_star,
+            self.c,
+            region_cnstr,
+            region_name,
+            inf_norm_term=self.inf_norm_term)
         for param, val in mip_params.items():
             ret.milp.gurobi_model.setParam(param, val)
         ret.milp.gurobi_model.optimize()
@@ -116,6 +132,7 @@ class TrainBarrier:
             self.x_star,
             self.c,
             self.epsilon,
+            inf_norm_term=self.inf_norm_term,
             binary_var_type=gurobipy.GRB.BINARY)
         for param, val in self.barrier_deriv_mip_params.items():
             deriv_return.milp.gurobi_model.setParam(param, val)
@@ -139,14 +156,20 @@ class TrainBarrier:
         if unsafe_state_samples_weight is not None and\
                 unsafe_state_samples.shape[0] > 0:
             h_unsafe = self.barrier_system.barrier_value(
-                unsafe_state_samples, self.x_star, self.c)
+                unsafe_state_samples,
+                self.x_star,
+                self.c,
+                inf_norm_term=self.inf_norm_term)
             total_loss += unsafe_state_samples_weight * \
                 torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
                     -h_unsafe, torch.tensor(-1))
         if boundary_state_samples_weight is not None and\
                 boundary_state_samples.shape[0] > 0:
             h_boundary = self.barrier_system.barrier_value(
-                boundary_state_samples, self.x_star, self.c)
+                boundary_state_samples,
+                self.x_star,
+                self.c,
+                inf_norm_term=self.inf_norm_term)
             total_loss += boundary_state_samples_weight * \
                 torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
                     -h_boundary, torch.tensor(-1))
@@ -155,11 +178,15 @@ class TrainBarrier:
             hdot = torch.stack([
                 torch.min(
                     self.barrier_system.barrier_derivative(
-                        derivative_state_samples[i]))
+                        derivative_state_samples[i],
+                        inf_norm_term=self.inf_norm_term))
                 for i in range(derivative_state_samples.shape[0])
             ])
-            h = self.barrier_system.barrier_value(derivative_state_samples,
-                                                  self.x_star, self.c)
+            h = self.barrier_system.barrier_value(
+                derivative_state_samples,
+                self.x_star,
+                self.c,
+                inf_norm_term=self.inf_norm_term)
             total_loss += derivative_state_samples_weight * \
                 torch.nn.HingeEmbeddingLoss(margin=0., reduction="mean")(
                     hdot + self.epsilon * h, torch.tensor(-1))
@@ -378,9 +405,12 @@ class TrainBarrier:
         assert (len(sample_states.shape) == 2
                 and sample_states.shape[1] == self.barrier_system.system.x_dim)
         sample_loss = -self.epsilon * self.barrier_system.barrier_value(
-            sample_states, self.x_star, self.c
+            sample_states,
+            self.x_star,
+            self.c,
+            inf_norm_term=self.inf_norm_term
         ) - self.barrier_system.minimal_barrier_derivative_given_action(
-            sample_states, sample_actions)
+            sample_states, sample_actions, inf_norm_term=self.inf_norm_term)
 
         return weight * torch.nn.HingeEmbeddingLoss(
             margin=0., reduction="mean")(-sample_loss, torch.tensor(-1))
