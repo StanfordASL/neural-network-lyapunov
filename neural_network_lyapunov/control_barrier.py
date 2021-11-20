@@ -99,22 +99,7 @@ class ControlBarrier(barrier.Barrier):
         Return:
           hdot: hdot[i] = max_u dh[i]/dx[i] * (f(x[i]) + G(x[i]) * u)
         """
-        assert (x.shape[1] == self.system.x_dim)
-        x_star = torch.zeros((self.system.x_dim, ), dtype=self.system.dtype)
-        c = 100.
-        x.requires_grad = True
-        dhdx = torch.zeros_like(x, dtype=x.dtype)
-        h = self.barrier_value(x, x_star, c, inf_norm_term=inf_norm_term)
-        for i in range(x.shape[0]):
-            grd = torch.zeros_like(h, dtype=x.dtype)
-            grd[i] = 1
-            dhdx[i, :] = torch.autograd.grad(
-                outputs=h,
-                inputs=x,
-                grad_outputs=grd,
-                retain_graph=True,
-                create_graph=create_graph)[0][i, :]
-        x.requires_grad = False
+        dhdx = self._barrier_gradient_batch(x, inf_norm_term, create_graph)
         f = self.system.f(x)
         G = self.system.G(x)
         dhdx_times_f = torch.sum(dhdx * f, dim=1)

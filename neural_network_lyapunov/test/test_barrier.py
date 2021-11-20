@@ -245,6 +245,59 @@ class TestBarrier(unittest.TestCase):
             torch.norm(dhdx - torch.cat((dhdx1, dhdx2), dim=0)) < 1E-10
             or torch.norm(dhdx - torch.cat((dhdx2, dhdx1), dim=0)) < 1E-10)
 
+    def barrier_gradient_batch_tester(self, dut, x, inf_norm_term,
+                                      create_graph):
+        dhdx = dut._barrier_gradient_batch(x,
+                                           inf_norm_term,
+                                           create_graph=create_graph)
+        self.assertEqual(dhdx.shape, (x.shape[0], dut.system.x_dim))
+        dhdx_expected = torch.zeros_like(x, dtype=self.dtype)
+        for i in range(x.shape[0]):
+            dhdx_sample = dut._barrier_gradient(x[i], inf_norm_term)
+            assert (dhdx_sample.shape[0] == 1)
+            dhdx_expected[i] = dhdx_sample
+        np.testing.assert_allclose(dhdx.detach().numpy(),
+                                   dhdx_expected.detach().numpy())
+        return dhdx, dhdx_expected
+
+    def test_barrier_gradient_batch(self):
+        dut = mut.Barrier(self.linear_system, self.barrier_relu1)
+        inf_norm_term = mut.InfNormTerm(
+            torch.tensor([[1, 3], [-2, 4], [3, 1]], dtype=self.dtype),
+            torch.tensor([1, -2, 3], dtype=self.dtype))
+
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+
+        self.barrier_gradient_batch_tester(dut,
+                                           x_samples,
+                                           inf_norm_term=None,
+                                           create_graph=False)
+        self.barrier_gradient_batch_tester(dut,
+                                           x_samples,
+                                           inf_norm_term=inf_norm_term,
+                                           create_graph=False)
+
+        for v in dut.barrier_relu.parameters():
+            v.requires_grad = True
+        dhdx, dhdx_expected = self.barrier_gradient_batch_tester(
+            dut, x_samples, inf_norm_term=inf_norm_term, create_graph=True)
+        torch.sum(dhdx).backward()
+        grad = [
+            v.grad.clone() for v in dut.barrier_relu.parameters()
+            if v.grad is not None
+        ]
+        dut.barrier_relu.zero_grad()
+        torch.sum(dhdx_expected).backward()
+        grad_expected = [
+            v.grad.clone() for v in dut.barrier_relu.parameters()
+            if v.grad is not None
+        ]
+        for (v1, v2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(v1.detach().numpy(),
+                                       v2.detach().numpy())
+
 
 if __name__ == "__main__":
     unittest.main()
