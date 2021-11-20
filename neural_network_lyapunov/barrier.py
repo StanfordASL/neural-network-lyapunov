@@ -207,3 +207,19 @@ class Barrier:
                 "",
                 binary_var_type=gurobipy.GRB.BINARY)
         return inf_norm, inf_norm_binary
+
+    def _barrier_gradient(self, x, inf_norm_term):
+        """
+        Compute the gradient ∂h/∂x for the barrier function h(x).
+        If there are multiple possible gradient, then we return all the left
+        and right subgradient.
+        """
+        assert (x.shape == (self.system.x_dim, ))
+        dphidx = utils.relu_network_gradient(self.barrier_relu, x).squeeze(1)
+        if inf_norm_term is not None:
+            dinfnorm_dx = utils.l_infinity_gradient(
+                inf_norm_term.R @ x - inf_norm_term.p) @ inf_norm_term.R
+            dhdx = utils.minikowski_sum(dphidx, -dinfnorm_dx)
+        else:
+            dhdx = dphidx
+        return dhdx

@@ -370,7 +370,7 @@ class TestTrainBarrier(unittest.TestCase):
         loss = dut.nominal_controller_loss(controller, x_samples, weight)
 
         u_samples = controller.output(x_samples)
-        hdot = dut.barrier_system.barrier_derivative_given_action(
+        hdot = dut.barrier_system.minimal_barrier_derivative_given_action(
             x_samples, u_samples)
         loss_expected = weight * torch.mean(
             torch.maximum(

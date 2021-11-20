@@ -392,30 +392,45 @@ class TestControlBarrier(unittest.TestCase):
                                                epsilon,
                                                inf_norm_term=None)
 
-    def test_barrier_derivative_given_action(self):
+    def minimal_barrier_derivative_given_action_tester(self, dut, x_samples,
+                                                       u_samples,
+                                                       inf_norm_term):
+        hdot_batch = dut.minimal_barrier_derivative_given_action(
+            x_samples, u_samples, inf_norm_term=inf_norm_term)
+        self.assertEqual(hdot_batch.shape, (x_samples.shape[0], ))
+        for i in range(x_samples.shape[0]):
+            xdot = dut.system.dynamics(x_samples[i], u_samples[i])
+            dhdx = dut._barrier_gradient(x_samples[i], inf_norm_term)
+            hdot_expected = torch.min(dhdx @ xdot)
+            self.assertAlmostEqual(
+                hdot_expected.item(),
+                dut.minimal_barrier_derivative_given_action(
+                    x_samples[i], u_samples[i],
+                    inf_norm_term=inf_norm_term).item())
+            self.assertAlmostEqual(hdot_batch[i].item(), hdot_expected.item())
+
+    def test_minimal_barrier_derivative_given_action(self):
         dut1 = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
 
+        torch.manual_seed(0)
         x_samples = utils.uniform_sample_in_box(dut1.system.x_lo,
                                                 dut1.system.x_up, 100)
         u_samples = utils.uniform_sample_in_box(dut1.system.u_lo,
                                                 dut1.system.u_up, 100)
-        hdot_batch = dut1.barrier_derivative_given_action(x_samples, u_samples)
-        self.assertEqual(hdot_batch.shape, (x_samples.shape[0], ))
-        for i in range(x_samples.shape[0]):
-            xdot = dut1.system.dynamics(x_samples[i], u_samples[i])
-            dhdx = utils.relu_network_gradient(dut1.barrier_relu,
-                                               x_samples[i]).squeeze(1)
-            hdot_expected = torch.min(dhdx @ xdot)
-            self.assertAlmostEqual(
-                hdot_expected.item(),
-                dut1.barrier_derivative_given_action(x_samples[i],
-                                                     u_samples[i]).item())
-            self.assertAlmostEqual(hdot_batch[i].item(), hdot_expected)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[0.5, 0.2], [0.1, 0.3], [0.1, 1]], dtype=self.dtype),
+            torch.tensor([0.1, 0.5, 0.2], dtype=self.dtype))
+        self.minimal_barrier_derivative_given_action_tester(dut1,
+                                                            x_samples,
+                                                            u_samples,
+                                                            inf_norm_term=None)
+        self.minimal_barrier_derivative_given_action_tester(
+            dut1, x_samples, u_samples, inf_norm_term=inf_norm_term)
 
         # Test x such that dhdx has multiple values.
         x = torch.tensor([1, 1], dtype=self.dtype)
         u = torch.tensor([1, 2, 3], dtype=self.dtype)
-        hdot = dut1.barrier_derivative_given_action(x, u)
+        hdot = dut1.minimal_barrier_derivative_given_action(x, u)
         dhdx = utils.relu_network_gradient(dut1.barrier_relu, x).squeeze(1)
         hdot_expected = torch.min(dhdx @ dut1.system.dynamics(x, u))
         self.assertAlmostEqual(hdot.item(), hdot_expected.item())
@@ -552,8 +567,8 @@ class TestControlBarrier(unittest.TestCase):
     def barrier_derivative_batch_tester(self, dut, x, inf_norm_term,
                                         create_graph):
         hdot = dut.barrier_derivative_batch(x,
-                                            inf_norm_term=inf_norm_term,
-                                            create_graph=create_graph)
+                                            create_graph,
+                                            inf_norm_term=inf_norm_term)
         self.assertEqual(hdot.shape, (x.shape[0], ))
         hdot_expected = torch.empty((x.shape[0], ), dtype=dut.system.dtype)
         for i in range(x.shape[0]):

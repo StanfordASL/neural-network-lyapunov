@@ -378,9 +378,9 @@ class TrainBarrier:
         assert (len(sample_states.shape) == 2
                 and sample_states.shape[1] == self.barrier_system.system.x_dim)
         sample_loss = -self.epsilon * self.barrier_system.barrier_value(
-            sample_states, self.x_star,
-            self.c) - self.barrier_system.barrier_derivative_given_action(
-                sample_states, sample_actions)
+            sample_states, self.x_star, self.c
+        ) - self.barrier_system.minimal_barrier_derivative_given_action(
+            sample_states, sample_actions)
 
         return weight * torch.nn.HingeEmbeddingLoss(
             margin=0., reduction="mean")(-sample_loss, torch.tensor(-1))

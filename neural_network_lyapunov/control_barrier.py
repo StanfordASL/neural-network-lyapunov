@@ -83,9 +83,9 @@ class ControlBarrier(barrier.Barrier):
 
     def barrier_derivative_batch(self,
                                  x: torch.Tensor,
+                                 create_graph,
                                  *,
-                                 inf_norm_term: barrier.InfNormTerm = None,
-                                 create_graph=False):
+                                 inf_norm_term: barrier.InfNormTerm = None):
         """
         Compute the derivative hdot in a batch. Note that when there are
         multiple subgradient dhdx, we take the unique one returned by pytorch
@@ -446,8 +446,12 @@ class ControlBarrier(barrier.Barrier):
         return dinfnorm_dx_times_G, dinfnorm_dx_times_G_lo,\
             dinfnorm_dx_times_G_up
 
-    def barrier_derivative_given_action(self, x: torch.Tensor,
-                                        u: torch.Tensor):
+    def minimal_barrier_derivative_given_action(
+            self,
+            x: torch.Tensor,
+            u: torch.Tensor,
+            *,
+            inf_norm_term: barrier.InfNormTerm = None):
         """
         Compute ḣ = ∂h/∂x*ẋ
         When there are multiple ∂h/∂x, we return the minimal ḣ
@@ -456,13 +460,12 @@ class ControlBarrier(barrier.Barrier):
         assert (isinstance(u, torch.Tensor))
         xdot = self.system.dynamics(x, u)
         if (len(x.shape) == 1 and len(u.shape) == 1):
-            dhdx = utils.relu_network_gradient(self.barrier_relu, x).squeeze(1)
+            dhdx = self._barrier_gradient(x, inf_norm_term)
             return torch.min(dhdx @ xdot)
         else:
             hdot_batch = torch.empty(x.shape[0], dtype=self.system.dtype)
             for i in range(x.shape[0]):
-                dhdx = utils.relu_network_gradient(self.barrier_relu,
-                                                   x[i]).squeeze(1)
+                dhdx = self._barrier_gradient(x[i], inf_norm_term)
                 hdot_batch[i] = torch.min(dhdx @ xdot[i])
             return hdot_batch
 
