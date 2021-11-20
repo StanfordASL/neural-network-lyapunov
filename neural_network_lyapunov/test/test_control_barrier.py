@@ -375,10 +375,7 @@ class TestControlBarrier(unittest.TestCase):
                                                c,
                                                epsilon,
                                                inf_norm_term=None)
-        self.barrier_derivative_as_milp_tester(dut2,
-                                               x_star,
-                                               c,
-                                               epsilon,
+        self.barrier_derivative_as_milp_tester(dut2, x_star, c, epsilon,
                                                inf_norm_term)
 
         dut3 = mut.ControlBarrier(self.linear_system, self.barrier_relu2)
@@ -551,6 +548,54 @@ class TestControlBarrier(unittest.TestCase):
             torch.tensor([[2, -1], [0, 1], [1, 0]], dtype=self.dtype),
             torch.tensor([0.5, -0.1, 0.1], dtype=self.dtype))
         self.compute_dinfnorm_dx_times_G_tester(dut, inf_norm_term)
+
+    def barrier_derivative_batch_tester(self, dut, x, inf_norm_term,
+                                        create_graph):
+        hdot = dut.barrier_derivative_batch(x,
+                                            inf_norm_term=inf_norm_term,
+                                            create_graph=create_graph)
+        self.assertEqual(hdot.shape, (x.shape[0], ))
+        hdot_expected = torch.empty((x.shape[0], ), dtype=dut.system.dtype)
+        for i in range(x.shape[0]):
+            hdot_sample = dut.barrier_derivative(x[i],
+                                                 inf_norm_term=inf_norm_term)
+            assert (hdot_sample.shape[0] == 1)
+            hdot_expected[i] = hdot_sample[0]
+        np.testing.assert_allclose(hdot.detach().numpy(),
+                                   hdot_expected.detach().numpy())
+        return hdot, hdot_expected
+
+    def test_barrier_derivative_batch(self):
+        dut = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 3], [-1, 2], [2, -1]], dtype=self.dtype),
+            torch.tensor([0.5, -1, 1], dtype=self.dtype))
+
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        create_graph = False
+        self.barrier_derivative_batch_tester(dut, x_samples, inf_norm_term,
+                                             create_graph)
+        for v in self.barrier_relu1.parameters():
+            v.requires_grad = True
+        create_graph = True
+        hdot, hdot_expected = self.barrier_derivative_batch_tester(
+            dut, x_samples, inf_norm_term, create_graph)
+        torch.mean(hdot).backward()
+        grad = [
+            v.grad.clone() for v in self.barrier_relu1.parameters()
+            if v.grad is not None
+        ]
+        self.barrier_relu1.zero_grad()
+        torch.mean(hdot_expected).backward()
+        grad_expected = [
+            v.grad.clone() for v in self.barrier_relu1.parameters()
+            if v.grad is not None
+        ]
+        for (v1, v2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(v1.detach().numpy(),
+                                       v2.detach().numpy())
 
 
 if __name__ == "__main__":

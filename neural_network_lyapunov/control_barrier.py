@@ -81,6 +81,50 @@ class ControlBarrier(barrier.Barrier):
             dim=1)
         return hdot
 
+    def barrier_derivative_batch(self,
+                                 x: torch.Tensor,
+                                 *,
+                                 inf_norm_term: barrier.InfNormTerm = None,
+                                 create_graph=False):
+        """
+        Compute the derivative hdot in a batch. Note that when there are
+        multiple subgradient dhdx, we take the unique one returned by pytorch
+        backward().
+        Also make sure that the system f(x) and G(x) handles a batch of x.
+
+        Args:
+          create_graph: Set to True if you want to compute the gradient of hdot
+          later.
+
+        Return:
+          hdot: hdot[i] = max_u dh[i]/dx[i] * (f(x[i]) + G(x[i]) * u)
+        """
+        assert (x.shape[1] == self.system.x_dim)
+        x_star = torch.zeros((self.system.x_dim, ), dtype=self.system.dtype)
+        c = 100.
+        x.requires_grad = True
+        dhdx = torch.zeros_like(x, dtype=x.dtype)
+        h = self.barrier_value(x, x_star, c, inf_norm_term=inf_norm_term)
+        for i in range(x.shape[0]):
+            grd = torch.zeros_like(h, dtype=x.dtype)
+            grd[i] = 1
+            dhdx[i, :] = torch.autograd.grad(
+                outputs=h,
+                inputs=x,
+                grad_outputs=grd,
+                retain_graph=True,
+                create_graph=create_graph)[0][i, :]
+        x.requires_grad = False
+        f = self.system.f(x)
+        G = self.system.G(x)
+        dhdx_times_f = torch.sum(dhdx * f, dim=1)
+        dhdx_times_G = (dhdx.unsqueeze(1) @ G).squeeze(1)
+        u_mid = (self.system.u_lo + self.system.u_up) / 2
+        delta_u = (self.system.u_up - self.system.u_lo) / 2
+        hdot = dhdx_times_f + dhdx_times_G @ u_mid + torch.norm(
+            dhdx_times_G * delta_u, p=1, dim=1)
+        return hdot
+
     def barrier_derivative_as_milp(
             self,
             x_star,
@@ -165,9 +209,9 @@ class ControlBarrier(barrier.Barrier):
             # ∂|Rx−p|∞/∂x * f, we add linf_binary_pos_times_Rf.sum() -
             # linf_binary_neg_times_Rf.sum() to the cost
             cost_coeff.append(
-                torch.cat(
-                    (torch.ones((inf_norm_term.R.shape[0], ), dtype=dtype),
-                     -torch.ones((inf_norm_term.R.shape[0], ), dtype=dtype))))
+                torch.cat((torch.ones(
+                    (inf_norm_term.R.shape[0], ), dtype=dtype), -torch.ones(
+                        (inf_norm_term.R.shape[0], ), dtype=dtype))))
             cost_vars.append(linf_binary_pos_times_Rf +
                              linf_binary_neg_times_Rf)
         else:
