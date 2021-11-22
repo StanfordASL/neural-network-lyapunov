@@ -14,6 +14,7 @@ import argparse
 import numpy as np
 import gurobipy
 import scipy.integrate
+import matplotlib.pyplot as plt
 
 
 def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
@@ -44,8 +45,7 @@ def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
         u_var = [u[0], u[1]]
         x_torch = torch.from_numpy(x)
         with torch.no_grad():
-            dhdx = dut._barrier_gradient(x_torch,
-                                         inf_norm_term)
+            dhdx = dut._barrier_gradient(x_torch, inf_norm_term)
 
             f = dynamics_model.f(x_torch)
             G = dynamics_model.G(x_torch)
@@ -87,15 +87,56 @@ def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
 
     reach_goal.terminal = True
 
-    result = scipy.integrate.solve_ivp(plant_dynamics, [0, T],
-                                       x0,
-                                       events=reach_goal,
-                                       max_step=0.01)
+    def exit_boundary(t, x):
+        return np.minimum((x_up.detach().numpy() + 0.01 - x).min(),
+                          (x - x_lo.detach().numpy() + 0.01).min())
+
+    exit_boundary.terminal = True
+
+    result_newton = scipy.integrate.solve_ivp(
+        plant_dynamics, [0, T],
+        x0,
+        events=[reach_goal, exit_boundary],
+        max_step=0.01)
     result_nn = scipy.integrate.solve_ivp(nn_plant_dynamics, [0, T],
                                           x0,
-                                          events=reach_goal,
-                                          max_step=0.01)
-    return result, result_nn
+                                          events=[reach_goal, exit_boundary],
+                                          max_step=0.001)
+
+    def plot_result(result):
+        nT = result.t.shape[0]
+        u_val = np.zeros((2, nT))
+        hdot = np.zeros((nT, ))
+        for i in range(nT):
+            u_val[:, i] = compute_control(result.y[:, i])
+            hdot[i] = dut.minimal_barrier_derivative_given_action(
+                torch.from_numpy(result.y[:, i]),
+                torch.from_numpy(u_val[:, i]),
+                inf_norm_term=inf_norm_term).item()
+        h_val = dut.barrier_value(
+            torch.from_numpy(result.y.T),
+            x_star,
+            c,
+            inf_norm_term=inf_norm_term).detach().numpy()
+        fig_u = plt.figure()
+        ax_u0 = fig_u.add_subplot(211)
+        ax_u0.plot(result.t, u_val[0, :])
+        ax_u0.set_title("u")
+        ax_u1 = fig_u.add_subplot(212)
+        ax_u1.plot(result.t, u_val[1, :])
+        ax_u1.set_xlabel("time (s)")
+
+        fig_h = plt.figure()
+        ax_h0 = fig_h.add_subplot(211)
+        ax_h0.plot(result.t, h_val)
+        ax_h0.set_title("h")
+        ax_h1 = fig_h.add_subplot(212)
+        ax_h1.plot(result.t, hdot)
+        ax_h1.set_xlabel("time (s)")
+
+        return fig_u, fig_h, u_val, h_val, hdot
+
+    return result_newton, result_nn
 
 
 if __name__ == "__main__":
