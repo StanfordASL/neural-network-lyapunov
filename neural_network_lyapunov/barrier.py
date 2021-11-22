@@ -30,6 +30,15 @@ class InfNormTerm:
         assert ((self.R is None and self.p is None)
                 or (self.R.shape[0] == self.p.shape[0]))
 
+    @classmethod
+    def from_bounding_box(cls, x_lo, x_up, scale: float):
+        """
+        Create an infinity norm term |Rx-p|∞ such that this term has value
+        `scale` on the boundary of the box x_lo <= x <= x_up
+        """
+        return cls(R=torch.diag(2. * scale / (x_up - x_lo)),
+                   p=scale * (x_up + x_lo) / (x_up - x_lo))
+
 
 class Barrier:
     """

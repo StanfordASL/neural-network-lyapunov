@@ -1162,20 +1162,27 @@ def save_controller_model(controller_relu, x_lo, x_up, u_lo, u_up, file_path):
 
 
 def save_control_barrier_function(barrier_relu, x_star, c, epsilon, x_lo, x_up,
-                                  u_lo, u_up, save_path):
+                                  u_lo, u_up, inf_norm_term, save_path):
     linear_layer_width, negative_slope, bias = extract_relu_structure(
         barrier_relu)
+    inf_norm_data = None if inf_norm_term is None else {
+        "R": inf_norm_term.R,
+        "p": inf_norm_term.p
+    }
     torch.save(
         {
             "linear_layer_width": linear_layer_width,
             "negative_slope": negative_slope,
             "bias": bias,
+            "state_dict": barrier_relu.state_dict(),
             "x_star": x_star,
             "c": c,
+            "epsilon": epsilon,
             "x_lo": x_lo,
             "x_up": x_up,
             "u_lo": u_lo,
-            "u_up": u_up
+            "u_up": u_up,
+            "inf_norm_term": inf_norm_data
         }, save_path)
 
 

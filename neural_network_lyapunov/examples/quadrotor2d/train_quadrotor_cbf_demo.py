@@ -1,4 +1,5 @@
 import neural_network_lyapunov.train_barrier as train_barrier
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.control_barrier as control_barrier
 import neural_network_lyapunov.examples.quadrotor2d.control_affine_quadrotor\
     as control_affine_quadrotor
@@ -16,13 +17,15 @@ import scipy.integrate
 
 
 def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
-             barrier_relu, x_star, c, u_lo, u_up, epsilon, x0, pos_des, T):
+             barrier_relu, x_star, c, inf_norm_term, u_lo, u_up, epsilon, x0,
+             pos_des, T):
     """
     Simulate the system to go to a desired hovering position, while respecting
     the barrier cerificate.
     """
     dtype = torch.float64
     plant = quadrotor_2d.Quadrotor2D(dtype)
+    dut = control_barrier.ControlBarrier(dynamics_model, barrier_relu)
 
     x_des = np.array([pos_des[0], pos_des[1], 0, 0, 0, 0])
     h_des = barrier_relu(torch.from_numpy(x_des)) - barrier_relu(x_star) + c
@@ -41,11 +44,15 @@ def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
         u_var = [u[0], u[1]]
         x_torch = torch.from_numpy(x)
         with torch.no_grad():
-            dhdx = utils.relu_network_gradient(barrier_relu,
-                                               x_torch).squeeze(1)
+            dhdx = dut._barrier_gradient(x_torch,
+                                         inf_norm_term)
+
             f = dynamics_model.f(x_torch)
             G = dynamics_model.G(x_torch)
-            h = barrier_relu(x_torch) - barrier_relu(x_star) + c
+            h = dut.barrier_value(x_torch,
+                                  x_star,
+                                  c,
+                                  inf_norm_term=inf_norm_term)
             for i in range(dhdx.shape[0]):
                 prog.addLConstr(gurobipy.LinExpr((dhdx[i] @ G).tolist(),
                                                  u_var),
@@ -102,6 +109,7 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="path to load the control barrier model")
+    parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--max_iterations", type=int, default=1000)
     parser.add_argument("--enable_wandb", action="store_true")
     args = parser.parse_args()
@@ -166,14 +174,18 @@ if __name__ == "__main__":
 
     epsilon = 0.1
 
+    inf_norm_term = barrier.InfNormTerm(torch.diag(2. / (x_up - x_lo)),
+                                        (x_up + x_lo) / (x_up - x_lo))
+
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,
-                                     verify_region_boundary, epsilon)
+                                     verify_region_boundary, epsilon,
+                                     inf_norm_term)
     dut.max_iterations = args.max_iterations
     dut.enable_wandb = args.enable_wandb
 
-    # simulate(dynamics_model, barrier_relu, x_star, c, u_lo, u_up, epsilon,
-    #          np.zeros((6, )), np.array([0, -0.35]), 5)
+    simulate(dynamics_model, barrier_relu, x_star, c, inf_norm_term, u_lo,
+             u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 3)
 
     if args.train_on_samples:
         # First train on samples without solving MIP.

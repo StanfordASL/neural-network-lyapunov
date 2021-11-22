@@ -9,6 +9,21 @@ import unittest
 import gurobipy
 
 
+class TestInfNormTerm(unittest.TestCase):
+    def test_from_bounding_box(self):
+        dtype = torch.float64
+        x_lo = torch.tensor([-3, -2, 1], dtype=dtype)
+        x_up = torch.tensor([-1, 2, 3], dtype=dtype)
+        scale = 0.5
+        dut = mut.InfNormTerm.from_bounding_box(x_lo, x_up, scale)
+        x_samples = utils.uniform_sample_on_box_boundary(x_lo, x_up, 100)
+        np.testing.assert_allclose(
+            torch.norm(dut.R @ x_samples.T - dut.p.unsqueeze(1),
+                       p=float("inf"),
+                       dim=0).detach().numpy(),
+            np.ones((x_samples.shape[0], )) * scale)
+
+
 class TestBarrier(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
