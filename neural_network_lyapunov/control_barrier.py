@@ -454,6 +454,25 @@ class ControlBarrier(barrier.Barrier):
                 hdot_batch[i] = torch.min(dhdx @ xdot[i])
             return hdot_batch
 
+    def barrier_derivative_given_action_batch(
+            self,
+            x: torch.Tensor,
+            u: torch.Tensor,
+            create_graph,
+            *,
+            inf_norm_term: barrier.InfNormTerm = None):
+        """
+        Compute ḣ = ∂h/∂x*ẋ for a batch of x and u.
+        For a given state x[i], if there are multiple ∂h/∂x, we select the one
+        used by pytorch autograd.
+        """
+        assert (isinstance(x, torch.Tensor))
+        assert (isinstance(u, torch.Tensor))
+        assert (x.shape[0] == u.shape[0])
+        dhdx = self._barrier_gradient_batch(x, inf_norm_term, create_graph)
+        xdot = self.system.dynamics(x, u)
+        return torch.sum(dhdx * xdot, dim=1)
+
 
 def _compute_dlinfdx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,
                              linf_binary: list, y: list, R: torch.Tensor,

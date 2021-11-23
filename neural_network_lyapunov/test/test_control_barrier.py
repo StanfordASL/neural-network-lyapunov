@@ -612,6 +612,67 @@ class TestControlBarrier(unittest.TestCase):
             np.testing.assert_allclose(v1.detach().numpy(),
                                        v2.detach().numpy())
 
+    def barrier_derivative_given_action_batch_tester(self, dut, x, u,
+                                                     create_graph,
+                                                     inf_norm_term):
+        hdot = dut.barrier_derivative_given_action_batch(
+            x, u, create_graph, inf_norm_term=inf_norm_term)
+        self.assertEqual(hdot.shape, (x.shape[0], ))
+        hdot_expected = torch.empty((x.shape[0], ), dtype=self.dtype)
+        for i in range(x.shape[0]):
+            hdot_expected[i] = dut.minimal_barrier_derivative_given_action(
+                x[i], u[i], inf_norm_term=inf_norm_term)
+            np.testing.assert_allclose(hdot[i].detach().numpy(),
+                                       hdot_expected[i].detach().numpy())
+        return hdot, hdot_expected
+
+    def test_barrier_derivative_given_action_batch(self):
+        dut = mut.ControlBarrier(self.linear_system, self.barrier_relu1)
+        inf_norm_term = barrier.InfNormTerm(
+            torch.tensor([[1, 3], [-1, 2], [2, -1]], dtype=self.dtype),
+            torch.tensor([0.5, -1, 1], dtype=self.dtype))
+
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        u_samples = utils.uniform_sample_in_box(dut.system.u_lo,
+                                                dut.system.u_up, 100)
+        self.barrier_derivative_given_action_batch_tester(dut,
+                                                          x_samples,
+                                                          u_samples,
+                                                          create_graph=False,
+                                                          inf_norm_term=None)
+        self.barrier_derivative_given_action_batch_tester(
+            dut,
+            x_samples,
+            u_samples,
+            create_graph=False,
+            inf_norm_term=inf_norm_term)
+        # create_graph=True. I want to check the gradient.
+        for v in self.barrier_relu1.parameters():
+            v.requires_grad = True
+        hdot, hdot_expected = \
+            self.barrier_derivative_given_action_batch_tester(
+                dut,
+                x_samples,
+                u_samples,
+                create_graph=True,
+                inf_norm_term=inf_norm_term)
+        torch.sum(hdot).backward()
+        grad = [
+            v.grad.clone() for v in self.barrier_relu1.parameters()
+            if v.grad is not None
+        ]
+        self.barrier_relu1.zero_grad()
+        torch.sum(hdot_expected).backward()
+        grad_expected = [
+            v.grad.clone() for v in self.barrier_relu1.parameters()
+            if v.grad is not None
+        ]
+        for (v1, v2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(v1.detach().numpy(),
+                                       v2.detach().numpy())
+
 
 if __name__ == "__main__":
     unittest.main()
