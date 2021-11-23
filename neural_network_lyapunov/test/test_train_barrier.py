@@ -9,6 +9,7 @@ import neural_network_lyapunov.nominal_controller as nominal_controller
 
 import torch
 import unittest
+import numpy as np
 
 
 class TestTrainBarrier(unittest.TestCase):
@@ -378,21 +379,57 @@ class TestTrainBarrier(unittest.TestCase):
         dut.train_on_samples(unsafe_state_samples, boundary_state_samples,
                              deriv_state_samples)
 
+    def nominal_control_loss_tester(self, dut):
+        loss = dut.nominal_controller_loss()
+        x_samples = dut.nominal_control_option.sample_states
+
+        u_samples = dut.nominal_control_option.controller.output(x_samples)
+        hdot = dut.barrier_system.minimal_barrier_derivative_given_action(
+            x_samples, u_samples, inf_norm_term=dut.inf_norm_term)
+        h = dut.barrier_system.barrier_value(x_samples,
+                                             dut.x_star,
+                                             dut.c,
+                                             inf_norm_term=dut.inf_norm_term)
+        if dut.nominal_control_option.norm == "mean":
+            loss_expected = dut.nominal_control_option.weight * torch.mean(
+                torch.maximum(
+                    -hdot - dut.epsilon * h,
+                    torch.ones_like(hdot, dtype=self.dtype) *
+                    dut.nominal_control_option.margin))
+        elif dut.nominal_control_option.norm == "max":
+            loss_expected = dut.nominal_control_option.weight * torch.max(
+                torch.maximum(
+                    -hdot - dut.epsilon * h,
+                    torch.ones_like(hdot, dtype=self.dtype) *
+                    dut.nominal_control_option.margin))
+
+        self.assertAlmostEqual(loss.item(), loss_expected.item())
+
+        all_parameters = list(
+            dut.barrier_system.barrier_relu.parameters()) + list(
+                dut.nominal_control_option.controller.parameters())
+        for v in all_parameters:
+            v.requires_grad = True
+        loss.backward()
+        grad = [v.grad.clone() for v in all_parameters if v.grad is not None]
+        for v in all_parameters:
+            v.grad.zero_()
+        loss_expected.backward()
+        grad_expected = [
+            v.grad.clone() for v in all_parameters if v.grad is not None
+        ]
+        for (v1, v2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(v1.detach().numpy(),
+                                       v2.detach().numpy())
+        for v in all_parameters:
+            v.grad.zero_()
+
     def test_nominal_controller_loss(self):
         c = 0.5
         epsilon = 1.5
         x_star = torch.tensor([0.5, 0.1], dtype=self.dtype)
-        inf_norm_term = barrier.InfNormTerm(
-            torch.diag(2. /
-                       (self.linear_system.x_up - self.linear_system.x_lo)),
-            (self.linear_system.x_up + self.linear_system.x_lo) /
-            (self.linear_system.x_up - self.linear_system.x_lo))
-        dut = mut.TrainBarrier(
-            control_barrier.ControlBarrier(self.linear_system,
-                                           self.barrier_relu1), x_star, c,
-            gurobi_torch_mip.MixedIntegerConstraintsReturn(),
-            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon,
-            inf_norm_term)
+        inf_norm_term = barrier.InfNormTerm.from_bounding_box(
+            self.linear_system.x_lo, self.linear_system.x_up, 1.)
         controller_network = utils.setup_relu((2, 4, 3),
                                               params=None,
                                               negative_slope=0.1,
@@ -407,23 +444,38 @@ class TestTrainBarrier(unittest.TestCase):
         controller_network[2].bias.data = torch.tensor([1, 3, 2],
                                                        dtype=self.dtype)
         controller = nominal_controller.NominalNNController(
-            controller_network, None, None, dut.barrier_system.system.u_lo,
-            dut.barrier_system.system.u_up)
-        x_samples = utils.uniform_sample_in_box(dut.barrier_system.system.x_lo,
-                                                dut.barrier_system.system.x_up,
-                                                100)
+            controller_network, None, None, self.linear_system.u_lo,
+            self.linear_system.u_up)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(self.linear_system.x_lo,
+                                                self.linear_system.x_up, 100)
         weight = 0.2
-        loss = dut.nominal_controller_loss(controller, x_samples, weight)
+        margin = -0.5
+        nominal_control_option1 = mut.NominalControlOption(controller,
+                                                           x_samples,
+                                                           weight,
+                                                           margin,
+                                                           norm="mean")
+        dut1 = mut.TrainBarrier(
+            control_barrier.ControlBarrier(self.linear_system,
+                                           self.barrier_relu1), x_star, c,
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(),
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon,
+            inf_norm_term, nominal_control_option1)
+        self.nominal_control_loss_tester(dut1)
 
-        u_samples = controller.output(x_samples)
-        hdot = dut.barrier_system.minimal_barrier_derivative_given_action(
-            x_samples, u_samples, inf_norm_term=inf_norm_term)
-        loss_expected = weight * torch.mean(
-            torch.maximum(
-                -hdot - epsilon * dut.barrier_system.barrier_value(
-                    x_samples, x_star, c, inf_norm_term=inf_norm_term),
-                torch.zeros_like(hdot, dtype=self.dtype)))
-        self.assertAlmostEqual(loss.item(), loss_expected.item())
+        nominal_control_option2 = mut.NominalControlOption(controller,
+                                                           x_samples,
+                                                           weight,
+                                                           margin,
+                                                           norm="max")
+        dut2 = mut.TrainBarrier(
+            control_barrier.ControlBarrier(self.linear_system,
+                                           self.barrier_relu1), x_star, c,
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(),
+            gurobi_torch_mip.MixedIntegerConstraintsReturn(), epsilon,
+            inf_norm_term, nominal_control_option2)
+        self.nominal_control_loss_tester(dut2)
 
 
 if __name__ == "__main__":

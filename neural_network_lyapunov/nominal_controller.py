@@ -25,6 +25,12 @@ class NominalController:
     def _do_output(self, x: torch.Tensor):
         raise NotImplementedError
 
+    def parameters(self):
+        """
+        Return all the trainable parameters of the controller.
+        """
+        raise NotImplementedError
+
 
 class NominalNNController(NominalController):
     """
@@ -57,3 +63,6 @@ class NominalNNController(NominalController):
                                                     1),
                                max=self.u_up.repeat(u_before_clamp.shape[0],
                                                     1))
+
+    def parameters(self):
+        return self.network.parameters()

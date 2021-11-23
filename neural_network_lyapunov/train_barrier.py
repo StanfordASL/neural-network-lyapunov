@@ -9,6 +9,36 @@ import time
 import wandb
 
 
+class NominalControlOption:
+    """
+    We will penalize the violation of the barrier condition ḣ ≥ −εh on sampled
+    states for a nominal controller
+    We will add the cost
+    If norm="mean"
+    weight * mean(max(−εh−ḣ, margin))
+    If norm="max"
+    weight * max(max(−εh−ḣ, margin))
+    Namely We add the average violation to the total cost using a weight
+    multiplier
+    """
+    def __init__(self, controller: nominal_controller.NominalController,
+                 sample_states: torch.Tensor, weight: float, margin: float,
+                 norm: str):
+        self.controller = controller
+        assert (isinstance(sample_states, torch.Tensor))
+        self.sample_states = sample_states
+        assert (isinstance(weight, float))
+        assert (weight >= 0)
+        self.weight = weight
+        assert (isinstance(margin, float))
+        if margin > 0:
+            raise Warning("NominalControlOption: better to set margin <= 0")
+        self.margin = margin
+        assert (isinstance(norm, str))
+        assert (norm in ("max", "mean"))
+        self.norm = norm
+
+
 class TrainBarrier:
     """
     Find a barrier function h(x) satisfying
@@ -32,7 +62,8 @@ class TrainBarrier:
                  verify_region_boundary: gurobi_torch_mip.
                  MixedIntegerConstraintsReturn,
                  epsilon: float,
-                 inf_norm_term: barrier.InfNormTerm = None):
+                 inf_norm_term: barrier.InfNormTerm = None,
+                 nominal_control_option: NominalControlOption = None):
         """
         Args:
           barrier_system: a Barrier class object.
@@ -44,6 +75,8 @@ class TrainBarrier:
           inf_norm_term: If not None, then we add the infinity term -|Rx-p|∞
           to the barrier function. This is useful to make h(x) to be negative
           on the boundary of the box region.
+          nominal_control_option : If not None, then we add the nominal
+          controller cost on sampled states.
         """
         assert (isinstance(barrier_system, barrier.Barrier))
         self.barrier_system = barrier_system
@@ -66,6 +99,10 @@ class TrainBarrier:
         assert (inf_norm_term is None
                 or isinstance(inf_norm_term, barrier.InfNormTerm))
         self.inf_norm_term = inf_norm_term
+
+        assert (nominal_control_option is None
+                or isinstance(nominal_control_option, NominalControlOption))
+        self.nominal_control_option = nominal_control_option
 
         self.learning_rate = 0.003
         # momentum used in SGD.
@@ -388,9 +425,7 @@ class TrainBarrier:
             iter_count += 1
         return
 
-    def nominal_controller_loss(
-            self, controller: nominal_controller.NominalController,
-            sample_states: torch.Tensor, weight: float):
+    def nominal_controller_loss(self):
         """
         When we train a control barrier function, we can also search for a
         nominal controller that is consistent with this CBF, namely
@@ -399,18 +434,27 @@ class TrainBarrier:
         this loss will help the CBF-induced controller to take more smooth
         actions.
         """
-        assert (isinstance(controller, nominal_controller.NominalController))
-        sample_actions = controller.output(sample_states)
-        assert (isinstance(sample_states, torch.Tensor))
-        assert (len(sample_states.shape) == 2
-                and sample_states.shape[1] == self.barrier_system.system.x_dim)
-        sample_loss = -self.epsilon * self.barrier_system.barrier_value(
-            sample_states,
+        sample_actions = self.nominal_control_option.controller.output(
+            self.nominal_control_option.sample_states)
+        sample_val = -self.epsilon * self.barrier_system.barrier_value(
+            self.nominal_control_option.sample_states,
             self.x_star,
             self.c,
             inf_norm_term=self.inf_norm_term
-        ) - self.barrier_system.minimal_barrier_derivative_given_action(
-            sample_states, sample_actions, inf_norm_term=self.inf_norm_term)
-
-        return weight * torch.nn.HingeEmbeddingLoss(
-            margin=0., reduction="mean")(-sample_loss, torch.tensor(-1))
+        ) - self.barrier_system.barrier_derivative_given_action_batch(
+            self.nominal_control_option.sample_states,
+            sample_actions,
+            create_graph=True,
+            inf_norm_term=self.inf_norm_term)
+        if self.nominal_control_option.norm == "mean":
+            return self.nominal_control_option.weight * torch.mean(
+                torch.maximum(
+                    sample_val,
+                    torch.ones_like(sample_val, dtype=sample_val.dtype) *
+                    self.nominal_control_option.margin))
+        elif self.nominal_control_option.norm == "max":
+            return self.nominal_control_option.weight * torch.max(
+                torch.maximum(
+                    sample_val,
+                    torch.ones_like(sample_val, dtype=sample_val.dtype) *
+                    self.nominal_control_option.margin))
