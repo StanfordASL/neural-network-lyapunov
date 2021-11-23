@@ -8,12 +8,12 @@ import neural_network_lyapunov.examples.quadrotor2d.quadrotor_2d as \
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.integrator as integrator
 
 import torch
 import argparse
 import numpy as np
 import gurobipy
-import scipy.integrate
 import matplotlib.pyplot as plt
 
 
@@ -82,61 +82,49 @@ def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
             return dynamics_model.dynamics(torch.from_numpy(x),
                                            torch.from_numpy(u))
 
-    def reach_goal(t, x):
-        return np.linalg.norm(x - x_des) - 1E-3
-
-    reach_goal.terminal = True
-
-    def exit_boundary(t, x):
-        return np.minimum((x_up.detach().numpy() + 0.01 - x).min(),
-                          (x - x_lo.detach().numpy() + 0.01).min())
-
-    exit_boundary.terminal = True
-
-    result_newton = scipy.integrate.solve_ivp(
-        plant_dynamics, [0, T],
-        x0,
-        events=[reach_goal, exit_boundary],
-        max_step=0.01)
-    result_nn = scipy.integrate.solve_ivp(nn_plant_dynamics, [0, T],
-                                          x0,
-                                          events=[reach_goal, exit_boundary],
-                                          max_step=0.001)
-
-    def plot_result(result):
-        nT = result.t.shape[0]
-        u_val = np.zeros((2, nT))
-        hdot = np.zeros((nT, ))
-        for i in range(nT):
-            u_val[:, i] = compute_control(result.y[:, i])
+    dt = 0.001
+    constant_control_steps = 1
+    num_control_cycles = 2000
+    u_val = np.zeros((2, num_control_cycles))
+    x_val = np.zeros((6, num_control_cycles))
+    x_val[:, 0] = x0
+    hdot = np.zeros((num_control_cycles, ))
+    with torch.no_grad():
+        for i in range(num_control_cycles - 1):
+            x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
+                lambda x, u: dynamics_model.dynamics(torch.from_numpy(
+                    x), torch.from_numpy(u)).detach().numpy(), compute_control,
+                x_val[:, i], dt, constant_control_steps)
+        u_val[:, -1] = u_val[:, -2]
+        for i in range(num_control_cycles):
             hdot[i] = dut.minimal_barrier_derivative_given_action(
-                torch.from_numpy(result.y[:, i]),
+                torch.from_numpy(x_val[:, i]),
                 torch.from_numpy(u_val[:, i]),
-                inf_norm_term=inf_norm_term).item()
-        h_val = dut.barrier_value(
-            torch.from_numpy(result.y.T),
-            x_star,
-            c,
-            inf_norm_term=inf_norm_term).detach().numpy()
-        fig_u = plt.figure()
-        ax_u0 = fig_u.add_subplot(211)
-        ax_u0.plot(result.t, u_val[0, :])
-        ax_u0.set_title("u")
-        ax_u1 = fig_u.add_subplot(212)
-        ax_u1.plot(result.t, u_val[1, :])
-        ax_u1.set_xlabel("time (s)")
+                inf_norm_term=inf_norm_term)
+        h_val = dut.barrier_value(torch.from_numpy(x_val.T),
+                                  x_star,
+                                  c,
+                                  inf_norm_term=inf_norm_term)
 
-        fig_h = plt.figure()
-        ax_h0 = fig_h.add_subplot(211)
-        ax_h0.plot(result.t, h_val)
-        ax_h0.set_title("h")
-        ax_h1 = fig_h.add_subplot(212)
-        ax_h1.plot(result.t, hdot)
-        ax_h1.set_xlabel("time (s)")
+    t_samples = np.arange(num_control_cycles) * dt * constant_control_steps
+    fig_u = plt.figure()
+    ax_u0 = fig_u.add_subplot(211)
+    ax_u0.plot(t_samples, u_val[0, :])
+    ax_u0.set_title("u")
+    ax_u1 = fig_u.add_subplot(212)
+    ax_u1.plot(t_samples, u_val[1, :])
+    ax_u1.set_xlabel("time (s)")
 
-        return fig_u, fig_h, u_val, h_val, hdot
+    fig_h = plt.figure()
+    ax_h0 = fig_h.add_subplot(211)
+    ax_h0.plot(t_samples, h_val)
+    ax_h0.set_title("h")
+    ax_h1 = fig_h.add_subplot(212)
+    ax_h1.plot(t_samples, hdot)
+    ax_h1.set_xlabel("time (s)")
 
-    return result_newton, result_nn
+    fig_u.show()
+    fig_h.show()
 
 
 if __name__ == "__main__":
@@ -153,6 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_on_samples", action="store_true")
     parser.add_argument("--max_iterations", type=int, default=1000)
     parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
     dtype = torch.float64
 
@@ -225,30 +214,32 @@ if __name__ == "__main__":
     dut.max_iterations = args.max_iterations
     dut.enable_wandb = args.enable_wandb
 
-    simulate(dynamics_model, barrier_relu, x_star, c, inf_norm_term, u_lo,
-             u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 3)
+    if args.simulate:
+        simulate(dynamics_model, barrier_relu, x_star, c, inf_norm_term, u_lo,
+                 u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 3)
+    else:
 
-    if args.train_on_samples:
-        # First train on samples without solving MIP.
-        dut.derivative_state_samples_weight = 1.
-        dut.boundary_state_samples_weight = 1.
-        dut.unsafe_state_samples_weight = 1.
-        x_up_unsafe = x_up.clone()
-        x_up_unsafe[1] = unsafe_height
-        # unsafe_state_samples = utils.uniform_sample_in_box(
-        #     x_lo, x_up_unsafe, 1000)
-        unsafe_state_samples = torch.empty((0, 6), dtype=dtype)
-        boundary_state_samples = utils.uniform_sample_on_box_boundary(
-            x_lo, x_up, 3000)
-        deriv_state_samples = utils.uniform_sample_in_box(x_lo, x_up, 2000)
-        dut.train_on_samples(unsafe_state_samples, boundary_state_samples,
-                             deriv_state_samples)
-        pass
-    unsafe_state_samples = torch.zeros((0, 6), dtype=dtype)
-    boundary_state_samples = torch.zeros((0, 6), dtype=dtype)
-    deriv_state_samples = torch.zeros((0, 6), dtype=dtype)
-    dut.deriv_mip_margin = 0.5
-    # dut.verify_region_boundary_mip_cost_weight = 5
-    dut.train(unsafe_state_samples, boundary_state_samples,
-              deriv_state_samples)
+        if args.train_on_samples:
+            # First train on samples without solving MIP.
+            dut.derivative_state_samples_weight = 1.
+            dut.boundary_state_samples_weight = 1.
+            dut.unsafe_state_samples_weight = 1.
+            x_up_unsafe = x_up.clone()
+            x_up_unsafe[1] = unsafe_height
+            # unsafe_state_samples = utils.uniform_sample_in_box(
+            #     x_lo, x_up_unsafe, 1000)
+            unsafe_state_samples = torch.empty((0, 6), dtype=dtype)
+            boundary_state_samples = utils.uniform_sample_on_box_boundary(
+                x_lo, x_up, 3000)
+            deriv_state_samples = utils.uniform_sample_in_box(x_lo, x_up, 2000)
+            dut.train_on_samples(unsafe_state_samples, boundary_state_samples,
+                                 deriv_state_samples)
+            pass
+        unsafe_state_samples = torch.zeros((0, 6), dtype=dtype)
+        boundary_state_samples = torch.zeros((0, 6), dtype=dtype)
+        deriv_state_samples = torch.zeros((0, 6), dtype=dtype)
+        dut.deriv_mip_margin = 0.5
+        # dut.verify_region_boundary_mip_cost_weight = 5
+        dut.train(unsafe_state_samples, boundary_state_samples,
+                  deriv_state_samples)
     pass
