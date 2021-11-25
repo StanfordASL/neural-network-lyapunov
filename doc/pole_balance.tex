@@ -1,0 +1,44 @@
+\documentclass{article}
+\usepackage{amsmath, amsfonts, graphicx, fullpage}
+\begin{document}
+Consider a massless pole with a sphere attached to one end, with sphere mass being $m_s$. The other end of the pole (point $A$) is attached to the end-effector with mass $m_e$ at point $A$. The state of the pole is the location/velocity of $A$, and the azimuth/altitude angle and their velocity, as shown in this plot
+
+\begin{figure}
+	\centering
+	\includegraphics[width=0.5\textwidth]{pole.pdf}
+\end{figure}
+
+The position of the mass is
+\begin{align}
+	\begin{bmatrix}
+		x_A + l\cos\beta\cos\alpha\\
+		y_A + l\cos\beta\sin\alpha\\
+		z_A + l\sin\beta
+	\end{bmatrix}
+\end{align}
+The velocity of the mass is
+\begin{align}
+	\begin{bmatrix}
+		\dot{x}_A - l\dot{\alpha}\cos\beta\sin\alpha - l\dot{\beta}\sin\beta\cos\alpha\\
+		\dot{y}_A + l\dot{\alpha}\cos\beta\cos\alpha - l\dot{\beta}\sin\beta\sin\alpha\\
+		\dot{z}_A + l\dot{\beta}\cos\beta
+	\end{bmatrix}
+\end{align}
+The total kinetic energy of the system is
+\begin{multline}
+	T = 0.5 m_e (\dot{x}_A^2 + \dot{y}_A^2 +\dot{z}_A^2) + 0.5 m_s(\dot{x}_A^2 + \dot{y}_A^2 + \dot{z}_A^2 + l^2\dot{\alpha}^2\cos^2\beta +\\
+	l^2\dot{\beta}^2 - 2\dot{x}_Al\dot{\alpha}\cos\beta\sin\alpha + 2\dot{y}_Al\dot{\alpha}\cos\beta\cos\alpha - 2\dot{x}_Al\dot{\beta}\sin\beta\cos\alpha - 2\dot{y}_Al\dot{\beta}\sin\beta\sin\alpha + 2\dot{z}_Al\dot{\beta}\cos\beta) 
+\end{multline}
+The total potential energy is
+\begin{align}
+	V = m_egz_A + m_sg(z_A + l\sin\beta)
+\end{align}
+Using Lagrangian $L = T-V$ and $\frac{d}{dt}\frac{\partial L}{\partial \dot{q}}-\frac{\partial L}{\partial q}$, we have
+\begin{align}
+	(m_s + m_e)\ddot{x}_A - m_sl(\ddot{\alpha}\cos\beta\sin\alpha + \ddot{\beta}\sin\beta\cos\alpha + \cos\beta\cos\alpha(\dot{\alpha}^2+\dot{\beta}^2) - 2\dot{\alpha}\dot{\beta}\sin\beta\sin\alpha) = u_x\\
+	(m_s + m_e)\ddot{y}_A +m_sl(\ddot{\alpha}\cos\beta\cos\alpha-\ddot{\beta}\sin\beta\sin\alpha-2\dot{\alpha}\dot{\beta}\sin\beta\cos\alpha-(\dot{\alpha}^2+\dot{\beta}^2)\cos\beta\sin\alpha) = u_y\\
+	(m_s + m_e)\ddot{z}_A + m_sl(\ddot{\beta}\cos\beta - \dot{\beta}^2\sin\beta) + (m_s+m_e)g = u_z\\
+	-\dot{\alpha}\dot{\beta}l\sin 2\beta + l\ddot{\alpha}\cos^2\beta - \ddot{x}_A\cos\beta\sin\alpha + \ddot{y}_A\cos\alpha\cos\beta = 0\\
+	\dot{\alpha}^2l\sin 2\beta + \ddot{\beta}l + g\cos\beta + \ddot{x}_A\cos\alpha\sin\beta - \ddot{y}_A\sin\alpha\sin\beta + \ddot{z}_A\cos\beta = 0
+\end{align}
+\end{document}
