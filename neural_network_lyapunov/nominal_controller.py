@@ -8,6 +8,7 @@ require the nominal controller and the CLF/CBF to satisfy the Lyapunov/barrier
 condition on all of the inifinitely many states.
 We need to compute the gradient of the controller.
 """
+import neural_network_lyapunov.utils as utils
 import torch
 
 
@@ -29,6 +30,9 @@ class NominalController:
         """
         Return all the trainable parameters of the controller.
         """
+        raise NotImplementedError
+
+    def to_save_data(self):
         raise NotImplementedError
 
 
@@ -66,3 +70,15 @@ class NominalNNController(NominalController):
 
     def parameters(self):
         return self.network.parameters()
+
+    def to_save_data(self):
+        linear_layer_width, negative_slope, bias = \
+            utils.extract_relu_structure(self.network)
+        return {
+            "linear_layer_width": linear_layer_width,
+            "negative_slope": negative_slope,
+            "bias": bias,
+            "state_dict": self.network.state_dict(),
+            "x_star": self.x_star,
+            "u_star": self.u_star
+        }

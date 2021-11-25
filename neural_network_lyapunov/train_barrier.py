@@ -451,16 +451,16 @@ class TrainBarrier:
         """
         sample_actions = self.nominal_control_option.controller.output(
             self.nominal_control_option.sample_states)
-        sample_val = -self.epsilon * self.barrier_system.barrier_value(
-            self.nominal_control_option.sample_states,
-            self.x_star,
-            self.c,
-            inf_norm_term=self.inf_norm_term
-        ) - self.barrier_system.barrier_derivative_given_action_batch(
+        hdot = self.barrier_system.barrier_derivative_given_action_batch(
             self.nominal_control_option.sample_states,
             sample_actions,
             create_graph=True,
             inf_norm_term=self.inf_norm_term)
+        sample_val = -self.epsilon * self.barrier_system.barrier_value(
+            self.nominal_control_option.sample_states,
+            self.x_star,
+            self.c,
+            inf_norm_term=self.inf_norm_term) - hdot
         if self.nominal_control_option.norm == "mean":
             return self.nominal_control_option.weight * \
                 torch.nn.HingeEmbeddingLoss(

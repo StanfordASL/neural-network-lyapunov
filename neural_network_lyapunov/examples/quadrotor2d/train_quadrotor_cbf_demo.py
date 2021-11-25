@@ -181,6 +181,11 @@ if __name__ == "__main__":
         x_star = x_equilibrium
         barrier_system = control_barrier.ControlBarrier(
             dynamics_model, barrier_relu)
+        nominal_controller_nn = utils.setup_relu((6, 4, 3, 2),
+                                                 params=None,
+                                                 negative_slope=0.1,
+                                                 bias=True,
+                                                 dtype=dtype)
     else:
         barrier_data = torch.load(args.load_barrier_relu)
         barrier_relu = utils.setup_relu(
@@ -193,6 +198,14 @@ if __name__ == "__main__":
         c = barrier_data["c"]
         barrier_system = control_barrier.ControlBarrier(
             dynamics_model, barrier_relu)
+        nominal_controller_nn = utils.setup_relu(
+            barrier_data["nominal_control"]["linear_layer_width"],
+            params=None,
+            negative_slope=barrier_data["nominal_control"]["negative_slope"],
+            bias=barrier_data["nominal_control"]["bias"],
+            dtype=dtype)
+        nominal_controller_nn.load_state_dict(
+            barrier_data["nominal_control"]["state_dict"])
 
     # The unsafe region is z < -0.2
     unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
@@ -203,18 +216,13 @@ if __name__ == "__main__":
 
     verify_region_boundary = utils.box_boundary(x_lo, x_up)
 
-    epsilon = 0.1
+    epsilon = 0.3
 
     inf_norm_term = barrier.InfNormTerm(torch.diag(2. / (x_up - x_lo)),
                                         (x_up + x_lo) / (x_up - x_lo))
 
-    nominal_controller_nn = utils.setup_relu((6, 4, 3, 2),
-                                             params=None,
-                                             negative_slope=0.1,
-                                             bias=True,
-                                             dtype=dtype)
     nominal_control_state_samples = utils.uniform_sample_in_box(
-        x_lo, x_up, 10000)
+        x_lo, x_up, 30000)
     u_star = torch.ones((2, ), dtype=dtype) * plant.mass * plant.gravity / 2
     nominal_control_option = train_barrier.NominalControlOption(
         nominal_controller.NominalNNController(nominal_controller_nn, x_star,
@@ -235,7 +243,6 @@ if __name__ == "__main__":
         simulate(dynamics_model, barrier_relu, x_star, c, inf_norm_term, u_lo,
                  u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 8)
     else:
-
         if args.train_on_samples:
             # First train on samples without solving MIP.
             dut.derivative_state_samples_weight = 1.

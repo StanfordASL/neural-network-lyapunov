@@ -244,16 +244,11 @@ class Barrier:
         c = 100.
         x_requires_grad = x.requires_grad
         x.requires_grad = True
-        dhdx = torch.zeros_like(x, dtype=x.dtype)
         h = self.barrier_value(x, x_star, c, inf_norm_term=inf_norm_term)
-        for i in range(x.shape[0]):
-            grd = torch.zeros_like(h, dtype=x.dtype)
-            grd[i] = 1
-            dhdx[i, :] = torch.autograd.grad(
-                outputs=h,
-                inputs=x,
-                grad_outputs=grd,
-                retain_graph=True,
-                create_graph=create_graph)[0][i, :]
+        dhdx = torch.autograd.grad(outputs=h,
+                                   inputs=x,
+                                   grad_outputs=torch.ones_like(h),
+                                   create_graph=create_graph,
+                                   retain_graph=True)[0]
         x.requires_grad = x_requires_grad
         return dhdx
