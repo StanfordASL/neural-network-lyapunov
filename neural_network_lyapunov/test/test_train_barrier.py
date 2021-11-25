@@ -156,6 +156,9 @@ class TestTrainBarrier(unittest.TestCase):
             dut.derivative_state_samples_weight)
         loss_expected += sample_loss
 
+        if dut.nominal_control_option is not None:
+            loss_expected += dut.nominal_controller_loss()
+
         self.assertAlmostEqual(total_loss_return.loss.item(),
                                loss_expected.item())
 
@@ -195,6 +198,31 @@ class TestTrainBarrier(unittest.TestCase):
             dut.unsafe_mip_margin = 10.
             dut.boundary_mip_margin = 20.
             dut.deriv_mip_margin = 30.
+            self.total_loss_tester(dut, 2., 3., 4., unsafe_state_samples,
+                                   boundary_state_samples, deriv_state_samples)
+
+            controller_nn = utils.setup_relu((2, 4, 3),
+                                             params=None,
+                                             negative_slope=0.1,
+                                             bias=True)
+            u_star = torch.zeros((3, ), dtype=self.dtype)
+            controller = nominal_controller.NominalNNController(
+                controller_nn, x_star, u_star, self.linear_system.u_lo,
+                self.linear_system.u_up)
+            sample_states = utils.uniform_sample_in_box(
+                self.linear_system.x_lo, self.linear_system.x_up, 100)
+            nominal_control_option = mut.NominalControlOption(controller,
+                                                              sample_states,
+                                                              weight=1.5,
+                                                              margin=0.5,
+                                                              norm="mean")
+            dut = mut.TrainBarrier(
+                control_barrier.ControlBarrier(self.linear_system,
+                                               barrier_relu), x_star, c,
+                unsafe_region_cnstr1,
+                utils.box_boundary(self.linear_system.x_lo,
+                                   self.linear_system.x_up), epsilon,
+                inf_norm_term, nominal_control_option)
             self.total_loss_tester(dut, 2., 3., 4., unsafe_state_samples,
                                    boundary_state_samples, deriv_state_samples)
 
@@ -393,15 +421,12 @@ class TestTrainBarrier(unittest.TestCase):
         if dut.nominal_control_option.norm == "mean":
             loss_expected = dut.nominal_control_option.weight * torch.mean(
                 torch.maximum(
-                    -hdot - dut.epsilon * h,
-                    torch.ones_like(hdot, dtype=self.dtype) *
-                    dut.nominal_control_option.margin))
+                    -hdot - dut.epsilon * h +
+                    dut.nominal_control_option.margin,
+                    torch.zeros_like(hdot, dtype=self.dtype)))
         elif dut.nominal_control_option.norm == "max":
             loss_expected = dut.nominal_control_option.weight * torch.max(
-                torch.maximum(
-                    -hdot - dut.epsilon * h,
-                    torch.ones_like(hdot, dtype=self.dtype) *
-                    dut.nominal_control_option.margin))
+                -hdot - dut.epsilon * h + dut.nominal_control_option.margin)
 
         self.assertAlmostEqual(loss.item(), loss_expected.item())
 
@@ -450,7 +475,7 @@ class TestTrainBarrier(unittest.TestCase):
         x_samples = utils.uniform_sample_in_box(self.linear_system.x_lo,
                                                 self.linear_system.x_up, 100)
         weight = 0.2
-        margin = -0.5
+        margin = 0.5
         nominal_control_option1 = mut.NominalControlOption(controller,
                                                            x_samples,
                                                            weight,

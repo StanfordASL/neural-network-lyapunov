@@ -9,6 +9,7 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.integrator as integrator
+import neural_network_lyapunov.nominal_controller as nominal_controller
 
 import torch
 import argparse
@@ -84,7 +85,7 @@ def simulate(dynamics_model: control_affine_quadrotor.ControlAffineQuadrotor2d,
 
     dt = 0.001
     constant_control_steps = 1
-    num_control_cycles = 2000
+    num_control_cycles = int(T / (dt * constant_control_steps))
     u_val = np.zeros((2, num_control_cycles))
     x_val = np.zeros((6, num_control_cycles))
     x_val[:, 0] = x0
@@ -207,16 +208,32 @@ if __name__ == "__main__":
     inf_norm_term = barrier.InfNormTerm(torch.diag(2. / (x_up - x_lo)),
                                         (x_up + x_lo) / (x_up - x_lo))
 
+    nominal_controller_nn = utils.setup_relu((6, 4, 3, 2),
+                                             params=None,
+                                             negative_slope=0.1,
+                                             bias=True,
+                                             dtype=dtype)
+    nominal_control_state_samples = utils.uniform_sample_in_box(
+        x_lo, x_up, 10000)
+    u_star = torch.ones((2, ), dtype=dtype) * plant.mass * plant.gravity / 2
+    nominal_control_option = train_barrier.NominalControlOption(
+        nominal_controller.NominalNNController(nominal_controller_nn, x_star,
+                                               u_star, u_lo, u_up),
+        nominal_control_state_samples,
+        weight=10.,
+        margin=0.5,
+        norm="mean")
+
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,
                                      verify_region_boundary, epsilon,
-                                     inf_norm_term)
+                                     inf_norm_term, nominal_control_option)
     dut.max_iterations = args.max_iterations
     dut.enable_wandb = args.enable_wandb
 
     if args.simulate:
         simulate(dynamics_model, barrier_relu, x_star, c, inf_norm_term, u_lo,
-                 u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 3)
+                 u_up, epsilon, np.zeros((6, )), np.array([0, -0.35]), 8)
     else:
 
         if args.train_on_samples:

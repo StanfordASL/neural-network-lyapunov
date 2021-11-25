@@ -312,6 +312,7 @@ class TestBarrier(unittest.TestCase):
         for (v1, v2) in zip(grad, grad_expected):
             np.testing.assert_allclose(v1.detach().numpy(),
                                        v2.detach().numpy())
+        dut.barrier_relu.zero_grad()
 
 
 if __name__ == "__main__":

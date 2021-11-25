@@ -15,9 +15,9 @@ class NominalControlOption:
     states for a nominal controller
     We will add the cost
     If norm="mean"
-    weight * mean(max(−εh−ḣ, margin))
+    weight * mean(max(−εh−ḣ+margin, 0)))
     If norm="max"
-    weight * max(max(−εh−ḣ, margin))
+    weight * max(−εh−ḣ + margin)
     Namely We add the average violation to the total cost using a weight
     multiplier
     """
@@ -31,8 +31,8 @@ class NominalControlOption:
         assert (weight >= 0)
         self.weight = weight
         assert (isinstance(margin, float))
-        if margin > 0:
-            raise Warning("NominalControlOption: better to set margin <= 0")
+        if margin < 0:
+            raise Warning("NominalControlOption: better to set margin >= 0")
         self.margin = margin
         assert (isinstance(norm, str))
         assert (norm in ("max", "mean"))
@@ -232,13 +232,15 @@ class TrainBarrier:
     class TotalLossReturn:
         def __init__(self, loss, unsafe_mip_objective,
                      verify_region_boundary_mip_objective,
-                     barrier_deriv_mip_objective, sample_loss):
+                     barrier_deriv_mip_objective, sample_loss,
+                     nominal_control_loss):
             self.loss = loss
             self.unsafe_mip_objective = unsafe_mip_objective
             self.verify_region_boundary_mip_objective = \
                 verify_region_boundary_mip_objective
             self.barrier_deriv_mip_objective = barrier_deriv_mip_objective
             self.sample_loss = sample_loss
+            self.nominal_control_loss = nominal_control_loss
 
     def total_loss(self, unsafe_mip_cost_weight: float,
                    verify_region_boundary_mip_cost_weight: float,
@@ -254,6 +256,7 @@ class TrainBarrier:
         4. hinge(h(xⁱ)), xⁱ in unsafe_state_samples
         5. hinge(h(xⁱ)), xⁱ in boundary_state_samples
         6. hinge(−ḣ(xⁱ) − εh(xⁱ)) xⁱ in deriv_state_samples
+        7. nominal_controller_loss
         """
         dtype = self.barrier_system.system.dtype
         loss = torch.tensor(0, dtype=dtype)
@@ -306,9 +309,15 @@ class TrainBarrier:
             self.derivative_state_samples_weight)
         loss += sample_loss
 
+        if self.nominal_control_option is not None:
+            nominal_control_loss = self.nominal_controller_loss()
+            loss += nominal_control_loss
+        else:
+            nominal_control_loss = None
+
         return TrainBarrier.TotalLossReturn(
             loss, unsafe_mip_objective, verify_region_boundary_mip_objective,
-            barrier_deriv_mip_objective, sample_loss)
+            barrier_deriv_mip_objective, sample_loss, nominal_control_loss)
 
     def print(self):
         for attr in inspect.getmembers(self):
@@ -320,6 +329,9 @@ class TrainBarrier:
 
     def _training_params(self):
         training_params = list(self.barrier_system.barrier_relu.parameters())
+        if self.nominal_control_option is not None:
+            training_params.extend(
+                self.nominal_control_option.controller.parameters())
         return training_params
 
     def train(self, unsafe_state_samples, boundary_state_samples,
@@ -359,6 +371,8 @@ class TrainBarrier:
                     total_loss_return.barrier_deriv_mip_objective,
                     "verify_region_boundary_mip_objective":
                     total_loss_return.verify_region_boundary_mip_objective,
+                    "nominal_controller_loss":
+                    total_loss_return.nominal_control_loss,
                     "time":
                     time.time() - train_start_time
                 })
@@ -372,7 +386,8 @@ class TrainBarrier:
                     f"{total_loss_return.barrier_deriv_mip_objective}, " +
                     "verify_region_boundary_mip_objective " +
                     f"{total_loss_return.verify_region_boundary_mip_objective}"
-                )
+                    " nominal_control_loss " +
+                    f"{total_loss_return.nominal_control_loss}")
 
             if (total_loss_return.unsafe_mip_objective is None or
                 total_loss_return.unsafe_mip_objective <= 0) and\
@@ -447,14 +462,10 @@ class TrainBarrier:
             create_graph=True,
             inf_norm_term=self.inf_norm_term)
         if self.nominal_control_option.norm == "mean":
-            return self.nominal_control_option.weight * torch.mean(
-                torch.maximum(
-                    sample_val,
-                    torch.ones_like(sample_val, dtype=sample_val.dtype) *
-                    self.nominal_control_option.margin))
+            return self.nominal_control_option.weight * \
+                torch.nn.HingeEmbeddingLoss(
+                    margin=self.nominal_control_option.margin,
+                    reduction="mean")(-sample_val, torch.tensor(-1))
         elif self.nominal_control_option.norm == "max":
             return self.nominal_control_option.weight * torch.max(
-                torch.maximum(
-                    sample_val,
-                    torch.ones_like(sample_val, dtype=sample_val.dtype) *
-                    self.nominal_control_option.margin))
+                sample_val + self.nominal_control_option.margin)
