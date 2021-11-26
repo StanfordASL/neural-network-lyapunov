@@ -23,7 +23,7 @@ class NominalControlOption:
     """
     def __init__(self, controller: nominal_controller.NominalController,
                  sample_states: torch.Tensor, weight: float, margin: float,
-                 norm: str):
+                 norm: str, nominal_control_loss_tol: float):
         self.controller = controller
         assert (isinstance(sample_states, torch.Tensor))
         self.sample_states = sample_states
@@ -37,6 +37,9 @@ class NominalControlOption:
         assert (isinstance(norm, str))
         assert (norm in ("max", "mean"))
         self.norm = norm
+        assert (isinstance(nominal_control_loss_tol, float))
+        assert (nominal_control_loss_tol >= 0)
+        self.nominal_control_loss_tol = nominal_control_loss_tol
 
 
 class TrainBarrier:
@@ -389,17 +392,29 @@ class TrainBarrier:
                     " nominal_control_loss " +
                     f"{total_loss_return.nominal_control_loss}")
 
-            if (total_loss_return.unsafe_mip_objective is None or
-                total_loss_return.unsafe_mip_objective <= 0) and\
-                total_loss_return.barrier_deriv_mip_objective <= 0 and\
-                (total_loss_return.verify_region_boundary_mip_objective is None
-                 or total_loss_return.verify_region_boundary_mip_objective <= 0):  # noqa
+            if self._converged(total_loss_return):
                 return True
 
             total_loss_return.loss.backward()
             optimizer.step()
             iter_count += 1
         return False
+
+    def _converged(self, total_loss_return: TotalLossReturn):
+        if total_loss_return.unsafe_mip_objective is not None and \
+                total_loss_return.unsafe_mip_objective > 0:
+            return False
+        if total_loss_return.barrier_deriv_mip_objective is not None and \
+                total_loss_return.barrier_deriv_mip_objective > 0:
+            return False
+        if total_loss_return.verify_region_boundary_mip_objective is not None \
+                and total_loss_return.verify_region_boundary_mip_objective > 0:
+            return False
+        if total_loss_return.nominal_control_loss is not None and \
+                total_loss_return.nominal_control_loss > \
+                self.nominal_control_option.nominal_control_loss_tol:
+            return False
+        return True
 
     def train_on_samples(self, unsafe_state_samples, boundary_state_samples,
                          deriv_state_samples):

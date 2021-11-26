@@ -230,7 +230,8 @@ if __name__ == "__main__":
         nominal_control_state_samples,
         weight=10.,
         margin=0.5,
-        norm="mean")
+        norm="mean",
+        nominal_control_loss_tol=0.8)
 
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,

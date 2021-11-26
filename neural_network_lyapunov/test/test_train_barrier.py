@@ -211,11 +211,13 @@ class TestTrainBarrier(unittest.TestCase):
                 self.linear_system.u_up)
             sample_states = utils.uniform_sample_in_box(
                 self.linear_system.x_lo, self.linear_system.x_up, 100)
-            nominal_control_option = mut.NominalControlOption(controller,
-                                                              sample_states,
-                                                              weight=1.5,
-                                                              margin=0.5,
-                                                              norm="mean")
+            nominal_control_option = mut.NominalControlOption(
+                controller,
+                sample_states,
+                weight=1.5,
+                margin=0.5,
+                norm="mean",
+                nominal_control_loss_tol=0.5)
             dut = mut.TrainBarrier(
                 control_barrier.ControlBarrier(self.linear_system,
                                                barrier_relu), x_star, c,
@@ -476,11 +478,13 @@ class TestTrainBarrier(unittest.TestCase):
                                                 self.linear_system.x_up, 100)
         weight = 0.2
         margin = 0.5
-        nominal_control_option1 = mut.NominalControlOption(controller,
-                                                           x_samples,
-                                                           weight,
-                                                           margin,
-                                                           norm="mean")
+        nominal_control_option1 = mut.NominalControlOption(
+            controller,
+            x_samples,
+            weight,
+            margin,
+            norm="mean",
+            nominal_control_loss_tol=0.5)
         dut1 = mut.TrainBarrier(
             control_barrier.ControlBarrier(self.linear_system,
                                            self.barrier_relu1), x_star, c,
@@ -489,11 +493,13 @@ class TestTrainBarrier(unittest.TestCase):
             inf_norm_term, nominal_control_option1)
         self.nominal_control_loss_tester(dut1)
 
-        nominal_control_option2 = mut.NominalControlOption(controller,
-                                                           x_samples,
-                                                           weight,
-                                                           margin,
-                                                           norm="max")
+        nominal_control_option2 = mut.NominalControlOption(
+            controller,
+            x_samples,
+            weight,
+            margin,
+            norm="max",
+            nominal_control_loss_tol=0.5)
         dut2 = mut.TrainBarrier(
             control_barrier.ControlBarrier(self.linear_system,
                                            self.barrier_relu1), x_star, c,
