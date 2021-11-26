@@ -8,6 +8,20 @@ import torch
 class ControlAffineUnicycle(control_affine_system.ControlPiecewiseAffineSystem
                             ):
     """
+    The state is [x, y, cosθ, sinθ]
+    The control is [vel, θdot]
+    The dynamics is
+    xdot = cosθ * u[0]
+    ydot = sinθ * u[0]
+    dcosθ/dt = -sinθ * u[1]
+    dsinθ/dt = cosθ * u[1]
+    """
+    pass
+
+
+class ControlAffineUnicycleApprox(
+        control_affine_system.ControlPiecewiseAffineSystem):
+    """
     The state is [x, y, theta]
     The control is [vel, thetadot]
     The dynamics is [xdot, ydot] = ϕ(θ)*u[0]
@@ -15,7 +29,8 @@ class ControlAffineUnicycle(control_affine_system.ControlPiecewiseAffineSystem
     """
     def __init__(self, phi, x_lo, x_up, u_lo, u_up,
                  method: mip_utils.PropagateBoundsMethod):
-        super(ControlAffineUnicycle, self).__init__(x_lo, x_up, u_lo, u_up)
+        super(ControlAffineUnicycleApprox,
+              self).__init__(x_lo, x_up, u_lo, u_up)
         assert (phi[0].in_features == 1)
         assert (phi[-1].out_features == 2)
         self.phi = phi

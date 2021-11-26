@@ -8,7 +8,7 @@ import numpy as np
 import gurobipy
 
 
-class TestControlAffineUnicycle(unittest.TestCase):
+class TestControlAffineUnicycleApprox(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.phi = utils.setup_relu((1, 3, 2),
@@ -28,7 +28,7 @@ class TestControlAffineUnicycle(unittest.TestCase):
         x_up = -x_lo
         u_lo = torch.tensor([-1, -1], dtype=self.dtype)
         u_up = -u_lo
-        dut = mut.ControlAffineUnicycle(
+        dut = mut.ControlAffineUnicycleApprox(
             self.phi,
             x_lo,
             x_up,
@@ -87,8 +87,8 @@ class TestControlAffineUnicycle(unittest.TestCase):
         u_lo = torch.tensor([-1, -1], dtype=self.dtype)
         u_up = -u_lo
         for method in list(mip_utils.PropagateBoundsMethod):
-            dut = mut.ControlAffineUnicycle(self.phi, x_lo, x_up, u_lo, u_up,
-                                            method)
+            dut = mut.ControlAffineUnicycleApprox(self.phi, x_lo, x_up, u_lo,
+                                                  u_up, method)
             self.mixed_integer_constraints_tester(dut)
 
 
