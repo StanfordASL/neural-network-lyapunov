@@ -6,10 +6,96 @@ import neural_network_lyapunov.train_barrier as train_barrier
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.integrator as integrator
 
 import torch
 import argparse
 import numpy as np
+import gurobipy
+import matplotlib.pyplot as plt
+
+
+def simulate(dut, dt, nT, x0, u_des, x_star, c, epsilon, inf_norm_term):
+    def compute_control(x):
+        x_torch = torch.from_numpy(x)
+        prog = gurobipy.Model()
+        u = prog.addVars(2,
+                         lb=dut.system.u_lo.tolist(),
+                         ub=dut.system.u_up.tolist())
+        f = dut.system.f(x_torch).detach().numpy()
+        G = dut.system.G(x_torch).detach().numpy()
+        dhdx = dut._barrier_gradient(x_torch, inf_norm_term).detach().numpy()
+        h = dut.barrier_value(x_torch, x_star, c,
+                              inf_norm_term=inf_norm_term).detach().numpy()
+        prog.addMConstrs(dhdx @ G, [u[0], u[1]],
+                         sense=gurobipy.GRB.GREATER_EQUAL,
+                         b=-epsilon * h - dhdx @ f)
+        prog.setObjective((u[0] - u_des[0]) * (u[0] - u_des[0]) +
+                          (u[1] - u_des[1]) * (u[1] - u_des[1]),
+                          sense=gurobipy.GRB.MINIMIZE)
+        prog.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.optimize()
+        assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+        u_val = np.array([u[0].x, u[1].x])
+        return u_val
+
+    x_val = np.zeros((3, nT))
+    u_val = np.zeros((2, nT))
+    x_val[:, 0] = x0
+    for i in range(nT - 1):
+        x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
+            lambda x, u: dut.system.dynamics(torch.from_numpy(
+                x), torch.from_numpy(u)).detach().numpy(),
+            compute_control,
+            x_val[:, i],
+            dt,
+            constant_control_steps=1)
+    u_val[:, -1] = compute_control(x_val[:, -1])
+    h_val = dut.barrier_value(torch.from_numpy(x_val.T),
+                              x_star,
+                              c,
+                              inf_norm_term=inf_norm_term).detach().numpy()
+    hdot_val = dut.barrier_derivative_given_action_batch(
+        torch.from_numpy(x_val.T),
+        torch.from_numpy(u_val.T),
+        create_graph=False,
+        inf_norm_term=inf_norm_term).detach().numpy()
+
+    t_val = dt * np.arange(nT)
+
+    fig_u = plt.figure()
+    ax_vel = fig_u.add_subplot(211)
+    ax_vel.plot(t_val, u_val[0, :])
+    ax_vel.set_ylabel("vel (m/s)")
+    ax_thetadot = fig_u.add_subplot(212)
+    ax_thetadot.plot(t_val, u_val[1, :])
+    ax_thetadot.set_ylabel(r"$\dot{\theta}$ (rad/s)")
+    ax_thetadot.set_xlabel("t (s)")
+
+    fig_h = plt.figure()
+    ax_h = fig_h.add_subplot(211)
+    ax_h.plot(t_val, h_val)
+    ax_h.set_ylabel("h")
+    ax_hdot = fig_h.add_subplot(212)
+    ax_hdot.plot(t_val, hdot_val)
+    ax_hdot.set_ylabel(r"$\dot{h}$")
+    ax_hdot.set_xlabel("t (s)")
+
+    fig_x = plt.figure()
+    ax_x = fig_x.add_subplot(311)
+    ax_x.plot(t_val, x_val[0, :])
+    ax_y = fig_x.add_subplot(312)
+    ax_y.plot(t_val, x_val[1, :])
+    ax_theta = fig_x.add_subplot(313)
+    ax_theta.plot(t_val, x_val[2, :])
+    ax_x.set_ylabel("x (m)")
+    ax_y.set_ylabel("y (m)")
+    ax_theta.set_ylabel(r"$\theta$ (rad)")
+    ax_theta.set_xlabel("t (s)")
+
+    fig_u.show()
+    fig_h.show()
+    fig_x.show()
 
 
 def train_forward_model(
@@ -47,6 +133,11 @@ if __name__ == "__main__":
                         help="path to load the forward model")
     parser.add_argument("--max_iterations", type=int, default=1000)
     parser.add_argument("--enable_wandb", action="store_true")
+    parser.add_argument("--load_barrier_relu",
+                        type=str,
+                        default=None,
+                        help="path to load barrier relu")
+    parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
     dtype = torch.float64
 
@@ -90,18 +181,47 @@ if __name__ == "__main__":
         dynamics_model = control_affine_unicycle.ControlAffineUnicycleApprox(
             phi, x_lo, x_up, u_lo, u_up, mip_utils.PropagateBoundsMethod.IA)
 
-    barrier_relu = utils.setup_relu((3, 8, 4, 1),
-                                    params=None,
-                                    negative_slope=0.1,
-                                    bias=True)
-    x_star = torch.tensor([0, 0, 0], dtype=dtype)
-    c = 0.5
+    if args.load_barrier_relu is None:
+        barrier_relu = utils.setup_relu((3, 8, 4, 1),
+                                        params=None,
+                                        negative_slope=0.1,
+                                        bias=True)
+        x_star = torch.tensor([0, 0, 0], dtype=dtype)
+        c = 0.5
+        inf_norm_term = barrier.InfNormTerm.from_bounding_box(x_lo, x_up, 0.7)
+        epsilon = 0.2
+    else:
+        barrier_data = torch.load(args.load_barrier_relu)
+        barrier_relu = utils.setup_relu(
+            barrier_data["linear_layer_width"],
+            params=None,
+            negative_slope=barrier_data["negative_slope"],
+            bias=barrier_data["bias"],
+            dtype=dtype)
+        barrier_relu.load_state_dict(barrier_data["state_dict"])
+        x_star = barrier_data["x_star"]
+        c = barrier_data["c"]
+        epsilon = barrier_data["epsilon"]
+        if barrier_data["inf_norm_term"] is not None:
+            inf_norm_term = barrier.InfNormTerm(
+                barrier_data["inf_norm_term"]["R"],
+                barrier_data["inf_norm_term"]["p"])
+        else:
+            inf_norm_term is None
     barrier_system = control_barrier.ControlBarrier(dynamics_model,
                                                     barrier_relu)
+    if args.simulate:
+        simulate(barrier_system,
+                 dt=0.01,
+                 nT=5000,
+                 x0=np.array([0., 0, 0]),
+                 u_des=np.array([0.5, 0]),
+                 x_star=x_star,
+                 c=c,
+                 epsilon=epsilon,
+                 inf_norm_term=inf_norm_term)
     verify_region_boundary = utils.box_boundary(x_lo, x_up)
     unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-    epsilon = 0.2
-    inf_norm_term = barrier.InfNormTerm.from_bounding_box(x_lo, x_up, 0.7)
 
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,
