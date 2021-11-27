@@ -15,18 +15,20 @@ import gurobipy
 import matplotlib.pyplot as plt
 
 
-def simulate(dut, dt, nT, x0, u_des, x_star, c, epsilon, inf_norm_term):
-    def compute_control(x):
+def simulate(barrier_syatem, dt, nT, x0, u0, x_star, c, epsilon,
+             inf_norm_term):
+    def compute_control(x, u_des):
         x_torch = torch.from_numpy(x)
         prog = gurobipy.Model()
         u = prog.addVars(2,
-                         lb=dut.system.u_lo.tolist(),
-                         ub=dut.system.u_up.tolist())
-        f = dut.system.f(x_torch).detach().numpy()
-        G = dut.system.G(x_torch).detach().numpy()
-        dhdx = dut._barrier_gradient(x_torch, inf_norm_term).detach().numpy()
-        h = dut.barrier_value(x_torch, x_star, c,
-                              inf_norm_term=inf_norm_term).detach().numpy()
+                         lb=barrier_system.system.u_lo.tolist(),
+                         ub=barrier_system.system.u_up.tolist())
+        f = barrier_system.system.f(x_torch).detach().numpy()
+        G = barrier_system.system.G(x_torch).detach().numpy()
+        dhdx = barrier_system._barrier_gradient(
+            x_torch, inf_norm_term).detach().numpy()
+        h = barrier_system.barrier_value(
+            x_torch, x_star, c, inf_norm_term=inf_norm_term).detach().numpy()
         prog.addMConstrs(dhdx @ G, [u[0], u[1]],
                          sense=gurobipy.GRB.GREATER_EQUAL,
                          b=-epsilon * h - dhdx @ f)
@@ -43,19 +45,22 @@ def simulate(dut, dt, nT, x0, u_des, x_star, c, epsilon, inf_norm_term):
     u_val = np.zeros((2, nT))
     x_val[:, 0] = x0
     for i in range(nT - 1):
+        if i == 0:
+            u_des = u0
+        else:
+            u_des = u_val[:, i - 1]
         x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
-            lambda x, u: dut.system.dynamics(torch.from_numpy(
-                x), torch.from_numpy(u)).detach().numpy(),
-            compute_control,
+            lambda x, u: barrier_system.system.dynamics(
+                torch.from_numpy(x), torch.from_numpy(u)).detach().numpy(),
+            lambda x: compute_control(x, u_des),
             x_val[:, i],
             dt,
             constant_control_steps=1)
-    u_val[:, -1] = compute_control(x_val[:, -1])
-    h_val = dut.barrier_value(torch.from_numpy(x_val.T),
-                              x_star,
-                              c,
-                              inf_norm_term=inf_norm_term).detach().numpy()
-    hdot_val = dut.barrier_derivative_given_action_batch(
+    u_val[:, -1] = compute_control(x_val[:, -1], u_val[:, -2])
+    h_val = barrier_system.barrier_value(
+        torch.from_numpy(x_val.T), x_star, c,
+        inf_norm_term=inf_norm_term).detach().numpy()
+    hdot_val = barrier_system.barrier_derivative_given_action_batch(
         torch.from_numpy(x_val.T),
         torch.from_numpy(u_val.T),
         create_graph=False,
@@ -96,6 +101,7 @@ def simulate(dut, dt, nT, x0, u_des, x_star, c, epsilon, inf_norm_term):
     fig_u.show()
     fig_h.show()
     fig_x.show()
+    return x_val, u_val, h_val, hdot_val
 
 
 def train_forward_model(
@@ -215,13 +221,18 @@ if __name__ == "__main__":
                  dt=0.01,
                  nT=5000,
                  x0=np.array([0., 0, 0]),
-                 u_des=np.array([0.5, 0]),
+                 u0=np.array([0.5, 0]),
                  x_star=x_star,
                  c=c,
                  epsilon=epsilon,
                  inf_norm_term=inf_norm_term)
     verify_region_boundary = utils.box_boundary(x_lo, x_up)
+    # unsafe region is a box region
     unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+    unsafe_region_cnstr.Ain_input = torch.tensor(
+        [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]], dtype=dtype)
+    unsafe_region_cnstr.rhs_in = torch.tensor([0.6, 0.6, -0.4, -0.4],
+                                              dtype=dtype)
 
     dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                      unsafe_region_cnstr,
