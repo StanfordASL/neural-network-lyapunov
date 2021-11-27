@@ -26,7 +26,7 @@ def simulate(barrier_syatem, dt, nT, x0, u0, x_star, c, epsilon,
         f = barrier_system.system.f(x_torch).detach().numpy()
         G = barrier_system.system.G(x_torch).detach().numpy()
         dhdx = barrier_system._barrier_gradient(
-            x_torch, inf_norm_term).detach().numpy()
+            x_torch, inf_norm_term, zero_tol=1E-5).detach().numpy()
         h = barrier_system.barrier_value(
             x_torch, x_star, c, inf_norm_term=inf_norm_term).detach().numpy()
         prog.addMConstrs(dhdx @ G, [u[0], u[1]],

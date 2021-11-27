@@ -225,7 +225,9 @@ class TestBarrier(unittest.TestCase):
         x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
                                                 dut.system.x_up, 100)
         for i in range(x_samples.shape[0]):
-            dhdx = dut._barrier_gradient(x_samples[i], inf_norm_term=None)
+            dhdx = dut._barrier_gradient(x_samples[i],
+                                         inf_norm_term=None,
+                                         zero_tol=0.)
             assert (dhdx.shape[0] == 1)
             x_clone = x_samples[i].clone()
             x_clone.requires_grad = True
@@ -237,7 +239,9 @@ class TestBarrier(unittest.TestCase):
             np.testing.assert_allclose(dhdx[0].detach().numpy(),
                                        dhdx_expected.detach().numpy())
 
-            dhdx = dut._barrier_gradient(x_samples[i], inf_norm_term)
+            dhdx = dut._barrier_gradient(x_samples[i],
+                                         inf_norm_term,
+                                         zero_tol=0.)
             assert (dhdx.shape[0] == 1)
             x_clone.grad.zero_()
             dut.barrier_value(x_clone,
@@ -250,12 +254,12 @@ class TestBarrier(unittest.TestCase):
 
         # Now try x with multiple sub-gradient.
         x = torch.tensor([2, 1], dtype=self.dtype)
-        dhdx = dut._barrier_gradient(x, inf_norm_term)
+        dhdx = dut._barrier_gradient(x, inf_norm_term, zero_tol=0.)
         self.assertEqual(dhdx.shape, (2, dut.system.x_dim))
         x_perturb1 = x + torch.tensor([1E-6, 0], dtype=self.dtype)
         x_perturb2 = x - torch.tensor([1E-6, 0], dtype=self.dtype)
-        dhdx1 = dut._barrier_gradient(x_perturb1, inf_norm_term)
-        dhdx2 = dut._barrier_gradient(x_perturb2, inf_norm_term)
+        dhdx1 = dut._barrier_gradient(x_perturb1, inf_norm_term, zero_tol=0.)
+        dhdx2 = dut._barrier_gradient(x_perturb2, inf_norm_term, zero_tol=0.)
         self.assertTrue(
             torch.norm(dhdx - torch.cat((dhdx1, dhdx2), dim=0)) < 1E-10
             or torch.norm(dhdx - torch.cat((dhdx2, dhdx1), dim=0)) < 1E-10)
@@ -268,7 +272,9 @@ class TestBarrier(unittest.TestCase):
         self.assertEqual(dhdx.shape, (x.shape[0], dut.system.x_dim))
         dhdx_expected = torch.zeros_like(x, dtype=self.dtype)
         for i in range(x.shape[0]):
-            dhdx_sample = dut._barrier_gradient(x[i], inf_norm_term)
+            dhdx_sample = dut._barrier_gradient(x[i],
+                                                inf_norm_term,
+                                                zero_tol=0.)
             assert (dhdx_sample.shape[0] == 1)
             dhdx_expected[i] = dhdx_sample
         np.testing.assert_allclose(dhdx.detach().numpy(),

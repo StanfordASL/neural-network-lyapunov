@@ -436,7 +436,8 @@ class ControlBarrier(barrier.Barrier):
             x: torch.Tensor,
             u: torch.Tensor,
             *,
-            inf_norm_term: barrier.InfNormTerm = None):
+            inf_norm_term: barrier.InfNormTerm = None,
+            zero_tol: float = 0.):
         """
         Compute ḣ = ∂h/∂x*ẋ
         When there are multiple ∂h/∂x, we return the minimal ḣ
@@ -445,12 +446,12 @@ class ControlBarrier(barrier.Barrier):
         assert (isinstance(u, torch.Tensor))
         xdot = self.system.dynamics(x, u)
         if (len(x.shape) == 1 and len(u.shape) == 1):
-            dhdx = self._barrier_gradient(x, inf_norm_term)
+            dhdx = self._barrier_gradient(x, inf_norm_term, zero_tol)
             return torch.min(dhdx @ xdot)
         else:
             hdot_batch = torch.empty(x.shape[0], dtype=self.system.dtype)
             for i in range(x.shape[0]):
-                dhdx = self._barrier_gradient(x[i], inf_norm_term)
+                dhdx = self._barrier_gradient(x[i], inf_norm_term, zero_tol)
                 hdot_batch[i] = torch.min(dhdx @ xdot[i])
             return hdot_batch
 

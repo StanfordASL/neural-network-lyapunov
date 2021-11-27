@@ -396,11 +396,13 @@ class TestControlBarrier(unittest.TestCase):
                                                        u_samples,
                                                        inf_norm_term):
         hdot_batch = dut.minimal_barrier_derivative_given_action(
-            x_samples, u_samples, inf_norm_term=inf_norm_term)
+            x_samples, u_samples, inf_norm_term=inf_norm_term, zero_tol=0.)
         self.assertEqual(hdot_batch.shape, (x_samples.shape[0], ))
         for i in range(x_samples.shape[0]):
             xdot = dut.system.dynamics(x_samples[i], u_samples[i])
-            dhdx = dut._barrier_gradient(x_samples[i], inf_norm_term)
+            dhdx = dut._barrier_gradient(x_samples[i],
+                                         inf_norm_term,
+                                         zero_tol=0.)
             hdot_expected = torch.min(dhdx @ xdot)
             self.assertAlmostEqual(
                 hdot_expected.item(),
