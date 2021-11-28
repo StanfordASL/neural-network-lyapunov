@@ -68,7 +68,7 @@ class ControlBarrier(barrier.Barrier):
             inf_norm_grad = utils.l_infinity_gradient(
                 inf_norm_term.R @ x - inf_norm_term.p,
                 max_tol=zero_tol) @ inf_norm_term.R
-            barrier_grad = utils.minikowski_sum(relu_grad, -inf_norm_grad)
+            barrier_grad = utils.minkowski_sum(relu_grad, -inf_norm_grad)
         else:
             barrier_grad = relu_grad
         u_mid = (self.system.u_lo + self.system.u_up) / 2

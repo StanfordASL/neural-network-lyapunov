@@ -231,7 +231,7 @@ class Barrier:
             dinfnorm_dx = utils.l_infinity_gradient(
                 inf_norm_term.R @ x - inf_norm_term.p,
                 max_tol=zero_tol) @ inf_norm_term.R
-            dhdx = utils.minikowski_sum(dphidx, -dinfnorm_dx)
+            dhdx = utils.minkowski_sum(dphidx, -dinfnorm_dx)
         else:
             dhdx = dphidx
         return dhdx

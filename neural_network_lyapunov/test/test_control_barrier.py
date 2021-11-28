@@ -100,7 +100,7 @@ class TestControlBarrier(unittest.TestCase):
         if inf_norm_term is not None:
             inf_norm_grad = utils.l_infinity_gradient(
                 inf_norm_term.R @ x - inf_norm_term.p) @ inf_norm_term.R
-            barrier_grad = utils.minikowski_sum(relu_grad, -inf_norm_grad)
+            barrier_grad = utils.minkowski_sum(relu_grad, -inf_norm_grad)
         else:
             barrier_grad = relu_grad
         if barrier_grad.shape[0] == 1:

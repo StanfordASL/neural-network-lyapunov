@@ -798,7 +798,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             zero_tol=zero_tol,
             subgradient_samples=self.l1_subgradient_policy.subgradient_samples
         ) @ R
-        dVdx = utils.minikowski_sum(dphidx, dl1dx)
+        dVdx = utils.minkowski_sum(dphidx, dl1dx)
         return dVdx
 
     def _lyapunov_gradient_batch(self, x, x_equilibrium, V_lambda, R,
