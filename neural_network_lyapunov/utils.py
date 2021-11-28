@@ -1543,7 +1543,7 @@ def box_boundary(x_lo, x_up) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
     return mixed_integer_cnstr
 
 
-def minikowski_sum(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def minkowski_sum(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """
     Given two tensors x, y, such that x.shape[i] = y.shape[i], i>=1. We want
     to return the Minkowski sum of x[i] + y[j] for each pair (i, j).
