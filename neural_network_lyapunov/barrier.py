@@ -251,7 +251,6 @@ class Barrier:
         dhdx = torch.autograd.grad(outputs=h,
                                    inputs=x,
                                    grad_outputs=torch.ones_like(h),
-                                   create_graph=create_graph,
-                                   retain_graph=True)[0]
+                                   create_graph=create_graph)[0]
         x.requires_grad = x_requires_grad
         return dhdx

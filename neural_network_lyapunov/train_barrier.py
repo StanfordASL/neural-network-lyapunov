@@ -389,7 +389,7 @@ class TrainBarrier:
                     f"{total_loss_return.barrier_deriv_mip_objective}, " +
                     "verify_region_boundary_mip_objective " +
                     f"{total_loss_return.verify_region_boundary_mip_objective}"
-                    " nominal_control_loss " +
+                    ", nominal_control_loss " +
                     f"{total_loss_return.nominal_control_loss}")
 
             if self._converged(total_loss_return):

@@ -145,22 +145,11 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
 
         R = lyapunov._get_R(R, self.system.x_dim, x_equilibrium.device)
 
-        # First compute ∂ϕ/∂x
-        dphi_dx = utils.relu_network_gradient(self.lyapunov_relu,
-                                              x,
-                                              zero_tol=zero_tol).squeeze(1)
-
-        # Now compute the gradient of λ|R(x−x*)|₁
-        dl1_dx = V_lambda * utils.l1_gradient(
-            R @ (x - x_equilibrium),
-            zero_tol=zero_tol,
-            subgradient_samples=self.l1_subgradient_policy.subgradient_samples
-        ) @ R
-
-        # We compute the sum of each possible dphi_dX and dl1_dx
-        dVdx = dphi_dx.repeat((dl1_dx.shape[0], 1)) + dl1_dx.repeat(
-            (1, dphi_dx.shape[0])).view(
-                (dphi_dx.shape[0] * dl1_dx.shape[0], self.system.x_dim))
+        dVdx = self._lyapunov_gradient(x,
+                                       x_equilibrium,
+                                       V_lambda,
+                                       R,
+                                       zero_tol=zero_tol)
 
         # minᵤ V̇
         # = ∂V/∂x*f(x) + ∂V/∂x*G(x)*(u_lo + u_up)/2
@@ -202,10 +191,7 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
         s.t s >= dᵢᵀ(f(x) + G(x)u)
         where dᵢ is the i'th vertex of the set of subgradient.
         """
-        dphi_dx = utils.relu_network_gradient(self.lyapunov_relu,
-                                              x,
-                                              zero_tol=zero_tol)
-        dl1_dx = utils.l1_gradient(R @ (x - x_equilibrium)) @ R
+        dVdx = self._lyapunov_gradient(x, x_equilibrium, V_lambda, R, zero_tol)
         f = self.system.f(x)
         G = self.system.G(x)
         milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
@@ -219,15 +205,9 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
             sense=gurobipy.GRB.LESS_EQUAL,
             b=-self.system.u_lo)
         s = milp.addVars(1, lb=-gurobipy.GRB.INFINITY)
-        for i in range(dphi_dx.shape[0]):
-            for j in range(dl1_dx.shape[0]):
-                V_subgradient = dphi_dx[i] + V_lambda * dl1_dx[j].unsqueeze(0)
-                milp.addLConstr([
-                    torch.tensor([1.], dtype=self.system.dtype),
-                    (-V_subgradient @ G).squeeze(0)
-                ], [s, u],
-                                sense=gurobipy.GRB.GREATER_EQUAL,
-                                rhs=V_subgradient.squeeze(0) @ f)
+        milp.addMConstrs([torch.ones((dVdx.shape[0], 1)), (-dVdx @ G)], [s, u],
+                         sense=gurobipy.GRB.GREATER_EQUAL,
+                         b=dVdx @ f)
         milp.setObjective([torch.tensor([1.], dtype=self.system.dtype)], [s],
                           constant=0.,
                           sense=gurobipy.GRB.MINIMIZE)
@@ -802,6 +782,42 @@ class ControlLyapunov(lyapunov.LyapunovHybridLinearSystem):
                                                        dVdx_times_G_up,
                                                        dphidx_times_G,
                                                        dl1dx_times_G)
+
+    def _lyapunov_gradient(self, x, x_equilibrium, V_lambda, R, zero_tol):
+        """
+        Compute the gradient ∂V/∂x.
+        When the gradient is not unique, we return all the left and right
+        gradient.
+        """
+        assert (x.shape == (self.system.x_dim, ))
+        dphidx = utils.relu_network_gradient(self.lyapunov_relu,
+                                             x,
+                                             zero_tol=zero_tol).squeeze(1)
+        dl1dx = V_lambda * utils.l1_gradient(
+            R @ (x - x_equilibrium),
+            zero_tol=zero_tol,
+            subgradient_samples=self.l1_subgradient_policy.subgradient_samples
+        ) @ R
+        dVdx = utils.minikowski_sum(dphidx, dl1dx)
+        return dVdx
+
+    def _lyapunov_gradient_batch(self, x, x_equilibrium, V_lambda, R,
+                                 create_graph):
+        """
+        Compute the gradient ∂V/∂x.
+        This function assumes x is a batch of state. When there are multiple
+        possible subgradients, we take the one returned from pytorch autodiff.
+        """
+        assert (x.shape[1] == self.system.x_dim)
+        x_requires_grad = x.requires_grad
+        x.requires_grad = True
+        V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
+        dVdx = torch.autograd.grad(outputs=V,
+                                   inputs=x,
+                                   grad_outputs=torch.ones_like(V),
+                                   create_graph=create_graph)[0]
+        x.requires_grad = x_requires_grad
+        return dVdx
 
 
 def _compute_dl1dx_times_y(milp: gurobi_torch_mip.GurobiTorchMIP,

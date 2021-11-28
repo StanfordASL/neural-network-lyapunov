@@ -1048,6 +1048,92 @@ class TestControlLyapunov(unittest.TestCase):
         tester(torch.tensor([2, -1], dtype=self.dtype))
         tester(torch.tensor([0, 0], dtype=self.dtype))
 
+    def test_lyapunov_gradient(self):
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  l1_subgradient_policy=mut.SubgradientPolicy(
+                                      np.array([0.])))
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        V_lambda = 0.1
+        R = torch.tensor([[1, 2], [0, 1], [1, -1]], dtype=self.dtype)
+        zero_tol = 0.
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        for i in range(x_samples.shape[0]):
+            dVdx = dut._lyapunov_gradient(x_samples[i], x_equilibrium,
+                                          V_lambda, R, zero_tol).squeeze(0)
+            x_clone = x_samples[i].clone()
+            x_clone.requires_grad = True
+            V = dut.lyapunov_value(x_clone, x_equilibrium, V_lambda, R=R)
+            dVdx_expected = torch.autograd.grad(outputs=V, inputs=x_clone)[0]
+            np.testing.assert_allclose(dVdx.detach().numpy(),
+                                       dVdx_expected.detach().numpy())
+
+        # Now test x with multiple l1-norm subgradient.
+        x = torch.tensor([2, -1], dtype=self.dtype)
+        dVdx = dut._lyapunov_gradient(x, x_equilibrium, V_lambda, R, zero_tol)
+        self.assertEqual(
+            dVdx.shape,
+            (2 + dut.l1_subgradient_policy.subgradient_samples.shape[0],
+             dut.system.x_dim))
+        dl1dx = V_lambda * utils.l1_gradient(
+            R @ (x - x_equilibrium),
+            subgradient_samples=dut.l1_subgradient_policy.subgradient_samples
+        ) @ R
+        dphidx = utils.relu_network_gradient(dut.lyapunov_relu, x).squeeze(1)
+        np.testing.assert_allclose(dVdx.detach().numpy(),
+                                   (dphidx + dl1dx).detach().numpy())
+
+    def lyapunov_gradient_batch_tester(self, dut, x_equilibrium, V_lambda, R,
+                                       create_graph):
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        dVdx = dut._lyapunov_gradient_batch(x_samples, x_equilibrium, V_lambda,
+                                            R, create_graph)
+        self.assertEqual(dVdx.shape, x_samples.shape)
+        dVdx_expected = torch.empty_like(dVdx, dtype=self.dtype)
+        for i in range(x_samples.shape[0]):
+            dVdx_expected[i] = dut._lyapunov_gradient(x_samples[i],
+                                                      x_equilibrium,
+                                                      V_lambda,
+                                                      R,
+                                                      zero_tol=0.)
+        np.testing.assert_allclose(dVdx.detach().numpy(),
+                                   dVdx_expected.detach().numpy())
+        return dVdx, dVdx_expected
+
+    def test_lyapunov_gradient_batch(self):
+        dut = mut.ControlLyapunov(self.linear_system,
+                                  self.lyapunov_relu1,
+                                  l1_subgradient_policy=mut.SubgradientPolicy(
+                                      np.array([0.])))
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        V_lambda = 0.1
+        R = torch.tensor([[1, 2], [0, 1], [1, -1]], dtype=self.dtype)
+        self.lyapunov_gradient_batch_tester(dut,
+                                            x_equilibrium,
+                                            V_lambda,
+                                            R,
+                                            create_graph=False)
+        dVdx, dVdx_expected = self.lyapunov_gradient_batch_tester(
+            dut, x_equilibrium, V_lambda, R, create_graph=True)
+        torch.mean(dVdx).backward()
+        grad = [
+            v.grad.clone() for v in dut.lyapunov_relu.parameters()
+            if v.grad is not None
+        ]
+        dut.lyapunov_relu.zero_grad()
+        torch.mean(dVdx_expected).backward()
+        grad_expected = [
+            v.grad.clone() for v in dut.lyapunov_relu.parameters()
+            if v.grad is not None
+        ]
+        assert (len(grad) == len(grad_expected))
+        for (grad1, grad2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(grad1.detach().numpy(),
+                                       grad2.detach().numpy())
+
 
 def set_l1_binary_val(R, x, x_equilibrium, l1_binary, idx):
     """
