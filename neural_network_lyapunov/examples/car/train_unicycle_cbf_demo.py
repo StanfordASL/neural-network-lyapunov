@@ -25,8 +25,9 @@ def simulate(barrier_syatem, dt, nT, x0, u0, x_star, c, epsilon,
                          ub=barrier_system.system.u_up.tolist())
         f = barrier_system.system.f(x_torch).detach().numpy()
         G = barrier_system.system.G(x_torch).detach().numpy()
-        dhdx = barrier_system._barrier_gradient(
-            x_torch, inf_norm_term, zero_tol=1E-5).detach().numpy()
+        dhdx = barrier_system._barrier_gradient(x_torch,
+                                                inf_norm_term,
+                                                zero_tol=0.).detach().numpy()
         h = barrier_system.barrier_value(
             x_torch, x_star, c, inf_norm_term=inf_norm_term).detach().numpy()
         prog.addMConstrs(dhdx @ G, [u[0], u[1]],
@@ -48,7 +49,7 @@ def simulate(barrier_syatem, dt, nT, x0, u0, x_star, c, epsilon,
         if i == 0:
             u_des = u0
         else:
-            u_des = u_val[:, i - 1]
+            u_des = u0
         x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
             lambda x, u: barrier_system.system.dynamics(
                 torch.from_numpy(x), torch.from_numpy(u)).detach().numpy(),
@@ -194,7 +195,9 @@ if __name__ == "__main__":
                                         bias=True)
         x_star = torch.tensor([0, 0, 0], dtype=dtype)
         c = 0.5
-        inf_norm_term = barrier.InfNormTerm.from_bounding_box(x_lo, x_up, 0.7)
+        # inf_norm_term = barrier.InfNormTerm.from_bounding_box(
+        #     x_lo, x_up, 0.7)
+        inf_norm_term = None
         epsilon = 0.2
     else:
         barrier_data = torch.load(args.load_barrier_relu)
@@ -213,37 +216,38 @@ if __name__ == "__main__":
                 barrier_data["inf_norm_term"]["R"],
                 barrier_data["inf_norm_term"]["p"])
         else:
-            inf_norm_term is None
+            inf_norm_term = None
     barrier_system = control_barrier.ControlBarrier(dynamics_model,
                                                     barrier_relu)
     if args.simulate:
-        simulate(barrier_system,
-                 dt=0.01,
-                 nT=5000,
-                 x0=np.array([0., 0, 0]),
-                 u0=np.array([0.5, 0]),
-                 x_star=x_star,
-                 c=c,
-                 epsilon=epsilon,
-                 inf_norm_term=inf_norm_term)
-    verify_region_boundary = utils.box_boundary(x_lo, x_up)
-    # unsafe region is a box region
-    unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-    unsafe_region_cnstr.Ain_input = torch.tensor(
-        [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]], dtype=dtype)
-    unsafe_region_cnstr.rhs_in = torch.tensor([0.6, 0.6, -0.4, -0.4],
-                                              dtype=dtype)
+        x_val, u_val, h_val, hdot_val = simulate(barrier_system,
+                                                 dt=0.01,
+                                                 nT=5000,
+                                                 x0=np.array([0.5, 0.5, 0]),
+                                                 u0=np.array([0.5, 0]),
+                                                 x_star=x_star,
+                                                 c=c,
+                                                 epsilon=epsilon,
+                                                 inf_norm_term=inf_norm_term)
+    else:
+        verify_region_boundary = utils.box_boundary(x_lo, x_up)
+        # unsafe region is a box region
+        unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
+        unsafe_region_cnstr.Ain_input = torch.tensor(
+            [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]], dtype=dtype)
+        unsafe_region_cnstr.rhs_in = torch.tensor([0.6, 0.6, -0.4, -0.4],
+                                                  dtype=dtype)
 
-    dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
-                                     unsafe_region_cnstr,
-                                     verify_region_boundary, epsilon,
-                                     inf_norm_term)
-    dut.enable_wandb = args.enable_wandb
+        dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
+                                         unsafe_region_cnstr,
+                                         verify_region_boundary, epsilon,
+                                         inf_norm_term)
+        dut.enable_wandb = args.enable_wandb
 
-    unsafe_state_samples = torch.zeros((0, 3), dtype=dtype)
-    boundary_state_samples = torch.zeros((0, 3), dtype=dtype)
-    deriv_state_samples = torch.zeros((0, 3), dtype=dtype)
+        unsafe_state_samples = torch.zeros((0, 3), dtype=dtype)
+        boundary_state_samples = torch.zeros((0, 3), dtype=dtype)
+        deriv_state_samples = torch.zeros((0, 3), dtype=dtype)
 
-    is_success = dut.train(unsafe_state_samples, boundary_state_samples,
-                           deriv_state_samples)
+        is_success = dut.train(unsafe_state_samples, boundary_state_samples,
+                               deriv_state_samples)
     pass

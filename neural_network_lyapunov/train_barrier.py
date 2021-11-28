@@ -368,7 +368,7 @@ class TrainBarrier:
                 wandb.log({
                     "loss":
                     total_loss_return.loss.item(),
-                    "unsafe_mip_objective":
+                    "unsafe_region_mip_objective":
                     total_loss_return.unsafe_mip_objective,
                     "barrier_deriv_mip_objective":
                     total_loss_return.barrier_deriv_mip_objective,
