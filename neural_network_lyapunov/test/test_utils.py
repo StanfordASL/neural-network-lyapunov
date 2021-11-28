@@ -1388,7 +1388,7 @@ class TestBoxBoundary(unittest.TestCase):
 
 class TestMinkowskiSum(unittest.TestCase):
     def minkowski_sum_tester(self, x, y):
-        result = utils.minikowski_sum(x, y)
+        result = utils.minkowski_sum(x, y)
         self.assertEqual(result.shape,
                          ((x.shape[0] * y.shape[0], ) + tuple(x.shape[1:])))
         for i in range(x.shape[0]):
