@@ -166,9 +166,19 @@ We use the $l_1$ norm function $|R(x-x^*)|_1$ to denote how to use the subgradie
 \end{align}
 Notice that when the gradient is unique, then we only need to consider the discrete value $\pm1$ multiplying the continuous value $Rf, RG$, and this product can be captured by mixed-integer linear constraints. But when we have subgradient, then we need to consider the continuous variable in the range $[-1, 1]$ multiplying continuous value $Rf, RG$. This product between continuous variables can't be captured by mixed-integer linear constraints.
 
-To remedy this, we only consider a finite number of sampled subgradients. For example if we only consider the sub-gradient $-1, 0, 1$, then we can write the subgradient as
+We propose two approaches to remedy this
+\subsubsection{sampled subgradient}
+In the first approach, we only consider a finite number of sampled subgradients. For example if we only consider the sub-gradient $-1, 0, 1$, then we can write the subgradient as
 \begin{align}
 	g_i = \beta_0*-1+\beta_1 * 0 + \beta_2 * 1, \beta_i \text{ is binary}, \beta_0 + \beta_1 + \beta_2 = 1 \text{ if } R[i, :] (x-x^*)=0
+\end{align}
+\subsubsection{all subgradients}
+In the second approach, we do consider all subgradients. The key thing is to note that when the subgradient $g_i \in [-1, 1]$,  the term $g_i z$ can be replaced by a new term $t$ with the constraint $-|z| \le t \le |z|$ if $z$ is a scalar. It is very important to aggregate anything that multiplies $g_i$ to a single slack variable $z$ when we use this trick.
+
+We will have the term $g^TRf - |g^TRG|_1$. We denote $\bar{f}=Rf, \bar{G}=RG$
+\begin{align}
+	g^TRf - |g^TRG|_1 = g^T\bar{f} - |g^T\bar{G}|_1\\
+	= \sum_{i=1}^{n_x} g_i \bar{f}_i - \sum_{j=1}^{n_u}|\sum_{i=1}^{n_x}g_i \bar{G}_{ij}|
 \end{align}
 
 \section{Control barrier function}
