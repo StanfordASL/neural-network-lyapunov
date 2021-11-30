@@ -8,10 +8,63 @@ import neural_network_lyapunov.control_lyapunov as control_lyapunov
 import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.integrator as integrator
 
 import torch
 import numpy as np
 import argparse
+import gurobipy
+
+
+def simulate(lyapunov_hybrid_system, dt, nT, x0, x_equilibrium, V_lambda,
+             deriv_epsilon, R):
+    def compute_control(x, u_des):
+        x_torch = torch.from_numpy(x)
+        prog = gurobipy.Model()
+        u = prog.addVars(2,
+                         lb=lyapunov_hybrid_system.system.u_lo.tolist(),
+                         ub=lyapunov_hybrid_system.system.u_up.tolist())
+        f = lyapunov_hybrid_system.system.f(x_torch).detach().numpy()
+        G = lyapunov_hybrid_system.system.G(x_torch).detach().numpy()
+        dhdx = lyapunov_hybrid_system._lyapunov_gradient(
+            x_torch, x_equilibrium, V_lambda, R,
+            zero_tol=1E-6).detach().numpy()
+        V = lyapunov_hybrid_system.lyapunov_value(x_torch,
+                                                  x_equilibrium,
+                                                  V_lambda,
+                                                  R=R).detach().numpy()
+        prog.addMConstrs(dhdx @ G, [u[0], u[1]],
+                         sense=gurobipy.GRB.LESS_EQUAL,
+                         b=(-deriv_epsilon * V - dhdx @ f))
+        prog.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        prog.setObjective((u[0] - u_des[0]) * (u[0] - u_des[0]) +
+                          (u[1] - u_des[1]) * (u[1] - u_des[1]))
+        prog.optimize()
+        assert (prog.status == gurobipy.GRB.Status.OPTIMAL)
+        u_val = np.array([u[0].x, u[1].x])
+        return u_val
+
+    x_val = np.zeros((6, nT))
+    x_val[:, 0] = x0
+    u_val = np.zeros((2, nT))
+    for i in range(nT - 1):
+        if i == 0:
+            u_des = np.array([0, 0.])
+        else:
+            u_des = u_val[:, i - 1]
+        x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
+            lambda x, u: lyapunov_hybrid_system.system.dynamics(
+                torch.from_numpy(x), torch.from_numpy(u)).detach().numpy(),
+            lambda x: compute_control(x, u_des),
+            x_val[:, i],
+            dt,
+            constant_control_steps=1)
+    u_val[:, -1] = compute_control(x_val[:, -1], u_val[:, -2])
+    V_val = lyapunov_hybrid_system.lyapunov_value(torch.from_numpy(x_val.T),
+                                                  x_equilibrium,
+                                                  V_lambda,
+                                                  R=R)
+    return x_val, u_val, V_val
 
 
 def generate_quadrotor_dynamics_data():
@@ -78,6 +131,7 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="path to load lyapunov")
+    parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
     dtype = torch.float64
 
@@ -169,7 +223,7 @@ if __name__ == "__main__":
 
     lyapunov_hybrid_system = control_lyapunov.ControlLyapunov(
         dynamics_model, lyapunov_relu,
-        control_lyapunov.SubgradientPolicy(np.array([0.])))
+        control_lyapunov.SubgradientPolicy(np.array([-0.5, 0., 0.5])))
 
     R_options = r_options.FixedROptions(R)
 
@@ -177,19 +231,30 @@ if __name__ == "__main__":
         train_utils.wandb_config_update(args, lyapunov_relu, None, x_lo, x_up,
                                         u_lo, u_up)
 
-    dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system, V_lambda,
-                                           x_equilibrium, R_options)
+    if args.simulate:
+        x_val, u_val, V_val = simulate(lyapunov_hybrid_system,
+                                       dt=0.001,
+                                       nT=2000,
+                                       x0=np.array([0.5, 0.5, 0.2, 0, 0., 0.]),
+                                       x_equilibrium=x_equilibrium,
+                                       V_lambda=V_lambda,
+                                       deriv_epsilon=0.1,
+                                       R=R)
+    else:
+        dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system,
+                                               V_lambda, x_equilibrium,
+                                               R_options)
 
-    dut.lyapunov_positivity_mip_pool_solutions = 1
-    dut.lyapunov_derivative_mip_pool_solutions = 1
-    dut.lyapunov_derivative_epsilon = 0.1
-    dut.lyapunov_derivative_mip_clamp_min = -1.
-    dut.lyapunov_derivative_mip_cost_weight = 1.
-    dut.output_flag = True
-    dut.learning_rate = 0.003
-    dut.max_iterations = args.max_iterations
-    dut.enable_wandb = args.enable_wandb
-    state_samples_all = torch.empty((0, 6), dtype=dtype)
-    dut.train(state_samples_all)
+        dut.lyapunov_positivity_mip_pool_solutions = 1
+        dut.lyapunov_derivative_mip_pool_solutions = 1
+        dut.lyapunov_derivative_epsilon = 0.1
+        dut.lyapunov_derivative_mip_clamp_min = -1.
+        dut.lyapunov_derivative_mip_cost_weight = 1.
+        dut.output_flag = True
+        dut.learning_rate = 0.003
+        dut.max_iterations = args.max_iterations
+        dut.enable_wandb = args.enable_wandb
+        state_samples_all = torch.empty((0, 6), dtype=dtype)
+        dut.train(state_samples_all)
 
     pass
