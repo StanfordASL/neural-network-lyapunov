@@ -7,6 +7,7 @@ import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.integrator as integrator
+import neural_network_lyapunov.nominal_controller as nominal_controller
 
 import torch
 import argparse
@@ -49,7 +50,7 @@ def simulate(barrier_syatem, dt, nT, x0, u0, x_star, c, epsilon,
         if i == 0:
             u_des = u0
         else:
-            u_des = u0
+            u_des = u_val[:, i - 1]
         x_val[:, i + 1], u_val[:, i] = integrator.rk4_constant_control(
             lambda x, u: barrier_system.system.dynamics(
                 torch.from_numpy(x), torch.from_numpy(u)).detach().numpy(),
@@ -224,7 +225,7 @@ if __name__ == "__main__":
                                                  dt=0.01,
                                                  nT=5000,
                                                  x0=np.array([0.5, 0.5, 0]),
-                                                 u0=np.array([0.5, 0]),
+                                                 u0=np.array([0., 0]),
                                                  x_star=x_star,
                                                  c=c,
                                                  epsilon=epsilon,
@@ -233,16 +234,34 @@ if __name__ == "__main__":
         verify_region_boundary = utils.box_boundary(x_lo, x_up)
         # unsafe region is a box region
         unsafe_region_cnstr = gurobi_torch_mip.MixedIntegerConstraintsReturn()
-        unsafe_region_cnstr.Ain_input = torch.tensor(
-            [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]], dtype=dtype)
-        unsafe_region_cnstr.rhs_in = torch.tensor([0.6, 0.6, -0.4, -0.4],
-                                                  dtype=dtype)
+        # unsafe_region_cnstr.Ain_input = torch.tensor(
+        #     [[1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0]], dtype=dtype)
+        # unsafe_region_cnstr.rhs_in = torch.tensor([0.6, 0.6, -0.4, -0.4],
+        #                                           dtype=dtype)
+
+        nominal_controller_nn = utils.setup_relu((3, 6, 8, 2),
+                                                 params=None,
+                                                 negative_slope=0.1,
+                                                 bias=True,
+                                                 dtype=dtype)
+        nominal_control_state_samples = utils.uniform_sample_in_box(
+            x_lo, x_up, 10000)
+        u_star = torch.zeros((2, ), dtype=dtype)
+        nominal_control_option = train_barrier.NominalControlOption(
+            nominal_controller.NominalNNController(nominal_controller_nn,
+                                                   x_star, u_star, u_lo, u_up),
+            nominal_control_state_samples,
+            weight=10.,
+            margin=0.1,
+            norm="max",
+            nominal_control_loss_tol=0.8)
 
         dut = train_barrier.TrainBarrier(barrier_system, x_star, c,
                                          unsafe_region_cnstr,
                                          verify_region_boundary, epsilon,
-                                         inf_norm_term)
+                                         inf_norm_term, nominal_control_option)
         dut.enable_wandb = args.enable_wandb
+        dut.max_iterations = args.max_iterations
 
         unsafe_state_samples = torch.zeros((0, 3), dtype=dtype)
         boundary_state_samples = torch.zeros((0, 3), dtype=dtype)
