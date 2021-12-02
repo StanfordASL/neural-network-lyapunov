@@ -1,7 +1,7 @@
 \documentclass{article}
 \usepackage{amsmath, amsfonts, graphicx, fullpage}
 \begin{document}
-Consider a massless pole with a sphere attached to one end, with sphere mass being $m_s$. The other end of the pole (point $A$) is attached to the end-effector with mass $m_e$ at point $A$. The state of the pole is the location/velocity of $A$, and the azimuth/altitude angle and their velocity, as shown in this plot
+Consider a massless pole with a sphere attached to one end, with sphere mass being $m_s$. The other end of the pole (point $A$) is attached to the end-effector with mass $m_e$ at point $A$. The state of the system is the velocity of the end-effector point A $(\dot{x}_A, \dot{y}_A, \dot{z}_A)$, the delta position between the sphere and the end-effector in the horizontal plane $x_{AB} = x_B - x_A, y_{AB} = y_B-y_A$, together with its time derivative $\dot{x}_{AB}, \dot{y}_{AB}$.
 
 \begin{figure}
 	\centering
@@ -11,34 +11,65 @@ Consider a massless pole with a sphere attached to one end, with sphere mass bei
 The position of the mass is
 \begin{align}
 	\begin{bmatrix}
-		x_A + l\cos\beta\cos\alpha\\
-		y_A + l\cos\beta\sin\alpha\\
-		z_A + l\sin\beta
+		x_A + x_{AB}\\
+		y_A + y_{AB}\\
+		z_A + \sqrt{l^2 - x_{AB}^2 - y_{AB}^2}
 	\end{bmatrix}
 \end{align}
 The velocity of the mass is
 \begin{align}
 	\begin{bmatrix}
-		\dot{x}_A - l\dot{\alpha}\cos\beta\sin\alpha - l\dot{\beta}\sin\beta\cos\alpha\\
-		\dot{y}_A + l\dot{\alpha}\cos\beta\cos\alpha - l\dot{\beta}\sin\beta\sin\alpha\\
-		\dot{z}_A + l\dot{\beta}\cos\beta
+		\dot{x}_A + \dot{x}_{AB}\\
+		\dot{y}_A + \dot{y}_{AB}\\
+		\dot{z}_A - \frac{lx_{AB}\dot{x}_{AB} + ly_{AB}\dot{y}_{AB}}{\sqrt{l^2-x_{AB}^2 - y_{AB}^2}}
 	\end{bmatrix}
 \end{align}
 The total kinetic energy of the system is
 \begin{multline}
-	T = 0.5 m_e (\dot{x}_A^2 + \dot{y}_A^2 +\dot{z}_A^2) + 0.5 m_s(\dot{x}_A^2 + \dot{y}_A^2 + \dot{z}_A^2 + l^2\dot{\alpha}^2\cos^2\beta +\\
-	l^2\dot{\beta}^2 - 2\dot{x}_Al\dot{\alpha}\cos\beta\sin\alpha + 2\dot{y}_Al\dot{\alpha}\cos\beta\cos\alpha - 2\dot{x}_Al\dot{\beta}\sin\beta\cos\alpha - 2\dot{y}_Al\dot{\beta}\sin\beta\sin\alpha + 2\dot{z}_Al\dot{\beta}\cos\beta) 
+	T = 0.5 m_e (\dot{x}_A^2 + \dot{y}_A^2 +\dot{z}_A^2) + 0.5 m_s(\dot{x}_A^2 + \dot{y}_A^2 + \dot{z}_A^2 + \dot{x}_{AB}^2 + \dot{y}_{AB}^2 + \frac{l^2(x_{AB}^2\dot{x}_{AB}^2 + y_{AB}^2\dot{y}_{AB}^2 + 2x_{AB}y_{AB}\dot{x}_{AB}\dot{y}_{AB})}{l^2-x_{AB}^2-y_{AB}^2}\\
+	+ 2\dot{x}_A\dot{x}_{AB} + 2\dot{y}_A\dot{y}_{AB} - \frac{2l\dot{z}_A(x_{AB}\dot{x}_{AB}+y_{AB}\dot{y}_{AB})}{\sqrt{l^2-x_{AB}^2-y_{AB}^2}})
 \end{multline}
 The total potential energy is
 \begin{align}
-	V = m_egz_A + m_sg(z_A + l\sin\beta)
+	V = m_egz_A + m_sg(z_A + \sqrt{l^2-x_{AB}^2-y_{AB}^2})
 \end{align}
 Using Lagrangian $L = T-V$ and $\frac{d}{dt}\frac{\partial L}{\partial \dot{q}}-\frac{\partial L}{\partial q}$, we have
 \begin{align}
-	(m_s + m_e)\ddot{x}_A - m_sl(\ddot{\alpha}\cos\beta\sin\alpha + \ddot{\beta}\sin\beta\cos\alpha + \cos\beta\cos\alpha(\dot{\alpha}^2+\dot{\beta}^2) - 2\dot{\alpha}\dot{\beta}\sin\beta\sin\alpha) = u_x\\
-	(m_s + m_e)\ddot{y}_A +m_sl(\ddot{\alpha}\cos\beta\cos\alpha-\ddot{\beta}\sin\beta\sin\alpha-2\dot{\alpha}\dot{\beta}\sin\beta\cos\alpha-(\dot{\alpha}^2+\dot{\beta}^2)\cos\beta\sin\alpha) = u_y\\
-	(m_s + m_e)\ddot{z}_A + m_sl(\ddot{\beta}\cos\beta - \dot{\beta}^2\sin\beta) + (m_s+m_e)g = u_z\\
-	-\dot{\alpha}\dot{\beta}l\sin 2\beta + l\ddot{\alpha}\cos^2\beta - \ddot{x}_A\cos\beta\sin\alpha + \ddot{y}_A\cos\alpha\cos\beta = 0\\
-	\dot{\alpha}^2l\sin 2\beta + \ddot{\beta}l + g\cos\beta + \ddot{x}_A\cos\alpha\sin\beta - \ddot{y}_A\sin\alpha\sin\beta + \ddot{z}_A\cos\beta = 0
+	(m_e + m_s)\ddot{x}_A + m_s\ddot{x}_{AB} = u_x\\
+	(m_e + m_s)\ddot{y}_A + m_s\ddot{y}_{AB} = u_y
+\end{align}
+\begin{multline}
+	(m_e + m_s)(\ddot{z}_A+g) - m_sl\left(\dot{x}_{AB}^2\frac{l^2 - y_{AB}^2}{z_{AB}^3} + \frac{x_{AB}}{z_{AB}}\ddot{x}_{AB} + \dot{y}_{AB}^2\frac{l^2-x_{AB}^2}{z_{AB}^3} + \frac{y_{AB}}{z_{AB}}\ddot{y}_{AB} - 2 \frac{x_{AB}y_{AB}\dot{x}_{AB}\dot{y}_{AB}}{z_{AB}^3}\right) = u_z
+\end{multline}
+\begin{multline}
+	m_s(\ddot{x}_A + \ddot{x}_{AB}) - m_slx_{AB}(g+\ddot{z}_A)/z_{AB} + m_sl^2(x_{AB}^2\ddot{x}_{AB}+x_{AB}\dot{x}_{AB}^2+x_{AB}y_{AB}\ddot{y}_{AB}+x_{AB}\dot{y}_{AB}^2)/z_{AB}^2\\
+	+ m_sl^2(x_{AB}^3\dot{x}_{AB}^2 + 2x_{AB}^2y_{AB}\dot{x}_{AB}\dot{y}_{AB} + x_{AB}y_{AB}^2\dot{y}_{AB}^2)/z_{AB}^4=0
+\end{multline}
+\begin{multline}
+	m_s(\ddot{y}_A + \ddot{y}_{AB}) - m_sly_{AB}(g+\ddot{z}_A)/z_{AB} + m_sl^2(y_{AB}^2\ddot{y}_{AB}+y_{AB}\dot{y}_{AB}^2+y_{AB}x_{AB}\ddot{x}_{AB}+y_{AB}\dot{x}_{AB}^2)/z_{AB}^2\\
+	+ m_sl^2(y_{AB}^3\dot{y}_{AB}^2 + 2y_{AB}^2x_{AB}\dot{y}_{AB}\dot{x}_{AB} + y_{AB}x_{AB}^2\dot{x}_{AB}^2)/z_{AB}^4=0
+\end{multline}
+
+In the matrix form, we have
+\begin{align}
+	M	\begin{bmatrix}\ddot{x}_A\\\ddot{y}_A\\\ddot{z}_A\\\ddot{x}_{AB}\\\ddot{y}_{AB}\end{bmatrix} + C = \begin{bmatrix}u_x\\u_y\\u_z\\0\\0\end{bmatrix}
+\end{align}
+where
+\begin{align}
+	M = 
+	\begin{bmatrix}
+		m_e + m_s & 0 & 0 & m_s & 0\\
+		0 & m_e + m_s & 0 & 0 & m_s\\
+		0 & 0 & m_e + m_s & -m_sl\frac{x_{AB}}{z_{AB}} & -m_sl\frac{y_{AB}}{z_{AB}}\\
+		m_s& 0 & -m_sl\frac{x_{AB}}{z_{AB}} & m_s + m_sl^2\frac{x_{AB}^2}{z_{AB}^2} & m_sl^2\frac{x_{AB}y_{AB}}{z_{AB}^2}\\
+		l^2 & m_s & -m_sl\frac{y_{AB}}{z_{AB}} &m_sl^2\frac{x_{AB}y_{AB}}{z_{AB}^2} & m_s + m_sl^2\frac{y_{AB}^2}{z_{AB}^2}
+	\end{bmatrix}\\
+	C = \begin{bmatrix}
+		0\\
+		0\\
+		(m_e + m_s)g - m_sl\left(\dot{x}_{AB}^2\frac{l^2-y_{AB}^2}{z_{AB}^3} + \dot{y}_{AB}^2\frac{l^2-x_{AB}^2}{z_{AB}^3} - 2\frac{x_{AB}y_{AB}\dot{x}_{AB}\dot{y}_{AB}}{z_{AB}^3}\right)\\
+		-m_sgl\frac{x_{AB}}{z_{AB}}+m_sl^2x_{AB}\left(\frac{\dot{x}_{AB}^2 + \dot{y}_{AB}^2}{z_{AB}^2}+\frac{(x_{AB}\dot{x}_{AB} + y_{AB}\dot{y}_{AB})^2}{z_{AB}^4}\right)\\
+		-m_sgl\frac{y_{AB}}{z_{AB}}+m_sl^2y_{AB}\left(\frac{\dot{x}_{AB}^2 + \dot{y}_{AB}^2}{z_{AB}^2}+\frac{(x_{AB}\dot{x}_{AB} + y_{AB}\dot{y}_{AB})^2}{z_{AB}^4}\right)
+	\end{bmatrix}
 \end{align}
 \end{document}
