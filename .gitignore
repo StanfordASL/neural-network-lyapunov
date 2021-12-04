@@ -143,3 +143,5 @@ notebooks/*.p
 *.DS_Store
 
 *wandb
+
+lyapunov_venv/
