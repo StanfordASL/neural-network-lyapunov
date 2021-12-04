@@ -29,6 +29,7 @@ jobs:
         python3 -m unittest discover neural_network_lyapunov/test
         python3 -m unittest discover neural_network_lyapunov/examples/car/test
         python3 -m unittest discover neural_network_lyapunov/examples/pendulum/test
+        python3 -m unittest discover neural_network_lyapunov/examples/pole/test
         python3 -m unittest discover neural_network_lyapunov/examples/quadrotor2d/test
         python3 -m unittest discover neural_network_lyapunov/examples/quadrotor3d/test
         python3 -m unittest discover neural_network_lyapunov/examples/rocket/test
