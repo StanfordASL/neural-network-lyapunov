@@ -12,6 +12,49 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.lyapunov as lyapunov
 
 
+class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
+    """
+    For a continuous time system
+    ẋ = f(x)
+    Find a Lyapunov function V(x) = ϕ(x)−ϕ(x*)+λ|R(x−x*)|₁
+    that certifies the Lyapunov condition
+    V(x) > 0 ∀ x≠ x*
+    V̇(x) ≤ −ε₂V(x) ∀ x
+
+    Here we consider the dynamics constraint ẋ = f(x) can be  represented by
+    mixed-integer linear constraint. ϕ(x) is a neural network with leaky ReLU
+    units.
+    We will solve the two optimization problem
+    maxₓ -V(x) + ε₁|R(x−x*)|₁
+    andₓ V̇(x) + ε₂ V(x)
+    If the maximal objective for both problems are 0, then we prove the
+    Lyapunov condition.
+    """
+    def __init__(self, system, lyapunov_relu):
+        """
+        Args:
+          system: A continuous-time dynamical system.
+          lyapunov_relu: The network ϕ(x) used in the Lyapunov function V(x).
+        """
+        super(LyapunovContinuousTimeSystem,
+              self).__init__(system, lyapunov_relu)
+
+    def lyapunov_derivative(self, x, x_equilibrium, V_lambda, epsilon, *, R):
+        """
+        Compute V̇(x) + εV(x)
+        Due to the non-uniqueness of the gradient dV/dx, there might be
+        multiple V̇(x) + εV(x). We return a list of all the values.
+        """
+        dVdx = self._lyapunov_gradient(x,
+                                       x_equilibrium,
+                                       V_lambda,
+                                       R,
+                                       zero_tol=0.)
+        xdot = self.system.step_forward(x)
+        return dVdx @ xdot + epsilon * self.lyapunov_value(
+            x, x_equilibrium, V_lambda, R=R)
+
+
 class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
     """
     For a continuous time autonomous hybrid linear system
