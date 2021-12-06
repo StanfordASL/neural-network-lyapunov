@@ -1079,9 +1079,9 @@ class ReLUFreePattern:
 
         return (M, B1, B2, d)
 
-    def output_gradient_times_vector(
-            self, vector_lower,
-            vector_upper) -> ReLUGradientTimesVecMixedIntegerConstraintsReturn:
+    def output_gradient_times_vector_w_bounds(
+            self, z_lo, z_up, Wz_lo,
+            Wz_up) -> ReLUGradientTimesVecMixedIntegerConstraintsReturn:
         """
         We want to compute the gradient of the network ∂ReLU(x)/∂x times a
         vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
@@ -1105,15 +1105,15 @@ class ReLUFreePattern:
         where slack = [z₁; z₂;...;zₙ]
         Note that we do NOT require that β is the right activation pattern for
         the input x. This constraint should be imposed in output() function.
-        @param vector_lower The lower bound of the vector y.
-        @param vector_upper The upper bound of the vector y.
+        @param z_lo z_lo[i] is the lower bound of zᵢ.
+        @param z_up z_up[i] is the upper bound of zᵢ.
+        @param Wz_lo Wz_lo[i] is the lower bound of Wᵢzᵢ
+        @param Wz_up Wz_up[i] is the upper bound of Wᵢzᵢ
         @return mip_cnstr_return that contains the output
         ∂ReLU(x)/∂x * y = Aₒᵤₜ * z
         and the linear inequality constraint
         A_y * y + A_slack * slack + A_beta * β ≤ rhs
         """
-        utils.check_shape_and_type(vector_lower, (self.x_size, ), self.dtype)
-        utils.check_shape_and_type(vector_upper, (self.x_size, ), self.dtype)
         A_y = torch.zeros((4 * self.num_relu_units, self.x_size),
                           dtype=self.dtype)
         A_slack = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
@@ -1121,14 +1121,10 @@ class ReLUFreePattern:
         A_beta = torch.zeros((4 * self.num_relu_units, self.num_relu_units),
                              dtype=self.dtype)
         rhs = torch.zeros(4 * self.num_relu_units, dtype=self.dtype)
-        z_lo = torch.empty(self.num_relu_units, dtype=self.dtype)
-        z_up = torch.empty(self.num_relu_units, dtype=self.dtype)
         layer_count = 0
         ineq_count = 0
         A_out = torch.zeros((self.model[-1].out_features, self.num_relu_units),
                             dtype=self.dtype)
-        z_lo, z_up, Wz_lo, Wz_up = self._compute_Wz_bounds_IA(
-            vector_lower, vector_upper)
         linear_layer_count = 0
         for layer in self.model:
             if (isinstance(layer, nn.Linear)):
@@ -1187,6 +1183,46 @@ class ReLUFreePattern:
         result.Wz_lo = Wz_lo
         result.Wz_up = Wz_up
         return result
+
+    def output_gradient_times_vector(
+            self, vector_lower,
+            vector_upper) -> ReLUGradientTimesVecMixedIntegerConstraintsReturn:
+        """
+        We want to compute the gradient of the network ∂ReLU(x)/∂x times a
+        vector y: ∂ReLU(x)/∂x  * y, and reformulate this product as
+        mixed-integer linear constraints.
+        We assume that the leaky relu unit has negative slope c (c = 0 for
+        ReLU unit). And we define a matrix
+        M(β, c) = c*I + (1-c)*diag(β)
+        We notice that
+        ∂ReLU(x)/∂x = Wₙ * M(βₙ₋₁, c)  * Wₙ₋₁ * M(βₙ₋₂, c) * Wₙ₋₂ * ...
+                      * M(β₀, c) * W₀
+        So we introduce slack variable z, such that
+        z₀ = y
+        zᵢ₊₁ = M(βᵢ, c)*Wᵢ*zᵢ, i = 0, ..., n-1    (1)
+        The constraint (1) can be replaced by mixed-integer linear constraint
+        on zᵢ and βᵢ.
+
+        We write ∂ReLU(x)/∂x * y as
+        Aₒᵤₜ * slack
+        with the additional constraint
+        A_y * y + A_slack * slack + A_beta * β ≤ rhs
+        where slack = [z₁; z₂;...;zₙ]
+        Note that we do NOT require that β is the right activation pattern for
+        the input x. This constraint should be imposed in output() function.
+        @param vector_lower The lower bound of the vector y.
+        @param vector_upper The upper bound of the vector y.
+        @return mip_cnstr_return that contains the output
+        ∂ReLU(x)/∂x * y = Aₒᵤₜ * z
+        and the linear inequality constraint
+        A_y * y + A_slack * slack + A_beta * β ≤ rhs
+        """
+        utils.check_shape_and_type(vector_lower, (self.x_size, ), self.dtype)
+        utils.check_shape_and_type(vector_upper, (self.x_size, ), self.dtype)
+        z_lo, z_up, Wz_lo, Wz_up = self._compute_Wz_bounds_IA(
+            vector_lower, vector_upper)
+        return self.output_gradient_times_vector_w_bounds(
+            z_lo, z_up, Wz_lo, Wz_up)
 
     def _compute_Wz_bounds_optimization(self, prog: gurobipy.Model, z0: list,
                                         beta: list):
