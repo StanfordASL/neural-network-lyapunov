@@ -258,8 +258,7 @@ class LyapunovHybridLinearSystem:
         assert (len(x) == self.system.x_dim)
         # z is the slack variable to write the output of ReLU network as mixed
         # integer constraints.
-        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
-            mip, x)
+        z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(mip, x)
         # Now write the 1-norm |R*(x - x*)|₁ as mixed-integer linear
         # constraints.
         s, gamma = self.add_state_error_l1_constraint(mip,
@@ -547,6 +546,39 @@ class LyapunovHybridLinearSystem:
         assert (x_equilibrium.shape == (self.system.x_dim, ))
         assert (np.all(x_equilibrium.detach().numpy() <= self.system.x_up_all))
         assert (np.all(x_equilibrium.detach().numpy() >= self.system.x_lo_all))
+
+    def _lyapunov_gradient(self, x, x_equilibrium, V_lambda, R, zero_tol):
+        """
+        Compute the gradient ∂V/∂x.
+        When the gradient is not unique, we return all the left and right
+        gradient.
+        """
+        assert (x.shape == (self.system.x_dim, ))
+        dphidx = utils.relu_network_gradient(self.lyapunov_relu,
+                                             x,
+                                             zero_tol=zero_tol).squeeze(1)
+        dl1dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium),
+                                             zero_tol=zero_tol) @ R
+        dVdx = utils.minkowski_sum(dphidx, dl1dx)
+        return dVdx
+
+    def _lyapunov_gradient_batch(self, x, x_equilibrium, V_lambda, R,
+                                 create_graph):
+        """
+        Compute the gradient ∂V/∂x.
+        This function assumes x is a batch of state. When there are multiple
+        possible subgradients, we take the one returned from pytorch autodiff.
+        """
+        assert (x.shape[1] == self.system.x_dim)
+        x_requires_grad = x.requires_grad
+        x.requires_grad = True
+        V = self.lyapunov_value(x, x_equilibrium, V_lambda, R=R)
+        dVdx = torch.autograd.grad(outputs=V,
+                                   inputs=x,
+                                   grad_outputs=torch.ones_like(V),
+                                   create_graph=create_graph)[0]
+        x.requires_grad = x_requires_grad
+        return dVdx
 
 
 class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
