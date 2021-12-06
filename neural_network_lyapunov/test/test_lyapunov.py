@@ -297,6 +297,11 @@ class TestLyapunovHybridSystem(unittest.TestCase):
         self.system3 = test_hybrid_linear_system.\
             setup_johansson_continuous_time_system1()
         self.x_equilibrium3 = torch.tensor([0, 0], dtype=self.dtype)
+        self.system4 = relu_system.AutonomousReLUSystemGivenEquilibrium(
+            self.dtype, torch.tensor([-2, -3], dtype=self.dtype),
+            torch.tensor([1, -2], dtype=self.dtype),
+            setup_relu_dyn(self.dtype),
+            torch.tensor([-1, -2.5], dtype=self.dtype))
 
         self.lyapunov_relu1 = utils.setup_relu((2, 3, 4, 1),
                                                params=None,
@@ -766,6 +771,82 @@ class TestLyapunovHybridSystem(unittest.TestCase):
             s_expected = torch.abs(R @ (x_samples[i] - x_equilibrium))
             np.testing.assert_allclose(np.array([v.x for v in s]),
                                        s_expected.detach().numpy())
+
+    def test_lyapunov_gradient(self):
+        dut = lyapunov.LyapunovHybridLinearSystem(self.system4,
+                                                  self.lyapunov_relu1)
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        V_lambda = 0.1
+        R = torch.tensor([[1, 2], [0, 1], [1, -1]], dtype=self.dtype)
+        zero_tol = 0.
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        for i in range(x_samples.shape[0]):
+            dVdx = dut._lyapunov_gradient(x_samples[i], x_equilibrium,
+                                          V_lambda, R, zero_tol).squeeze(0)
+            x_clone = x_samples[i].clone()
+            x_clone.requires_grad = True
+            V = dut.lyapunov_value(x_clone, x_equilibrium, V_lambda, R=R)
+            dVdx_expected = torch.autograd.grad(outputs=V, inputs=x_clone)[0]
+            np.testing.assert_allclose(dVdx.detach().numpy(),
+                                       dVdx_expected.detach().numpy())
+
+        # Now test x with multiple l1-norm subgradient.
+        x = torch.tensor([2, -1], dtype=self.dtype)
+        dVdx = dut._lyapunov_gradient(x, x_equilibrium, V_lambda, R, zero_tol)
+        self.assertEqual(dVdx.shape, (2, dut.system.x_dim))
+        dl1dx = V_lambda * utils.l1_gradient(R @ (x - x_equilibrium)) @ R
+        dphidx = utils.relu_network_gradient(dut.lyapunov_relu, x).squeeze(1)
+        np.testing.assert_allclose(dVdx.detach().numpy(),
+                                   (dphidx + dl1dx).detach().numpy())
+
+    def lyapunov_gradient_batch_tester(self, dut, x_equilibrium, V_lambda, R,
+                                       create_graph):
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        dVdx = dut._lyapunov_gradient_batch(x_samples, x_equilibrium, V_lambda,
+                                            R, create_graph)
+        self.assertEqual(dVdx.shape, x_samples.shape)
+        dVdx_expected = torch.empty_like(dVdx, dtype=self.dtype)
+        for i in range(x_samples.shape[0]):
+            dVdx_expected[i] = dut._lyapunov_gradient(x_samples[i],
+                                                      x_equilibrium,
+                                                      V_lambda,
+                                                      R,
+                                                      zero_tol=0.)
+        np.testing.assert_allclose(dVdx.detach().numpy(),
+                                   dVdx_expected.detach().numpy())
+        return dVdx, dVdx_expected
+
+    def test_lyapunov_gradient_batch(self):
+        dut = lyapunov.LyapunovHybridLinearSystem(self.system4,
+                                                  self.lyapunov_relu1)
+        x_equilibrium = torch.tensor([0., 0.], dtype=self.dtype)
+        V_lambda = 0.1
+        R = torch.tensor([[1, 2], [0, 1], [1, -1]], dtype=self.dtype)
+        self.lyapunov_gradient_batch_tester(dut,
+                                            x_equilibrium,
+                                            V_lambda,
+                                            R,
+                                            create_graph=False)
+        dVdx, dVdx_expected = self.lyapunov_gradient_batch_tester(
+            dut, x_equilibrium, V_lambda, R, create_graph=True)
+        torch.mean(dVdx).backward()
+        grad = [
+            v.grad.clone() for v in dut.lyapunov_relu.parameters()
+            if v.grad is not None
+        ]
+        dut.lyapunov_relu.zero_grad()
+        torch.mean(dVdx_expected).backward()
+        grad_expected = [
+            v.grad.clone() for v in dut.lyapunov_relu.parameters()
+            if v.grad is not None
+        ]
+        assert (len(grad) == len(grad_expected))
+        for (grad1, grad2) in zip(grad, grad_expected):
+            np.testing.assert_allclose(grad1.detach().numpy(),
+                                       grad2.detach().numpy())
 
 
 class TestLyapunovDiscreteTimeHybridSystem(unittest.TestCase):
