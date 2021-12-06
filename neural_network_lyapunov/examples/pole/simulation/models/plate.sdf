@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+
+  <!-- Note:
+       This file defines the model for a box.
+  -->
+  <model name="plate">
+    <!-- The model for a solid box of uniform density. -->
+    <link name="box">
+      <inertial>
+        <mass>0.2</mass>
+        <inertia>
+          <ixx>0</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0</iyy>
+          <iyz>0</iyz>
+          <izz>0</izz>
+        </inertia>
+      </inertial>
+
+      <visual name="box_visual">
+        <geometry>
+          <box>
+            <size>0.099 0.079 0.009</size>
+          </box>
+        </geometry>
+        <material>
+          <diffuse>0.9 0.9 0.9 0.9</diffuse>
+        </material>
+      </visual>
+
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.099 0.079 0.009</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.5</mu>
+              <mu2>0.5</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </link>
+  </model>
+</sdf>

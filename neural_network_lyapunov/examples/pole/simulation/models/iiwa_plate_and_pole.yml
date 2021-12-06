@@ -1,0 +1,22 @@
+directives:
+  - add_directives:
+      file: package://iiwa_controller/iiwa.yml
+
+  - add_frame:
+      name: l7_ee_offset
+      X_PF:
+        base_frame: iiwa::iiwa_link_7
+        rotation: !Rpy {deg: [0.0, 90.0, 0.0]}
+        translation: [0, 0, 0.099]
+
+  - add_model:
+      name: plate
+      file: package://iiwa_controller/plate.sdf
+
+  - add_model:
+      name: pole
+      file: package://iiwa_controller/pole_and_ball.sdf
+
+  - add_weld:
+      parent: l7_ee_offset
+      child: plate::box

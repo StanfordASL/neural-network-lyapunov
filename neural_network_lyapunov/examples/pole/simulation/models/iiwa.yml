@@ -1,0 +1,9 @@
+directives:
+
+- add_model:
+    name: iiwa
+    file: package://drake_manipulation_models/iiwa_description/iiwa7/iiwa7_no_collision.sdf
+
+- add_weld:
+    parent: world
+    child: iiwa::iiwa_link_0
