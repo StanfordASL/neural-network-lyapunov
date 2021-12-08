@@ -2,7 +2,8 @@
 <sdf version="1.7">
 
   <!-- Note:
-       This file defines the model for a pole with the ball attached to one end
+       This file defines the model for a pole with a tiny massless ball attached
+        to the bottom for point contact. The cylinder's center is at the origin.
   -->
   <model name="pole">
     <link name="cylinder">

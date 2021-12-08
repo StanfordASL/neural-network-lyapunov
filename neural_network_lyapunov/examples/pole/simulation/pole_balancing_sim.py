@@ -1,20 +1,22 @@
 import numpy as np
+import os
 
 from pydrake.all import (AddMultibodyPlantSceneGraph, ConnectMeshcatVisualizer,
-                         Simulator, SpatialForce, RigidTransform, Cylinder,
-                         UnitInertia, CoulombFriction, QueryObject,
-                         DiscreteTimeLinearQuadraticRegulator, AbstractValue,
-                         LeafSystem, BasicVector, PortDataType,
-                         SpatialVelocity)
-from pydrake.trajectories import PiecewisePolynomial
+                         Simulator, SpatialForce, RigidTransform, Parser,
+                         LinearQuadraticRegulator, AbstractValue,
+                         LeafSystem, BasicVector, PortDataType, MultibodyPlant,
+                         SpatialVelocity, ProcessModelDirectives,
+                         LoadModelDirectives)
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.multibody.plant import ExternallyAppliedSpatialForce
 from pydrake.multibody import inverse_kinematics as ik
-from pydrake.systems.primitives import TrajectorySource, LogOutput
+from pydrake.systems.primitives import LogOutput
 import pydrake.solvers.mathematicalprogram as mp
 from pydrake.math import RotationMatrix
+from pydrake.common import GetDrakePath
 
-from utils import *
+models_dir = os.path.join(os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), 'simulation'), 'models')
 
 
 def render_system_with_graphviz(system, output_file="system_view.gz"):
@@ -27,6 +29,15 @@ def render_system_with_graphviz(system, output_file="system_view.gz"):
     src.render(output_file, view=False)
 
 
+def add_package_paths(parser: Parser):
+    parser.package_map().Add(
+        "drake_manipulation_models",
+        os.path.join(GetDrakePath(),
+                     "manipulation/models"))
+
+    parser.package_map().Add("iiwa_controller", models_dir)
+
+
 class LyapunovController(LeafSystem):
     def __init__(self, plant):
         LeafSystem.__init__(self)
@@ -34,14 +45,16 @@ class LyapunovController(LeafSystem):
         self.context = plant.CreateDefaultContext()
         self.u_dim = 3
 
-        self.pole_state_input_port = self.DeclareInputPort(
-            "pole_state", PortDataType.kVectorValued, 13)
+        self.pose_input_port = self.DeclareAbstractInputPort(
+            "body_pose", AbstractValue.Make([RigidTransform()]))
+        self.velocity_input_port = self.DeclareAbstractInputPort(
+            "body_velocity", AbstractValue.Make([SpatialVelocity()]))
 
-        self.controller = self.DeclareVectorOutputPort(
-            "control", BasicVector(self.u_dim), self.CalculateController)
+        self.ee_force = self.DeclareVectorOutputPort(
+            "ee_force", BasicVector(self.u_dim), self.CalculateController)
 
     def CalculateController(self, context, output):
-        pole_state = self.pole_state_input_port.Eval(context)
+        # pole_state = self.pole_state_input_port.Eval(context)
         y = output.get_mutable_value()
         y[:] = 0
 
@@ -53,12 +66,10 @@ class LQRController(LeafSystem):
         self.context = plant.CreateDefaultContext()
         self.ball_index = int(plant.GetBodyByName("ball").index())
         self.plate_index = int(plant.GetBodyByName("box").index())
-        self.l = 0.82
         self.ms = 0.1649
         self.me = 0.2
         self.g = 9.81
-        self.u_eq = np.array([0, 0, (self.ms+self.me)*self.g])
-        self.dt = 0.01
+        self.u_eq = np.array([0, 0, (self.ms + self.me) * self.g])
         self.u_dim = 3
         self.Ac = np.array([[0., 0., 0., 0., 0., 1., 0.],
                             [0., 0., 0., 0., 0., 0., 1.],
@@ -74,17 +85,11 @@ class LQRController(LeafSystem):
                             [0., 0., 2.74047684],
                             [-5., 0., 0.],
                             [0., -5., 0.]])
-        self.Ad = self.Ac * self.dt + np.eye(7)
-        self.Bd = self.Bc * self.dt
         self.Q = np.diag([10, 10, 1, 1, 1, 10, 10])
         self.R = np.eye(3)
-        self.K, _ = DiscreteTimeLinearQuadraticRegulator(self.Ad, self.Bd, self.Q,
-                                                      self.R)
+        self.K, _ = LinearQuadraticRegulator(
+            self.Ac, self.Bc, self.Q, self.R)
 
-        self.pole_state_input_port = self.DeclareInputPort(
-            "pole_state", PortDataType.kVectorValued, 13)
-        self.iiwa_state_input_port = self.DeclareInputPort(
-            "iiwa_state", PortDataType.kVectorValued, 14)
         self.pose_input_port = self.DeclareAbstractInputPort(
             "body_pose", AbstractValue.Make([RigidTransform()]))
         self.velocity_input_port = self.DeclareAbstractInputPort(
@@ -104,10 +109,11 @@ class LQRController(LeafSystem):
         x_A, y_A, _ = plate_pose.translation()
         xd_B, yd_B, _ = ball_velocity.translational()
         xd_A, yd_A, zd_A = plate_velocity.translational()
-        x = np.array([x_B-x_A, y_B-y_A, xd_A, yd_A, zd_A, xd_B-xd_A, yd_B-yd_A])
+        x = np.array([x_B - x_A, y_B - y_A, xd_A, yd_A,
+                      zd_A, xd_B - xd_A, yd_B - yd_A])
 
         u = output.get_mutable_value()
-        u[:] = -self.K@x + self.u_eq
+        u[:] = -self.K @ x + self.u_eq
 
 
 class IiwaController(LeafSystem):
@@ -124,7 +130,7 @@ class IiwaController(LeafSystem):
             "joint_torques", BasicVector(self.nq), self.CalculateController)
 
     def CalculateController(self, context, output):
-        ee_force = self.ee_force.Eval(context)
+        # ee_force = self.ee_force.Eval(context)
         y = output.get_mutable_value()
         y[:] = 0
 
@@ -190,9 +196,7 @@ def create_iiwa_controller_plant(gravity):
     return plant, link_frame_indices
 
 
-def run_sim(q_traj_iiwa: PiecewisePolynomial,
-            Kp_iiwa: np.array,
-            gravity: np.array,
+def run_sim(gravity: np.array,
             f_C_W,
             time_step,
             is_visualizing=True):
@@ -200,7 +204,7 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
     builder = DiagramBuilder()
 
     # MultibodyPlant
-    plant = MultibodyPlant(time_step)
+    plant = MultibodyPlant(0)
     plant.mutable_gravity_field().set_gravity_vector(gravity)
 
     _, scene_graph = AddMultibodyPlantSceneGraph(builder, plant=plant)
@@ -213,7 +217,7 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
         plant, parser)
 
     iiwa_model = plant.GetModelInstanceByName('iiwa')
-    plate_model = plant.GetModelInstanceByName('plate')
+    # plate_model = plant.GetModelInstanceByName('plate')
     pole_model = plant.GetModelInstanceByName('pole')
 
     plant.Finalize()
@@ -231,9 +235,6 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
         lqr_controller.get_output_port(0),
         controller_iiwa.ee_force)
     builder.Connect(
-        plant.get_state_output_port(pole_model),
-        lqr_controller.GetInputPort("pole_state"))
-    builder.Connect(
         plant.get_body_poses_output_port(),
         lqr_controller.GetInputPort("body_pose"))
     builder.Connect(
@@ -242,12 +243,13 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
 
     # meshcat visualizer
     if is_visualizing:
-        viz = ConnectMeshcatVisualizer(
+        ConnectMeshcatVisualizer(
             builder, scene_graph, frames_to_draw=[plant.GetBodyFrameIdOrThrow(
                 plant.GetBodyByName("iiwa_link_7").index()),
-                plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("box").index()),
-                plant.GetBodyFrameIdOrThrow(plant.GetBodyByName(
-                "cylinder").index())])
+                plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("box"
+                                                                ).index()),
+                plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("cylinder"
+                                                                ).index())])
 
     # Logs
     iiwa_log = LogOutput(plant.get_state_output_port(iiwa_model), builder)
@@ -259,18 +261,17 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
     # %% Run simulation.
     sim = Simulator(diagram)
     context = sim.get_context()
-    context_controller = diagram.GetSubsystemContext(controller_iiwa, context)
+    # context_controller = diagram.GetSubsystemContext(controller_iiwa,
+    # context)
     context_plant = diagram.GetSubsystemContext(plant, context)
 
     # robot initial configuration by solving IK
     plate_position = np.array([0.7, 0, 0.3])
     plate_rotation = RotationMatrix.MakeYRotation(np.pi)
     q0 = calculate_plate_position(plant_robot, plate_position, plate_rotation)
-    q_iiwa_0 = q_traj_iiwa.value(0).squeeze()
-    t_final = q_traj_iiwa.end_time()
     plant.SetPositions(context_plant, iiwa_model, q0)
-    plant.SetPositions(context_plant, pole_model, np.array([0, 0, 0, 1, 0.7, 0,
-                                                            0.3 + 0.41 + 0.003]))
+    plant.SetPositions(context_plant, pole_model, np.array(
+        [0, 0, 0, 1, 0.7, 0, 0.3 + 0.41 + 0.003]))
 
     # constant force on link 7.
     easf = ExternallyAppliedSpatialForce()
@@ -282,34 +283,19 @@ def run_sim(q_traj_iiwa: PiecewisePolynomial,
     # Initialize simulator
     sim.Initialize()
     sim.set_target_realtime_rate(0)
-    sim.AdvanceTo(t_final)
+    sim.AdvanceTo(1)
 
     return iiwa_log, controller_iiwa
 
 
 if __name__ == '__main__':
-    p_L7oC_L7 = np.zeros(3)
     # force at C.
     f_C_W = np.array([0, 0, -20])
     # Stiffness matrix of the robot.
     Kp_iiwa = np.array([800., 600, 600, 600, 400, 200, 200])
     gravity = np.array([0, 0, -9.81])
 
-    # robot trajectory (hold q0).
-    q0 = np.array([0, 7.90686825e-01, 0, -1.72041458,
-                   0, -9.41413670e-01, 0])
-    # q0 = np.array([0, 0.8, 0, -1.70, 0, -1.0, 0])
-    q_iiwa_knots = np.zeros((2, 7))
-    q_iiwa_knots[0] = q0
-    q_iiwa_knots[1] = q0
-
-    # run simulation for 1s.
-    qa_traj = PiecewisePolynomial.FirstOrderHold([0, 1],
-                                                 q_iiwa_knots.T)
-
     run_sim(
-        q_traj_iiwa=qa_traj,
-        Kp_iiwa=Kp_iiwa,
         gravity=gravity,
         f_C_W=f_C_W,
         time_step=1e-5)
