@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import torch
 
 from pydrake.all import (AddMultibodyPlantSceneGraph, ConnectMeshcatVisualizer,
                          Simulator, SpatialForce, RigidTransform, Parser,
@@ -14,6 +15,8 @@ from pydrake.systems.primitives import LogOutput
 import pydrake.solvers.mathematicalprogram as mp
 from pydrake.math import RotationMatrix
 from pydrake.common import GetDrakePath
+
+from neural_network_lyapunov.examples.pole.pole import Pole
 
 models_dir = os.path.join(os.path.join(
     os.path.dirname(os.path.dirname(__file__)), 'simulation'), 'models')
@@ -66,29 +69,23 @@ class LQRController(LeafSystem):
         self.context = plant.CreateDefaultContext()
         self.ball_index = int(plant.GetBodyByName("ball").index())
         self.plate_index = int(plant.GetBodyByName("box").index())
+        self.length = 0.82
         self.ms = 0.1649
         self.me = 0.2
         self.g = 9.81
         self.u_eq = np.array([0, 0, (self.ms + self.me) * self.g])
         self.u_dim = 3
-        self.Ac = np.array([[0., 0., 0., 0., 0., 1., 0.],
-                            [0., 0., 0., 0., 0., 0., 1.],
-                            [-9.86383537, 0., 0., 0., 0., 0., 0.],
-                            [0., -9.86383537, 0., 0., 0., 0., 0.],
-                            [0., 0., 0., 0., 0., 0., 0.],
-                            [21.82725, 0., 0., 0., 0., 0., 0.],
-                            [0., 21.82725, 0., 0., 0., 0., 0.]])
-        self.Bc = np.array([[0., 0., 0.],
-                            [0., 0., 0.],
-                            [5., 0., 0.],
-                            [0., 5., 0.],
-                            [0., 0., 2.74047684],
-                            [-5., 0., 0.],
-                            [0., -5., 0.]])
+        # Linearization around the upright equilibrium
+        pole = Pole(self.ms, self.me, self.length)
+        x0 = torch.tensor(np.zeros(7), dtype=pole.dtype)
+        u0 = torch.tensor(self.u_eq, pole.dtype)
+        A, B = pole.gradient(x0, u0)
+        self.A = A.detach().numpy()
+        self.B = B.detach().numpy()
         self.Q = np.diag([10, 10, 1, 1, 1, 10, 10])
         self.R = np.eye(3)
         self.K, _ = LinearQuadraticRegulator(
-            self.Ac, self.Bc, self.Q, self.R)
+            self.A, self.B, self.Q, self.R)
 
         self.pose_input_port = self.DeclareAbstractInputPort(
             "body_pose", AbstractValue.Make([RigidTransform()]))
