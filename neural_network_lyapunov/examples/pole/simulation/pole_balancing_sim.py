@@ -78,7 +78,7 @@ class LQRController(LeafSystem):
         # Linearization around the upright equilibrium
         pole = Pole(self.ms, self.me, self.length)
         x0 = torch.tensor(np.zeros(7), dtype=pole.dtype)
-        u0 = torch.tensor(self.u_eq, pole.dtype)
+        u0 = torch.tensor(self.u_eq, dtype=pole.dtype)
         A, B = pole.gradient(x0, u0)
         self.A = A.detach().numpy()
         self.B = B.detach().numpy()
