@@ -106,6 +106,79 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
                                    (dVdx @ xdot +
                                     epsilon * V).detach().numpy())
 
+    def lyapunov_derivative_as_milp_tester(self, dut, x_equilibrium, V_lambda,
+                                           epsilon, eps_type, R,
+                                           lyapunov_lower, lyapunov_upper):
+        ret = dut.lyapunov_derivative_as_milp(x_equilibrium,
+                                              V_lambda,
+                                              epsilon,
+                                              eps_type,
+                                              R=R,
+                                              lyapunov_lower=lyapunov_lower,
+                                              lyapunov_upper=lyapunov_upper)
+        ret.milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        ret.milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions,
+                                       False)
+        # First compute the maximal.
+        ret.milp.gurobi_model.optimize()
+        self.assertEqual(ret.milp.gurobi_model.status,
+                         gurobipy.GRB.Status.OPTIMAL)
+        obj_max = ret.milp.gurobi_model.ObjVal
+        x_optimal = torch.tensor([v.x for v in ret.x], dtype=self.dtype)
+        self.assertAlmostEqual(
+            torch.max(
+                dut.lyapunov_derivative(x_optimal,
+                                        x_equilibrium,
+                                        V_lambda,
+                                        epsilon,
+                                        R=R,
+                                        zero_tol=1E-10)).item(), obj_max)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        V_vals = dut.lyapunov_value(x_samples, x_equilibrium, V_lambda, R=R)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                ret.x[j].lb = x_samples[i, j].item()
+                ret.x[j].ub = x_samples[i, j].item()
+            ret.milp.gurobi_model.optimize()
+            is_feasible = True
+            if lyapunov_lower is not None:
+                is_feasible = is_feasible and V_vals[i].item(
+                ) >= lyapunov_lower
+            if lyapunov_upper is not None:
+                is_feasible = is_feasible and V_vals[i].item(
+                ) <= lyapunov_upper
+            if is_feasible:
+                self.assertEqual(ret.milp.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                self.assertAlmostEqual(
+                    dut.lyapunov_derivative(x_samples[i],
+                                            x_equilibrium,
+                                            V_lambda,
+                                            epsilon,
+                                            R=R,
+                                            zero_tol=1E-12).item(),
+                    ret.milp.gurobi_model.ObjVal)
+                self.assertLessEqual(ret.milp.gurobi_model.ObjVal, obj_max)
+            else:
+                self.assertEqual(ret.milp.gurobi_model.status,
+                                 gurobipy.GRB.Status.INFEASIBLE)
+
+    def test_lyapunov_derivative_as_milp(self):
+        dut1 = mut.LyapunovContinuousTimeSystem(self.system1,
+                                                self.lyapunov_relu1)
+        R = torch.tensor([[1, 3], [-1, 2], [0, 1]], dtype=self.dtype)
+        self.lyapunov_derivative_as_milp_tester(
+            dut1,
+            self.system1.x_equilibrium,
+            V_lambda=0.,
+            epsilon=0.5,
+            eps_type=lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            lyapunov_lower=None,
+            lyapunov_upper=None)
+
 
 class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
     def setUp(self):
