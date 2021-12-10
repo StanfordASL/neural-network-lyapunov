@@ -7,6 +7,7 @@ import torch.nn as nn
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 def test_step_forward_batch(tester, dut, *args):
@@ -63,27 +64,28 @@ class TestAutonomousReluSystem(unittest.TestCase):
     def setUp(self):
         self.dtype = torch.float64
         self.relu_dyn = setup_relu_dyn(self.dtype)
-        self.x_lo = torch.tensor([-1e4, -1e4], dtype=self.dtype)
-        self.x_up = torch.tensor([1e4, 1e4], dtype=self.dtype)
+        self.x_lo = torch.tensor([-1, -1], dtype=self.dtype)
+        self.x_up = torch.tensor([-0.5, 2], dtype=self.dtype)
         self.system = relu_system.AutonomousReLUSystem(self.dtype, self.x_lo,
                                                        self.x_up,
                                                        self.relu_dyn)
 
     def test_relu_system_as_milp(self):
-        mip_cnstr_return = self.system.mixed_integer_constraints()
+        dut = self.system
+        mip_cnstr_return = dut.mixed_integer_constraints()
         self.assertIsNone(mip_cnstr_return.Aout_input)
         self.assertIsNone(mip_cnstr_return.Aout_binary)
 
         def check_transition(x0):
             milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
-            x = milp.addVars(self.system.x_dim,
+            x = milp.addVars(dut.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS,
                              name="x")
             s, gamma = milp.add_mixed_integer_linear_constraints(
                 mip_cnstr_return, x, None, "s", "gamma", "relu_dynamics_ineq",
                 "relu_dynamics_eq", "")
-            for i in range(self.system.x_dim):
+            for i in range(dut.x_dim):
                 milp.addLConstr([torch.tensor([1.], dtype=self.dtype)],
                                 [[x[i]]],
                                 sense=gurobipy.GRB.EQUAL,
@@ -97,14 +99,14 @@ class TestAutonomousReluSystem(unittest.TestCase):
                 mip_cnstr_return.Cout
             np.testing.assert_array_almost_equal(
                 x_next_val.detach().numpy(),
-                self.relu_dyn(x0).detach().numpy(),
+                dut.dynamics_relu(x0).detach().numpy(),
                 decimal=5)
 
         torch.manual_seed(0)
+        x0 = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
 
-        for i in range(10):
-            x0 = torch.rand(2, dtype=self.dtype)
-            check_transition(x0)
+        for i in range(x0.shape[0]):
+            check_transition(x0[i])
 
     def test_step_forward(self):
         # Test a single x.
@@ -116,6 +118,112 @@ class TestAutonomousReluSystem(unittest.TestCase):
         # Test a batch of x
         x = torch.tensor([[2., 3.], [1., -2], [0., 4.]], dtype=self.dtype)
         test_step_forward_batch(self, self.system, x)
+
+    def add_dynamics_constraint_tester(self, dut):
+        mip = gurobi_torch_mip.GurobiTorchMIP(dut.dtype)
+        x_var = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+        x_next_var = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
+        ret = dut.add_dynamics_constraint(mip,
+                                          x_var,
+                                          x_next_var,
+                                          "",
+                                          "",
+                                          binary_var_type=gurobipy.GRB.BINARY)
+        # Check the value for x_next_var
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
+        mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.x_dim):
+                x_var[j].lb = x_samples[i, j].item()
+                x_var[j].ub = x_samples[i, j].item()
+            mip.gurobi_model.optimize()
+            self.assertEqual(mip.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            x_next_val = np.array([v.x for v in x_next_var])
+            np.testing.assert_allclose(
+                x_next_val,
+                dut.step_forward(x_samples[i]).detach().numpy())
+            if dut.network_bound_propagate_method in (
+                    mip_utils.PropagateBoundsMethod.IA,
+                    mip_utils.PropagateBoundsMethod.IA_MIP):
+                np.testing.assert_array_less(
+                    x_next_val,
+                    ret.x_next_ub_IA.detach().numpy() + 1E-6)
+                np.testing.assert_array_less(ret.x_next_lb_IA.detach().numpy(),
+                                             x_next_val + 1E-6)
+            if dut.network_bound_propagate_method in (
+                    mip_utils.PropagateBoundsMethod.LP,
+                    mip_utils.PropagateBoundsMethod.MIP,
+                    mip_utils.PropagateBoundsMethod.IA_MIP):
+                ret.x_next_bound_prog.gurobi_model.setParam(
+                    gurobipy.GRB.Param.OutputFlag, False)
+                for i in range(dut.x_dim):
+                    ret.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=dut.dtype)],
+                        [[ret.x_next_bound_var[i]]],
+                        constant=0.,
+                        sense=gurobipy.GRB.MAXIMIZE)
+                    ret.x_next_bound_prog.gurobi_model.optimize()
+                    self.assertEqual(ret.x_next_bound_prog.gurobi_model.status,
+                                     gurobipy.GRB.Status.OPTIMAL)
+                    self.assertLessEqual(
+                        x_next_val[i],
+                        ret.x_next_bound_prog.gurobi_model.ObjVal)
+                    # Check the lower bound
+                    ret.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=dut.dtype)],
+                        [[ret.x_next_bound_var[i]]],
+                        constant=0.,
+                        sense=gurobipy.GRB.MINIMIZE)
+                    ret.x_next_bound_prog.gurobi_model.optimize()
+                    self.assertEqual(ret.x_next_bound_prog.gurobi_model.status,
+                                     gurobipy.GRB.Status.OPTIMAL)
+                    self.assertGreaterEqual(
+                        x_next_val[i],
+                        ret.x_next_bound_prog.gurobi_model.ObjVal)
+        return ret
+
+    def test_add_dynamics_constraint(self):
+        dut = self.system
+        ret = {}
+        for network_bound_propagate_method in list(
+                mip_utils.PropagateBoundsMethod):
+            dut.network_bound_propagate_method = network_bound_propagate_method
+            ret[network_bound_propagate_method] = \
+                self.add_dynamics_constraint_tester(dut)
+
+        # Check that using MIP generates tighter bounds than LP
+        ret_LP = ret[mip_utils.PropagateBoundsMethod.LP]
+        ret_MIP = ret[mip_utils.PropagateBoundsMethod.MIP]
+        self.assertEqual(
+            ret_LP.x_next_bound_prog.gurobi_model.getAttr(
+                gurobipy.GRB.Attr.NumBinVars), 0)
+        self.assertGreater(
+            ret_MIP.x_next_bound_prog.gurobi_model.getAttr(
+                gurobipy.GRB.Attr.NumBinVars), 0)
+        for i in range(dut.x_dim):
+            for sense in (gurobipy.GRB.MAXIMIZE, gurobipy.GRB.MINIMIZE):
+                ret_LP.x_next_bound_prog.setObjective(
+                    [torch.tensor([1], dtype=self.dtype)],
+                    [[ret_LP.x_next_bound_var[i]]],
+                    constant=0.,
+                    sense=sense)
+                ret_LP.x_next_bound_prog.gurobi_model.optimize()
+                ret_MIP.x_next_bound_prog.setObjective(
+                    [torch.tensor([1], dtype=self.dtype)],
+                    [[ret_MIP.x_next_bound_var[i]]],
+                    constant=0.,
+                    sense=sense)
+                ret_MIP.x_next_bound_prog.gurobi_model.optimize()
+                if sense == gurobipy.GRB.MAXIMIZE:
+                    self.assertLessEqual(
+                        ret_MIP.x_next_bound_prog.gurobi_model.ObjVal,
+                        ret_LP.x_next_bound_prog.gurobi_model.ObjVal)
+                else:
+                    self.assertLessEqual(
+                        ret_LP.x_next_bound_prog.gurobi_model.ObjVal,
+                        ret_MIP.x_next_bound_prog.gurobi_model.ObjVal)
 
 
 def check_mixed_integer_constraints(tester, dut, x_val, u_val, autonomous):
@@ -191,8 +299,8 @@ def check_add_dynamics_constraint(dut, x_val, u_val, atol=0, rtol=1E-7):
         mip, x, x_next, u, "s", "gamma")
     forward_slack = dynamics_constraint_return.slack
     forward_binary = dynamics_constraint_return.binary
-    assert(isinstance(forward_slack, list))
-    assert(isinstance(forward_binary, list))
+    assert (isinstance(forward_slack, list))
+    assert (isinstance(forward_binary, list))
     mip.addMConstrs([torch.eye(dut.x_dim, dtype=dut.dtype)], [x],
                     b=x_val,
                     sense=gurobipy.GRB.EQUAL)

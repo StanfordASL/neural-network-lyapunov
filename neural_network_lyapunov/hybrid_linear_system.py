@@ -18,9 +18,33 @@ class DynamicsConstraintReturn:
     """
     The return from add_dynamics_constraint()
     """
-    def __init__(self, slack, binary):
+    def __init__(self,
+                 slack,
+                 binary,
+                 x_next_lb_IA=None,
+                 x_next_ub_IA=None,
+                 x_next_bound_prog=None,
+                 x_next_bound_var=None):
+        """
+        Store the slack and binary variables in the dynamics constraint.
+        We also compute the bounds of x_next. For discrete-time systems, x_next
+        is x[n+1]. For continuous-time systems, x_next is ẋ
+        Args:
+          x_next_lb_IA, x_next_ub_IA: The lower and upper bound for x_next
+          computed from IA. Set to None if these bounds are not computed.
+          x_next_bound_prog, x_next_bound_var: The optimization program that
+          contains all the constraints to compute the bounds for x_next. They
+          are used if we want to compute the variable bounds through
+          optimization. Set to None if we don't use them.
+          x_next_bound_var is the variable registered in x_next_bound_prog to
+          represent x_next.
+        """
         self.slack = slack
         self.binary = binary
+        self.x_next_lb_IA = x_next_lb_IA
+        self.x_next_ub_IA = x_next_ub_IA
+        self.x_next_bound_prog = x_next_bound_prog
+        self.x_next_bound_var = x_next_bound_var
 
 
 class HybridLinearSystem:
@@ -256,15 +280,14 @@ class HybridLinearSystem:
         if additional_u_lo is not None or additional_u_up is not None:
             warnings.warn(
                 "hybrid linear system don't accept additional u_lo and u_up " +
-                "add_dynamics_constraint yet."
-            )
+                "add_dynamics_constraint yet.")
         mip_cnstr = self.mixed_integer_constraints()
         slack, binary = mip.add_mixed_integer_linear_constraints(
             mip_cnstr, x_var + u_var, x_next_var, slack_var_name,
             binary_var_name, "hybrid_linear_dynamics_ineq",
             "hybrid_linear_dynamics_eq", "hybrid_linear_dynamics_output",
             binary_var_type)
-        return DynamicsConstraintReturn(slack, binary)
+        return DynamicsConstraintReturn(slack, binary, None, None, None, None)
 
     def mode(self, x_start, u_start):
         """
