@@ -6,6 +6,45 @@ import neural_network_lyapunov.mip_utils as mip_utils
 import gurobipy
 
 
+class ReLUDynamicsConstraintReturn(
+        hybrid_linear_system.DynamicsConstraintReturn):
+    def __init__(self,
+                 slack,
+                 binary,
+                 x_next_lb_IA=None,
+                 x_next_ub_IA=None,
+                 x_next_bound_prog=None,
+                 x_next_bound_var=None):
+        super(ReLUDynamicsConstraintReturn,
+              self).__init__(slack, binary, x_next_lb_IA, x_next_ub_IA,
+                             x_next_bound_prog, x_next_bound_var)
+        self.nn_input = None
+        self.nn_input_lo = None
+        self.nn_input_up = None
+        self.nn_output_lo = None
+        self.nn_output_up = None
+        self.relu_input_lo = None
+        self.relu_input_up = None
+        self.relu_output_lo = None
+        self.relu_output_up = None
+
+    def from_mip_cnstr_return(self, mip_cnstr_return: relu_to_optimization.
+                              ReLUMixedIntegerConstraintsReturn,
+                              nn_input: list):
+        assert (isinstance(
+            mip_cnstr_return,
+            relu_to_optimization.ReLUMixedIntegerConstraintsReturn))
+        self.nn_input = nn_input
+        self.nn_input_lo = mip_cnstr_return.nn_input_lo
+        self.nn_input_up = mip_cnstr_return.nn_input_up
+        self.nn_output_lo = mip_cnstr_return.nn_output_lo
+        self.nn_output_up = mip_cnstr_return.nn_output_up
+        self.relu_input_lo = mip_cnstr_return.relu_input_lo
+        self.relu_input_up = mip_cnstr_return.relu_input_up
+        self.relu_output_lo = mip_cnstr_return.relu_output_lo
+        self.relu_output_up = mip_cnstr_return.relu_output_up
+
+
 class AutonomousReLUSystem:
     """
     This system models an autonomous using a feedforward
@@ -30,6 +69,8 @@ class AutonomousReLUSystem:
         self.dynamics_relu = dynamics_relu
         self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             dynamics_relu, dtype)
+        self.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
 
     @property
     def x_lo_all(self):
@@ -52,7 +93,7 @@ class AutonomousReLUSystem:
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+            self.x_lo, self.x_up, self.network_bound_propagate_method)
         return result
 
     def possible_dx(self, x):
@@ -63,6 +104,43 @@ class AutonomousReLUSystem:
     def step_forward(self, x_start):
         assert (isinstance(x_start, torch.Tensor))
         return self.dynamics_relu(x_start)
+
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                slack_var_name,
+                                binary_var_name,
+                                binary_var_type=gurobipy.GRB.BINARY):
+        mip_cnstr_return = self.mixed_integer_constraints()
+        slack, binary = mip.add_mixed_integer_linear_constraints(
+            mip_cnstr_return, x_var, x_next_var, slack_var_name,
+            binary_var_name, "dynamics_ineq", "dynamics_eq", "dynamics_output",
+            binary_var_type)
+        ret = ReLUDynamicsConstraintReturn(slack, binary)
+        ret.from_mip_cnstr_return(mip_cnstr_return, x_var)
+        if self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.IA,
+                mip_utils.PropagateBoundsMethod.IA_MIP):
+            ret.x_next_lb_IA = mip_cnstr_return.nn_output_lo
+            ret.x_next_ub_IA = mip_cnstr_return.nn_output_up
+        if self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.LP,
+                mip_utils.PropagateBoundsMethod.MIP,
+                mip_utils.PropagateBoundsMethod.IA_MIP):
+            ret.x_next_bound_prog = gurobi_torch_mip.GurobiTorchMILP(
+                self.dtype)
+            ret.x_next_bound_var = ret.x_next_bound_prog.addVars(
+                self.x_dim, lb=-gurobipy.GRB.INFINITY)
+            x_next_bound_x_var = ret.x_next_bound_prog.addVars(
+                self.x_dim, lb=-gurobipy.GRB.INFINITY)
+            x_next_bound_prog_binary_type = gurobipy.GRB.CONTINUOUS if \
+                self.network_bound_propagate_method == \
+                mip_utils.PropagateBoundsMethod.LP else gurobipy.GRB.BINARY
+            ret.x_next_bound_prog.add_mixed_integer_linear_constraints(
+                mip_cnstr_return, x_next_bound_x_var, ret.x_next_bound_var, "",
+                "", "", "", "", x_next_bound_prog_binary_type)
+        return ret
 
 
 class AutonomousReLUSystemGivenEquilibrium:
@@ -196,37 +274,6 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         assert (isinstance(x_start, torch.Tensor))
         return self.dynamics_relu(x_start) - \
             self.dynamics_relu(self.x_equilibrium) + x_start
-
-
-class ReLUDynamicsConstraintReturn(
-        hybrid_linear_system.DynamicsConstraintReturn):
-    def __init__(self, slack, binary):
-        super(ReLUDynamicsConstraintReturn, self).__init__(slack, binary)
-        self.nn_input = None
-        self.nn_input_lo = None
-        self.nn_input_up = None
-        self.nn_output_lo = None
-        self.nn_output_up = None
-        self.relu_input_lo = None
-        self.relu_input_up = None
-        self.relu_output_lo = None
-        self.relu_output_up = None
-
-    def from_mip_cnstr_return(self, mip_cnstr_return: relu_to_optimization.
-                              ReLUMixedIntegerConstraintsReturn,
-                              nn_input: list):
-        assert (isinstance(
-            mip_cnstr_return,
-            relu_to_optimization.ReLUMixedIntegerConstraintsReturn))
-        self.nn_input = nn_input
-        self.nn_input_lo = mip_cnstr_return.nn_input_lo
-        self.nn_input_up = mip_cnstr_return.nn_input_up
-        self.nn_output_lo = mip_cnstr_return.nn_output_lo
-        self.nn_output_up = mip_cnstr_return.nn_output_up
-        self.relu_input_lo = mip_cnstr_return.relu_input_lo
-        self.relu_input_up = mip_cnstr_return.relu_input_up
-        self.relu_output_lo = mip_cnstr_return.relu_output_lo
-        self.relu_output_up = mip_cnstr_return.relu_output_up
 
 
 class ReLUSystem:
