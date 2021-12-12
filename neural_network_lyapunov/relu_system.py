@@ -147,10 +147,19 @@ class AutonomousReLUSystemGivenEquilibrium:
     """
     This system models an autonomous system with known equilibirum x* using
     a feedforward neural network with ReLU activations
+    For discrete-time system
     x[n+1] = ϕ(x[n]) − ϕ(x*) + x*
+    For continuous-time system
+    ẋ = ϕ(x) − ϕ(x*)
     where ϕ is a feedforward (leaky) ReLU network.
     """
-    def __init__(self, dtype, x_lo, x_up, dynamics_relu, x_equilibrium):
+    def __init__(self,
+                 dtype,
+                 x_lo,
+                 x_up,
+                 dynamics_relu,
+                 x_equilibrium,
+                 discrete_time_flag=True):
         """
         @param dtype The torch datatype
         @param x_lo, x_up torch tensor that lower and upper bound the state
@@ -169,6 +178,7 @@ class AutonomousReLUSystemGivenEquilibrium:
             dynamics_relu, dtype)
         assert (x_equilibrium.shape == (self.x_dim, ))
         self.x_equilibrium = x_equilibrium
+        self.discrete_time_flag = discrete_time_flag
 
     @property
     def x_lo_all(self):
@@ -191,9 +201,11 @@ class AutonomousReLUSystemGivenEquilibrium:
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
             self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
-        result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
-            self.x_equilibrium
-
+        if self.discrete_time_flag:
+            result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
+                self.x_equilibrium
+        else:
+            result.Cout += -self.dynamics_relu(self.x_equilibrium)
         return result
 
     def possible_dx(self, x):
@@ -203,8 +215,12 @@ class AutonomousReLUSystemGivenEquilibrium:
 
     def step_forward(self, x_start):
         assert (isinstance(x_start, torch.Tensor))
-        return self.dynamics_relu(x_start) - \
-            self.dynamics_relu(self.x_equilibrium) + self.x_equilibrium
+        if self.discrete_time_flag:
+            return self.dynamics_relu(x_start) - \
+                self.dynamics_relu(self.x_equilibrium) + self.x_equilibrium
+        else:
+            return self.dynamics_relu(x_start) - \
+                self.dynamics_relu(self.x_equilibrium)
 
 
 class AutonomousResidualReLUSystemGivenEquilibrium:
