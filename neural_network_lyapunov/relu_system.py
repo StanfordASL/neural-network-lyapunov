@@ -45,6 +45,51 @@ class ReLUDynamicsConstraintReturn(
         self.relu_output_up = mip_cnstr_return.relu_output_up
 
 
+def _add_dynamics_constraint_autonmous(mip_cnstr_return,
+                                       x_next_lb_IA,
+                                       x_next_ub_IA,
+                                       mip: gurobi_torch_mip.GurobiTorchMIP,
+                                       x_var,
+                                       x_next_var,
+                                       slack_var_name,
+                                       binary_var_name,
+                                       network_bound_propagate_method,
+                                       binary_var_type=gurobipy.GRB.BINARY):
+    """
+    Args:
+        mip_cnstr_return: Returned from mixed_integer_constraints() function.
+        It encodes the constraint between x and x_next.
+    """
+    dtype = mip.dtype
+    x_dim = len(x_var)
+    slack, binary = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr_return, x_var, x_next_var, slack_var_name, binary_var_name,
+        "dynamics_ineq", "dynamics_eq", "dynamics_output", binary_var_type)
+    ret = ReLUDynamicsConstraintReturn(slack, binary)
+    ret.from_mip_cnstr_return(mip_cnstr_return, x_var)
+    if network_bound_propagate_method in (
+            mip_utils.PropagateBoundsMethod.IA,
+            mip_utils.PropagateBoundsMethod.IA_MIP):
+        ret.x_next_lb_IA = x_next_lb_IA
+        ret.x_next_ub_IA = x_next_ub_IA
+    if network_bound_propagate_method in (
+            mip_utils.PropagateBoundsMethod.LP,
+            mip_utils.PropagateBoundsMethod.MIP,
+            mip_utils.PropagateBoundsMethod.IA_MIP):
+        ret.x_next_bound_prog = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        ret.x_next_bound_var = ret.x_next_bound_prog.addVars(
+            x_dim, lb=-gurobipy.GRB.INFINITY)
+        x_next_bound_x_var = ret.x_next_bound_prog.addVars(
+            x_dim, lb=-gurobipy.GRB.INFINITY)
+        x_next_bound_prog_binary_type = gurobipy.GRB.CONTINUOUS if \
+            network_bound_propagate_method == \
+            mip_utils.PropagateBoundsMethod.LP else gurobipy.GRB.BINARY
+        ret.x_next_bound_prog.add_mixed_integer_linear_constraints(
+            mip_cnstr_return, x_next_bound_x_var, ret.x_next_bound_var, "", "",
+            "", "", "", x_next_bound_prog_binary_type)
+    return ret
+
+
 class AutonomousReLUSystem:
     """
     This system models an autonomous using a feedforward
@@ -113,34 +158,18 @@ class AutonomousReLUSystem:
                                 binary_var_name,
                                 binary_var_type=gurobipy.GRB.BINARY):
         mip_cnstr_return = self.mixed_integer_constraints()
-        slack, binary = mip.add_mixed_integer_linear_constraints(
-            mip_cnstr_return, x_var, x_next_var, slack_var_name,
-            binary_var_name, "dynamics_ineq", "dynamics_eq", "dynamics_output",
-            binary_var_type)
-        ret = ReLUDynamicsConstraintReturn(slack, binary)
-        ret.from_mip_cnstr_return(mip_cnstr_return, x_var)
         if self.network_bound_propagate_method in (
                 mip_utils.PropagateBoundsMethod.IA,
                 mip_utils.PropagateBoundsMethod.IA_MIP):
-            ret.x_next_lb_IA = mip_cnstr_return.nn_output_lo
-            ret.x_next_ub_IA = mip_cnstr_return.nn_output_up
-        if self.network_bound_propagate_method in (
-                mip_utils.PropagateBoundsMethod.LP,
-                mip_utils.PropagateBoundsMethod.MIP,
-                mip_utils.PropagateBoundsMethod.IA_MIP):
-            ret.x_next_bound_prog = gurobi_torch_mip.GurobiTorchMILP(
-                self.dtype)
-            ret.x_next_bound_var = ret.x_next_bound_prog.addVars(
-                self.x_dim, lb=-gurobipy.GRB.INFINITY)
-            x_next_bound_x_var = ret.x_next_bound_prog.addVars(
-                self.x_dim, lb=-gurobipy.GRB.INFINITY)
-            x_next_bound_prog_binary_type = gurobipy.GRB.CONTINUOUS if \
-                self.network_bound_propagate_method == \
-                mip_utils.PropagateBoundsMethod.LP else gurobipy.GRB.BINARY
-            ret.x_next_bound_prog.add_mixed_integer_linear_constraints(
-                mip_cnstr_return, x_next_bound_x_var, ret.x_next_bound_var, "",
-                "", "", "", "", x_next_bound_prog_binary_type)
-        return ret
+            x_next_lb_IA = mip_cnstr_return.nn_output_lo
+            x_next_ub_IA = mip_cnstr_return.nn_output_up
+        else:
+            x_next_lb_IA = None
+            x_next_ub_IA = None
+        return _add_dynamics_constraint_autonmous(
+            mip_cnstr_return, x_next_lb_IA, x_next_ub_IA, mip, x_var,
+            x_next_var, slack_var_name, binary_var_name,
+            self.network_bound_propagate_method, binary_var_type)
 
 
 class AutonomousReLUSystemGivenEquilibrium:
@@ -221,6 +250,30 @@ class AutonomousReLUSystemGivenEquilibrium:
         else:
             return self.dynamics_relu(x_start) - \
                 self.dynamics_relu(self.x_equilibrium)
+
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                slack_var_name,
+                                binary_var_name,
+                                binary_var_type=gurobipy.GRB.BINARY):
+        mip_cnstr_return = self.mixed_integer_constraints()
+        if self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.IA,
+                mip_utils.PropagateBoundsMethod.IA_MIP):
+            relu_at_equilibrium = self.dynamics_relu(self.x_equilibrium)
+            x_next_lb_IA = mip_cnstr_return.nn_output_lo - relu_at_equilibrium\
+                + self.x_lo if self.discrete_time_flag else 0.
+            x_next_ub_IA = mip_cnstr_return.nn_output_up - relu_at_equilibrium\
+                + self.x_up if self.discrete_time_flag else 0.
+        else:
+            x_next_lb_IA = None
+            x_next_ub_IA = None
+        return _add_dynamics_constraint_autonmous(
+            mip_cnstr_return, x_next_lb_IA, x_next_ub_IA, mip, x_var,
+            x_next_var, slack_var_name, binary_var_name,
+            self.network_bound_propagate_method, binary_var_type)
 
 
 class AutonomousResidualReLUSystemGivenEquilibrium:
