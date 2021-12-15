@@ -281,10 +281,19 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
     This system models an autonomous system with known equilibirum x* using
     a feedforward neural network with ReLU activations. The neural network
     learn the residual dynamics
+    Discrete-time system
     x[n+1] = ϕ(x[n]) − ϕ(x*) + x[n]
+    Continuous-time system
+    ẋ = ϕ(x) − ϕ(x*)
     where ϕ is a feedforward (leaky) ReLU network.
     """
-    def __init__(self, dtype, x_lo, x_up, dynamics_relu, x_equilibrium):
+    def __init__(self,
+                 dtype,
+                 x_lo,
+                 x_up,
+                 dynamics_relu,
+                 x_equilibrium,
+                 discrete_time_flag=True):
         """
         @param dtype The torch datatype
         @param x_lo, x_up torch tensor that lower and upper bound the state
@@ -303,6 +312,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
             dynamics_relu, dtype)
         assert (x_equilibrium.shape == (self.x_dim, ))
         self.x_equilibrium = x_equilibrium
+        self.discrete_time_flag = discrete_time_flag
 
     @property
     def x_lo_all(self):
@@ -327,10 +337,11 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         result = self.dynamics_relu_free_pattern.output_constraint(
             self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
         result.Cout += -self.dynamics_relu(self.x_equilibrium)
-        if result.Aout_input is None:
-            result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
-        else:
-            result.Aout_input += torch.eye(self.x_dim, dtype=self.dtype)
+        if self.discrete_time_flag:
+            if result.Aout_input is None:
+                result.Aout_input = torch.eye(self.x_dim, dtype=self.dtype)
+            else:
+                result.Aout_input += torch.eye(self.x_dim, dtype=self.dtype)
 
         return result
 
@@ -341,8 +352,12 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
 
     def step_forward(self, x_start):
         assert (isinstance(x_start, torch.Tensor))
-        return self.dynamics_relu(x_start) - \
-            self.dynamics_relu(self.x_equilibrium) + x_start
+        if self.discrete_time_flag:
+            return self.dynamics_relu(x_start) - \
+                self.dynamics_relu(self.x_equilibrium) + x_start
+        else:
+            return self.dynamics_relu(x_start) - \
+                self.dynamics_relu(self.x_equilibrium)
 
 
 class ReLUSystem:
