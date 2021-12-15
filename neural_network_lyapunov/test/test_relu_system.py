@@ -822,7 +822,7 @@ class TestAutonomousReLUSystemGivenEquilibrium(unittest.TestCase):
 
 
 class TestAutonomousResidualReLUSystemGivenEquilibrium(unittest.TestCase):
-    def construct_relu_system_example(self):
+    def construct_relu_system_example(self, discrete_time_flag):
         # Construct a ReLU system with nx = 3
         self.dtype = torch.float64
         linear1 = torch.nn.Linear(3, 5, bias=True)
@@ -845,51 +845,59 @@ class TestAutonomousResidualReLUSystemGivenEquilibrium(unittest.TestCase):
         x_up = torch.tensor([2, 2, 2], dtype=self.dtype)
         x_equilibrium = torch.tensor([-.1, 0.3, 0.5], dtype=self.dtype)
         dut = relu_system.AutonomousResidualReLUSystemGivenEquilibrium(
-            self.dtype, x_lo, x_up, dynamics_relu, x_equilibrium)
+            self.dtype, x_lo, x_up, dynamics_relu, x_equilibrium,
+            discrete_time_flag)
         return dut, x_equilibrium
 
     def test_mixed_integer_constraints(self):
-        dut, _ = self.construct_relu_system_example()
+        dut1, _ = self.construct_relu_system_example(True)
+        dut2, _ = self.construct_relu_system_example(False)
 
-        self.assertEqual(dut.x_dim, 3)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([1.2, 0.3, 0.5],
-                                                           dtype=dut.dtype),
-                                        u_val=None,
-                                        autonomous=True)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([0.2, 0.5, -0.5],
-                                                           dtype=dut.dtype),
-                                        u_val=None,
-                                        autonomous=True)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([-0.4, 0.9, -0.5],
-                                                           dtype=dut.dtype),
-                                        u_val=None,
-                                        autonomous=True)
+        self.assertEqual(dut1.x_dim, 3)
+
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut1.x_lo, dut1.x_up, 10)
+        for i in range(x_samples.shape[0]):
+
+            check_mixed_integer_constraints(self,
+                                            dut1,
+                                            x_val=x_samples[i],
+                                            u_val=None,
+                                            autonomous=True)
+            check_mixed_integer_constraints(self,
+                                            dut2,
+                                            x_val=x_samples[i],
+                                            u_val=None,
+                                            autonomous=True)
 
     def test_equilibrium(self):
-        dut, x_equ = self.construct_relu_system_example()
+        dut, x_equ = self.construct_relu_system_example(True)
         x_next = dut.step_forward(x_equ)
 
         np.testing.assert_array_almost_equal(x_next.detach().numpy(),
                                              x_equ.detach().numpy(),
                                              decimal=5)
 
+    def step_forward_tester(self, dut):
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.x_lo, dut.x_up, 100)
+        x_next = dut.step_forward(x_samples)
+        self.assertEqual(x_samples.shape, x_next.shape)
+        for i in range(x_samples.shape[0]):
+            x_next_i = dut.step_forward(x_samples[i])
+            np.testing.assert_allclose(x_next[i].detach().numpy(),
+                                       x_next_i.detach().numpy())
+            x_next_expected = dut.dynamics_relu(
+                x_samples[i]) - dut.dynamics_relu(dut.x_equilibrium) + (
+                    x_samples[i] if dut.discrete_time_flag else 0.)
+            np.testing.assert_allclose(x_next_i.detach().numpy(),
+                                       x_next_expected.detach().numpy())
+
     def test_step_forward(self):
-        dut, x_equ = self.construct_relu_system_example()
-        # Test a single state x.
-        x = torch.tensor([1., 2., 3.], dtype=torch.float64)
-        x_next = dut.step_forward(x)
-        x_next_expected = dut.dynamics_relu(x) - dut.dynamics_relu(x_equ) + x
-        np.testing.assert_allclose(x_next.detach().numpy(),
-                                   x_next_expected.detach().numpy())
-        # Test a batch of x.
-        x = torch.tensor([[1., 2., 3.], [-2, -3., -1.]], dtype=torch.float64)
-        test_step_forward_batch(self, dut, x)
+        dut1, _ = self.construct_relu_system_example(True)
+        dut2, _ = self.construct_relu_system_example(False)
+        self.step_forward_tester(dut1)
+        self.step_forward_tester(dut2)
 
 
 if __name__ == "__main__":
