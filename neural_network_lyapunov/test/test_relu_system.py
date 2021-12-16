@@ -899,6 +899,19 @@ class TestAutonomousResidualReLUSystemGivenEquilibrium(unittest.TestCase):
         self.step_forward_tester(dut1)
         self.step_forward_tester(dut2)
 
+    def test_add_dynamics_constraint(self):
+        dut1, _ = self.construct_relu_system_example(True)
+        dut2, _ = self.construct_relu_system_example(False)
+
+        for network_bound_propagate_method in list(
+                mip_utils.PropagateBoundsMethod):
+            dut1.network_bound_propagate_method = \
+                network_bound_propagate_method
+            add_dynamics_constraint_tester(self, dut1)
+            dut2.network_bound_propagate_method = \
+                network_bound_propagate_method
+            add_dynamics_constraint_tester(self, dut2)
+
 
 if __name__ == "__main__":
     unittest.main()
