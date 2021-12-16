@@ -2,7 +2,6 @@ import gurobipy
 import numpy as np
 import unittest
 import torch
-import torch.nn as nn
 
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
@@ -20,43 +19,23 @@ def test_step_forward_batch(tester, dut, *args):
             dut.step_forward(*[arg[i] for arg in args]).detach().numpy())
 
 
-def setup_relu_dyn(dtype, params=None):
-    # Construct a simple ReLU model with 2 hidden layers
+def setup_relu_dyn(dtype):
+    # Construct a simple ReLU model with 3 hidden layers
     # params is the value of weights/bias after concatenation.
     # the network has the same number of outputs as inputs (2)
-    if params is not None:
-        assert (isinstance(params, torch.Tensor))
-        assert (params.shape == (35, ))
-    linear1 = nn.Linear(2, 3)
-    if params is None:
-        linear1.weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]],
-                                           dtype=dtype)
-        linear1.bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
-    else:
-        linear1.weight.data = params[:6].clone().reshape((3, 2))
-        linear1.bias.data = params[6:9].clone()
-    linear2 = nn.Linear(3, 4)
-    if params is None:
-        linear2.weight.data = torch.tensor(
-            [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]],
-            dtype=dtype)
-        linear2.bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
-    else:
-        linear2.weight.data = params[9:21].clone().reshape((4, 3))
-        linear2.bias.data = params[21:25].clone()
-    linear3 = nn.Linear(4, 2)
-    if params is None:
-        linear3.weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]],
-                                           dtype=dtype)
-        linear3.bias.data = torch.tensor([-9, 3], dtype=dtype)
-    else:
-        linear3.weight.data = params[25:33].clone().reshape((2, 4))
-        linear3.bias.data = params[33:35].clone().reshape((2))
-    relu1 = nn.Sequential(linear1, nn.ReLU(), linear2, nn.ReLU(), linear3)
-    assert (not relu1.forward(torch.tensor([0, 0], dtype=dtype))[0].item()
-            == 0)
-    assert (not relu1.forward(torch.tensor([0, 0], dtype=dtype))[1].item()
-            == 0)
+    relu1 = utils.setup_relu((2, 3, 4, 2),
+                             params=None,
+                             negative_slope=0.1,
+                             bias=True,
+                             dtype=dtype)
+    relu1[0].weight.data = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dtype)
+    relu1[0].bias.data = torch.tensor([-11, 10, 5], dtype=dtype)
+    relu1[2].weight.data = torch.tensor(
+        [[-1, -0.5, 1.5], [2, 5, 6], [-2, -3, -4], [1.5, 4, 6]], dtype=dtype)
+    relu1[2].bias.data = torch.tensor([-3, 2, 0.7, 1.5], dtype=dtype)
+    relu1[4].weight.data = torch.tensor([[4, 5, 6, 7], [8, 7, 5.5, 4.5]],
+                                        dtype=dtype)
+    relu1[4].bias.data = torch.tensor([-9, 3], dtype=dtype)
     return relu1
 
 
@@ -222,7 +201,7 @@ class TestAutonomousReluSystem(unittest.TestCase):
                 else:
                     self.assertLessEqual(
                         ret_LP.x_next_bound_prog.gurobi_model.ObjVal,
-                        ret_MIP.x_next_bound_prog.gurobi_model.ObjVal)
+                        ret_MIP.x_next_bound_prog.gurobi_model.ObjVal + 1E-10)
 
 
 def check_mixed_integer_constraints(tester, dut, x_val, u_val, autonomous):

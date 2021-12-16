@@ -98,7 +98,13 @@ class AutonomousReLUSystem:
     or
     x_dot = relu(x)
     """
-    def __init__(self, dtype, x_lo, x_up, dynamics_relu):
+    def __init__(
+            self,
+            dtype,
+            x_lo,
+            x_up,
+            dynamics_relu,
+            network_bound_propagate_method=mip_utils.PropagateBoundsMethod.IA):
         """
         @param dtype The torch datatype
         @param x_lo, x_up torch tensor that lower and upper bound the state
@@ -114,8 +120,7 @@ class AutonomousReLUSystem:
         self.dynamics_relu = dynamics_relu
         self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
             dynamics_relu, dtype)
-        self.network_bound_propagate_method = \
-            mip_utils.PropagateBoundsMethod.IA
+        self.network_bound_propagate_method = network_bound_propagate_method
 
     @property
     def x_lo_all(self):
@@ -182,13 +187,15 @@ class AutonomousReLUSystemGivenEquilibrium:
     ẋ = ϕ(x) − ϕ(x*)
     where ϕ is a feedforward (leaky) ReLU network.
     """
-    def __init__(self,
-                 dtype,
-                 x_lo,
-                 x_up,
-                 dynamics_relu,
-                 x_equilibrium,
-                 discrete_time_flag=True):
+    def __init__(
+            self,
+            dtype,
+            x_lo,
+            x_up,
+            dynamics_relu,
+            x_equilibrium,
+            discrete_time_flag=True,
+            network_bound_propagate_method=mip_utils.PropagateBoundsMethod.IA):
         """
         @param dtype The torch datatype
         @param x_lo, x_up torch tensor that lower and upper bound the state
@@ -208,6 +215,7 @@ class AutonomousReLUSystemGivenEquilibrium:
         assert (x_equilibrium.shape == (self.x_dim, ))
         self.x_equilibrium = x_equilibrium
         self.discrete_time_flag = discrete_time_flag
+        self.network_bound_propagate_method = network_bound_propagate_method
 
     @property
     def x_lo_all(self):
@@ -229,7 +237,7 @@ class AutonomousReLUSystemGivenEquilibrium:
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+            self.x_lo, self.x_up, self.network_bound_propagate_method)
         if self.discrete_time_flag:
             result.Cout += -self.dynamics_relu(self.x_equilibrium) +\
                 self.x_equilibrium
@@ -287,13 +295,15 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
     ẋ = ϕ(x) − ϕ(x*)
     where ϕ is a feedforward (leaky) ReLU network.
     """
-    def __init__(self,
-                 dtype,
-                 x_lo,
-                 x_up,
-                 dynamics_relu,
-                 x_equilibrium,
-                 discrete_time_flag=True):
+    def __init__(
+            self,
+            dtype,
+            x_lo,
+            x_up,
+            dynamics_relu,
+            x_equilibrium,
+            discrete_time_flag=True,
+            network_bound_propagate_method=mip_utils.PropagateBoundsMethod.IA):
         """
         @param dtype The torch datatype
         @param x_lo, x_up torch tensor that lower and upper bound the state
@@ -313,6 +323,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         assert (x_equilibrium.shape == (self.x_dim, ))
         self.x_equilibrium = x_equilibrium
         self.discrete_time_flag = discrete_time_flag
+        self.network_bound_propagate_method = network_bound_propagate_method
 
     @property
     def x_lo_all(self):
@@ -335,7 +346,7 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
                 Aeq_x @ x + Aeq_s @ s + Aeq_gamma @ gamma == rhs_eq
         """
         result = self.dynamics_relu_free_pattern.output_constraint(
-            self.x_lo, self.x_up, mip_utils.PropagateBoundsMethod.IA)
+            self.x_lo, self.x_up, self.network_bound_propagate_method)
         result.Cout += -self.dynamics_relu(self.x_equilibrium)
         if self.discrete_time_flag:
             if result.Aout_input is None:
