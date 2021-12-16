@@ -264,9 +264,9 @@ class AutonomousReLUSystemGivenEquilibrium:
                 mip_utils.PropagateBoundsMethod.IA_MIP):
             relu_at_equilibrium = self.dynamics_relu(self.x_equilibrium)
             x_next_lb_IA = mip_cnstr_return.nn_output_lo - relu_at_equilibrium\
-                + self.x_lo if self.discrete_time_flag else 0.
+                + (self.x_equilibrium if self.discrete_time_flag else 0.)
             x_next_ub_IA = mip_cnstr_return.nn_output_up - relu_at_equilibrium\
-                + self.x_up if self.discrete_time_flag else 0.
+                + (self.x_equilibrium if self.discrete_time_flag else 0.)
         else:
             x_next_lb_IA = None
             x_next_ub_IA = None
@@ -358,6 +358,30 @@ class AutonomousResidualReLUSystemGivenEquilibrium:
         else:
             return self.dynamics_relu(x_start) - \
                 self.dynamics_relu(self.x_equilibrium)
+
+    def add_dynamics_constraint(self,
+                                mip: gurobi_torch_mip.GurobiTorchMIP,
+                                x_var,
+                                x_next_var,
+                                slack_var_name,
+                                binary_var_name,
+                                binary_var_type=gurobipy.GRB.BINARY):
+        mip_cnstr_return = self.mixed_integer_constraints()
+        if self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.IA,
+                mip_utils.PropagateBoundsMethod.IA_MIP):
+            relu_at_equilibrium = self.dynamics_relu(self.x_equilibrium)
+            x_next_lb_IA = mip_cnstr_return.nn_output_lo - relu_at_equilibrium\
+                + (self.x_lo if self.discrete_time_flag else 0.)
+            x_next_ub_IA = mip_cnstr_return.nn_output_up - relu_at_equilibrium\
+                + (self.x_up if self.discrete_time_flag else 0.)
+        else:
+            x_next_lb_IA = None
+            x_next_ub_IA = None
+        return _add_dynamics_constraint_autonmous(
+            mip_cnstr_return, x_next_lb_IA, x_next_ub_IA, mip, x_var,
+            x_next_var, slack_var_name, binary_var_name,
+            self.network_bound_propagate_method, binary_var_type)
 
 
 class ReLUSystem:
