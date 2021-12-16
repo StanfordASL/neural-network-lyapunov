@@ -30,18 +30,6 @@ class ConvergenceEps(Enum):
     Asymp = 3
 
 
-class SystemConstraintReturn:
-    """
-    Return from LyapunovHybridLinearSystem.add_system_constraint()
-    """
-    def __init__(self, slack, binary):
-        self.slack = slack
-        self.binary = binary
-        # These returns are for feedback systems.
-        self.forward_dynamics_return = None
-        self.controller_mip_cnstr_return = None
-
-
 class LyapunovHybridLinearSystem:
     """
     This is the super class of LyapunovDiscreteTimeHybridSystem and
@@ -96,12 +84,9 @@ class LyapunovHybridLinearSystem:
                     self.system,
                     relu_system.AutonomousResidualReLUSystemGivenEquilibrium):
             assert (isinstance(milp, gurobi_torch_mip.GurobiTorchMIP))
-            mip_cnstr_return = self.system.mixed_integer_constraints()
-            s, gamma = milp.add_mixed_integer_linear_constraints(
-                mip_cnstr_return, x, x_next, "s", "gamma",
-                "hybrid_ineq_dynamics", "hybrid_eq_dynamics",
-                "hybrid_output_dynamics", binary_var_type)
-            return SystemConstraintReturn(s, gamma)
+            return self.system.add_dynamics_constraint(milp, x, x_next, "s",
+                                                       "gamma",
+                                                       binary_var_type)
 
         elif isinstance(self.system, feedback_system.FeedbackSystem):
             u, forward_dynamics_return, controller_mip_cnstr_return = \
@@ -112,7 +97,7 @@ class LyapunovHybridLinearSystem:
                 controller_mip_cnstr_return.slack
             binary = forward_dynamics_return.binary + \
                 controller_mip_cnstr_return.binary
-            ret = SystemConstraintReturn(slack, binary)
+            ret = hybrid_linear_system.DynamicsConstraintReturn(slack, binary)
             ret.forward_dynamics_return = forward_dynamics_return
             ret.controller_mip_cnstr_return = controller_mip_cnstr_return
             return ret

@@ -554,6 +554,15 @@ class AutonomousHybridLinearSystem:
         mip_cnstr_return.rhs_eq = torch.tensor([[1.]], dtype=self.dtype)
         return mip_cnstr_return
 
+    def add_dynamics_constraint(self, mip, x_var, x_next_var, slack_var_name,
+                                binary_var_name, binary_var_type):
+        mip_cnstr_return = self.mixed_integer_constraints()
+        s, gamma = mip.add_mixed_integer_linear_constraints(
+            mip_cnstr_return, x_var, x_next_var, slack_var_name,
+            binary_var_name, "ineq_dynamics", "eq_dynamics", "output_dynamics",
+            binary_var_type)
+        return DynamicsConstraintReturn(s, gamma)
+
     def mode(self, x):
         """
         Returns the mode of state x. Namely P[mode] * x <= q[mode].
