@@ -10,6 +10,7 @@ import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
@@ -39,7 +40,14 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
         super(LyapunovContinuousTimeSystem,
               self).__init__(system, lyapunov_relu)
 
-    def lyapunov_derivative(self, x, x_equilibrium, V_lambda, epsilon, *, R):
+    def lyapunov_derivative(self,
+                            x,
+                            x_equilibrium,
+                            V_lambda,
+                            epsilon,
+                            *,
+                            R,
+                            zero_tol=0.):
         """
         Compute V̇(x) + εV(x)
         Due to the non-uniqueness of the gradient dV/dx, there might be
@@ -49,10 +57,117 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
                                        x_equilibrium,
                                        V_lambda,
                                        R,
-                                       zero_tol=0.)
+                                       zero_tol=zero_tol)
         xdot = self.system.step_forward(x)
         return dVdx @ xdot + epsilon * self.lyapunov_value(
             x, x_equilibrium, V_lambda, R=R)
+
+    def lyapunov_derivative_as_milp(self,
+                                    x_equilibrium,
+                                    V_lambda,
+                                    epsilon,
+                                    eps_type: lyapunov.ConvergenceEps,
+                                    *,
+                                    R,
+                                    lyapunov_lower=None,
+                                    lyapunov_upper=None,
+                                    x_warmstart=None,
+                                    binary_var_type=gurobipy.GRB.BINARY):
+        """
+        Formulate the optimization problem
+        maxₓ V̇(x) + ε V(x)
+        s.t lyapunov_lower <= V(x) <= lyapunov_upper
+        """
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
+        # TODO(hongkai.dai): allow other type of epsilon type.
+        assert (eps_type == lyapunov.ConvergenceEps.ExpLower)
+        assert (lyapunov_lower is None or isinstance(lyapunov_lower, float))
+        assert (lyapunov_upper is None or isinstance(lyapunov_upper, float))
+        R = lyapunov._get_R(R, self.system.x_dim, x_equilibrium.device)
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
+        x = milp.addVars(self.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         name="x")
+        xdot = milp.addVars(self.system.x_dim,
+                            lb=-gurobipy.GRB.INFINITY,
+                            name="xdot")
+        # Add the constraint to compute xdot = f(x).
+        system_constraint_return = self.add_system_constraint(
+            milp, x, xdot, binary_var_type=binary_var_type)
+        # Adds the mixed-integer constraints to compute V(x).
+        relu_slack, relu_binary, relu_a_out, relu_b_out, _ = \
+            self.add_lyap_relu_output_constraint(milp, x)
+
+        l1_slack, l1_binary = self.add_state_error_l1_constraint(
+            milp,
+            x_equilibrium,
+            x,
+            R=R,
+            slack_name="l1_slack",
+            binary_var_name="l1_binary",
+            binary_var_type=binary_var_type)
+        V_coeff = [
+            relu_a_out, V_lambda * torch.ones(
+                (R.shape[0], ), dtype=self.system.dtype)
+        ]
+        V_vars = [relu_slack, l1_slack]
+        relu_at_equilibrium = self.lyapunov_relu(x_equilibrium)
+        V_constant = relu_b_out.squeeze() - relu_at_equilibrium.squeeze()
+        if lyapunov_lower is not None:
+            milp.addLConstr(V_coeff,
+                            V_vars,
+                            sense=gurobipy.GRB.GREATER_EQUAL,
+                            rhs=lyapunov_lower - V_constant)
+        if lyapunov_upper is not None:
+            milp.addLConstr(V_coeff,
+                            V_vars,
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            rhs=lyapunov_upper - V_constant)
+        # Adds the mixed-integer constraint that formulates ∂ϕ/∂x * ẋ
+        if self.network_bound_propagate_method == \
+                mip_utils.PropagateBoundsMethod.IA:
+            relu_z_lo, relu_z_up, relu_Wz_lo, relu_Wz_up = \
+                self.lyapunov_relu_free_pattern._compute_Wz_bounds_IA(
+                    system_constraint_return.x_next_lb_IA,
+                    system_constraint_return.x_next_ub_IA)
+        elif self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.LP,
+                mip_utils.PropagateBoundsMethod.MIP):
+            relu_z_lo, relu_z_up, relu_Wz_lo, relu_Wz_up, _ = \
+                self.lyapunov_relu_free_pattern.\
+                _compute_Wz_bounds_optimization(
+                    system_constraint_return.x_next_bound_prog.gurobi_model,
+                    system_constraint_return.x_next_bound_var, relu_binary)
+        else:
+            raise NotImplementedError
+        dphidx_times_xdot_ret = self.lyapunov_relu_free_pattern.\
+            output_gradient_times_vector_w_bounds(
+                relu_z_lo, relu_z_up, relu_Wz_lo, relu_Wz_up)
+        dphidx_times_xdot_slack, _ = milp.add_mixed_integer_linear_constraints(
+            dphidx_times_xdot_ret, xdot, None, "relu_times_xdot_slack",
+            relu_binary, "relu_times_xdot_ineq", "relu_times_xdot_eq", "",
+            binary_var_type)
+        assert (dphidx_times_xdot_ret.Aout_input is None)
+        assert (dphidx_times_xdot_ret.Aout_binary is None)
+        assert (dphidx_times_xdot_ret.Cout is None)
+        objective_vars = V_vars
+        objective_coeffs = [epsilon * c for c in V_coeff]
+        objective_constant = V_constant * epsilon
+        objective_vars.append(dphidx_times_xdot_slack)
+        objective_coeffs.append(
+            dphidx_times_xdot_ret.Aout_slack.reshape((-1, )))
+
+        milp.setObjective(objective_coeffs,
+                          objective_vars,
+                          objective_constant,
+                          sense=gurobipy.GRB.MAXIMIZE)
+        LyapDerivMilpReturn = collections.namedtuple(
+            "LyapDerivMilpReturn", ["milp", "x", "relu_binary", "xdot"])
+        return LyapDerivMilpReturn(milp=milp,
+                                   x=x,
+                                   relu_binary=relu_binary,
+                                   xdot=xdot)
 
 
 class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
