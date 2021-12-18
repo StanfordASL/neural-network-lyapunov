@@ -14,10 +14,11 @@ class ReLUDynamicsConstraintReturn(
                  x_next_lb_IA=None,
                  x_next_ub_IA=None,
                  x_next_bound_prog=None,
-                 x_next_bound_var=None):
+                 x_next_bound_var=None,
+                 x_var=None):
         super(ReLUDynamicsConstraintReturn,
               self).__init__(slack, binary, x_next_lb_IA, x_next_ub_IA,
-                             x_next_bound_prog, x_next_bound_var)
+                             x_next_bound_prog, x_next_bound_var, x_var)
         self.nn_input = None
         self.nn_input_lo = None
         self.nn_input_up = None
@@ -77,16 +78,18 @@ def _add_dynamics_constraint_autonmous(mip_cnstr_return,
             mip_utils.PropagateBoundsMethod.MIP,
             mip_utils.PropagateBoundsMethod.IA_MIP):
         ret.x_next_bound_prog = gurobi_torch_mip.GurobiTorchMILP(dtype)
+        ret.x_next_bound_prog.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
         ret.x_next_bound_var = ret.x_next_bound_prog.addVars(
             x_dim, lb=-gurobipy.GRB.INFINITY)
-        x_next_bound_x_var = ret.x_next_bound_prog.addVars(
-            x_dim, lb=-gurobipy.GRB.INFINITY)
+        ret.x_var = ret.x_next_bound_prog.addVars(x_dim,
+                                                  lb=-gurobipy.GRB.INFINITY)
         x_next_bound_prog_binary_type = gurobipy.GRB.CONTINUOUS if \
             network_bound_propagate_method == \
             mip_utils.PropagateBoundsMethod.LP else gurobipy.GRB.BINARY
         ret.x_next_bound_prog.add_mixed_integer_linear_constraints(
-            mip_cnstr_return, x_next_bound_x_var, ret.x_next_bound_var, "", "",
-            "", "", "", x_next_bound_prog_binary_type)
+            mip_cnstr_return, ret.x_var, ret.x_next_bound_var, "", "", "", "",
+            "", x_next_bound_prog_binary_type)
     return ret
 
 
