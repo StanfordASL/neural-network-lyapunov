@@ -96,8 +96,9 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
         system_constraint_return = self.add_system_constraint(
             milp, x, xdot, binary_var_type=binary_var_type)
         # Adds the mixed-integer constraints to compute V(x).
-        relu_slack, relu_binary, relu_a_out, relu_b_out, _ = \
-            self.add_lyap_relu_output_constraint(milp, x)
+        relu_slack, relu_binary, relu_a_out, relu_b_out,\
+            relu_output_mip_cnstr_ret = self.add_lyap_relu_output_constraint(
+                milp, x)
 
         l1_slack, l1_binary = self.add_state_error_l1_constraint(
             milp,
@@ -134,11 +135,19 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
         elif self.network_bound_propagate_method in (
                 mip_utils.PropagateBoundsMethod.LP,
                 mip_utils.PropagateBoundsMethod.MIP):
+            x_next_bound_prog_binary_type = gurobipy.GRB.CONTINUOUS if\
+                self.network_bound_propagate_method == \
+                mip_utils.PropagateBoundsMethod.LP else gurobipy.GRB.BINARY
+            _, x_next_bound_relu_binary = system_constraint_return.\
+                x_next_bound_prog.add_mixed_integer_linear_constraints(
+                    relu_output_mip_cnstr_ret, system_constraint_return.x_var,
+                    None, "", "", "", "", "", x_next_bound_prog_binary_type)
             relu_z_lo, relu_z_up, relu_Wz_lo, relu_Wz_up, _ = \
                 self.lyapunov_relu_free_pattern.\
                 _compute_Wz_bounds_optimization(
                     system_constraint_return.x_next_bound_prog.gurobi_model,
-                    system_constraint_return.x_next_bound_var, relu_binary)
+                    system_constraint_return.x_next_bound_var,
+                    x_next_bound_relu_binary)
         else:
             raise NotImplementedError
         dphidx_times_xdot_ret = self.lyapunov_relu_free_pattern.\
@@ -195,7 +204,7 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
                 mip_utils.PropagateBoundsMethod.MIP):
             Rxdot_lb = torch.empty((R.shape[0], ), dtype=self.system.dtype)
             Rxdot_ub = torch.empty((R.shape[0], ), dtype=self.system.dtype)
-            for i in R.shape[0]:
+            for i in range(R.shape[0]):
                 system_constraint_return.x_next_bound_prog.setObjective(
                     [R[i]], [system_constraint_return.x_next_bound_var], 0.,
                     gurobipy.GRB.MAXIMIZE)

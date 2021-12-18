@@ -24,7 +24,8 @@ class DynamicsConstraintReturn:
                  x_next_lb_IA=None,
                  x_next_ub_IA=None,
                  x_next_bound_prog=None,
-                 x_next_bound_var=None):
+                 x_next_bound_var=None,
+                 x_var=None):
         """
         Store the slack and binary variables in the dynamics constraint.
         We also compute the bounds of x_next. For discrete-time systems, x_next
@@ -38,6 +39,7 @@ class DynamicsConstraintReturn:
           optimization. Set to None if we don't use them.
           x_next_bound_var is the variable registered in x_next_bound_prog to
           represent x_next.
+          x_var is the variable registered in x_next_bound_prog to represent x.
         """
         self.slack = slack
         self.binary = binary
@@ -45,6 +47,7 @@ class DynamicsConstraintReturn:
         self.x_next_ub_IA = x_next_ub_IA
         self.x_next_bound_prog = x_next_bound_prog
         self.x_next_bound_var = x_next_bound_var
+        self.x_var = x_var
 
 
 class HybridLinearSystem:

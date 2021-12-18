@@ -16,6 +16,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import neural_network_lyapunov.test.test_lyapunov as test_lyapunov
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class TestLyapunovContinuousTimeSystem(unittest.TestCase):
@@ -165,7 +166,8 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
                 self.assertEqual(ret.milp.gurobi_model.status,
                                  gurobipy.GRB.Status.INFEASIBLE)
 
-    def test_lyapunov_derivative_as_milp(self):
+    def test_lyapunov_derivative_as_milp1(self):
+        # Test with IA.
         dut1 = mut.LyapunovContinuousTimeSystem(self.system1,
                                                 self.lyapunov_relu1)
         R = torch.tensor([[1, 3], [-1, 2], [0, 1]], dtype=self.dtype)
@@ -182,6 +184,25 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
             dut1,
             self.system1.x_equilibrium,
             V_lambda=0.2,
+            epsilon=0.5,
+            eps_type=lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            lyapunov_lower=None,
+            lyapunov_upper=None)
+
+    def test_lyapunov_derivative_as_milp2(self):
+        # Test with network bound propagate = LP.
+        network_bound_propagate_method = mip_utils.PropagateBoundsMethod.LP
+        self.system1.network_bound_propagate_method = \
+            network_bound_propagate_method
+        dut1 = mut.LyapunovContinuousTimeSystem(self.system1,
+                                                self.lyapunov_relu1)
+        dut1.network_bound_propagate_method = network_bound_propagate_method
+        R = torch.tensor([[1, 3], [-1, 2], [0, 1]], dtype=self.dtype)
+        self.lyapunov_derivative_as_milp_tester(
+            dut1,
+            self.system1.x_equilibrium,
+            V_lambda=0.,
             epsilon=0.5,
             eps_type=lyapunov.ConvergenceEps.ExpLower,
             R=R,
