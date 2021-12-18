@@ -158,16 +158,76 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
         objective_coeffs.append(
             dphidx_times_xdot_ret.Aout_slack.reshape((-1, )))
 
+        # Now add the term ∂λ|R(x−x*)|₁/∂x * ẋ to the cost function.
+        dl1dx_times_xdot_coeffs, dl1dx_times_xdot_vars = \
+            self._add_dl1dx_times_xdot(
+                V_lambda, R, l1_binary, system_constraint_return, milp, xdot)
+        objective_coeffs.append(dl1dx_times_xdot_coeffs)
+        objective_vars.append(dl1dx_times_xdot_vars)
+
         milp.setObjective(objective_coeffs,
                           objective_vars,
                           objective_constant,
                           sense=gurobipy.GRB.MAXIMIZE)
         LyapDerivMilpReturn = collections.namedtuple(
-            "LyapDerivMilpReturn", ["milp", "x", "relu_binary", "xdot"])
+            "LyapDerivMilpReturn",
+            ["milp", "x", "relu_binary", "l1_binary", "xdot"])
         return LyapDerivMilpReturn(milp=milp,
                                    x=x,
                                    relu_binary=relu_binary,
+                                   l1_binary=l1_binary,
                                    xdot=xdot)
+
+    def _add_dl1dx_times_xdot(self, V_lambda, R, l1_binary,
+                              system_constraint_return, milp, xdot):
+        # Now add the term ∂λ|R(x−x*)|₁/∂x * ẋ to the cost function. This
+        # equals to λ*(2 * b(i)-1)*R[i,:]ẋ, where b(i) is the i'th term in
+        # l1_binary
+        # First compute the bounds R[i, :]*ẋ
+        if self.network_bound_propagate_method == \
+                mip_utils.PropagateBoundsMethod.IA:
+            Rxdot_lb, Rxdot_ub = mip_utils.compute_range_by_IA(
+                R, torch.zeros((R.shape[0], ), dtype=self.system.dtype),
+                system_constraint_return.x_next_lb_IA,
+                system_constraint_return.x_next_ub_IA)
+        elif self.network_bound_propagate_method in (
+                mip_utils.PropagateBoundsMethod.LP,
+                mip_utils.PropagateBoundsMethod.MIP):
+            Rxdot_lb = torch.empty((R.shape[0], ), dtype=self.system.dtype)
+            Rxdot_ub = torch.empty((R.shape[0], ), dtype=self.system.dtype)
+            for i in R.shape[0]:
+                system_constraint_return.x_next_bound_prog.setObjective(
+                    [R[i]], [system_constraint_return.x_next_bound_var], 0.,
+                    gurobipy.GRB.MAXIMIZE)
+                system_constraint_return.x_next_bound_prog.gurobi_model.\
+                    optimize()
+                Rxdot_ub[i] = system_constraint_return.x_next_bound_prog.\
+                    gurobi_model.ObjVal
+                system_constraint_return.x_next_bound_prog.setObjective(
+                    [R[i]], [system_constraint_return.x_next_bound_var], 0.,
+                    gurobipy.GRB.MINIMIZE)
+                system_constraint_return.x_next_bound_prog.gurobi_model.\
+                    optimize()
+                Rxdot_lb[i] = system_constraint_return.x_next_bound_prog.\
+                    gurobi_model.ObjVal
+        dl1dx_times_xdot_slack = milp.addVars(R.shape[0],
+                                              lb=-gurobipy.GRB.INFINITY)
+        for i in range(R.shape[0]):
+            A_Rxdot, A_slack, A_l1_binary, rhs = \
+                utils.replace_binary_continuous_product(
+                    Rxdot_lb[i], Rxdot_ub[i], self.system.dtype)
+            milp.addMConstrs([
+                A_Rxdot.reshape((-1, 1)) @ R[i].reshape((1, -1)),
+                A_slack.reshape((-1, 1)),
+                A_l1_binary.reshape((-1, 1))
+            ], [xdot, [dl1dx_times_xdot_slack[i]], [l1_binary[i]]],
+                             b=rhs,
+                             sense=gurobipy.GRB.LESS_EQUAL)
+        cost_vars = dl1dx_times_xdot_slack + xdot
+        cost_coeffs = torch.cat(
+            (2 * V_lambda * torch.ones(R.shape[0], dtype=self.system.dtype),
+             -V_lambda * torch.sum(R, dim=0)))
+        return cost_coeffs, cost_vars
 
 
 class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
