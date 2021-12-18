@@ -178,6 +178,57 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
             R=R,
             lyapunov_lower=None,
             lyapunov_upper=None)
+        self.lyapunov_derivative_as_milp_tester(
+            dut1,
+            self.system1.x_equilibrium,
+            V_lambda=0.2,
+            epsilon=0.5,
+            eps_type=lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            lyapunov_lower=None,
+            lyapunov_upper=None)
+
+    def add_dl1dx_times_xdot_tester(self, dut, V_lambda, R, x_equilibrium):
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        xdot = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
+        system_constraint_return = dut.add_system_constraint(
+            milp, x, xdot, binary_var_type=gurobipy.GRB.BINARY)
+        _, l1_binary = dut.add_state_error_l1_constraint(milp,
+                                                         x_equilibrium,
+                                                         x,
+                                                         R=R)
+        dl1dx_times_xdot_coeffs, dl1dx_times_xdot_vars = \
+            dut._add_dl1dx_times_xdot(
+                V_lambda, R, l1_binary, system_constraint_return, milp, xdot)
+        milp.setObjective([dl1dx_times_xdot_coeffs], [dl1dx_times_xdot_vars],
+                          0., gurobipy.GRB.MAXIMIZE)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.DualReductions, False)
+        torch.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+        for i in range(x_samples.shape[0]):
+            for j in range(dut.system.x_dim):
+                x[j].lb = x_samples[i, j].item()
+                x[j].ub = x_samples[i, j].item()
+            milp.gurobi_model.optimize()
+            self.assertEqual(milp.gurobi_model.status,
+                             gurobipy.GRB.Status.OPTIMAL)
+            xdot_expected = dut.system.step_forward(x_samples[i])
+            np.testing.assert_allclose([v.x for v in xdot],
+                                       xdot_expected.detach().numpy())
+            self.assertAlmostEqual(
+                (V_lambda *
+                 utils.l1_gradient(R @ (x_samples[i] - x_equilibrium)) @ R
+                 @ xdot_expected).item(), milp.gurobi_model.ObjVal)
+
+    def test_add_dl1dx_times_xdot(self):
+        dut1 = mut.LyapunovContinuousTimeSystem(self.system1,
+                                                self.lyapunov_relu1)
+        R = torch.tensor([[1, 3], [-1, 2], [0, 1]], dtype=self.dtype)
+        self.add_dl1dx_times_xdot_tester(
+            dut1, V_lambda=0.5, R=R, x_equilibrium=dut1.system.x_equilibrium)
 
 
 class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
