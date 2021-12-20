@@ -238,6 +238,70 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
              -V_lambda * torch.sum(R, dim=0)))
         return cost_coeffs, cost_vars
 
+    def lyapunov_derivative_loss_at_samples_and_next_states(
+            self,
+            V_lambda,
+            epsilon,
+            state_samples,
+            state_next,
+            x_equilibrium,
+            eps_type,
+            *,
+            R,
+            margin=0.,
+            reduction="mean",
+            weight=None,
+            zero_tol=1E-8):
+        """
+        Args:
+          zero_tol: the term ϕ(x) and |R(x−x*)|₁ are not differentiable
+          everywhere. At the kink of these functions, the gradient can take
+          multiple values. when x is close to these kinks within distance
+          zero_tol, then we consider both the left and right derivatives.
+        """
+        assert (isinstance(V_lambda, float))
+        assert (isinstance(epsilon, float))
+        assert (isinstance(state_samples, torch.Tensor))
+        assert (isinstance(state_next, torch.Tensor))
+        assert (state_samples.shape == state_next.shape
+                and state_samples.shape[1] == self.system.x_dim)
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        assert (x_equilibrium.shape == (self.system.x_dim, ))
+        assert (isinstance(eps_type, lyapunov.ConvergenceEps))
+
+        assert (eps_type == lyapunov.ConvergenceEps.ExpLower)
+        assert (reduction in {"mean", "max", "4norm"})
+        assert (isinstance(zero_tol, float) and zero_tol >= 0.)
+        R = lyapunov._get_R(R, self.system.x_dim, state_samples.device)
+        Vdot = torch.empty(state_samples.shape[0], dtype=self.system.dtype)
+        V = self.lyapunov_value(state_samples, x_equilibrium, V_lambda, R=R)
+        for i in range(state_samples.shape[0]):
+            dVdx = self._lyapunov_gradient(state_samples[i], x_equilibrium,
+                                           V_lambda, R, zero_tol)
+            if eps_type == lyapunov.ConvergenceEps.ExpLower:
+                Vdot[i] = torch.max(dVdx @ state_next[i])
+            else:
+                raise NotImplementedError
+
+        if eps_type == lyapunov.ConvergenceEps.ExpLower:
+            hinge_loss_all = torch.nn.HingeEmbeddingLoss(
+                margin=margin,
+                reduction="none")(-(Vdot + epsilon * V),
+                                  torch.tensor(-1.).to(state_samples.device))
+        else:
+            raise NotImplementedError
+
+        if reduction == "mean":
+            if weight is None:
+                return torch.mean(hinge_loss_all)
+            else:
+                assert (weight.shape == (state_samples.shape[0], ))
+                return torch.mean(weight * hinge_loss_all)
+        elif reduction == "max":
+            return torch.max(hinge_loss_all)
+        elif reduction == "4norm":
+            return torch.norm(hinge_loss_all, p=4)
+
 
 class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
     """

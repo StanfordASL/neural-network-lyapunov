@@ -208,6 +208,15 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
             R=R,
             lyapunov_lower=None,
             lyapunov_upper=None)
+        self.lyapunov_derivative_as_milp_tester(
+            dut1,
+            self.system1.x_equilibrium,
+            V_lambda=0.2,
+            epsilon=0.5,
+            eps_type=lyapunov.ConvergenceEps.ExpLower,
+            R=R,
+            lyapunov_lower=None,
+            lyapunov_upper=None)
 
     def add_dl1dx_times_xdot_tester(self, dut, V_lambda, R, x_equilibrium):
         milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
@@ -250,6 +259,66 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
         R = torch.tensor([[1, 3], [-1, 2], [0, 1]], dtype=self.dtype)
         self.add_dl1dx_times_xdot_tester(
             dut1, V_lambda=0.5, R=R, x_equilibrium=dut1.system.x_equilibrium)
+
+    def lyapunov_derivative_loss_at_samples_and_next_states_tester(
+            self, dut, V_lambda, epsilon, state_samples, state_next,
+            x_equilibrium, eps_type, R, margin, reduction, zero_tol):
+        loss = dut.lyapunov_derivative_loss_at_samples_and_next_states(
+            V_lambda,
+            epsilon,
+            state_samples,
+            state_next,
+            x_equilibrium,
+            eps_type,
+            R=R,
+            margin=margin,
+            reduction=reduction,
+            zero_tol=zero_tol)
+        objectives = torch.empty(state_samples.shape[0], dtype=self.dtype)
+        for i in range(state_samples.shape[0]):
+            if eps_type == lyapunov.ConvergenceEps.ExpLower:
+                objectives[i] = torch.max(
+                    dut.lyapunov_derivative(state_samples[i],
+                                            x_equilibrium,
+                                            V_lambda,
+                                            epsilon,
+                                            R=R,
+                                            zero_tol=zero_tol))
+        loss_all = torch.maximum(objectives + margin,
+                                 torch.zeros_like(objectives))
+        if reduction == "mean":
+            self.assertAlmostEqual(loss.item(), torch.mean(loss_all).item())
+        elif reduction == "max":
+            self.assertAlmostEqual(loss.item(), torch.max(loss_all).item())
+        elif reduction == "4norm":
+            self.assertAlmostEqual(loss.item(),
+                                   torch.norm(loss_all, p=4).item())
+
+    def test_lyapunov_derivative_loss_at_samples_and_next_states(self):
+        dut = mut.LyapunovContinuousTimeSystem(self.system1,
+                                               self.lyapunov_relu1)
+        torch.manual_seed(0)
+        state_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                    dut.system.x_up, 100)
+        state_next = dut.system.step_forward(state_samples)
+        V_lambda = 0.5
+        epsilon = 0.1
+        R = torch.tensor([[0.5, 0.1], [-0.2, 1], [0.1, 0.5]], dtype=self.dtype)
+        eps_type = lyapunov.ConvergenceEps.ExpLower
+        margin = 0.2
+        for reduction in ("mean", "max", "4norm"):
+            self.lyapunov_derivative_loss_at_samples_and_next_states_tester(
+                dut,
+                V_lambda,
+                epsilon,
+                state_samples,
+                state_next,
+                dut.system.x_equilibrium,
+                eps_type,
+                R,
+                margin,
+                reduction,
+                zero_tol=1E-8)
 
 
 class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
