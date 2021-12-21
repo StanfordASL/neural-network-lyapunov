@@ -91,6 +91,8 @@ class PoleReluSystem:
                                 x_var,
                                 x_next_var,
                                 u_var,
+                                forward_slack_var_name,
+                                forward_binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
                                 binary_var_type=gurobipy.GRB.BINARY):
