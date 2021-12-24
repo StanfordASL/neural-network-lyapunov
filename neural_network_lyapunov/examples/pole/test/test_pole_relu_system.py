@@ -76,8 +76,8 @@ class TestPoleReluSystem(unittest.TestCase):
         x_var = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
         x_next_var = mip.addVars(dut.x_dim, lb=-gurobipy.GRB.INFINITY)
         u_var = mip.addVars(dut.u_dim, lb=-gurobipy.GRB.INFINITY)
-        ret = dut.add_dynamics_constraint(mip, x_var, x_next_var, u_var,
-                                          additional_u_lo, additional_u_up,
+        ret = dut.add_dynamics_constraint(mip, x_var, x_next_var, u_var, "",
+                                          "", additional_u_lo, additional_u_up,
                                           gurobipy.GRB.BINARY)
         self.assertIsInstance(ret, relu_system.ReLUDynamicsConstraintReturn)
         # Take many samples of x and u, check if x_next is right.
