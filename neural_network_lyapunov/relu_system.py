@@ -503,14 +503,17 @@ class ReLUSystemGivenEquilibrium:
     """
     Represent a forward dynamical system with given equilibrium x*, u*. The
     dynamics is
+    discrete time system:
     x[n+1] = ϕ(x[n], u[n]) − ϕ(x*, u*) + x*
+    continuous time system
+    ẋ = ϕ(x, u) − ϕ(x*, u*)
     where ϕ is a feedforward (leaky) ReLU network.
     x[n+1], x[n] and u[n] satisfy a piecewise affine relationship. When x[n],
     u[n] are bounded, we can write this relationship using mixed-integer linear
     constraints.
     """
     def __init__(self, dtype, x_lo, x_up, u_lo, u_up, dynamics_relu,
-                 x_equilibrium, u_equilibrium):
+                 x_equilibrium, u_equilibrium, discrete_time_flag: bool):
         """
         @param x_lo The lower bound of x[n] and x[n+1]. This is only used in
         forming the mixed-integer linear constraints.
@@ -552,6 +555,7 @@ class ReLUSystemGivenEquilibrium:
         assert (torch.all(u_lo <= u_equilibrium))
         assert (torch.all(u_up >= u_equilibrium))
         self.u_equilibrium = u_equilibrium
+        self.discrete_time_flag = discrete_time_flag
 
     @property
     def x_lo_all(self):
@@ -577,8 +581,9 @@ class ReLUSystemGivenEquilibrium:
         result.Aout_slack = result.Aout_slack.reshape((self.x_dim, -1))
         result.Cout = result.Cout.reshape((-1))
         result.Cout += -self.dynamics_relu(
-            torch.cat((self.x_equilibrium, self.u_equilibrium))) +\
-            self.x_equilibrium
+            torch.cat((self.x_equilibrium, self.u_equilibrium)))
+        if self.discrete_time_flag:
+            result.Cout += self.x_equilibrium
 
         return result
 
@@ -587,7 +592,9 @@ class ReLUSystemGivenEquilibrium:
         assert (isinstance(u_start, torch.Tensor))
         x_next = self.dynamics_relu(torch.cat((x_start, u_start), dim=-1)) - \
             self.dynamics_relu(torch.cat(
-                (self.x_equilibrium, self.u_equilibrium))) + self.x_equilibrium
+                (self.x_equilibrium, self.u_equilibrium)))
+        if self.discrete_time_flag:
+            x_next += self.x_equilibrium
         return x_next
 
     def possible_dx(self, x, u):

@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     forward_system = relu_system.ReLUSystemGivenEquilibrium(
         torch.float64, x_lo, x_up, u_lo, u_up, forward_relu, x_equilibrium,
-        u_equilibrium)
+        u_equilibrium, discrete_time_flag=True)
 
     closed_loop_system = feedback_system.FeedbackSystem(
         forward_system, controller_relu, x_equilibrium, u_equilibrium,
