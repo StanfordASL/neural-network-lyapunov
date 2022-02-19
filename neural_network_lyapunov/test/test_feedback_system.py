@@ -181,7 +181,7 @@ class TestFeedbackSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0.5, 0.2, 0.1], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.2, -0.3], dtype=self.dtype)
         forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag=True)
         milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         x_var = milp.addVars(forward_system.x_dim, lb=-gurobipy.GRB.INFINITY)
         u_var = milp.addVars(forward_system.u_dim, lb=-gurobipy.GRB.INFINITY)
@@ -224,7 +224,7 @@ class TestFeedbackSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0.5, 0.2, 0.1], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.2, -0.3], dtype=self.dtype)
         forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag=True)
         milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         x_var = milp.addVars(forward_system.x_dim, lb=-gurobipy.GRB.INFINITY)
         dut = feedback_system.FeedbackSystem(
@@ -262,7 +262,7 @@ class TestFeedbackSystem(unittest.TestCase):
         self.assertLess(milp.gurobi_model.ObjVal, milp_objective)
 
     def construct_relu_forward_system_given_equilibrium(
-            self, x_equilibrium, u_equilibrium):
+            self, x_equilibrium, u_equilibrium, discrete_time_flag):
         forward_network_params = torch.tensor([
             0.1, 0.4, 0.5, 0.5, 0.1, 0.2, -0.1, 1.2, 1.1, -1.2, 0.5, -0.3, 0.2,
             0.1, 0.4, 1.1, 0.4, -0.5, 0.1, 0.3, 0.2, 0.2, -0.5, -0.9, 0.8, 1.5,
@@ -279,7 +279,7 @@ class TestFeedbackSystem(unittest.TestCase):
             torch.tensor([2, 2, 2], dtype=self.dtype),
             torch.tensor([-5, -5], dtype=self.dtype),
             torch.tensor([5, 5], dtype=self.dtype), forward_network,
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag)
         return forward_system
 
     def construct_relu_second_order_forward_system_given_equilibrium(
@@ -397,7 +397,7 @@ class TestFeedbackSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag=True)
 
         self.add_dynamics_mip_constraint_tester(
             forward_system, self.controller_network1,
@@ -435,7 +435,7 @@ class TestFeedbackSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag=True)
         u_lower_limit = np.array([0., -10.])
         u_upper_limit = np.array([100., 0.3])
         closed_loop_system = feedback_system.FeedbackSystem(
@@ -560,7 +560,7 @@ class TestFeedbackSystem(unittest.TestCase):
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
         forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium)
+            x_equilibrium, u_equilibrium, discrete_time_flag=True)
         self.step_forward_at_equilibrium_test(forward_system,
                                               self.controller_network1,
                                               x_equilibrium, u_equilibrium,

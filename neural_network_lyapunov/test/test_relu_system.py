@@ -397,7 +397,7 @@ class TestReLUSystem(unittest.TestCase):
 
 
 class TestReLUSystemGivenEquilibrium(unittest.TestCase):
-    def construct_relu_system_example(self):
+    def construct_relu_system_example(self, discrete_time_flag):
         # Construct a ReLU system with nx = 2 and nu = 1
         self.dtype = torch.float64
         linear1 = torch.nn.Linear(3, 5, bias=True)
@@ -424,80 +424,90 @@ class TestReLUSystemGivenEquilibrium(unittest.TestCase):
         dut = relu_system.ReLUSystemGivenEquilibrium(self.dtype, x_lo, x_up,
                                                      u_lo, u_up, dynamics_relu,
                                                      x_equilibrium,
-                                                     u_equilibrium)
+                                                     u_equilibrium,
+                                                     discrete_time_flag)
         return dut
 
     def test_mixed_integer_constraints(self):
-        dut = self.construct_relu_system_example()
+        for discrete_time_flag in (False, True):
+            dut = self.construct_relu_system_example(discrete_time_flag)
 
-        self.assertEqual(dut.x_dim, 2)
-        self.assertEqual(dut.u_dim, 1)
-        result = dut.mixed_integer_constraints()
-        self.assertIsNone(result.Aout_input)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([0.2, 0.5],
-                                                           dtype=dut.dtype),
-                                        u_val=torch.tensor([0.1],
-                                                           dtype=dut.dtype),
-                                        autonomous=False)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([1.2, 0.5],
-                                                           dtype=dut.dtype),
-                                        u_val=torch.tensor([0.1],
-                                                           dtype=dut.dtype),
-                                        autonomous=False)
-        check_mixed_integer_constraints(self,
-                                        dut,
-                                        x_val=torch.tensor([-1.2, 0.3],
-                                                           dtype=dut.dtype),
-                                        u_val=torch.tensor([0.5],
-                                                           dtype=dut.dtype),
-                                        autonomous=False)
+            self.assertEqual(dut.x_dim, 2)
+            self.assertEqual(dut.u_dim, 1)
+            result = dut.mixed_integer_constraints()
+            self.assertIsNone(result.Aout_input)
+            check_mixed_integer_constraints(
+                self,
+                dut,
+                x_val=torch.tensor([0.2, 0.5], dtype=dut.dtype),
+                u_val=torch.tensor([0.1], dtype=dut.dtype),
+                autonomous=False)
+            check_mixed_integer_constraints(
+                self,
+                dut,
+                x_val=torch.tensor([1.2, 0.5], dtype=dut.dtype),
+                u_val=torch.tensor([0.1], dtype=dut.dtype),
+                autonomous=False)
+            check_mixed_integer_constraints(
+                self,
+                dut,
+                x_val=torch.tensor([-1.2, 0.3], dtype=dut.dtype),
+                u_val=torch.tensor([0.5], dtype=dut.dtype),
+                autonomous=False)
 
     def test_add_dynamics_constraint(self):
-        dut = self.construct_relu_system_example()
-        check_add_dynamics_constraint(dut,
-                                      x_val=torch.tensor([1.2, 0.5],
-                                                         dtype=dut.dtype),
-                                      u_val=torch.tensor([0.2],
-                                                         dtype=dut.dtype))
-        check_add_dynamics_constraint(dut,
-                                      x_val=torch.tensor([-1.2, -0.2],
-                                                         dtype=dut.dtype),
-                                      u_val=torch.tensor([0.8],
-                                                         dtype=dut.dtype))
+        for discrete_time_flag in (False, True):
+            dut = self.construct_relu_system_example(discrete_time_flag)
+            check_add_dynamics_constraint(dut,
+                                          x_val=torch.tensor([1.2, 0.5],
+                                                             dtype=dut.dtype),
+                                          u_val=torch.tensor([0.2],
+                                                             dtype=dut.dtype))
+            check_add_dynamics_constraint(dut,
+                                          x_val=torch.tensor([-1.2, -0.2],
+                                                             dtype=dut.dtype),
+                                          u_val=torch.tensor([0.8],
+                                                             dtype=dut.dtype))
 
     def test_step_forward(self):
-        dut = self.construct_relu_system_example()
+        for discrete_time_flag in (False, True):
+            dut = self.construct_relu_system_example(discrete_time_flag)
 
-        # step_forward evaluated at the equilibrium should return the
-        # equilibrium state.
-        np.testing.assert_allclose(
-            dut.step_forward(dut.x_equilibrium,
-                             dut.u_equilibrium).detach().numpy(),
-            dut.x_equilibrium.detach().numpy())
+            # step_forward evaluated at the equilibrium should return the
+            # equilibrium state.
+            if (discrete_time_flag):
+                np.testing.assert_allclose(
+                    dut.step_forward(dut.x_equilibrium,
+                                     dut.u_equilibrium).detach().numpy(),
+                    dut.x_equilibrium.detach().numpy())
+            else:
+                np.testing.assert_allclose(
+                    dut.step_forward(dut.x_equilibrium,
+                                     dut.u_equilibrium).detach().numpy(),
+                    np.zeros_like(dut.x_equilibrium))
 
-        def check(x, u):
-            x_next_expected = dut.dynamics_relu(torch.cat((x, u))) -\
-                dut.dynamics_relu(torch.cat((
-                    dut.x_equilibrium, dut.u_equilibrium))) + dut.x_equilibrium
-            x_next = dut.step_forward(x, u)
-            np.testing.assert_allclose(x_next_expected.detach().numpy(),
-                                       x_next.detach().numpy())
+            def check(x, u):
+                x_next_expected = dut.dynamics_relu(torch.cat((x, u))) -\
+                    dut.dynamics_relu(torch.cat((
+                        dut.x_equilibrium, dut.u_equilibrium)))
+                if discrete_time_flag:
+                    x_next_expected += dut.x_equilibrium
+                x_next = dut.step_forward(x, u)
+                np.testing.assert_allclose(x_next_expected.detach().numpy(),
+                                           x_next.detach().numpy())
 
-        check(torch.tensor([0.2, 0.6], dtype=dut.dtype),
-              torch.tensor([0.5], dtype=dut.dtype))
-        check(torch.tensor([-0.2, 0.6], dtype=dut.dtype),
-              torch.tensor([0.9], dtype=dut.dtype))
-        check(torch.tensor([-1.2, 1.6], dtype=dut.dtype),
-              torch.tensor([-.2], dtype=dut.dtype))
+            check(torch.tensor([0.2, 0.6], dtype=dut.dtype),
+                  torch.tensor([0.5], dtype=dut.dtype))
+            check(torch.tensor([-0.2, 0.6], dtype=dut.dtype),
+                  torch.tensor([0.9], dtype=dut.dtype))
+            check(torch.tensor([-1.2, 1.6], dtype=dut.dtype),
+                  torch.tensor([-.2], dtype=dut.dtype))
 
-        # Test a batch of x, u
-        x = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=dut.dtype)
-        u = torch.tensor([[0.1], [-0.2], [0.5]], dtype=dut.dtype)
-        test_step_forward_batch(self, dut, x, u)
+            # Test a batch of x, u
+            x = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+                             dtype=dut.dtype)
+            u = torch.tensor([[0.1], [-0.2], [0.5]], dtype=dut.dtype)
+            test_step_forward_batch(self, dut, x, u)
 
 
 class TestReLUSecondOrderSystemGivenEquilibrium(unittest.TestCase):

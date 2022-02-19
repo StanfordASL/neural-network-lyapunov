@@ -402,7 +402,7 @@ class TestLyapunov(unittest.TestCase):
 
 class TestGradient(unittest.TestCase):
     # Tests the gradient of the loss in train_lyapunov.py
-    def construct_lyap1(self):
+    def construct_lyap1(self, discrete_time_flag):
         torch.manual_seed(0)
         dtype = torch.float64
         x_lo = torch.tensor([-2, -4], dtype=dtype)
@@ -418,7 +418,7 @@ class TestGradient(unittest.TestCase):
         u_equilibrium = torch.tensor([0.4, 1.5], dtype=dtype)
         forward_system = relu_system.ReLUSystemGivenEquilibrium(
             dtype, x_lo, x_up, u_lo, u_up, forward_network, x_equilibrium,
-            u_equilibrium)
+            u_equilibrium, discrete_time_flag)
         lyapunov_relu = utils.setup_relu((2, 3, 1),
                                          params=None,
                                          negative_slope=0.1,
@@ -439,7 +439,7 @@ class TestGradient(unittest.TestCase):
 
     def test_sample_loss_grad(self):
         # Test with sample loss gradient
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         R_val = torch.tensor([[1.5, 0.3], [-0.2, 3.1]],
                              dtype=lyap1.system.dtype)
         fixed_R_options = r_options.FixedROptions(R_val)
@@ -471,7 +471,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
 
     def test_positivity_mip_loss_fixed_R(self):
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         V_lambda = 0.5
         V_epsilon = 0.3
         fixed_R_options = r_options.FixedROptions(
@@ -488,7 +488,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
 
     def test_positivity_mip_loss_search_R(self):
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         V_lambda = 0.5
         V_epsilon = 0.3
         torch.manual_seed(0)
@@ -506,7 +506,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
 
     def test_derivative_mip_loss_fixed_R(self):
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         V_lambda = 0.5
         V_epsilon = 0.3
         fixed_R_options = r_options.FixedROptions(
@@ -523,7 +523,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
 
     def test_derivative_mip_loss_search_R_spd(self):
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         V_lambda = 0.5
         V_epsilon = 0.3
         torch.manual_seed(0)
@@ -541,7 +541,7 @@ class TestGradient(unittest.TestCase):
             rtol=1E-5)
 
     def test_derivative_mip_loss_search_R_svd(self):
-        lyap1 = self.construct_lyap1()
+        lyap1 = self.construct_lyap1(discrete_time_flag=True)
         V_lambda = 0.5
         V_epsilon = 0.3
         torch.manual_seed(0)
