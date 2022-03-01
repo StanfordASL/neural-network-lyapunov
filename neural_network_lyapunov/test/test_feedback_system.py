@@ -396,26 +396,26 @@ class TestFeedbackSystem(unittest.TestCase):
         # system.
         x_equilibrium = torch.tensor([0, 0.5, 0.3], dtype=self.dtype)
         u_equilibrium = torch.tensor([0.1, 0.2], dtype=self.dtype)
-        forward_system = self.construct_relu_forward_system_given_equilibrium(
-            x_equilibrium, u_equilibrium, discrete_time_flag=True)
+        for discrete_time_flag in (True, False):
+            forward_system = \
+                self.construct_relu_forward_system_given_equilibrium(
+                    x_equilibrium, u_equilibrium, discrete_time_flag)
 
-        self.add_dynamics_mip_constraint_tester(
-            forward_system, self.controller_network1,
-            forward_system.x_equilibrium, forward_system.u_equilibrium,
-            torch.tensor([0.1, 0.2, 0.3], dtype=self.dtype), np.array([0.,
-                                                                       0.]),
-            np.array([1., 1.]))
-        self.add_dynamics_mip_constraint_tester(
-            forward_system, self.controller_network1,
-            forward_system.x_equilibrium, forward_system.u_equilibrium,
-            torch.tensor([-0.1, 0.2, 0.3], dtype=self.dtype),
-            np.array([-10, -10.]), np.array([1., 1.]))
-        self.add_dynamics_mip_constraint_tester(
-            forward_system, self.controller_network1,
-            forward_system.x_equilibrium, forward_system.u_equilibrium,
-            torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype), np.array([0.,
-                                                                       0.]),
-            np.array([10., 10.]))
+            self.add_dynamics_mip_constraint_tester(
+                forward_system, self.controller_network1,
+                forward_system.x_equilibrium, forward_system.u_equilibrium,
+                torch.tensor([0.1, 0.2, 0.3], dtype=self.dtype),
+                np.array([0., 0.]), np.array([1., 1.]))
+            self.add_dynamics_mip_constraint_tester(
+                forward_system, self.controller_network1,
+                forward_system.x_equilibrium, forward_system.u_equilibrium,
+                torch.tensor([-0.1, 0.2, 0.3], dtype=self.dtype),
+                np.array([-10, -10.]), np.array([1., 1.]))
+            self.add_dynamics_mip_constraint_tester(
+                forward_system, self.controller_network1,
+                forward_system.x_equilibrium, forward_system.u_equilibrium,
+                torch.tensor([0.1, 0.0, 0.0], dtype=self.dtype),
+                np.array([0., 0.]), np.array([10., 10.]))
 
     def eval_u(self, dut, x_val):
         """
