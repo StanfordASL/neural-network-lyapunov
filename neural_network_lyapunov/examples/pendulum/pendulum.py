@@ -4,6 +4,11 @@ import numpy as np
 import scipy
 import scipy.linalg
 import matplotlib.pyplot as plt
+import gurobipy
+
+import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.mip_utils as mip_utils
 
 
 class Pendulum:
@@ -122,3 +127,95 @@ class PendulumVisualizer:
         self._pendulum_sphere.set_ydata(-l_ * cos_theta)
         self._pendulum_title.set_text(f"t={t:.2f}s")
         self._fig.canvas.draw()
+
+
+class PendulumReluContinuousTime:
+    """
+    The dynamics is theta_ddot = phi(theta, theta_dot, u) - phi(0, 0, 0)
+    """
+    def __init__(self, dtype, x_lo, x_up, u_lo, u_up, dynamics_relu):
+        self.x_dim = 2
+        self.dtype = dtype
+        assert (x_lo.shape == (self.x_dim, ))
+        assert (x_up.shape == (self.x_dim, ))
+        self.x_lo = x_lo
+        self.x_up = x_up
+        self.u_dim = 1
+        assert (u_lo.shape == (self.u_dim, ))
+        assert (u_up.shape == (self.u_dim, ))
+        self.u_lo = u_lo
+        self.u_up = u_up
+        assert (dynamics_relu[0].in_features == 3)
+        assert (dynamics_relu[-1].out_features == 1)
+        self.dynamics_relu = dynamics_relu
+        self.x_equilibrium = torch.tensor([np.pi, 0], dtype=self.dtype)
+        self.u_equilibrium = torch.tensor([0], dtype=self.dtype)
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        self.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def mixed_integer_constraints(self, u_lo=None, u_up=None):
+        if u_lo is None:
+            u_lo = self.u_lo
+        if u_up is None:
+            u_up = self.u_up
+        network_input_lo = torch.cat((self.x_lo, u_lo))
+        network_input_up = torch.cat((self.x_up, u_up))
+        result = self.dynamics_relu_free_pattern.output_constraint(
+            network_input_lo, network_input_up,
+            self.network_bound_propagate_method)
+        # Add the constraint xdot[0] = x[1]
+        # xdot[1] = phi(x, u) - phi(x*, u*)
+        result.Cout = torch.cat(
+            (torch.tensor([0], dtype=self.dtype),
+             result.Cout[0] - self.dynamics_relu(
+                 torch.cat((self.x_equilibrium, self.u_equilibrium)))))
+        assert (result.Aout_input is None)
+        result.Aout_input = torch.tensor([[0, 1, 0], [0, 0, 0]],
+                                         dtype=self.dtype)
+        result.Aout_slack = torch.cat((torch.zeros(
+            (1, result.num_slack()), dtype=self.dtype), result.Aout_slack),
+                                      dim=0)
+        if (result.Aout_binary is None):
+            result.Aout_binary = torch.zeros((2, result.num_binary()),
+                                             dtype=self.dtype)
+        else:
+            result.Aout_binary = torch.cat(
+                (torch.zeros((1, result.num_binary()),
+                             dtype=self.dtype), result.Aout_binary),
+                dim=0)
+        return result
+
+    def step_forward(self, x_start, u_start):
+        theta_ddot = self.dynamics_relu(torch.cat(
+            (x_start, u_start))) - self.dynamics_relu(
+                torch.cat((self.x_equilibrium, self.u_equilibrium)))
+        return torch.stack((x_start[1], theta_ddot[0]))
+
+    def possible_dx(self, x, u):
+        assert (isinstance(x, torch.Tensor))
+        assert (isinstance(u, torch.Tensor))
+        return [self.step_forward(x, u)]
+
+    def add_dynamics_constraint(self,
+                                mip,
+                                x_var,
+                                x_next_var,
+                                u_var,
+                                slack_var_name,
+                                binary_var_name,
+                                additional_u_lo: torch.Tensor = None,
+                                additional_u_up: torch.Tensor = None,
+                                binary_var_type=gurobipy.GRB.BINARY):
+        return relu_system._add_dynamics_mip_constraints(
+            mip, self, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name, additional_u_lo, additional_u_up, binary_var_type)
