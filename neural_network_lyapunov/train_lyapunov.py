@@ -315,11 +315,7 @@ class TrainLyapunovReLU:
         lyapunov_derivative_mip_obj = \
             lyapunov_derivative_mip.gurobi_model.ObjVal
 
-        relu_zeta_val = np.array(
-            [np.round(v.x) for v in lyapunov_derivative_as_milp_return.beta])
         if self.output_flag:
-            print("lyapunov derivative MIP Relu activation: "
-                  f"{np.argwhere(relu_zeta_val == 1).squeeze()}")
             print("adversarial x " +
                   f"{[v.x for v in lyapunov_derivative_as_milp_return.x]}")
         if self.lyapunov_derivative_mip_warmstart:
