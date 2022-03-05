@@ -449,6 +449,22 @@ class PropagateBoundsMethod(enum.Enum):
     IA_MIP = 4
 
 
+def binary_var_type_per_method(method: PropagateBoundsMethod):
+    """
+    Determine the type for the binary variables based on the bound propagation
+    method.
+    """
+    if method == PropagateBoundsMethod.LP:
+        return gurobipy.GRB.CONTINUOUS
+    elif method == PropagateBoundsMethod.MIP:
+        return gurobipy.GRB.BINARY
+    elif method == PropagateBoundsMethod.IA_MIP:
+        return gurobipy.GRB.BINARY
+    else:
+        raise Exception("Unsupported method to determine the binary " +
+                        "variable type.")
+
+
 def propagate_bounds(layer, input_lo, input_up):
     """
     Given the bound of the layer's input, find the bound of the output.
