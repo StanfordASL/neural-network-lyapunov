@@ -9,6 +9,7 @@ import gurobipy
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 class Pendulum:
@@ -163,7 +164,10 @@ class PendulumReluContinuousTime:
     def x_up_all(self):
         return self.x_up.detach().numpy()
 
-    def mixed_integer_constraints(self, u_lo=None, u_up=None):
+    def mixed_integer_constraints(
+            self,
+            u_lo=None,
+            u_up=None) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
         if u_lo is None:
             u_lo = self.u_lo
         if u_up is None:
@@ -193,6 +197,12 @@ class PendulumReluContinuousTime:
                 (torch.zeros((1, result.num_binary()),
                              dtype=self.dtype), result.Aout_binary),
                 dim=0)
+        relu_at_equilibrium = self.dynamics_relu(
+            torch.cat((self.x_equilibrium, self.u_equilibrium)))
+        result.x_next_lb = torch.stack(
+            (self.x_lo[1], result.nn_output_lo[0] - relu_at_equilibrium[0]))
+        result.x_next_ub = torch.stack(
+            (self.x_up[1], result.nn_output_up[0] - relu_at_equilibrium[0]))
         return result
 
     def step_forward(self, x_start, u_start):
@@ -206,16 +216,20 @@ class PendulumReluContinuousTime:
         assert (isinstance(u, torch.Tensor))
         return [self.step_forward(x, u)]
 
-    def add_dynamics_constraint(self,
-                                mip,
-                                x_var,
-                                x_next_var,
-                                u_var,
-                                slack_var_name,
-                                binary_var_name,
-                                additional_u_lo: torch.Tensor = None,
-                                additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
-        return relu_system._add_dynamics_mip_constraints(
-            mip, self, x_var, x_next_var, u_var, slack_var_name,
-            binary_var_name, additional_u_lo, additional_u_up, binary_var_type)
+    def add_dynamics_constraint(
+        self,
+        mip,
+        x_var,
+        x_next_var,
+        u_var,
+        slack_var_name,
+        binary_var_name,
+        additional_u_lo: torch.Tensor = None,
+        additional_u_up: torch.Tensor = None,
+        binary_var_type=gurobipy.GRB.BINARY,
+        u_input_prog: relu_system.ControlBoundProg = None
+    ) -> relu_system.ReLUDynamicsConstraintReturn:
+        return relu_system._add_forward_dynamics_mip_constraints(
+            self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name, additional_u_lo, additional_u_up, binary_var_type,
+            u_input_prog)

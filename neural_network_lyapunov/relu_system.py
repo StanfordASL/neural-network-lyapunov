@@ -955,7 +955,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
 
 
 def _add_dynamics_mip_constraints(mip,
-                                  relu_system,
+                                  dynamic_system,
                                   x_var,
                                   x_next_var,
                                   u_var,
@@ -964,16 +964,86 @@ def _add_dynamics_mip_constraints(mip,
                                   additional_u_lo: torch.Tensor = None,
                                   additional_u_up: torch.Tensor = None,
                                   binary_var_type=gurobipy.GRB.BINARY):
-    u_lo = relu_system.u_lo if additional_u_lo is None else torch.max(
-        relu_system.u_lo, additional_u_lo)
-    u_up = relu_system.u_up if additional_u_up is None else torch.min(
-        relu_system.u_up, additional_u_up)
-    mip_cnstr = relu_system.mixed_integer_constraints(u_lo, u_up)
+    u_lo = dynamic_system.u_lo if additional_u_lo is None else torch.max(
+        dynamic_system.u_lo, additional_u_lo)
+    u_up = dynamic_system.u_up if additional_u_up is None else torch.min(
+        dynamic_system.u_up, additional_u_up)
+    mip_cnstr = dynamic_system.mixed_integer_constraints(u_lo, u_up)
     input_vars = x_var + u_var
     slack, binary = mip.add_mixed_integer_linear_constraints(
         mip_cnstr, input_vars, x_next_var, slack_var_name, binary_var_name,
         "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
         "relu_forward_dynamics_output", binary_var_type)
     ret = ReLUDynamicsConstraintReturn(slack, binary)
+    ret.from_mip_cnstr_return(mip_cnstr, input_vars)
+    return ret
+
+
+class ControlBoundProg:
+    """
+    In order to compute the bound of the ReLU unit input through optimization,
+    I keep a separate program that stores this program, together with the
+    input/output of the network. This program can start with the one to compute
+    the bound in the controller network, and then it will be later used to
+    compute the bound in the Lyapunov network.
+    """
+    def __init__(self, prog: gurobi_torch_mip.GurobiTorchMIP, x_var, u_var):
+        """
+        This stores the (possibly relaxed) constraints on the controller that
+        maps x to u.
+        """
+        self.prog = prog
+        self.x_var = x_var
+        self.u_var = u_var
+
+
+def _add_forward_dynamics_mip_constraints(
+        forward_system, mip, x_var, x_next_var, u_var, slack_var_name,
+        binary_var_name, additional_u_lo, additional_u_up, binary_var_type,
+        u_input_prog: ControlBoundProg) -> ReLUDynamicsConstraintReturn:
+    """
+    Adds the constraints to @p mip on the forward dynamics.
+    Args:
+      u_input_prog: Set to None don't plan to compute the ReLU input bounds
+      through optimization.
+    """
+    mip_cnstr = forward_system.mixed_integer_constraints(
+        additional_u_lo, additional_u_up)
+    input_vars = x_var + u_var
+    slack, binary = mip.add_mixed_integer_linear_constraints(
+        mip_cnstr, input_vars, x_next_var, slack_var_name, binary_var_name,
+        "relu_forward_dynamics_ineq", "relu_forward_dynamics_eq",
+        "relu_forward_dynamics_output", binary_var_type)
+    x_next_lb_IA = None
+    x_next_ub_IA = None
+    bound_prog = None
+    bound_prog_x_next_var = None
+    bound_prog_x_var = None
+    if forward_system.network_bound_propagate_method ==\
+            mip_utils.PropagateBoundsMethod.IA:
+        x_next_lb_IA = mip_cnstr.x_next_lb
+        x_next_ub_IA = mip_cnstr.x_next_ub
+    else:
+        if u_input_prog is None:
+            bound_prog = gurobi_torch_mip.GurobiTorchMIP(forward_system.dtype)
+            bound_prog_x_var = bound_prog.addVars(forward_system.x_dim,
+                                                  lb=-gurobipy.GRB.INFINITY)
+            bound_prog_u_var = bound_prog.addVars(forward_system.u_dim,
+                                                  lb=-gurobipy.GRB.INFINITY)
+        else:
+            bound_prog = u_input_prog.prog
+            bound_prog_x_var = u_input_prog.x_var
+            bound_prog_u_var = u_input_prog.u_var
+        bound_prog_x_next_var = bound_prog.addVars(forward_system.x_dim,
+                                                   lb=-gurobipy.GRB.INFINITY)
+        bound_prog_binary_var_type = mip_utils.binary_var_type_per_method(
+            forward_system.network_bound_propagate_method)
+        bound_prog.add_mixed_integer_linear_constraints(
+            mip_cnstr, bound_prog_x_var + bound_prog_u_var,
+            bound_prog_x_next_var, "", "", "", "", "",
+            bound_prog_binary_var_type)
+    ret = ReLUDynamicsConstraintReturn(slack, binary, x_next_lb_IA,
+                                       x_next_ub_IA, bound_prog,
+                                       bound_prog_x_next_var, bound_prog_x_var)
     ret.from_mip_cnstr_return(mip_cnstr, input_vars)
     return ret
