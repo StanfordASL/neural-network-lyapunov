@@ -5,6 +5,8 @@ import enum
 import warnings
 import itertools
 
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+
 
 def strengthen_relu_mip_w_indices(c: float, w: torch.Tensor, b: torch.Tensor,
                                   lo: torch.Tensor, up: torch.Tensor,
@@ -455,7 +457,7 @@ def binary_var_type_per_method(method: PropagateBoundsMethod):
     method.
     """
     if method == PropagateBoundsMethod.LP:
-        return gurobipy.GRB.CONTINUOUS
+        return gurobi_torch_mip.BINARYRELAX
     elif method == PropagateBoundsMethod.MIP:
         return gurobipy.GRB.BINARY
     elif method == PropagateBoundsMethod.IA_MIP:

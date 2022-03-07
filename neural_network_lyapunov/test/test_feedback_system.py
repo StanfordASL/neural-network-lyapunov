@@ -683,6 +683,12 @@ class TestFeedbackSystem(unittest.TestCase):
             "slack",
             "binary",
             binary_var_type=gurobipy.GRB.BINARY)
+        self.assertIsNotNone(
+            controller_mip_cnstr_return.control_bound_prog.prog)
+        self.assertIsNotNone(
+            controller_mip_cnstr_return.control_bound_prog.x_var)
+        self.assertIsNotNone(
+            controller_mip_cnstr_return.control_bound_prog.u_var)
         for v in controller_mip_cnstr_return.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Now add constraint on x_var = x_val
