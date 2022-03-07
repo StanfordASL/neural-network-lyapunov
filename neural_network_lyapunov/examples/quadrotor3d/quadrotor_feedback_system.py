@@ -2,6 +2,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
+import neural_network_lyapunov.relu_system as relu_system
 
 import gurobipy
 import torch
@@ -12,14 +13,16 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                  u_upper_limit):
         assert (isinstance(forward_system, quadrotor.QuadrotorReLUSystem))
         super(QuadrotorFeedbackSystem,
-              self).__init__(forward_system,
-                             controller_network,
+              self).__init__(forward_system, controller_network,
                              forward_system.x_equilibrium,
-                             forward_system.u_equilibrium,
-                             u_lower_limit,
+                             forward_system.u_equilibrium, u_lower_limit,
                              u_upper_limit)
 
-    def add_dynamics_mip_constraint(self, mip, x_var, x_next_var, u_var_name,
+    def add_dynamics_mip_constraint(self,
+                                    mip,
+                                    x_var,
+                                    x_next_var,
+                                    u_var_name,
                                     forward_slack_var_name,
                                     forward_binary_var_name,
                                     controller_slack_var_name,
@@ -40,8 +43,7 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                              mip, x_var, x_next_var, u_var_name,
                              forward_slack_var_name, forward_binary_var_name,
                              controller_slack_var_name,
-                             controller_binary_var_name,
-                             binary_var_type)
+                             controller_binary_var_name, binary_var_type)
         else:
             assert (self.forward_system.network_bound_propagate_method
                     in (mip_utils.PropagateBoundsMethod.LP,
@@ -90,6 +92,30 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     controller_slack_var_name,
                     controller_binary_var_name,
                     binary_var_type=binary_var_type)
+            control_bound_prog = relu_system.ControlBoundProg(None, None, None)
+            control_bound_prog.prog = gurobi_torch_mip.GurobiTorchMILP(
+                self.dtype)
+            control_bound_prog.x_var = control_bound_prog.prog.addVars(
+                self.x_dim, lb=-gurobipy.GRB.INFINITY)
+            control_bound_prog.u_var = control_bound_prog.prog.addVars(
+                self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY)
+            if self.controller_network_bound_propagate_method !=\
+                    mip_utils.PropagateBoundsMethod.IA:
+                self._add_network_controller_mip_constraint_given_relu_bound(
+                    control_bound_prog.prog,
+                    control_bound_prog.x_var,
+                    control_bound_prog.u_var,
+                    controller_relu_input_lo,
+                    controller_relu_input_up,
+                    controller_network_input_lo,
+                    controller_network_input_up,
+                    controller_network_output_lo,
+                    controller_network_output_up,
+                    controller_slack_var_name,
+                    controller_binary_var_name,
+                    binary_var_type=mip_utils.binary_var_type_per_method(
+                        self.controller_network_bound_propagate_method))
+
             controller_mip_cnstr_return = \
                 feedback_system.ControllerMipConstraintReturn(
                     nn_input=x_var,
@@ -100,7 +126,8 @@ class QuadrotorFeedbackSystem(feedback_system.FeedbackSystem):
                     relu_input_lo=controller_relu_input_lo,
                     relu_input_up=controller_relu_input_up,
                     relu_output_lo=controller_relu_output_lo,
-                    relu_output_up=controller_relu_output_up)
+                    relu_output_up=controller_relu_output_up,
+                    control_bound_prog=control_bound_prog)
 
             # Now compute the bounds on the ReLU units of the forward
             # dynamic network through LP.

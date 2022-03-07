@@ -25,7 +25,8 @@ import neural_network_lyapunov.mip_utils as mip_utils
 
 class ControllerMipConstraintReturn:
     def __init__(self, nn_input, slack, binary, u_lower_bound, u_upper_bound,
-                 relu_input_lo, relu_input_up, relu_output_lo, relu_output_up):
+                 relu_input_lo, relu_input_up, relu_output_lo, relu_output_up,
+                 control_bound_prog: relu_system.ControlBoundProg):
         self.nn_input = nn_input
         self.slack = slack
         self.binary = binary
@@ -35,6 +36,7 @@ class ControllerMipConstraintReturn:
         self.relu_input_up = relu_input_up
         self.relu_output_lo = relu_output_lo
         self.relu_output_up = relu_output_up
+        self.control_bound_prog = control_bound_prog
 
 
 class FeedbackSystem:
@@ -44,13 +46,9 @@ class FeedbackSystem:
     The feedback controller is u[n] = ϕᵤ(x[n]) - ϕᵤ(x*), where ϕᵤ is another
     neural network with (leaky) ReLU activations.
     """
-    def __init__(self,
-                 forward_system,
-                 controller_network,
-                 x_equilibrium: torch.Tensor,
-                 u_equilibrium: torch.Tensor,
-                 u_lower_limit: np.ndarray,
-                 u_upper_limit: np.ndarray):
+    def __init__(self, forward_system, controller_network,
+                 x_equilibrium: torch.Tensor, u_equilibrium: torch.Tensor,
+                 u_lower_limit: np.ndarray, u_upper_limit: np.ndarray):
         """
         @param forward_system. The forward dynamical system representing
         x[n+1] = f(x[n], u[n]). This system must implements functions like
@@ -189,6 +187,23 @@ class FeedbackSystem:
                 network_output_lo, network_output_up,
                 controller_slack_var_name, controller_binary_var_name,
                 binary_var_type)
+
+        control_bound_prog = relu_system.ControlBoundProg(None, None, None)
+        control_bound_prog.prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        control_bound_prog.x_var = control_bound_prog.prog.addVars(
+            self.x_dim, lb=-gurobipy.GRB.INFINITY)
+        control_bound_prog.u_var = control_bound_prog.prog.addVars(
+            self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY)
+
+        if self.controller_network_bound_propagate_method != \
+                mip_utils.PropagateBoundsMethod.IA:
+            self._add_network_controller_mip_constraint_given_relu_bound(
+                control_bound_prog.prog, control_bound_prog.x_var,
+                control_bound_prog.u_var, controller_pre_relu_lo,
+                controller_pre_relu_up, network_input_lo, network_input_up,
+                network_output_lo, network_output_up, "", "",
+                mip_utils.binary_var_type_per_method(
+                    self.controller_network_bound_propagate_method))
         return ControllerMipConstraintReturn(
             nn_input=x_var,
             slack=controller_slack,
@@ -198,7 +213,8 @@ class FeedbackSystem:
             relu_input_lo=controller_pre_relu_lo,
             relu_input_up=controller_pre_relu_up,
             relu_output_lo=controller_post_relu_lo,
-            relu_output_up=controller_post_relu_up)
+            relu_output_up=controller_post_relu_up,
+            control_bound_prog=control_bound_prog)
 
     def _add_linear_controller_mip_constraint(self, mip, x_var, u_var,
                                               binary_var_type):
@@ -248,33 +264,39 @@ class FeedbackSystem:
                                        controller_binary_var_name,
                                        binary_var_type):
         if isinstance(self.controller_network, torch.nn.Sequential):
-            nn_controller_mip_cnstr_return = \
-                self._add_network_controller_mip_constraint(
-                    mip, x_var, u_var, controller_slack_var_name,
-                    controller_binary_var_name, binary_var_type)
-            return ControllerMipConstraintReturn(
-                nn_input=x_var,
-                slack=nn_controller_mip_cnstr_return.slack,
-                binary=nn_controller_mip_cnstr_return.binary,
-                u_lower_bound=nn_controller_mip_cnstr_return.u_lower_bound,
-                u_upper_bound=nn_controller_mip_cnstr_return.u_upper_bound,
-                relu_input_lo=nn_controller_mip_cnstr_return.relu_input_lo,
-                relu_input_up=nn_controller_mip_cnstr_return.relu_input_up,
-                relu_output_lo=nn_controller_mip_cnstr_return.relu_output_lo,
-                relu_output_up=nn_controller_mip_cnstr_return.relu_output_up)
+
+            return self._add_network_controller_mip_constraint(
+                mip, x_var, u_var, controller_slack_var_name,
+                controller_binary_var_name, binary_var_type)
         elif isinstance(self.controller_network, torch.nn.Linear):
             controller_slack, controller_binary, u_lower_bound, u_upper_bound\
                 = self._add_linear_controller_mip_constraint(
                     mip, x_var, u_var, binary_var_type)
-            return ControllerMipConstraintReturn(nn_input=None,
-                                                 slack=controller_slack,
-                                                 binary=controller_binary,
-                                                 u_lower_bound=u_lower_bound,
-                                                 u_upper_bound=u_upper_bound,
-                                                 relu_input_lo=None,
-                                                 relu_input_up=None,
-                                                 relu_output_lo=None,
-                                                 relu_output_up=None)
+            control_bound_prog = relu_system.ControlBoundProg(None, None, None)
+            control_bound_prog.prog = gurobi_torch_mip.GurobiTorchMILP(
+                self.dtype)
+            control_bound_prog.x_var = control_bound_prog.prog.addVars(
+                self.x_dim, lb=-gurobipy.GRB.INFINITY)
+            control_bound_prog.u_var = control_bound_prog.prog.addVars(
+                self.forward_system.u_dim, lb=-gurobipy.GRB.INFINITY)
+            if self.controller_network_bound_propagate_method != \
+                    mip_utils.PropagateBoundsMethod.IA:
+                self._add_linear_controller_mip_constraint(
+                    control_bound_prog.prog, control_bound_prog.x_var,
+                    control_bound_prog.u_var,
+                    mip_utils.binary_var_type_per_method(
+                        self.controller_network_bound_propagate_method))
+            return ControllerMipConstraintReturn(
+                nn_input=None,
+                slack=controller_slack,
+                binary=controller_binary,
+                u_lower_bound=u_lower_bound,
+                u_upper_bound=u_upper_bound,
+                relu_input_lo=None,
+                relu_input_up=None,
+                relu_output_lo=None,
+                relu_output_up=None,
+                control_bound_prog=control_bound_prog)
 
     def strengthen_controller_mip_constraint(
             self, mip: gurobi_torch_mip.GurobiTorchMIP, x_var: list,
@@ -352,8 +374,10 @@ class FeedbackSystem:
         return u, forward_dynamics_return, controller_mip_cnstr_return
 
     def strengthen_dynamics_constraint(
-            self, mip: gurobi_torch_mip.GurobiTorchMIP,
-            forward_dynamics_return: hybrid_linear_system.DynamicsConstraintReturn,  # noqa
+            self,
+            mip: gurobi_torch_mip.GurobiTorchMIP,
+            forward_dynamics_return: hybrid_linear_system.
+        DynamicsConstraintReturn,  # noqa
             controller_mip_cnstr_return: ControllerMipConstraintReturn):
         """
         Strengthen the MIP constraint on system dynamics.

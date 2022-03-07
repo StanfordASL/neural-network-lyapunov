@@ -541,16 +541,7 @@ class ReLUFreePattern:
                         self.model[2 * layer_count].weight, bias,
                         linear_layer_input_lo, linear_layer_input_up)
             else:
-                if method == mip_utils.PropagateBoundsMethod.LP:
-                    binary_var_type = gurobi_torch_mip.BINARYRELAX
-                elif method in (mip_utils.PropagateBoundsMethod.MIP,
-                                mip_utils.PropagateBoundsMethod.IA_MIP):
-                    binary_var_type = gurobipy.GRB.BINARY
-                else:
-                    raise Exception(
-                        "_compute_layer_bound: unknown bound propagation" +
-                        " method")
-
+                binary_var_type = mip_utils.binary_var_type_per_method(method)
                 for j in range(self.model[2 * layer_count].out_features):
                     neuron_index = self.relu_unit_index[layer_count][j]
                     z_pre_relu_lo[neuron_index], z_pre_relu_up[
@@ -631,15 +622,7 @@ class ReLUFreePattern:
                     self.model[-1], linear_input_lo, linear_input_up)
             return linear_output_lo, linear_output_up
         else:
-            if method == mip_utils.PropagateBoundsMethod.LP:
-                binary_var_type = gurobi_torch_mip.BINARYRELAX
-            elif method in (mip_utils.PropagateBoundsMethod.MIP,
-                            mip_utils.PropagateBoundsMethod.IA_MIP):
-                binary_var_type = gurobipy.GRB.BINARY
-            else:
-                raise Exception(
-                    "_compute_network_output_bounds: unknown bound " +
-                    "propagate method.")
+            binary_var_type = mip_utils.binary_var_type_per_method(method)
             linear_output_lo = torch.empty((self.model[-1].out_features, ),
                                            dtype=self.dtype)
             linear_output_up = torch.empty((self.model[-1].out_features, ),
