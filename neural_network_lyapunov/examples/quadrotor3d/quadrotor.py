@@ -535,7 +535,8 @@ class QuadrotorReLUSystem:
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
                                 create_lp_prog_callback=None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
         """
         Add the dynamics constraints
         pos[n+1] = pos[n] + (pos_dot[n] + pos_dot[n+1]) / 2 * dt

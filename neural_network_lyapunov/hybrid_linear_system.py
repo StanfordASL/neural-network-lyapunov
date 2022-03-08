@@ -279,7 +279,9 @@ class HybridLinearSystem:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
+        # TODO(hongkai.dai): support u_input_prog
         if additional_u_lo is not None or additional_u_up is not None:
             warnings.warn(
                 "hybrid linear system don't accept additional u_lo and u_up " +

@@ -492,7 +492,9 @@ class ReLUSystem:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
+        # TODO(hongkai.dai): support u_input_prog
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
@@ -611,7 +613,9 @@ class ReLUSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
+        # TODO(hongkai.dai): support u_input_prog
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
@@ -770,7 +774,9 @@ class ReLUSecondOrderSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
+        # TODO(hongkai.dai): support u_input_prog
         return _add_dynamics_mip_constraints(mip, self, x_var, x_next_var,
                                              u_var, slack_var_name,
                                              binary_var_name, additional_u_lo,
@@ -894,7 +900,8 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
                                 binary_var_name,
                                 additional_u_lo: torch.Tensor = None,
                                 additional_u_up: torch.Tensor = None,
-                                binary_var_type=gurobipy.GRB.BINARY):
+                                binary_var_type=gurobipy.GRB.BINARY,
+                                u_input_prog=None):
         u_lo = self.u_lo if additional_u_lo is None else torch.max(
             self.u_lo, additional_u_lo)
         u_up = self.u_up if additional_u_up is None else torch.min(
