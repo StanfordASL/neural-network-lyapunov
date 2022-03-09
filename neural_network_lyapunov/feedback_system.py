@@ -369,7 +369,8 @@ class FeedbackSystem:
                 forward_binary_var_name,
                 additional_u_lo=controller_mip_cnstr_return.u_lower_bound,
                 additional_u_up=controller_mip_cnstr_return.u_upper_bound,
-                binary_var_type=binary_var_type)
+                binary_var_type=binary_var_type,
+                u_input_prog=controller_mip_cnstr_return.control_bound_prog)
 
         return u, forward_dynamics_return, controller_mip_cnstr_return
 

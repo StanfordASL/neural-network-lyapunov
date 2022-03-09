@@ -11,6 +11,7 @@ import neural_network_lyapunov.mip_utils as mip_utils
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.feedback_system as feedback_system
 
 
 class TestPendulum(unittest.TestCase):
@@ -249,6 +250,86 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
                         result.x_next_ub_IA.detach().numpy())
                     np.testing.assert_array_less(
                         result.x_next_lb_IA.detach().numpy(), xdot_expected)
+
+    def test_feedback_system(self):
+        x_lo = torch.tensor([-2, -4], dtype=self.dtype)
+        x_up = torch.tensor([2, 3], dtype=self.dtype)
+        u_lo = torch.tensor([-1], dtype=self.dtype)
+        u_up = torch.tensor([1], dtype=self.dtype)
+        forward_system = pendulum.PendulumReluContinuousTime(
+            self.dtype, x_lo, x_up, u_lo, u_up, self.dynamics_relu)
+        controller_network = utils.setup_relu((2, 3, 1),
+                                              params=None,
+                                              negative_slope=0.1,
+                                              bias=True,
+                                              dtype=self.dtype)
+        controller_network[0].weight.data = torch.tensor(
+            [[1, 2], [3, -1], [0, 1]], dtype=self.dtype)
+        controller_network[0].bias.data = torch.tensor([1, 0, -2],
+                                                       dtype=self.dtype)
+        controller_network[2].weight.data = torch.tensor([[1, 3, -1]],
+                                                         dtype=self.dtype)
+        controller_network[2].bias.data = torch.tensor([1], dtype=self.dtype)
+        dut = feedback_system.FeedbackSystem(forward_system,
+                                             controller_network,
+                                             forward_system.x_equilibrium,
+                                             forward_system.u_equilibrium,
+                                             u_lo.detach().numpy(),
+                                             u_up.detach().numpy())
+        for method in list(mip_utils.PropagateBoundsMethod):
+            forward_system.network_bound_propagate_method = method
+            dut.controller_network_bound_propagate_method = method
+            mip = gurobi_torch_mip.GurobiTorchMIP(self.dtype)
+            x_var = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+            x_next_var = mip.addVars(2, lb=-gurobipy.GRB.INFINITY)
+            u_var, forward_dynamics_return, controller_mip_cnstr_return =\
+                dut.add_dynamics_mip_constraint(
+                    mip, x_var, x_next_var, "", "", "", "", "",
+                    gurobipy.GRB.BINARY)
+            x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+            mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            if method == mip_utils.PropagateBoundsMethod.IA:
+                x_next_lb = forward_dynamics_return.x_next_lb_IA
+                x_next_ub = forward_dynamics_return.x_next_ub_IA
+            else:
+                x_next_lb = torch.empty((dut.x_dim, ), dtype=self.dtype)
+                x_next_ub = torch.empty((dut.x_dim, ), dtype=self.dtype)
+                forward_dynamics_return.x_next_bound_prog.gurobi_model.\
+                    setParam(gurobipy.GRB.Param.OutputFlag, False)
+                for i in range(dut.x_dim):
+                    forward_dynamics_return.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=self.dtype)],
+                        [[forward_dynamics_return.x_next_bound_var[i]]], 0.,
+                        gurobipy.GRB.MAXIMIZE)
+                    forward_dynamics_return.x_next_bound_prog.gurobi_model.\
+                        optimize()
+                    x_next_ub[i] = forward_dynamics_return.x_next_bound_prog.\
+                        gurobi_model.ObjVal
+                    forward_dynamics_return.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=self.dtype)],
+                        [[forward_dynamics_return.x_next_bound_var[i]]], 0.,
+                        gurobipy.GRB.MINIMIZE)
+                    forward_dynamics_return.x_next_bound_prog.gurobi_model.\
+                        optimize()
+                    x_next_lb[i] = forward_dynamics_return.x_next_bound_prog.\
+                        gurobi_model.ObjVal
+            for i in range(x_samples.shape[0]):
+                for j in range(2):
+                    x_var[j].lb = x_samples[i, j].item()
+                    x_var[j].ub = x_samples[i, j].item()
+                mip.gurobi_model.optimize()
+                self.assertEqual(mip.gurobi_model.status,
+                                 gurobipy.GRB.Status.OPTIMAL)
+                u_val = dut.compute_u(x_samples[i])
+                np.testing.assert_allclose(np.array([v.x for v in u_var]),
+                                           u_val.detach().numpy())
+                x_next_val = forward_system.step_forward(x_samples[i], u_val)
+                np.testing.assert_allclose(np.array([v.x for v in x_next_var]),
+                                           x_next_val.detach().numpy())
+                np.testing.assert_array_less(x_next_val.detach().numpy(),
+                                             x_next_ub.detach().numpy())
+                np.testing.assert_array_less(x_next_lb.detach().numpy(),
+                                             x_next_val.detach().numpy())
 
 
 if __name__ == "__main__":
