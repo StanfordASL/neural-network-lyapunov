@@ -98,6 +98,11 @@ class LyapunovHybridLinearSystem:
             binary = forward_dynamics_return.binary + \
                 controller_mip_cnstr_return.binary
             ret = hybrid_linear_system.DynamicsConstraintReturn(slack, binary)
+            ret.x_next_lb_IA = forward_dynamics_return.x_next_lb_IA
+            ret.x_next_ub_IA = forward_dynamics_return.x_next_ub_IA
+            ret.x_next_bound_prog = forward_dynamics_return.x_next_bound_prog
+            ret.x_next_bound_var = forward_dynamics_return.x_next_bound_var
+            ret.x_var = forward_dynamics_return.x_var
             ret.forward_dynamics_return = forward_dynamics_return
             ret.controller_mip_cnstr_return = controller_mip_cnstr_return
             return ret

@@ -206,10 +206,16 @@ class PendulumReluContinuousTime:
         return result
 
     def step_forward(self, x_start, u_start):
-        theta_ddot = self.dynamics_relu(torch.cat(
-            (x_start, u_start))) - self.dynamics_relu(
-                torch.cat((self.x_equilibrium, self.u_equilibrium)))
-        return torch.stack((x_start[1], theta_ddot[0]))
+        if len(x_start.shape) == 1:
+            theta_ddot = self.dynamics_relu(torch.cat(
+                (x_start, u_start))) - self.dynamics_relu(
+                    torch.cat((self.x_equilibrium, self.u_equilibrium)))
+            return torch.stack((x_start[1], theta_ddot[0]))
+        else:
+            theta_ddot = self.dynamics_relu(
+                torch.cat((x_start, u_start), dim=1)) - self.dynamics_relu(
+                    torch.cat((self.x_equilibrium, self.u_equilibrium)))
+            return torch.cat((x_start[:, 1:], theta_ddot), dim=1)
 
     def possible_dx(self, x, u):
         assert (isinstance(x, torch.Tensor))
