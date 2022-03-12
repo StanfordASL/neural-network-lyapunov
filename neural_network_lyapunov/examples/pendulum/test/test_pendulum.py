@@ -12,6 +12,8 @@ import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
+import neural_network_lyapunov.continuous_time_lyapunov as\
+    continuous_time_lyapunov
 
 
 class TestPendulum(unittest.TestCase):
@@ -114,6 +116,19 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
         self.dynamics_relu[4].weight.data = torch.tensor([[1, 3, 2]],
                                                          dtype=self.dtype)
         self.dynamics_relu[4].bias.data = torch.tensor([0.5], dtype=self.dtype)
+        self.controller_network = utils.setup_relu((2, 3, 1),
+                                                   params=None,
+                                                   negative_slope=0.1,
+                                                   bias=True,
+                                                   dtype=self.dtype)
+        self.controller_network[0].weight.data = torch.tensor(
+            [[1, 2], [3, -1], [0, 1]], dtype=self.dtype)
+        self.controller_network[0].bias.data = torch.tensor([1, 0, -2],
+                                                            dtype=self.dtype)
+        self.controller_network[2].weight.data = torch.tensor([[1, 3, -1]],
+                                                              dtype=self.dtype)
+        self.controller_network[2].bias.data = torch.tensor([1],
+                                                            dtype=self.dtype)
 
     def test_step_forward(self):
         dut = pendulum.PendulumReluContinuousTime(
@@ -258,20 +273,8 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
         u_up = torch.tensor([1], dtype=self.dtype)
         forward_system = pendulum.PendulumReluContinuousTime(
             self.dtype, x_lo, x_up, u_lo, u_up, self.dynamics_relu)
-        controller_network = utils.setup_relu((2, 3, 1),
-                                              params=None,
-                                              negative_slope=0.1,
-                                              bias=True,
-                                              dtype=self.dtype)
-        controller_network[0].weight.data = torch.tensor(
-            [[1, 2], [3, -1], [0, 1]], dtype=self.dtype)
-        controller_network[0].bias.data = torch.tensor([1, 0, -2],
-                                                       dtype=self.dtype)
-        controller_network[2].weight.data = torch.tensor([[1, 3, -1]],
-                                                         dtype=self.dtype)
-        controller_network[2].bias.data = torch.tensor([1], dtype=self.dtype)
         dut = feedback_system.FeedbackSystem(forward_system,
-                                             controller_network,
+                                             self.controller_network,
                                              forward_system.x_equilibrium,
                                              forward_system.u_equilibrium,
                                              u_lo.detach().numpy(),
@@ -330,6 +333,91 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
                                              x_next_ub.detach().numpy())
                 np.testing.assert_array_less(x_next_lb.detach().numpy(),
                                              x_next_val.detach().numpy())
+
+    def test_lyapunov(self):
+        x_lo = torch.tensor([-2, -4], dtype=self.dtype)
+        x_up = torch.tensor([2, 3], dtype=self.dtype)
+        u_lo = torch.tensor([-1], dtype=self.dtype)
+        u_up = torch.tensor([1], dtype=self.dtype)
+        forward_system = pendulum.PendulumReluContinuousTime(
+            self.dtype, x_lo, x_up, u_lo, u_up, self.dynamics_relu)
+        closed_loop_system = feedback_system.FeedbackSystem(
+            forward_system, self.controller_network,
+            forward_system.x_equilibrium, forward_system.u_equilibrium,
+            u_lo.detach().numpy(),
+            u_up.detach().numpy())
+        lyapunov_relu = utils.setup_relu((2, 3, 2, 1),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=self.dtype)
+        lyapunov_relu[0].weight.data = torch.tensor([[1, 2], [3, -1], [1, 0]],
+                                                    dtype=self.dtype)
+        lyapunov_relu[0].bias.data = torch.tensor([1, 2, -3], dtype=self.dtype)
+        lyapunov_relu[2].weight.data = torch.tensor(
+            [[3, 0.5, 1], [1, 0.5, -2]], dtype=self.dtype)
+        lyapunov_relu[2].bias.data = torch.tensor([1, -2], dtype=self.dtype)
+        lyapunov_relu[4].weight.data = torch.tensor([[2, -3]],
+                                                    dtype=self.dtype)
+        lyapunov_relu[4].bias.data = torch.tensor([1], dtype=self.dtype)
+        dut = continuous_time_lyapunov.LyapunovContinuousTimeSystem(
+            closed_loop_system, lyapunov_relu)
+        for method in list(mip_utils.PropagateBoundsMethod):
+            forward_system.network_bound_propagate_method = method
+            closed_loop_system.controller_network_bound_propagate_method = \
+                method
+            milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+            x = milp.addVars(closed_loop_system.x_dim,
+                             lb=-gurobipy.GRB.INFINITY)
+            xdot = milp.addVars(closed_loop_system.x_dim,
+                                lb=-gurobipy.GRB.INFINITY)
+            system_constraint_return = dut.add_system_constraint(
+                milp, x, xdot, binary_var_type=gurobipy.GRB.BINARY)
+            if method == mip_utils.PropagateBoundsMethod.IA:
+                xdot_lb = system_constraint_return.x_next_lb_IA
+                xdot_ub = system_constraint_return.x_next_ub_IA
+            else:
+                xdot_lb = torch.empty((closed_loop_system.x_dim, ),
+                                      dtype=self.dtype)
+                xdot_ub = torch.empty((closed_loop_system.x_dim, ),
+                                      dtype=self.dtype)
+                system_constraint_return.x_next_bound_prog.gurobi_model.\
+                    setParam(gurobipy.GRB.Param.OutputFlag, False)
+                for i in range(closed_loop_system.x_dim):
+                    system_constraint_return.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=self.dtype)],
+                        [[system_constraint_return.x_next_bound_var[i]]],
+                        0.,
+                        sense=gurobipy.GRB.MAXIMIZE)
+                    system_constraint_return.x_next_bound_prog.gurobi_model.\
+                        optimize()
+                    xdot_ub[i] = system_constraint_return.x_next_bound_prog.\
+                        gurobi_model.ObjVal
+                    system_constraint_return.x_next_bound_prog.setObjective(
+                        [torch.tensor([1], dtype=self.dtype)],
+                        [[system_constraint_return.x_next_bound_var[i]]],
+                        0.,
+                        sense=gurobipy.GRB.MINIMIZE)
+                    system_constraint_return.x_next_bound_prog.gurobi_model.\
+                        optimize()
+                    xdot_lb[i] = system_constraint_return.x_next_bound_prog.\
+                        gurobi_model.ObjVal
+            torch.manual_seed(0)
+            x_samples = utils.uniform_sample_in_box(x_lo, x_up, 100)
+            xdot_samples = closed_loop_system.step_forward(x_samples)
+            milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
+            for i in range(x_samples.shape[0]):
+                for j in range(closed_loop_system.x_dim):
+                    x[j].lb = x_samples[i, j].item()
+                    x[j].ub = x_samples[i, j].item()
+                milp.gurobi_model.optimize()
+                np.testing.assert_allclose([v.x for v in xdot],
+                                           xdot_samples[i].detach().numpy(),
+                                           atol=1E-5)
+                np.testing.assert_array_less(xdot_samples[i].detach().numpy(),
+                                             xdot_ub.detach().numpy())
+                np.testing.assert_array_less(xdot_lb.detach().numpy(),
+                                             xdot_samples[i].detach().numpy())
 
 
 if __name__ == "__main__":
