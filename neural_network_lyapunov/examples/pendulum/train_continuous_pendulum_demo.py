@@ -11,6 +11,7 @@ import neural_network_lyapunov.r_options as r_options
 import torch
 import numpy as np
 import argparse
+import scipy.integrate
 
 
 def generate_dynamics_data():
@@ -44,6 +45,29 @@ def train_forward_model(dynamics_relu, model_dataset):
                              batch_size=50,
                              num_epochs=200,
                              lr=0.005)
+
+
+def simulate_system(plant, controller_relu, u_lo, u_up, lyapunov_hybrid_system,
+                    V_lambda, R, initial_state, T):
+    def closed_loop_dynamics(t, x):
+        with torch.no_grad():
+            x_torch = torch.from_numpy(x)
+            u = torch.clamp(
+                controller_relu(x_torch) -
+                controller_relu(torch.tensor([np.pi, 0], dtype=torch.float64)),
+                u_lo, u_up).detach().numpy()
+            xdot = plant.dynamics(x, u)
+            return xdot
+
+    result = scipy.integrate.solve_ivp(closed_loop_dynamics, [0, T],
+                                       initial_state)
+    with torch.no_grad():
+        V_val = lyapunov_hybrid_system.lyapunov_value(
+            torch.from_numpy(result.y.T),
+            torch.tensor([np.pi, 0], dtype=torch.float64),
+            V_lambda,
+            R=R)
+    return result, V_val
 
 
 if __name__ == "__main__":
@@ -104,8 +128,8 @@ if __name__ == "__main__":
 
     x_lo = torch.tensor([-0.1 * np.pi, -5], dtype=dtype)
     x_up = torch.tensor([2.1 * np.pi, 5], dtype=dtype)
-    u_lo = torch.tensor([-15], dtype=dtype)
-    u_up = torch.tensor([15], dtype=dtype)
+    u_lo = torch.tensor([-20], dtype=dtype)
+    u_up = torch.tensor([20], dtype=dtype)
     dynamics_model = pendulum.PendulumReluContinuousTime(
         dtype, x_lo, x_up, u_lo, u_up, dynamics_relu)
 
@@ -166,7 +190,7 @@ if __name__ == "__main__":
     dut.lyapunov_positivity_convergence_tol = 1E-5
     dut.max_iterations = args.max_iterations
     dut.lyapunov_positivity_epsilon = 0.2
-    dut.lyapunov_derivative_epsilon = 0.01
+    dut.lyapunov_derivative_epsilon = 0.5
     dut.lyapunov_derivative_eps_type = lyapunov.ConvergenceEps.ExpLower
     state_samples_all = utils.get_meshgrid_samples(x_lo,
                                                    x_up, (51, 51),
