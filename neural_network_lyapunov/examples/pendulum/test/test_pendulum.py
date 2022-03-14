@@ -240,6 +240,7 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
                                          (result.nn_output_up[0] -
                                           relu_at_equilibrium[0]).item())
 
+            torch.manual_seed(0)
             xu_samples = utils.uniform_sample_in_box(
                 torch.cat((x_lo, torch.max(u_lo, additional_u_lo))),
                 torch.cat((x_up, torch.min(u_up, additional_u_up))), 1000)
