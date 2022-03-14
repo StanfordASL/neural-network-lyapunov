@@ -16,8 +16,8 @@ class Quadrotor2DEnv(gym.Env):
         self.x_up = -self.x_lo
         self.u_lo = torch.tensor([0, 0], dtype=self.dtype)
         self.u_up = torch.tensor([8, 8], dtype=self.dtype)
-        self.action_space = gym.spaces.Box(
-            low=self.u_lo.detach().numpy(), high=self.u_up.detach().numpy())
+        self.action_space = gym.spaces.Box(low=self.u_lo.detach().numpy(),
+                                           high=self.u_up.detach().numpy())
         self.observation_space = gym.spaces.Box(
             low=self.x_lo.detach().numpy(), high=self.x_up.detach().numpy())
         self.system = quadrotor_2d.Quadrotor2D(self.dtype)
@@ -25,15 +25,16 @@ class Quadrotor2DEnv(gym.Env):
         self.act_equ = self.system.u_equilibrium
         self.x_current = torch.zeros((6, ), dtype=self.dtype)
         self.t_current = 0.
-        self.lqr_Q = torch.diag(torch.tensor(
-            [10, 10, 10, 1, 1, self.system.length / 2. / np.pi],
-            dtype=self.dtype))
+        self.lqr_Q = torch.diag(
+            torch.tensor([10, 10, 10, 1, 1, self.system.length / 2. / np.pi],
+                         dtype=self.dtype))
         self.lqr_R = torch.tensor([[0.1, 0.05], [0.05, 0.1]], dtype=self.dtype)
 
     def step(self, action_np):
         action = torch.tensor(action_np, dtype=self.dtype)
-        x_next = torch.tensor(self.system.next_pose(
-            self.x_current, action, self.dt), dtype=self.dtype)
+        x_next = torch.tensor(self.system.next_pose(self.x_current, action,
+                                                    self.dt),
+                              dtype=self.dtype)
         observation = x_next.detach().numpy()
         act_delta = (action - self.act_equ)
         obs_delta = (x_next - self.obs_equ)
