@@ -1,6 +1,12 @@
 import numpy as np
 import torch
 import scipy.integrate
+import gurobipy
+
+import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
+import neural_network_lyapunov.relu_system as relu_system
+import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
 class Quadrotor2D:
@@ -165,3 +171,138 @@ class Quadrotor2DVisualizer:
         self.ax.set_title("t = {:.1f}".format(t))
         self.ax.set_xlabel('x (m)')
         self.ax.set_ylabel('z (m)')
+
+
+class QuadrotorReluContinuousTime:
+    """
+    The dynamics is qddot = phi(theta, u) - phi(0, u*)
+    """
+    def __init__(self, dtype, x_lo, x_up, u_lo, u_up, dynamics_relu,
+                 u_equilibrium: torch.Tensor):
+        self.x_dim = 6
+        self.dtype = dtype
+        assert (x_lo.shape == (self.x_dim, ))
+        assert (x_up.shape == (self.x_dim, ))
+        self.x_lo = x_lo
+        self.x_up = x_up
+        self.u_dim = 2
+        assert (u_lo.shape == (self.u_dim, ))
+        assert (u_up.shape == (self.u_dim, ))
+        self.u_lo = u_lo
+        self.u_up = u_up
+        assert (dynamics_relu[0].in_features == 3)
+        assert (dynamics_relu[-1].out_features == 3)
+        self.dynamics_relu = dynamics_relu
+        self.x_equilibrium = torch.zeros((6, ), dtype=self.dtype)
+        self.u_equilibrium = u_equilibrium
+        self.dynamics_relu_free_pattern = relu_to_optimization.ReLUFreePattern(
+            dynamics_relu, dtype)
+        self.network_bound_propagate_method = \
+            mip_utils.PropagateBoundsMethod.IA
+
+    @property
+    def x_lo_all(self):
+        return self.x_lo.detach().numpy()
+
+    @property
+    def x_up_all(self):
+        return self.x_up.detach().numpy()
+
+    def step_forward(self, x_start, u_start):
+        relu_at_equilibrium = self.dynamics_relu(
+            torch.cat((torch.tensor([0],
+                                    dtype=self.dtype), self.u_equilibrium)))
+        if len(x_start.shape) == 1:
+            q_ddot = self.dynamics_relu(torch.cat(
+                (x_start[2:3], u_start))) - relu_at_equilibrium
+            return torch.cat((x_start[3:], q_ddot))
+        else:
+            q_ddot = self.dynamics_relu(
+                torch.cat(
+                    (x_start[:, 2:3], u_start), dim=1)) - relu_at_equilibrium
+            return torch.cat((x_start[:, 3:], q_ddot), dim=1)
+
+    def mixed_integer_constraints(
+            self,
+            u_lo=None,
+            u_up=None) -> gurobi_torch_mip.MixedIntegerConstraintsReturn:
+        if u_lo is None:
+            u_lo = self.u_lo
+        if u_up is None:
+            u_up = self.u_up
+        network_input_lo = torch.cat((self.x_lo[2:3], u_lo))
+        network_input_up = torch.cat((self.x_up[2:3], u_up))
+        result = self.dynamics_relu_free_pattern.output_constraint(
+            network_input_lo, network_input_up,
+            self.network_bound_propagate_method)
+        # Change the input from [x, u] to [theta, u]
+        A_transform = torch.zeros((3, 8), dtype=self.dtype)
+        A_transform[0, 2] = 1
+        A_transform[1, -2] = 1
+        A_transform[2, -1] = 1
+        result.transform_input(A_transform, torch.zeros((3, ),
+                                                        dtype=self.dtype))
+        # Add the constraint xdot[:3] = x[3:] and
+        # xdot[3:] = phi(theta, u) - phi(0, u_equilibrium)
+        relu_at_equilibrium = self.dynamics_relu(
+            torch.cat((torch.tensor([0],
+                                    dtype=self.dtype), self.u_equilibrium)))
+        result.Cout = torch.cat((torch.zeros(
+            (3, ), dtype=self.dtype), result.Cout - relu_at_equilibrium),
+                                dim=0)
+        assert (result.Aout_input is None)
+        result.Aout_input = torch.zeros((6, 8), dtype=self.dtype)
+        result.Aout_input[:3, 3:6] = torch.eye(3, dtype=self.dtype)
+        result.Aout_slack = torch.cat((torch.zeros(
+            (3, result.num_slack()), dtype=self.dtype), result.Aout_slack),
+                                      dim=0)
+        if result.Aout_binary is not None:
+            result.Aout_binary = torch.cat(
+                (torch.zeros((3, result.num_binary()),
+                             dtype=self.dtype), result.Aout_binary),
+                dim=0)
+
+        # Add the constraint x_lo[:2] <= input[:2] <= x_up[:2]
+        # x_lo[3:] <= input[3:6] <= x_up[3:]
+        Ain_input_additional = torch.zeros((10, 8), dtype=self.dtype)
+        Ain_input_additional[:2, :2] = torch.eye(2, dtype=self.dtype)
+        Ain_input_additional[2:4, :2] = -torch.eye(2, dtype=self.dtype)
+        Ain_input_additional[4:7, 3:6] = torch.eye(3, dtype=self.dtype)
+        Ain_input_additional[7:10, 3:6] = -torch.eye(3, dtype=self.dtype)
+        result.Ain_input = torch.cat((result.Ain_input, Ain_input_additional),
+                                     dim=0)
+        result.Ain_slack = torch.cat(
+            (result.Ain_slack,
+             torch.zeros((10, result.num_slack()), dtype=self.dtype)),
+            dim=0)
+        result.Ain_binary = torch.cat(
+            (result.Ain_binary,
+             torch.zeros((10, result.num_binary()), dtype=self.dtype)),
+            dim=0)
+        result.rhs_in = torch.cat(
+            (result.rhs_in, self.x_up[:2], -self.x_lo[:2], self.x_up[3:6],
+             -self.x_lo[3:6]))
+
+        result.x_next_lb = torch.cat(
+            (self.x_lo[3:], result.nn_output_lo - relu_at_equilibrium), dim=0)
+        result.x_next_ub = torch.cat(
+            (self.x_up[3:], result.nn_output_up - relu_at_equilibrium), dim=0)
+        return result
+
+    def add_dynamics_constraint(
+        self,
+        mip,
+        x_var,
+        x_next_var,
+        u_var,
+        slack_var_name,
+        binary_var_name,
+        additional_u_lo: torch.Tensor = None,
+        additional_u_up: torch.Tensor = None,
+        binary_var_type=gurobipy.GRB.BINARY,
+        u_input_prog: relu_system.ControlBoundProg = None
+    ) -> relu_system.ReLUDynamicsConstraintReturn:
+        return relu_system._add_forward_dynamics_mip_constraints(
+            self, mip, x_var, x_next_var, u_var, slack_var_name,
+            binary_var_name, additional_u_lo, additional_u_up, binary_var_type,
+            u_input_prog)
