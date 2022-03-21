@@ -190,6 +190,8 @@ class FeedbackSystem:
 
         control_bound_prog = relu_system.ControlBoundProg(None, None, None)
         control_bound_prog.prog = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
+        control_bound_prog.prog.gurobi_model.setParam(
+            gurobipy.GRB.Param.OutputFlag, False)
         control_bound_prog.x_var = control_bound_prog.prog.addVars(
             self.x_dim, lb=-gurobipy.GRB.INFINITY)
         control_bound_prog.u_var = control_bound_prog.prog.addVars(
@@ -275,6 +277,8 @@ class FeedbackSystem:
             control_bound_prog = relu_system.ControlBoundProg(None, None, None)
             control_bound_prog.prog = gurobi_torch_mip.GurobiTorchMILP(
                 self.dtype)
+            control_bound_prog.prog.gurobi_model.setParam(
+                gurobipy.GRB.Param.OutputFlag, False)
             control_bound_prog.x_var = control_bound_prog.prog.addVars(
                 self.x_dim, lb=-gurobipy.GRB.INFINITY)
             control_bound_prog.u_var = control_bound_prog.prog.addVars(
