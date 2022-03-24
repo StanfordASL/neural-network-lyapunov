@@ -262,9 +262,12 @@ if __name__ == "__main__":
     if args.train_adversarial:
         options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
         options.num_batches = 10
-        options.num_epochs_per_mip = 20
+        options.num_epochs_per_mip = 30
+        options.perturb_derivative_sample_count = 5
+        options.perturb_derivative_sample_std = 1E-4
         options.positivity_samples_pool_size = 10000
         options.derivative_samples_pool_size = 100000
+        options.adversarial_cluster_radius = 1E-5
         dut.lyapunov_positivity_mip_pool_solutions = 100
         dut.lyapunov_derivative_mip_pool_solutions = 500
         dut.add_derivative_adversarial_state = True
@@ -278,6 +281,8 @@ if __name__ == "__main__":
         dut.lyapunov_derivative_mip_params = {
             gurobipy.GRB.Param.OutputFlag: False
         }
+        dut.sample_loss_reduction = "4norm"
+        dut.learning_rate = 0.01
         if args.training_set:
             training_set_data = torch.load(args.training_set)
             positivity_state_samples_init = training_set_data[

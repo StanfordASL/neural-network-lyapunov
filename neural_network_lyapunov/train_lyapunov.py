@@ -172,14 +172,10 @@ class TrainLyapunovReLU:
         # require solving some MIPs).
         self.derivative_mip_strengthen_binary = False
 
-    def sample_loss(self,
-                    positivity_state_samples,
-                    derivative_state_samples,
+    def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
                     lyapunov_positivity_sample_cost_weight,
-                    lyapunov_derivative_sample_cost_weight,
-                    positivity_sample_repeatition=None,
-                    derivative_sample_repeatition=None):
+                    lyapunov_derivative_sample_cost_weight):
         """
         Compute the cost as the summation of
         1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
@@ -205,8 +201,7 @@ class TrainLyapunovReLU:
                     positivity_state_samples, self.V_lambda,
                     self.lyapunov_positivity_epsilon, R=self.R_options.R(),
                     margin=self.lyapunov_positivity_sample_margin,
-                    reduction=self.sample_loss_reduction,
-                    weight=positivity_sample_repeatition)
+                    reduction=self.sample_loss_reduction)
         else:
             positivity_sample_loss = torch.tensor(0., dtype=dtype)
         if lyapunov_derivative_sample_cost_weight != 0 and\
@@ -219,8 +214,7 @@ class TrainLyapunovReLU:
                     derivative_state_samples_next, self.x_equilibrium,
                     self.lyapunov_derivative_eps_type, R=self.R_options.R(),
                     margin=self.lyapunov_derivative_sample_margin,
-                    reduction=self.sample_loss_reduction,
-                    weight=derivative_sample_repeatition)
+                    reduction=self.sample_loss_reduction)
         else:
             derivative_sample_loss = torch.tensor(0., dtype=dtype)
 
@@ -709,7 +703,9 @@ class TrainLyapunovReLU:
                 self.lyapunov_positivity_convergence_tol and\
                     total_loss_return.lyapunov_derivative_mip_obj <\
                     best_derivative_mip_cost:
-                best_training_params = [p.clone() for p in training_params]  # noqa
+                best_training_params = [ # noqa
+                    p.clone() for p in training_params
+                ]
                 best_derivative_mip_cost = \
                     total_loss_return.lyapunov_derivative_mip_obj
             total_loss_return.loss.backward()
@@ -820,6 +816,13 @@ class TrainLyapunovReLU:
             self.positivity_samples_pool_size = 10000
             self.derivative_samples_pool_size = 10000
             self.adversarial_cluster_radius = np.inf
+            # We might perturb the derivative adversarial states a bit (for
+            # continuous lyapunov function we need to take the gradient dVdx,
+            # which is discontinuous. To cover both the left derivative and the
+            # right derivative of dVdx, we perturb the adversarial samples.)
+            self.perturb_derivative_sample_count = 0
+            # The standard variance of the perturbed states.
+            self.perturb_derivative_sample_std = 1E-3
 
         def wandb_config(self):
             for attr in inspect.getmembers(self):
@@ -874,9 +877,7 @@ class TrainLyapunovReLU:
                 derivative_state_samples_all,
                 derivative_state_samples_next_all,
                 self.lyapunov_positivity_sample_cost_weight,
-                self.lyapunov_derivative_sample_cost_weight,
-                positivity_state_repeatition,
-                derivative_state_repeatition)
+                self.lyapunov_derivative_sample_cost_weight)
         best_loss = positivity_sample_initial_loss +\
             derivative_sample_initial_loss
         best_training_params = self._get_current_training_params()
@@ -920,9 +921,7 @@ class TrainLyapunovReLU:
                         positivity_state_batch, derivative_state_batch,
                         derivative_state_next_batch,
                         self.lyapunov_positivity_sample_cost_weight,
-                        self.lyapunov_derivative_sample_cost_weight,
-                        positivity_state_repeatition_batch,
-                        derivative_state_repeatition_batch)
+                        self.lyapunov_derivative_sample_cost_weight)
                 batch_loss = positivity_sample_loss +\
                     derivative_sample_loss
                 batch_loss.backward()
@@ -937,9 +936,7 @@ class TrainLyapunovReLU:
                     derivative_state_samples_all,
                     derivative_state_samples_next_all,
                     self.lyapunov_positivity_sample_cost_weight,
-                    self.lyapunov_derivative_sample_cost_weight,
-                    positivity_state_repeatition,
-                    derivative_state_repeatition)
+                    self.lyapunov_derivative_sample_cost_weight)
             if self.output_flag:
                 print(f"epoch {epoch}, positivity_sample_loss " +
                       f"{positivity_sample_epoch_loss.item()}, " +
@@ -1012,6 +1009,16 @@ class TrainLyapunovReLU:
             #     derivative_mip_adversarial_repeatition = torch.ones(
             #         (derivative_mip_adversarial.shape[0], ),
             #         dtype=derivative_mip_adversarial.dtype)
+            if options.perturb_derivative_sample_count > 0:
+                derivative_mip_adversarial = torch.cat(
+                    (derivative_mip_adversarial,
+                     (derivative_mip_adversarial.unsqueeze(0) + torch.randn(
+                         (options.perturb_derivative_sample_count,
+                          derivative_mip_adversarial.shape[0],
+                          derivative_mip_adversarial.shape[1])) *
+                      options.perturb_derivative_sample_std).reshape(
+                          (-1, derivative_mip_adversarial.shape[1]))),
+                    dim=0)
             positivity_state_samples_all = torch.cat(
                 (positivity_state_samples_all, positivity_mip_adversarial),
                 dim=0)
