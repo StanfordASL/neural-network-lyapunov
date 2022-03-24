@@ -273,15 +273,13 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
         assert (reduction in {"mean", "max", "4norm"})
         assert (isinstance(zero_tol, float) and zero_tol >= 0.)
         R = lyapunov._get_R(R, self.system.x_dim, state_samples.device)
-        Vdot = torch.empty(state_samples.shape[0], dtype=self.system.dtype)
         V = self.lyapunov_value(state_samples, x_equilibrium, V_lambda, R=R)
-        for i in range(state_samples.shape[0]):
-            dVdx = self._lyapunov_gradient(state_samples[i], x_equilibrium,
-                                           V_lambda, R, zero_tol)
-            if eps_type == lyapunov.ConvergenceEps.ExpLower:
-                Vdot[i] = torch.max(dVdx @ state_next[i])
-            else:
-                raise NotImplementedError
+        dVdx = self._lyapunov_gradient_batch(state_samples,
+                                             x_equilibrium,
+                                             V_lambda,
+                                             R,
+                                             create_graph=True)
+        Vdot = torch.sum(dVdx * state_next, dim=1)
 
         if eps_type == lyapunov.ConvergenceEps.ExpLower:
             hinge_loss_all = torch.nn.HingeEmbeddingLoss(
