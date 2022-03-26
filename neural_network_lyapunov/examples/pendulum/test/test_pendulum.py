@@ -14,6 +14,7 @@ import neural_network_lyapunov.relu_system as relu_system
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.continuous_time_lyapunov as\
     continuous_time_lyapunov
+import neural_network_lyapunov.dynamic_system as dynamic_system
 
 
 class TestPendulum(unittest.TestCase):
@@ -361,7 +362,7 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
         lyapunov_relu[4].weight.data = torch.tensor([[2, -3]],
                                                     dtype=self.dtype)
         lyapunov_relu[4].bias.data = torch.tensor([1], dtype=self.dtype)
-        dut = continuous_time_lyapunov.LyapunovContinuousTimeSystem(
+        dut = continuous_time_lyapunov.LyapunovContinuousTimeSystem(  # noqa
             closed_loop_system, lyapunov_relu)
         for method in list(mip_utils.PropagateBoundsMethod):
             forward_system.network_bound_propagate_method = method
@@ -372,8 +373,9 @@ class TestPendulumReluContinuousTime(unittest.TestCase):
                              lb=-gurobipy.GRB.INFINITY)
             xdot = milp.addVars(closed_loop_system.x_dim,
                                 lb=-gurobipy.GRB.INFINITY)
-            system_constraint_return = dut.add_system_constraint(
-                milp, x, xdot, binary_var_type=gurobipy.GRB.BINARY)
+            system_constraint_return = dynamic_system._add_system_constraint(
+               closed_loop_system, milp, x, xdot,
+               binary_var_type=gurobipy.GRB.BINARY)
             if method == mip_utils.PropagateBoundsMethod.IA:
                 xdot_lb = system_constraint_return.x_next_lb_IA
                 xdot_ub = system_constraint_return.x_next_ub_IA

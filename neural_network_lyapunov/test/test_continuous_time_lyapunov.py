@@ -17,6 +17,7 @@ import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
 import neural_network_lyapunov.test.test_lyapunov as test_lyapunov
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.dynamic_system as dynamic_system
 
 
 class TestLyapunovContinuousTimeSystem(unittest.TestCase):
@@ -222,8 +223,8 @@ class TestLyapunovContinuousTimeSystem(unittest.TestCase):
         milp = gurobi_torch_mip.GurobiTorchMILP(self.dtype)
         x = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
         xdot = milp.addVars(dut.system.x_dim, lb=-gurobipy.GRB.INFINITY)
-        system_constraint_return = dut.add_system_constraint(
-            milp, x, xdot, binary_var_type=gurobipy.GRB.BINARY)
+        system_constraint_return = dynamic_system._add_system_constraint(
+            dut.system, milp, x, xdot, binary_var_type=gurobipy.GRB.BINARY)
         _, l1_binary = dut.add_state_error_l1_constraint(milp,
                                                          x_equilibrium,
                                                          x,
@@ -526,7 +527,8 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(system.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
-            system_constraint_return = dut.add_system_constraint(milp, x, None)
+            system_constraint_return = dynamic_system._add_system_constraint(
+                system, milp, x, None)
             s = system_constraint_return.slack
             gamma = system_constraint_return.binary
             (_, beta, _, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
@@ -611,7 +613,7 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(system.x_dim,
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS)
-            dut.add_system_constraint(milp, x, xdot)
+            dynamic_system._add_system_constraint(system, milp, x, xdot)
             (_, beta, _, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta, system.dx_lower, system.dx_upper)
@@ -676,7 +678,8 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             x = milp.addVars(system.x_dim,
                              lb=-gurobipy.GRB.INFINITY,
                              vtype=gurobipy.GRB.CONTINUOUS)
-            system_constraint_return = dut.add_system_constraint(milp, x, None)
+            system_constraint_return = dynamic_system._add_system_constraint(
+                system, milp, x, None)
             s = system_constraint_return.slack
             gamma = system_constraint_return.binary
             (_, alpha) = dut.add_state_error_l1_constraint(
@@ -784,7 +787,8 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             xdot = milp.addVars(system.x_dim,
                                 lb=-gurobipy.GRB.INFINITY,
                                 vtype=gurobipy.GRB.CONTINUOUS)
-            system_constraint_return = dut.add_system_constraint(milp, x, xdot)
+            system_constraint_return = dynamic_system._add_system_constraint(
+                system, milp, x, xdot)
             gamma = system_constraint_return.binary
             (_, alpha) = dut.add_state_error_l1_constraint(
                 milp, x_equilibrium, x)

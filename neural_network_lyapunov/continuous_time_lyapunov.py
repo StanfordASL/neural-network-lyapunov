@@ -11,6 +11,7 @@ import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.dynamic_system as dynamic_system
 
 
 class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
@@ -93,8 +94,8 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
                             lb=-gurobipy.GRB.INFINITY,
                             name="xdot")
         # Add the constraint to compute xdot = f(x).
-        system_constraint_return = self.add_system_constraint(
-            milp, x, xdot, binary_var_type=binary_var_type)
+        system_constraint_return = dynamic_system._add_system_constraint(
+            self.system, milp, x, xdot, binary_var_type=binary_var_type)
         # Adds the mixed-integer constraints to compute V(x).
         relu_slack, relu_binary, relu_a_out, relu_b_out,\
             relu_output_mip_cnstr_ret = self.add_lyap_relu_output_constraint(
@@ -445,7 +446,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         as a public function for unit test).
         Add sum_i ∂ReLU(x)/∂x*Aᵢsᵢ as mixed-integer linear constraints.
         @param s The slack variable to write the hybrid linear dynamics as
-        mixed-integer linear constraint. Returned from add_system_constraint()
+        mixed-integer linear constraint. Returned from _add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
         add_lyap_relu_output_constraint()
@@ -552,7 +553,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         as a public function for unit test).
         Add sum_i ∂ReLU(x)/∂x *gᵢγᵢ as mixed-integer linear constraints.
         @param gamma The binary variable indicating the active mode in the
-        hybrid dynamical system. Returned from add_system_constraint()
+        hybrid dynamical system. Returned from _add_system_constraint()
         @param beta The binary variable to determine the activation of the
         (leaky) ReLU units in the network, returned from
         add_lyap_relu_output_constraint()
@@ -613,7 +614,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(Aᵢsᵢ)(j) as mixed-integer linear
         constraints.
         @param s The slack variable representing x in each mode. This is
-        returned from add_system_constraint().
+        returned from _add_system_constraint().
         @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
         α(i)=0 => x(i)≤x*(i). This is returned from
         add_state_error_l1_constraint()
@@ -677,7 +678,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
         Adds ∑ᵢ ∑ⱼ sign(x(j)-x*(j))*(gᵢγᵢ)(j) as mixed-integer linear
         constraints.
         @param gamma The binary variable representing the active mode. This is
-        returned from add_system_constraint().
+        returned from _add_system_constraint().
         @param alpha Binary variables. α(i)=1 => x(i)≥x*(i),
         α(i)=0 => x(i)≤x*(i). This is returned from
         add_state_error_l1_constraint()
@@ -838,7 +839,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name="x")
-        system_constraint_return = self.add_system_constraint(milp, x, None)
+        system_constraint_return = dynamic_system._add_system_constraint(
+            self.system, milp, x, None)
         s = system_constraint_return.slack
         gamma = system_constraint_return.binary
 
@@ -1027,7 +1029,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                             lb=-gurobipy.GRB.INFINITY,
                             vtype=gurobipy.GRB.CONTINUOUS,
                             name="xdot")
-        system_constraint_return = self.add_system_constraint(milp, x, xdot)
+        system_constraint_return = dynamic_system._add_system_constraint(
+            self.system, milp, x, xdot)
         gamma = system_constraint_return.binary
 
         # V̇ = ∂V/∂x * ẋ
