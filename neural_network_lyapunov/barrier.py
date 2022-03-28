@@ -3,6 +3,19 @@ import gurobipy
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.dynamic_system as dynamic_system
+
+
+class BarrierDerivReturn:
+    def __init__(self, milp, x, x_next, binary_current, binary_next,
+                 system_constraint_return, barrier_relu_mip_cnstr_ret):
+        self.milp = milp
+        self.x = x
+        self.x_next = x_next
+        self.binary_current = binary_current
+        self.binary_next = binary_next
+        self.system_constraint_return = system_constraint_return
+        self.barrier_relu_mip_cnstr_ret = barrier_relu_mip_cnstr_ret
 
 
 class Barrier:
@@ -41,7 +54,7 @@ class Barrier:
         self.network_bound_propagate_method = \
             mip_utils.PropagateBoundsMethod.IA
 
-    def barrier_value(self, x, x_star, c: float):
+    def value(self, x, x_star, c: float):
         """
         Compute the value of ϕ(x) - ϕ(x*) + c
         """
@@ -53,10 +66,9 @@ class Barrier:
         else:
             return val
 
-    def barrier_value_as_milp(
-            self, x_star, c: float,
-            region: gurobi_torch_mip.MixedIntegerConstraintsReturn,
-            safe_flag: bool):
+    def value_as_milp(self, x_star, c: float,
+                      region: gurobi_torch_mip.MixedIntegerConstraintsReturn,
+                      safe_flag: bool):
         """
         To compute the maximal violation of the constraint that h(x) is
         negative in the unsafe region, or positive in the safe region, we
@@ -126,3 +138,72 @@ class Barrier:
                           objective_constant,
                           sense=gurobipy.GRB.MAXIMIZE)
         return (milp, x)
+
+
+class DiscreteTimeBarrier(Barrier):
+    def __init__(self, system, barrier_relu):
+        super(DiscreteTimeBarrier, self).__init__(system, barrier_relu)
+
+    def derivative(self, x, x_star, c, epsilon):
+        """
+        Compute -h(x[n+1]) + h(x[n]) - ε*h(x[n])
+        Note that we want this value to be <= 0
+        """
+        x_next = self.system.step_forward(x)
+        return -self.value(x_next, x_star, c) + (1 - epsilon) * self.value(
+            x, x_star, c)
+
+    def derivative_as_milp(self,
+                           x_star,
+                           c,
+                           epsilon,
+                           *,
+                           binary_var_type=gurobipy.GRB.BINARY):
+        """
+        Compute max -h(x[n+1]) + h(x[n]) - ε*h(x[n]) as an MILP.
+        The objective is
+        −ϕ(x[n+1]) + (1−ε)ϕ(x[n]) + εϕ(x*) - εc
+        """
+        milp = gurobi_torch_mip.GurobiTorchMILP(self.system.dtype)
+        x = milp.addVars(self.system.x_dim,
+                         lb=-gurobipy.GRB.INFINITY,
+                         name="x")
+        x_next = milp.addVars(self.system.x_dim,
+                              lb=-gurobipy.GRB.INFINITY,
+                              name="x")
+        # Add the constraint to compute x_next = f(x)
+        system_constraint_return = dynamic_system._add_system_constraint(
+            self.system, milp, x, x_next, binary_var_type=binary_var_type)
+        # Add the mixed-integer constraint that formulate the output ϕ(x)
+        relu_mip_cnstr_return = \
+            self.barrier_relu_free_pattern.output_constraint(
+                torch.from_numpy(self.system.x_lo_all),
+                torch.from_numpy(self.system.x_up_all),
+                self.network_bound_propagate_method)
+        relu_slack_current, relu_binary_current = \
+            milp.add_mixed_integer_linear_constraints(
+                relu_mip_cnstr_return, x, None, "relu_slack", "relu_binary",
+                "relu_ineq", "relu_eq", "", binary_var_type)
+        relu_slack_next, relu_binary_next = \
+            milp.add_mixed_integer_linear_constraints(
+                relu_mip_cnstr_return, x_next, None, "relu_slack_next",
+                "relu_binary_next", "relu_ineq", "relu_eq", "",
+                binary_var_type)
+        # phi(x) = Aout_slack * slack + Cout
+        assert (relu_mip_cnstr_return.Aout_input is None)
+        assert (relu_mip_cnstr_return.Aout_binary is None)
+        objective_coeff = [
+            (1 - epsilon) * relu_mip_cnstr_return.Aout_slack.squeeze(0),
+            -relu_mip_cnstr_return.Aout_slack.squeeze(0)
+        ]
+        objective_vars = [relu_slack_current, relu_slack_next]
+        objective_constant = epsilon * (-relu_mip_cnstr_return.Cout.squeeze() +
+                                        self.barrier_relu(x_star).squeeze() -
+                                        c)
+        milp.setObjective(objective_coeff,
+                          objective_vars,
+                          objective_constant,
+                          sense=gurobipy.GRB.MAXIMIZE)
+        return BarrierDerivReturn(milp, x, x_next, relu_binary_current,
+                                  relu_binary_next, system_constraint_return,
+                                  relu_mip_cnstr_return)
