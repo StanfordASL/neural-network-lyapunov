@@ -1,7 +1,7 @@
 # On a toy piecewise linear system, train a Lyapunov function to prove
 # exponential convergence to the equilibrium
 
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     state_samples_all1 = train_2d_lyapunov_utils.setup_state_samples_all(
         x_equilibrium, x_lower, x_upper, (51, 51), theta)
     # First train a ReLU to approximate the value function.
-    approximator = train_lyapunov.TrainValueApproximator()
+    approximator = train_lyapunov_barrier.TrainValueApproximator()
     approximator.max_epochs = args.approximator_iterations
     approximator.convergence_tolerance = 0.003
     if args.system == 1:
@@ -209,7 +209,8 @@ if __name__ == "__main__":
 
     state_samples_all = state_samples_all1
     R = None
-    dut = train_lyapunov.TrainLyapunovReLU(
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
         r_options.FixedROptions(torch.eye(2, dtype=torch.float64)))
     dut.output_flag = True

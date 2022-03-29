@@ -1,5 +1,5 @@
 import neural_network_lyapunov.lyapunov as lyapunov
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
     test_hybrid_linear_system
@@ -49,10 +49,10 @@ def setup_state_samples_all(mesh_size):
     return torch.stack(state_samples, dim=0)
 
 
-class TestTrainLyapunovReLUMIP(unittest.TestCase):
+class TestTrainerMIP(unittest.TestCase):
     """
     Test solve_positivity_mip() and solve_derivative_mip() function in
-    TrainLyapunovReLU
+    Trainer
     """
     def setUp(self):
         dtype = torch.float64
@@ -79,9 +79,9 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
             system, lyapunov_relu)
         self.R_options = r_options.FixedROptions(
             torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=dtype))
-        self.dut = train_lyapunov.TrainLyapunovReLU(self.lyap, V_lambda,
-                                                    x_equilibrium,
-                                                    self.R_options)
+        self.dut = train_lyapunov_barrier.Trainer()
+        self.dut.add_lyapunov(self.lyap, V_lambda, x_equilibrium,
+                              self.R_options)
 
     def test_solve_positivity_mip(self):
         for num_solutions in (1, 10, 1000):
@@ -162,9 +162,9 @@ class TestTrainLyapunovReLUMIP(unittest.TestCase):
                         derivative_mip_adversarial[i].detach().numpy())
 
 
-class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
+class TestTrainerAdversarial(TestTrainerMIP):
     """
-    Test the function TrainLyapunovReLU.train_adversarial()
+    Test the function Trainer.train_adversarial()
     """
     def test_train_adversarial(self):
         positivity_state_samples_init = utils.get_meshgrid_samples(
@@ -173,7 +173,7 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
         derivative_state_samples_init = utils.get_meshgrid_samples(
             torch.from_numpy(self.lyap.system.x_lo_all),
             torch.from_numpy(self.lyap.system.x_up_all), (5, 5), torch.float64)
-        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options = train_lyapunov_barrier.Trainer.AdversarialTrainingOptions()
         options.num_batches = 10
         options.num_epochs_per_mip = 5
         options.positivity_samples_pool_size = 1000
@@ -203,7 +203,7 @@ class TestTrainLyapunovReLUAdversarial(TestTrainLyapunovReLUMIP):
                          (derivative_state_samples.shape[0], ))
 
 
-class TestTrainLyapunovReLU(unittest.TestCase):
+class TestTrainer(unittest.TestCase):
     def test_total_loss(self):
         system = test_hybrid_linear_system.setup_trecate_discrete_time_system()
         V_lambda = 0.1
@@ -213,9 +213,9 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             system, relu)
         R_options = r_options.FixedROptions(
             torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
-        dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system,
-                                               V_lambda, x_equilibrium,
-                                               R_options)
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_lyapunov(lyapunov_hybrid_system, V_lambda, x_equilibrium,
+                         R_options)
         dut.lyapunov_positivity_sample_cost_weight = 0.5
         dut.lyapunov_derivative_sample_cost_weight = 0.6
         dut.boundary_value_gap_mip_cost_weight = 0.8
@@ -375,20 +375,20 @@ class TestTrainLyapunovReLU(unittest.TestCase):
             system, relu)
         R_options = r_options.FixedROptions(
             torch.tensor([[1, 1], [-1, 1], [0, 1]], dtype=system.dtype))
-        dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system,
-                                               V_lambda, x_equilibrium,
-                                               R_options)
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_lyapunov(lyapunov_hybrid_system, V_lambda, x_equilibrium,
+                         R_options)
         self.solve_boundary_gap_mip_tester(dut)
 
 
-class TestTrainLyapunov(unittest.TestCase):
+class TestTrainValueApproximator(unittest.TestCase):
     def setUp(self):
         self.system = \
             test_hybrid_linear_system.setup_trecate_discrete_time_system()
         self.relu = setup_lyapunov_relu()
 
     def test_train_value_approximator(self):
-        dut = train_lyapunov.TrainValueApproximator()
+        dut = train_lyapunov_barrier.TrainValueApproximator()
         dut.max_epochs = 1000
         dut.convergence_tolerance = 0.05
         state_samples_all = setup_state_samples_all((21, 21))
@@ -440,7 +440,7 @@ class TestClusterAdversarialStates(unittest.TestCase):
         adversarial_states = torch.cat(
             (x0, x0, x0, x1, x1, x1, x1, x2, x2, x2, x2)).reshape((-1, 2))
         clustered_adversarial_states, repeatition = \
-            train_lyapunov._cluster_adversarial_states(
+            train_lyapunov_barrier._cluster_adversarial_states(
                 adversarial_states, 1E-10)
         np.testing.assert_allclose(
             clustered_adversarial_states.detach().numpy(),
@@ -450,7 +450,7 @@ class TestClusterAdversarialStates(unittest.TestCase):
 
         adversarial_states = torch.cat((x0, x0, x0)).reshape((-1, 2))
         clustered_adversarial_states, repeatition = \
-            train_lyapunov._cluster_adversarial_states(
+            train_lyapunov_barrier._cluster_adversarial_states(
                 adversarial_states, 1E-10)
         np.testing.assert_allclose(
             clustered_adversarial_states.detach().numpy(),

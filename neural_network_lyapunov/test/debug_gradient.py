@@ -13,7 +13,7 @@ import neural_network_lyapunov.test.\
     train_continuous_linear_system_toy_lyapunov
 import neural_network_lyapunov.test.train_2d_lyapunov_utils as\
     train_2d_lyapunov_utils
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.r_options as r_options
 
 import argparse
@@ -25,7 +25,8 @@ def compute_total_loss(system, x_equilibrium, relu_layer_width, params_val,
                        state_samples_next, bias, requires_grad):
     relu = train_continuous_linear_system_toy_lyapunov.setup_relu(
         relu_layer_width, params_val, bias=bias)
-    dut = train_lyapunov.TrainLyapunovReLU(
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(
         continuous_time_lyapunov.LyapunovContinuousTimeHybridSystem(
             system, relu), V_lambda, x_equilibrium,
         r_options.FixedROptions(

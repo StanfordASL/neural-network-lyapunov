@@ -2,7 +2,7 @@ import torch
 import gurobipy
 import numpy as np
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 
 
 def check_sample_loss_grad(lyap, V_lambda, x_equilibrium, R_options, x_samples,
@@ -11,8 +11,8 @@ def check_sample_loss_grad(lyap, V_lambda, x_equilibrium, R_options, x_samples,
     utils.network_zero_grad(lyap.system.controller_network)
     if not R_options.fixed_R and R_options._variables.grad is not None:
         R_options._variables.grad.zero_()
-    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda, x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyap, V_lambda, x_equilibrium, R_options)
     x_next_samples = lyap.system.step_forward(x_samples)
     total_loss_return = dut.total_loss(x_samples, x_samples, x_next_samples,
                                        1., 1., None, None, 0.)
@@ -77,8 +77,8 @@ def check_lyapunov_mip_loss_grad(lyap, x_equilibrium, V_lambda, V_epsilon,
     if not R_options.fixed_R and R_options._variables.grad is not None:
         R_options._variables.grad.zero_()
     x_dim = x_equilibrium.shape[0]
-    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda, x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyap, V_lambda, x_equilibrium, R_options)
     x_samples = torch.empty((0, x_dim), dtype=torch.float64)
     x_next_samples = torch.empty((0, x_dim), dtype=torch.float64)
     if positivity_flag:

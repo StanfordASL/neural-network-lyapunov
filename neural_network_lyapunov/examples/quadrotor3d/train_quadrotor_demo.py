@@ -5,7 +5,7 @@ controller).
 import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.utils as utils
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.mip_utils as mip_utils
@@ -168,10 +168,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="path to the training set for adversarial training.")
-    parser.add_argument(
-        "--derivative_mip_num_strengthen_pts", type=int, default=0)
-    parser.add_argument(
-        "--derivative_mip_strengthen_binary", action="store_true")
+    parser.add_argument("--derivative_mip_num_strengthen_pts",
+                        type=int,
+                        default=0)
+    parser.add_argument("--derivative_mip_strengthen_binary",
+                        action="store_true")
     args = parser.parse_args()
     dt = 0.01
     dtype = torch.float64
@@ -310,9 +311,9 @@ if __name__ == "__main__":
         train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
                                         x_lo, x_up, u_lo, u_up)
 
-    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
-                                           closed_loop_system.x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyap, V_lambda, closed_loop_system.x_equilibrium,
+                     R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
@@ -339,7 +340,7 @@ if __name__ == "__main__":
     dut.derivative_mip_strengthen_binary = \
         args.derivative_mip_strengthen_binary
     if args.train_adversarial:
-        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options = train_lyapunov_barrier.Trainer.AdversarialTrainingOptions()
         options.num_batches = 1
         options.num_epochs_per_mip = 30
         options.positivity_samples_pool_size = 50000
