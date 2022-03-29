@@ -207,3 +207,38 @@ class DiscreteTimeBarrier(Barrier):
         return BarrierDerivReturn(milp, x, x_next, relu_binary_current,
                                   relu_binary_next, system_constraint_return,
                                   relu_mip_cnstr_return)
+
+    def derivative_loss_at_samples_and_next_states(self,
+                                                   x_star,
+                                                   c: float,
+                                                   epsilon: float,
+                                                   state_samples,
+                                                   state_next,
+                                                   *,
+                                                   margin=0.,
+                                                   reduction="mean"):
+        """
+        Take the sample state xⁱ, and compute the total loss on all these
+        samples. Each state has a loss max(−hdot(xⁱ)−εh(xⁱ) + margin, 0).
+        Args:
+          reduction: if reduction=="mean", then we take the average loss among
+          all samples; if reduction=="max", then we take the maximal loss among
+          all samples; if recution=="4norm", then we take the 4-norm for all
+          samples.
+        """
+        loss_all = torch.nn.HingeEmbeddingLoss(
+            margin=margin, reduction="none")(
+                -(-self.value(state_next, x_star, c) +
+                  (1 - epsilon) * self.value(state_samples, x_star, c)),
+                torch.tensor(-1.))
+        if reduction == "mean":
+            return torch.mean(loss_all)
+        elif reduction == "max":
+            return torch.max(loss_all)
+        elif reduction == "4norm":
+            return torch.norm(loss_all, p=4)
+        else:
+            raise Exception(
+                "Unknown reduction in " +
+                "derivative_loss_at_samples_and_next_states()"
+            )

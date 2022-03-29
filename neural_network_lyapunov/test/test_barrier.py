@@ -165,6 +165,37 @@ class TestDiscreteTimeBarrier(TestBarrier):
                 torch.max(dut.derivative(x_valid_samples, x_star, c,
                                          epsilon)).item())
 
+    def test_derivative_loss_at_samples_and_next_states(self):
+        dut = barrier.DiscreteTimeBarrier(self.system, self.barrier_relu)
+        torch.random.manual_seed(0)
+        x_samples = utils.uniform_sample_in_box(dut.system.x_lo,
+                                                dut.system.x_up, 100)
+        x_next = dut.system.step_forward(x_samples)
+        x_star = (dut.system.x_lo + dut.system.x_up) / 2
+        c = 0.5
+        margin = 0.2
+        epsilon = 0.1
+        loss_all = torch.maximum(
+            -dut.value(x_next, x_star, c) +
+            (1 - epsilon) * dut.value(x_samples, x_star, c) + margin,
+            torch.tensor(0., dtype=self.dtype))
+        for reduction in ("mean", "max", "4norm"):
+            loss = dut.derivative_loss_at_samples_and_next_states(
+                x_star,
+                c,
+                epsilon,
+                x_samples,
+                x_next,
+                margin=margin,
+                reduction=reduction)
+            if reduction == "mean":
+                loss_expected = torch.mean(loss_all)
+            elif reduction == "max":
+                loss_expected = torch.max(loss_all)
+            elif reduction == "4norm":
+                loss_expected = torch.norm(loss_all, p=4)
+            self.assertAlmostEqual(loss.item(), loss_expected.item())
+
 
 if __name__ == "__main__":
     unittest.main()
