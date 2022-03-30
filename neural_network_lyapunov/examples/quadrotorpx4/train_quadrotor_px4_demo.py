@@ -1,6 +1,6 @@
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.feedback_system as feedback_system
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.examples.quadrotor3d.quadrotor as quadrotor
 import neural_network_lyapunov.r_options as r_options
@@ -119,9 +119,9 @@ if __name__ == "__main__":
                                                      lyapunov_relu)
     R_options = r_options.SearchRwithSPDOptions(R.shape, 0.01)
     R_options.set_variable_value(R.detach().numpy())
-    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
-                                           closed_loop_system.x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyap, V_lambda, closed_loop_system.x_equilibrium,
+                     R_options)
     dut.max_iterations = 1000
     dut.search_R = True
     dut.add_derivative_adversarial_state = True

@@ -5,7 +5,7 @@ import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.relu_system as relu_system
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.test.feedback_gradient_check as\
     feedback_gradient_check
@@ -360,9 +360,9 @@ class TestLyapunov(unittest.TestCase):
         ],
                                          dim=0)
         V_lambda = 0.1
-        trainer = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
-                                                   lyap.system.x_equilibrium,
-                                                   r_options.FixedROptions(R))
+        trainer = train_lyapunov_barrier.Trainer()
+        trainer.add_lyapunov(lyap, V_lambda, lyap.system.x_equilibrium,
+                             r_options.FixedROptions(R))
         optimizer = torch.optim.Adam(training_params)
         for iter_count in range(2):
             optimizer.zero_grad()
@@ -401,7 +401,7 @@ class TestLyapunov(unittest.TestCase):
 
 
 class TestGradient(unittest.TestCase):
-    # Tests the gradient of the loss in train_lyapunov.py
+    # Tests the gradient of the loss in train_lyapunov_barrier.py
     def construct_lyap1(self, discrete_time_flag):
         torch.manual_seed(0)
         dtype = torch.float64

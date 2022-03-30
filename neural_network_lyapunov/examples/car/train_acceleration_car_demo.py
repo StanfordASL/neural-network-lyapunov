@@ -3,7 +3,7 @@ import neural_network_lyapunov.examples.car.acceleration_car as\
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.r_options as r_options
 import argparse
 import torch
@@ -184,9 +184,9 @@ if __name__ == "__main__":
         R_options.set_variable_value(R.detach().numpy())
     else:
         R_options = r_options.FixedROptions(R)
-    dut = train_lyapunov.TrainLyapunovReLU(lyap, V_lambda,
-                                           closed_loop_system.x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyap, V_lambda, closed_loop_system.x_equilibrium,
+                     R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5

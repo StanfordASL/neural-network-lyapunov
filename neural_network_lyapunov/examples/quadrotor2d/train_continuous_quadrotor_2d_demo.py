@@ -1,4 +1,4 @@
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.train_utils as train_utils
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.continuous_time_lyapunov as \
@@ -246,9 +246,9 @@ if __name__ == "__main__":
         train_utils.wandb_config_update(args, lyapunov_relu, controller_relu,
                                         x_lo, x_up, u_lo, u_up)
 
-    dut = train_lyapunov.TrainLyapunovReLU(lyapunov_hybrid_system, V_lambda,
-                                           closed_loop_system.x_equilibrium,
-                                           R_options)
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(lyapunov_hybrid_system, V_lambda,
+                     closed_loop_system.x_equilibrium, R_options)
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 1E-5
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     dut.output_flag = True
     dut.enable_wandb = args.enable_wandb
     if args.train_adversarial:
-        options = train_lyapunov.TrainLyapunovReLU.AdversarialTrainingOptions()
+        options = train_lyapunov_barrier.Trainer.AdversarialTrainingOptions()
         options.num_batches = 10
         options.num_epochs_per_mip = 30
         options.perturb_derivative_sample_count = 5

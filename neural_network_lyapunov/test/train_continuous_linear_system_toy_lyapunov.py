@@ -1,4 +1,4 @@
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.continuous_time_lyapunov as\
     continuous_time_lyapunov
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
@@ -231,7 +231,8 @@ if __name__ == "__main__":
         ])
 
     R = None
-    dut = train_lyapunov.TrainLyapunovReLU(
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
         r_options.FixedROptions(
             torch.eye(x_equilibrium.shape[0], dtype=torch.float64)))
@@ -263,7 +264,7 @@ if __name__ == "__main__":
                                           batch_size=10)
         else:
             # First train a ReLU to approximate the value function.
-            approximator = train_lyapunov.TrainValueApproximator()
+            approximator = train_lyapunov_barrier.TrainValueApproximator()
             approximator.max_epochs = args.approximator_iterations
             approximator.convergence_tolerance = 1e-5
             if args.load_cost_to_go_data is None:

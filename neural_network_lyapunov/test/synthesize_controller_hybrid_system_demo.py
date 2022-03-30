@@ -2,7 +2,7 @@ import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.lyapunov as lyapunov
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.r_options as r_options
 
 import torch
@@ -58,7 +58,8 @@ if __name__ == "__main__":
         closed_loop_system, lyapunov_relu)
 
     V_lambda = 0.0
-    dut = train_lyapunov.TrainLyapunovReLU(
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
         r_options.FixedROptions(torch.eye(2, dtype=torch.float64)))
     dut.output_flag = True

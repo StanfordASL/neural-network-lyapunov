@@ -13,7 +13,7 @@ import neural_network_lyapunov.r_options as r_options
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 
-class TrainLyapunovReLU:
+class Trainer:
     """
     We will train a ReLU network, such that the function
     V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁ is a Lyapunov function that
@@ -34,8 +34,7 @@ class TrainLyapunovReLU:
     R*(x - x*).
     hinge(z) = max(z + margin, 0) where margin is a given scalar.
     """
-    def __init__(self, lyapunov_hybrid_system, V_lambda, x_equilibrium,
-                 R_options):
+    def __init__(self):
         """
         @param lyapunov_hybrid_system This input should define a common
         interface
@@ -51,13 +50,10 @@ class TrainLyapunovReLU:
         @param x_equilibrium The equilibrium state.
         @param R_options An ROptions object.
         """
-        self.lyapunov_hybrid_system = lyapunov_hybrid_system
-        assert (isinstance(V_lambda, float))
-        self.V_lambda = V_lambda
-        self.lyapunov_hybrid_system.validate_x_equilibrium(x_equilibrium)
-        self.x_equilibrium = x_equilibrium
-        assert (isinstance(R_options, r_options.ROptions))
-        self.R_options = R_options
+        self.lyapunov_hybrid_system = None
+        self.V_lambda = None
+        self.x_equilibrium = None
+        self.R_options = None
         # The learning rate of the optimizer
         self.learning_rate = 0.003
         # Number of iterations in the training.
@@ -171,6 +167,21 @@ class TrainLyapunovReLU:
         # this strengthening might be computational expensive (it could
         # require solving some MIPs).
         self.derivative_mip_strengthen_binary = False
+
+    def add_lyapunov(
+            self, lyapunov_hybrid_system: lyapunov.LyapunovHybridLinearSystem,
+            V_lambda, x_equilibrium, R_options):
+        """
+        Set the Lyapunov function to be trained.
+        """
+        self.lyapunov_hybrid_system = lyapunov_hybrid_system
+        assert (isinstance(V_lambda, float))
+        self.V_lambda = V_lambda
+        assert (isinstance(x_equilibrium, torch.Tensor))
+        self.lyapunov_hybrid_system.validate_x_equilibrium(x_equilibrium)
+        self.x_equilibrium = x_equilibrium
+        assert (isinstance(R_options, r_options.ROptions))
+        self.R_options = R_options
 
     def sample_loss(self, positivity_state_samples, derivative_state_samples,
                     derivative_state_samples_next,
@@ -563,7 +574,7 @@ class TrainLyapunovReLU:
         loss = positivity_sample_loss + derivative_sample_loss + \
             positivity_mip_loss + derivative_mip_loss + gap_mip_loss
 
-        return TrainLyapunovReLU.TotalLossReturn(
+        return Trainer.TotalLossReturn(
             loss, lyapunov_positivity_mip_obj, lyapunov_derivative_mip_obj,
             positivity_sample_loss, derivative_sample_loss,
             positivity_mip_loss, derivative_mip_loss, gap_mip_loss,
@@ -703,7 +714,7 @@ class TrainLyapunovReLU:
                 self.lyapunov_positivity_convergence_tol and\
                     total_loss_return.lyapunov_derivative_mip_obj <\
                     best_derivative_mip_cost:
-                best_training_params = [ # noqa
+                best_training_params = [  # noqa
                     p.clone() for p in training_params
                 ]
                 best_derivative_mip_cost = \

@@ -1,4 +1,4 @@
-import neural_network_lyapunov.train_lyapunov as train_lyapunov
+import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.lyapunov as lyapunov
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.r_options as r_options
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     x_equilibrium = torch.tensor([0], dtype=torch.float64)
     state_samples_all = torch.linspace(-1, 1, 20).type(torch.float64).\
         reshape((-1, 1))
-    train_value_approximator = train_lyapunov.TrainValueApproximator()
+    train_value_approximator = train_lyapunov_barrier.TrainValueApproximator()
     train_value_approximator.max_epochs = 500
     train_value_approximator.convergence_tolerance = 0.001
     result1 = train_value_approximator.train(system, relu, V_lambda,
@@ -90,7 +90,8 @@ if __name__ == "__main__":
 
     lyapunov_hybrid_system = lyapunov.LyapunovDiscreteTimeHybridSystem(
         system, relu)
-    dut = train_lyapunov.TrainLyapunovReLU(
+    dut = train_lyapunov_barrier.Trainer()
+    dut.add_lyapunov(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
         r_options.FixedROptions(torch.eye(1, dtype=torch.float64)))
     dut.output_flag = True
