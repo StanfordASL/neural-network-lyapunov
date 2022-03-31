@@ -1,4 +1,5 @@
 import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.train_lyapunov_barrier as train_lyapunov_barrier
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.test.test_hybrid_linear_system as\
@@ -379,6 +380,83 @@ class TestTrainer(unittest.TestCase):
         dut.add_lyapunov(lyapunov_hybrid_system, V_lambda, x_equilibrium,
                          R_options)
         self.solve_boundary_gap_mip_tester(dut)
+
+
+class TestTrainerBarrier(unittest.TestCase):
+    """
+    Test barrier related functions in Trainer class.
+    """
+    def setUp(self):
+        self.dtype = torch.float64
+        dynamics_relu = utils.setup_relu((2, 4, 2),
+                                         params=None,
+                                         negative_slope=0.1,
+                                         bias=True,
+                                         dtype=self.dtype)
+        dynamics_relu[0].weight.data = torch.tensor(
+            [[1, -2], [1.2, 0.3], [0.5, 1], [0.2, 1]], dtype=self.dtype)
+        dynamics_relu[0].bias.data = torch.tensor([0.5, 1, 0.2, -0.3],
+                                                  dtype=self.dtype)
+        dynamics_relu[2].weight.data = torch.tensor(
+            [[0.1, 0.4, -0.2, 1], [0.5, 1.5, -0.2, 2]], dtype=self.dtype)
+        dynamics_relu[2].bias.data = torch.tensor([0.5, 1], dtype=self.dtype)
+        self.system = relu_system.AutonomousReLUSystemGivenEquilibrium(
+            self.dtype,
+            torch.tensor([-2, 1], dtype=self.dtype),
+            torch.tensor([3, 4], dtype=self.dtype),
+            dynamics_relu,
+            torch.tensor([1, 3], dtype=self.dtype),
+            discrete_time_flag=True)
+
+        self.barrier_relu = utils.setup_relu((2, 3, 2, 1),
+                                             params=None,
+                                             negative_slope=0.1,
+                                             bias=True,
+                                             dtype=self.dtype)
+        self.barrier_relu[0].weight.data = torch.tensor(
+            [[0.2, 0.3], [1, 2], [-2, -3]], dtype=self.dtype)
+        self.barrier_relu[0].bias.data = torch.tensor([0.5, -1, -0.2],
+                                                      dtype=self.dtype)
+        self.barrier_relu[2].weight.data = torch.tensor(
+            [[0.5, 0.1, -1.5], [0.2, -0.3, 1]], dtype=self.dtype)
+        self.barrier_relu[2].bias.data = torch.tensor([1, -2],
+                                                      dtype=self.dtype)
+        self.barrier_relu[4].weight.data = torch.tensor([[1, 3]],
+                                                        dtype=self.dtype)
+        self.barrier_relu[4].bias.data = torch.tensor([0.5], dtype=self.dtype)
+
+        self.barrier_system = barrier.DiscreteTimeBarrier(
+            self.system, self.barrier_relu)
+
+    def test_barrier_sample_loss(self):
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_barrier(self.barrier_system,
+                        x_star=(self.system.x_lo * 0.25 +
+                                self.system.x_up * 0.75),
+                        c=0.1,
+                        barrier_epsilon=0.3)
+        safe_state_samples = utils.uniform_sample_in_box(
+            self.system.x_lo, (self.system.x_lo + self.system.x_up) / 2, 100)
+        unsafe_state_samples = utils.uniform_sample_in_box(
+            (self.system.x_lo + self.system.x_up) / 2, self.system.x_up, 200)
+        derivative_state_samples = utils.uniform_sample_in_box(
+            self.system.x_lo, self.system.x_up, 300)
+        safe_cost_weight = 2.
+        unsafe_cost_weight = 3.
+        derivative_cost_weight = 4.
+        safe_sample_loss, unsafe_sample_loss, derivative_sample_loss =\
+            dut.barrier_sample_loss(
+                safe_state_samples, unsafe_state_samples,
+                derivative_state_samples, safe_cost_weight, unsafe_cost_weight,
+                derivative_cost_weight)
+        safe_sample_loss_expected = utils.loss_reduction(
+            torch.maximum(
+                -dut.barrier_system.value(safe_state_samples,
+                                          dut.barrier_x_star, dut.barrier_c),
+                torch.tensor(0, dtype=self.dtype)),
+            dut.sample_loss_reduction) * safe_cost_weight
+        self.assertAlmostEqual(safe_sample_loss.item(),
+                               safe_sample_loss_expected.item())
 
 
 class TestTrainValueApproximator(unittest.TestCase):

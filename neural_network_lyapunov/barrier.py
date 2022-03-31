@@ -3,6 +3,7 @@ import gurobipy
 import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 import neural_network_lyapunov.relu_to_optimization as relu_to_optimization
 import neural_network_lyapunov.mip_utils as mip_utils
+import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.dynamic_system as dynamic_system
 
 
@@ -231,14 +232,4 @@ class DiscreteTimeBarrier(Barrier):
                 -(-self.value(state_next, x_star, c) +
                   (1 - epsilon) * self.value(state_samples, x_star, c)),
                 torch.tensor(-1.))
-        if reduction == "mean":
-            return torch.mean(loss_all)
-        elif reduction == "max":
-            return torch.max(loss_all)
-        elif reduction == "4norm":
-            return torch.norm(loss_all, p=4)
-        else:
-            raise Exception(
-                "Unknown reduction in " +
-                "derivative_loss_at_samples_and_next_states()"
-            )
+        return utils.loss_reduction(loss_all, reduction)
