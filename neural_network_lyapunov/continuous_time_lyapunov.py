@@ -226,13 +226,13 @@ class LyapunovContinuousTimeSystem(lyapunov.LyapunovHybridLinearSystem):
             A_Rxdot, A_slack, A_l1_binary, rhs = \
                 utils.replace_binary_continuous_product(
                     Rxdot_lb[i], Rxdot_ub[i], self.system.dtype)
-            milp.addMConstrs([
+            milp.addMConstr([
                 A_Rxdot.reshape((-1, 1)) @ R[i].reshape((1, -1)),
                 A_slack.reshape((-1, 1)),
                 A_l1_binary.reshape((-1, 1))
             ], [xdot, [dl1dx_times_xdot_slack[i]], [l1_binary[i]]],
-                             b=rhs,
-                             sense=gurobipy.GRB.LESS_EQUAL)
+                            b=rhs,
+                            sense=gurobipy.GRB.LESS_EQUAL)
         cost_vars = dl1dx_times_xdot_slack + xdot
         cost_coeffs = torch.cat(
             (2 * V_lambda * torch.ones(R.shape[0], dtype=self.system.dtype),
@@ -483,13 +483,13 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                 vtype=gurobipy.GRB.CONTINUOUS,
                                 name=slack_name + "[" + str(i) + "]")
             A_si = A_Aisi @ self.system.A[i]
-            milp.addMConstrs([A_si, A_slack, A_beta], [
+            milp.addMConstr([A_si, A_slack, A_beta], [
                 s[i * self.system.x_dim:(i + 1) * self.system.x_dim], z[i],
                 beta
             ],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=rhs,
-                             name="milp_relu_gradient_times_Aisi")
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=rhs,
+                            name="milp_relu_gradient_times_Aisi")
         return (z, A_out)
 
     def add_relu_gradient_times_xdot(self,
@@ -535,10 +535,10 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                          lb=-gurobipy.GRB.INFINITY,
                          vtype=gurobipy.GRB.CONTINUOUS,
                          name=slack_name)
-        milp.addMConstrs([A_xdot, A_slack, A_beta], [xdot, z, beta],
-                         sense=gurobipy.GRB.LESS_EQUAL,
-                         b=rhs,
-                         name="milp_relu_gradient_times_xdot")
+        milp.addMConstr([A_xdot, A_slack, A_beta], [xdot, z, beta],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs,
+                        name="milp_relu_gradient_times_xdot")
         return (z, A_out)
 
     def add_relu_gradient_times_gigammai(self,
@@ -594,11 +594,11 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                                 vtype=gurobipy.GRB.CONTINUOUS,
                                 name=slack_name)
             A_gammai = A_gigammai @ self.system.g[i]
-            milp.addMConstrs([A_gammai.reshape((-1, 1)), A_slack, A_beta],
-                             [[gamma[i]], z[i], beta],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=rhs,
-                             name="milp_relu_gradient_times_gigammai")
+            milp.addMConstr([A_gammai.reshape((-1, 1)), A_slack, A_beta],
+                            [[gamma[i]], z[i], beta],
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=rhs,
+                            name="milp_relu_gradient_times_gigammai")
         return (z, A_out)
 
     def add_sign_state_error_times_Aisi(self,
@@ -653,7 +653,7 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                         Aisi_lower[i][j], Aisi_upper[i][j])
                 Ain_si = Ain_Aisi.reshape((-1, 1)) @ \
                     self.system.A[i][j].reshape((1, -1))
-                milp.addMConstrs([
+                milp.addMConstr([
                     Ain_si,
                     Ain_z.reshape((-1, 1)),
                     Ain_alpha.reshape((-1, 1))
@@ -661,8 +661,8 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                     s[i * self.system.x_dim:(i + 1) * self.system.x_dim],
                     [z[i][j]], [alpha[j]]
                 ],
-                                 sense=gurobipy.GRB.LESS_EQUAL,
-                                 b=rhs_in)
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                b=rhs_in)
         return (z, z_coeff, s_coeff)
 
     def add_sign_state_error_times_gigammai(self,
@@ -720,13 +720,13 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
                     replace_binary_continuous_product(
                         gigammai_lower[i][j], gigammai_upper[i][j])
                 Ain_gammai = Ain_gigammai * self.system.g[i][j]
-                milp.addMConstrs([
+                milp.addMConstr([
                     Ain_gammai.reshape((-1, 1)),
                     Ain_z.reshape((-1, 1)),
                     Ain_alpha.reshape((-1, 1))
                 ], [[gamma[i]], [z[i][j]], [alpha[j]]],
-                                 sense=gurobipy.GRB.LESS_EQUAL,
-                                 b=rhs)
+                                sense=gurobipy.GRB.LESS_EQUAL,
+                                b=rhs)
         return (z, z_coeff, gamma_coeff)
 
     def add_sign_state_error_times_xdot(self,
@@ -768,13 +768,13 @@ class LyapunovContinuousTimeHybridSystem(lyapunov.LyapunovHybridLinearSystem):
             Ain_xdot, Ain_z, Ain_alpha, rhs_in = utils.\
                 replace_binary_continuous_product(
                     xdot_lower[i], xdot_upper[i])
-            milp.addMConstrs([
+            milp.addMConstr([
                 Ain_xdot.reshape((-1, 1)),
                 Ain_z.reshape((-1, 1)),
                 Ain_alpha.reshape((-1, 1))
             ], [[xdot[i]], [z[i]], [alpha[i]]],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=rhs_in)
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=rhs_in)
         return (z, z_coeff, xdot_coeff)
 
     def lyapunov_derivative_as_milp2(self,

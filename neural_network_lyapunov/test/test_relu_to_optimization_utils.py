@@ -37,19 +37,17 @@ class TestAddConstraintByNeuron(unittest.TestCase):
                                          lb=-gurobipy.GRB.INFINITY)
             neuron_output = model.addVars(1, lb=-gurobipy.GRB.INFINITY)
             binary = model.addVars(1, vtype=gurobipy.GRB.BINARY)
-            model.addMConstrs(
-                [Ain_linear_input, Ain_neuron_output, Ain_binary],
-                [linear_input, neuron_output, binary],
-                b=rhs_in,
-                sense=gurobipy.GRB.LESS_EQUAL)
-            model.addMConstrs(
-                [Aeq_linear_input, Aeq_neuron_output, Aeq_binary],
-                [linear_input, neuron_output, binary],
-                b=rhs_eq,
-                sense=gurobipy.GRB.EQUAL)
-            model.addMConstrs([Wij.reshape((1, -1))], [linear_input],
-                              b=linear_output_val_samples[i] - bij,
-                              sense=gurobipy.GRB.EQUAL)
+            model.addMConstr([Ain_linear_input, Ain_neuron_output, Ain_binary],
+                             [linear_input, neuron_output, binary],
+                             b=rhs_in,
+                             sense=gurobipy.GRB.LESS_EQUAL)
+            model.addMConstr([Aeq_linear_input, Aeq_neuron_output, Aeq_binary],
+                             [linear_input, neuron_output, binary],
+                             b=rhs_eq,
+                             sense=gurobipy.GRB.EQUAL)
+            model.addMConstr([Wij.reshape((1, -1))], [linear_input],
+                             b=linear_output_val_samples[i] - bij,
+                             sense=gurobipy.GRB.EQUAL)
             model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             model.gurobi_model.optimize()
 
@@ -138,19 +136,19 @@ class TestAddConstraintByLayer(unittest.TestCase):
                                    lb=-gurobipy.GRB.INFINITY)
             beta = model.addVars(linear_layer.out_features,
                                  vtype=gurobipy.GRB.BINARY)
-            model.addMConstrs(
+            model.addMConstr(
                 [torch.eye(linear_layer.in_features, dtype=self.dtype)],
                 [z_curr],
                 b=z_curr_val[i],
                 sense=gurobipy.GRB.EQUAL)
-            model.addMConstrs([Ain_z_curr, Ain_z_next, Ain_binary],
-                              [z_curr, z_next, beta],
-                              b=rhs_in,
-                              sense=gurobipy.GRB.LESS_EQUAL)
-            model.addMConstrs([Aeq_z_curr, Aeq_z_next, Aeq_binary],
-                              [z_curr, z_next, beta],
-                              b=rhs_eq,
-                              sense=gurobipy.GRB.EQUAL)
+            model.addMConstr([Ain_z_curr, Ain_z_next, Ain_binary],
+                             [z_curr, z_next, beta],
+                             b=rhs_in,
+                             sense=gurobipy.GRB.LESS_EQUAL)
+            model.addMConstr([Aeq_z_curr, Aeq_z_next, Aeq_binary],
+                             [z_curr, z_next, beta],
+                             b=rhs_eq,
+                             sense=gurobipy.GRB.EQUAL)
             model.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             model.gurobi_model.optimize()
             with torch.no_grad():

@@ -120,7 +120,7 @@ class PoleReluSystem:
         # ϕ(x_AB*, y_AB*, ẋ_AB*, ẏ_AB*, u*)
         assert (mip_cnstr_result.Aout_input is None)
         assert (mip_cnstr_result.Aout_binary is None)
-        mip.addMConstrs(
+        mip.addMConstr(
             [
                 torch.eye(5,
                           dtype=self.dtype), -torch.eye(5, dtype=self.dtype),
@@ -136,7 +136,7 @@ class PoleReluSystem:
         # Now add the constraint
         # x_AB[n+1] = x_AB[n] + (ẋ_AB[n] + ẋ_AB[n+1]) * dt / 2
         # y_AB[n+1] = y_AB[n] + (ẏ_AB[n] + ẏ_AB[n+1]) * dt / 2
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(2, dtype=self.dtype), -torch.eye(2, dtype=self.dtype),
             -self.dt / 2 * torch.eye(2, dtype=self.dtype),
             -self.dt / 2 * torch.eye(2, dtype=self.dtype)

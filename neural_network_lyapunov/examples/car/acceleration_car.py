@@ -196,7 +196,7 @@ class AccelerationCarReLUModel:
         #                    = Aout_slack * s - ϕ(0, 0, 0, 0)
         assert (mip_cnstr_result.Aout_input is None)
         assert (mip_cnstr_result.Aout_binary is None)
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(2, dtype=self.dtype), -torch.eye(2, dtype=self.dtype),
             -mip_cnstr_result.Aout_slack
         ], [x_next_var[:2], x_var[:2], forward_slack],

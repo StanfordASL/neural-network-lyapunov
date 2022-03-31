@@ -279,12 +279,12 @@ def check_add_dynamics_constraint(dut, x_val, u_val, atol=0, rtol=1E-7):
     forward_binary = dynamics_constraint_return.binary
     assert (isinstance(forward_slack, list))
     assert (isinstance(forward_binary, list))
-    mip.addMConstrs([torch.eye(dut.x_dim, dtype=dut.dtype)], [x],
-                    b=x_val,
-                    sense=gurobipy.GRB.EQUAL)
-    mip.addMConstrs([torch.eye(dut.u_dim, dtype=dut.dtype)], [u],
-                    b=u_val,
-                    sense=gurobipy.GRB.EQUAL)
+    mip.addMConstr([torch.eye(dut.x_dim, dtype=dut.dtype)], [x],
+                   b=x_val,
+                   sense=gurobipy.GRB.EQUAL)
+    mip.addMConstr([torch.eye(dut.u_dim, dtype=dut.dtype)], [u],
+                   b=u_val,
+                   sense=gurobipy.GRB.EQUAL)
     mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
     mip.gurobi_model.optimize()
     x_next_expected = dut.step_forward(x_val, u_val)

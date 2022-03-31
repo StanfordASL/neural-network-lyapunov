@@ -113,7 +113,7 @@ class TestLyapunovDiscreteTimeHybridSystemROA(unittest.TestCase):
                 else:
                     np.testing.assert_allclose(
                         np.array([v.x for v in t_slack[i]]),
-                        np.zeros((dut.system.x_dim, )))
+                        np.zeros((dut.system.x_dim, )), atol=1E-10)
         else:
             self.assertEqual(milp.gurobi_model.status,
                              gurobipy.GRB.Status.INFEASIBLE)

@@ -932,7 +932,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
             mip_cnstr_result.Cout = mip_cnstr_result.Cout.reshape((-1))
         v_next = x_next_var[self.nq:]
         v_curr = x_var[self.nq:]
-        mip.addMConstrs(
+        mip.addMConstr(
             [
                 torch.eye(self.nv, dtype=self.dtype),
                 -torch.eye(self.nv, dtype=self.dtype),
@@ -947,7 +947,7 @@ class ReLUSecondOrderResidueSystemGivenEquilibrium:
         # q[n+1] - q[n] = (v[n+1] + v[n]) * dt / 2
         q_next = x_next_var[:self.nq]
         q_curr = x_var[:self.nq]
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(self.nq,
                       dtype=self.dtype), -torch.eye(self.nq, dtype=self.dtype),
             -self.dt / 2 * torch.eye(self.nv, dtype=self.dtype),

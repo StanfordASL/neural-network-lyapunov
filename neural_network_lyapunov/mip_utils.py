@@ -366,7 +366,7 @@ def compute_range_by_lp(A: np.ndarray, b: np.ndarray, x_lb: np.ndarray,
     model = gurobipy.Model()
     x = model.addMVar(x_dim, lb=x_lb, ub=x_ub)
     if C is not None:
-        model.addMConstrs(C, x, gurobipy.GRB.LESS_EQUAL, d)
+        model.addMConstr(C, x, gurobipy.GRB.LESS_EQUAL, d)
     for i in range(y_dim):
         # First find the upper bound.
         model.setMObjective(Q=None,

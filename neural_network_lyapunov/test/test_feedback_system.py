@@ -71,10 +71,10 @@ class TestFeedbackSystem(unittest.TestCase):
                 milp, x, x_next, "u", "forward_s", "forward_binary",
                 "controller_s", "controller_binary")
 
-        milp.addMConstrs([torch.eye(forward_system.x_dim, dtype=self.dtype)],
-                         [x],
-                         sense=gurobipy.GRB.EQUAL,
-                         b=x_val)
+        milp.addMConstr([torch.eye(forward_system.x_dim, dtype=self.dtype)],
+                        [x],
+                        sense=gurobipy.GRB.EQUAL,
+                        b=x_val)
 
         milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
         milp.gurobi_model.optimize()
@@ -692,9 +692,9 @@ class TestFeedbackSystem(unittest.TestCase):
         for v in controller_mip_cnstr_return.binary:
             self.assertEqual(v.vtype, gurobipy.GRB.BINARY)
         # Now add constraint on x_var = x_val
-        mip.addMConstrs([torch.eye(dut.x_dim, dtype=torch.float64)], [x_var],
-                        b=x_val,
-                        sense=gurobipy.GRB.EQUAL)
+        mip.addMConstr([torch.eye(dut.x_dim, dtype=torch.float64)], [x_var],
+                       b=x_val,
+                       sense=gurobipy.GRB.EQUAL)
         mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
         mip.gurobi_model.optimize()
 

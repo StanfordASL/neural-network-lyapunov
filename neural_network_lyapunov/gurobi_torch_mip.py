@@ -593,7 +593,7 @@ class GurobiTorchMIP:
 
         return constr
 
-    def addMConstrs(self, A, x, sense, b, name=""):
+    def addMConstr(self, A, x, sense, b, name=""):
         """
         Add linear constraints sum_i A[i] * x[i] <=, == or >= b
         @param A. A list of pytorch tensors.
@@ -612,11 +612,11 @@ class GurobiTorchMIP:
         assert (all([len(Ai.shape) == 2 for Ai in A]))
         A_flat = torch.cat(A, dim=1)
         x_flat = [v for xi in x for v in xi]
-        constr = self.gurobi_model.addMConstrs(A_flat.detach().numpy(),
-                                               x_flat,
-                                               sense=sense,
-                                               b=b,
-                                               name=name)
+        constr = self.gurobi_model.addMConstr(A_flat.detach().numpy(),
+                                              x_flat,
+                                              sense=sense,
+                                              b=b,
+                                              name=name)
         continuous_var_flag = \
             [xi in self.r_indices.keys() for xi in x_flat]
         binary_var_flag = [xi in self.zeta_indices.keys() for xi in x_flat]
@@ -796,11 +796,11 @@ class GurobiTorchMIP:
                                 ineq_matrices, ineq_vars)
             add_var_if_not_none(mip_cnstr_return.Ain_binary, binary,
                                 ineq_matrices, ineq_vars)
-            self.addMConstrs(ineq_matrices,
-                             ineq_vars,
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=mip_cnstr_return.rhs_in.reshape((-1)),
-                             name=ineq_constr_name)
+            self.addMConstr(ineq_matrices,
+                            ineq_vars,
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=mip_cnstr_return.rhs_in.reshape((-1)),
+                            name=ineq_constr_name)
         # Now add the equality constraint
         # Aeq_input * input + Aeq_slack * slack + Aeq_binary * binary = rhs_eq
         if mip_cnstr_return.rhs_eq is not None and\
@@ -813,11 +813,11 @@ class GurobiTorchMIP:
                                 eq_vars)
             add_var_if_not_none(mip_cnstr_return.Aeq_binary, binary,
                                 eq_matrices, eq_vars)
-            self.addMConstrs(eq_matrices,
-                             eq_vars,
-                             sense=gurobipy.GRB.EQUAL,
-                             b=mip_cnstr_return.rhs_eq.reshape((-1)),
-                             name=eq_constr_name)
+            self.addMConstr(eq_matrices,
+                            eq_vars,
+                            sense=gurobipy.GRB.EQUAL,
+                            b=mip_cnstr_return.rhs_eq.reshape((-1)),
+                            name=eq_constr_name)
         if output_vars is not None:
             # Now add the equality constraint
             # out = Aout_input * input + Aout_slack * slack +
@@ -837,11 +837,11 @@ class GurobiTorchMIP:
             out_constraint_rhs = -mip_cnstr_return.Cout.\
                 reshape((-1)) if mip_cnstr_return.Cout is not\
                 None else torch.zeros((len(output_vars)), dtype=self.dtype)
-            self.addMConstrs(out_constraint_matrix,
-                             out_constraint_vars,
-                             gurobipy.GRB.EQUAL,
-                             b=out_constraint_rhs,
-                             name=out_constr_name)
+            self.addMConstr(out_constraint_matrix,
+                            out_constraint_vars,
+                            gurobipy.GRB.EQUAL,
+                            b=out_constraint_rhs,
+                            name=out_constr_name)
         return (slack, binary)
 
     def get_active_constraints(self, active_ineq_row_indices, zeta_sol):

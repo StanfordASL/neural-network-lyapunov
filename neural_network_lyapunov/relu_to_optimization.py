@@ -404,11 +404,11 @@ class ReLUFreePattern:
             (linear_inputs, relu_activations), linear_inputs_lo,
             linear_inputs_up)
         if Ain_x is not None:
-            prog.addMConstrs([Ain_x, Ain_slack, Ain_binary],
-                             [x_var, slack_var, binary_var],
-                             b=rhs_in,
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             name="relu strengthened")
+            prog.addMConstr([Ain_x, Ain_slack, Ain_binary],
+                            [x_var, slack_var, binary_var],
+                            b=rhs_in,
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            name="relu strengthened")
 
     def _compute_linear_output_bound_by_optimization(
             self, layer_index, linear_output_row_index,
@@ -455,14 +455,14 @@ class ReLUFreePattern:
             assert (isinstance(prog, gurobi_torch_mip.GurobiTorchMILP))
             assert (isinstance(network_input, list))
             assert (len(network_input) == input_dim)
-            prog.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
-                             [network_input],
-                             b=torch.from_numpy(network_input_up),
-                             sense=gurobipy.GRB.LESS_EQUAL)
-            prog.addMConstrs([torch.eye(input_dim, dtype=self.dtype)],
-                             [network_input],
-                             b=torch.from_numpy(network_input_lo),
-                             sense=gurobipy.GRB.GREATER_EQUAL)
+            prog.addMConstr([torch.eye(input_dim, dtype=self.dtype)],
+                            [network_input],
+                            b=torch.from_numpy(network_input_up),
+                            sense=gurobipy.GRB.LESS_EQUAL)
+            prog.addMConstr([torch.eye(input_dim, dtype=self.dtype)],
+                            [network_input],
+                            b=torch.from_numpy(network_input_lo),
+                            sense=gurobipy.GRB.GREATER_EQUAL)
         z_curr = network_input
         for layer in range(layer_index):
             linear_layer = self.model[2 * layer]
@@ -1309,10 +1309,10 @@ class ReLUFreePattern:
                     var_relu = z[linear_layer_count] + [
                         z[linear_layer_count + 1][j]
                     ] + [beta[self.relu_unit_index[linear_layer_count][j]]]
-                    prog.addMConstrs(A_relu.detach().numpy(),
-                                     var_relu,
-                                     sense=gurobipy.GRB.LESS_EQUAL,
-                                     b=rhs_i.detach().numpy().squeeze())
+                    prog.addMConstr(A_relu.detach().numpy(),
+                                    var_relu,
+                                    sense=gurobipy.GRB.LESS_EQUAL,
+                                    b=rhs_i.detach().numpy().squeeze())
                     z_next_j_objective = gurobipy.LinExpr(
                         z[linear_layer_count + 1][j])
                     prog.setObjective(z_next_j_objective,

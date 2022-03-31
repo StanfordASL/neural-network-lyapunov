@@ -443,18 +443,18 @@ class LyapunovHybridLinearSystem:
         ], [zeta_lo, zeta_up],
                         rhs=1.,
                         sense=gurobipy.GRB.EQUAL)
-        milp.addMConstrs([
+        milp.addMConstr([
             torch.eye(self.system.x_dim, dtype=dtype),
             torch.diag(x_lo - x_up)
         ], [x, zeta_up],
-                         b=x_lo,
-                         sense=gurobipy.GRB.GREATER_EQUAL)
-        milp.addMConstrs([
+                        b=x_lo,
+                        sense=gurobipy.GRB.GREATER_EQUAL)
+        milp.addMConstr([
             torch.eye(self.system.x_dim, dtype=dtype),
             torch.diag(x_up - x_lo)
         ], [x, zeta_lo],
-                         b=x_up,
-                         sense=gurobipy.GRB.LESS_EQUAL)
+                        b=x_up,
+                        sense=gurobipy.GRB.LESS_EQUAL)
 
         relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
 
@@ -1152,8 +1152,8 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                               name="x[n+1]")
 
         # Add the dynamics constraint between x[n+1] and x[n]
-        dynamic_system._add_system_constraint(
-            self.system, milp, x_curr, x_next)
+        dynamic_system._add_system_constraint(self.system, milp, x_curr,
+                                              x_next)
 
         if x_curr_in_box:
             out_box_x = x_next
@@ -1162,14 +1162,14 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
 
         if not x_curr_in_box:
             # Add the constraint x_lo <= x[n+1] <= x_up
-            milp.addMConstrs([torch.eye(self.system.x_dim, dtype=dtype)],
-                             [x_next],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=torch.from_numpy(self.system.x_up_all))
-            milp.addMConstrs([-torch.eye(self.system.x_dim, dtype=dtype)],
-                             [x_next],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=torch.from_numpy(-self.system.x_lo_all))
+            milp.addMConstr([torch.eye(self.system.x_dim, dtype=dtype)],
+                            [x_next],
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=torch.from_numpy(self.system.x_up_all))
+            milp.addMConstr([-torch.eye(self.system.x_dim, dtype=dtype)],
+                            [x_next],
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=torch.from_numpy(-self.system.x_lo_all))
         z, beta, a_out, b_out, _ = self.add_lyap_relu_output_constraint(
             milp, x_curr)
 
@@ -1216,24 +1216,24 @@ class LyapunovDiscreteTimeHybridSystem(LyapunovHybridLinearSystem):
                     self.system.x_lo_all[i-self.system.x_dim]
             # Now add the constraint
             # x_box_lo_i * ζᵢ <= tᵢ <= x_box_up_i * ζᵢ
-            milp.addMConstrs([
+            milp.addMConstr([
                 x_box_lo_i.reshape(
                     (-1, 1)), -torch.eye(self.system.x_dim, dtype=dtype)
             ], [[box_zeta[i]], t_slack[i]],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=torch.zeros((self.system.x_dim, ), dtype=dtype))
-            milp.addMConstrs([
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=torch.zeros((self.system.x_dim, ), dtype=dtype))
+            milp.addMConstr([
                 torch.eye(self.system.x_dim, dtype=dtype), -x_box_up_i.reshape(
                     (-1, 1))
             ], [t_slack[i], [box_zeta[i]]],
-                             sense=gurobipy.GRB.LESS_EQUAL,
-                             b=torch.zeros((self.system.x_dim, ), dtype=dtype))
+                            sense=gurobipy.GRB.LESS_EQUAL,
+                            b=torch.zeros((self.system.x_dim, ), dtype=dtype))
         # Add constraint x = t₁ + ... tₘ
-        milp.addMConstrs([torch.eye(self.system.x_dim, dtype=dtype)] +
-                         [-torch.eye(self.system.x_dim, dtype=dtype)] *
-                         (2 * self.system.x_dim), [out_box_x] + t_slack,
-                         sense=gurobipy.GRB.EQUAL,
-                         b=torch.zeros((self.system.x_dim, ), dtype=dtype))
+        milp.addMConstr([torch.eye(self.system.x_dim, dtype=dtype)] +
+                        [-torch.eye(self.system.x_dim, dtype=dtype)] *
+                        (2 * self.system.x_dim), [out_box_x] + t_slack,
+                        sense=gurobipy.GRB.EQUAL,
+                        b=torch.zeros((self.system.x_dim, ), dtype=dtype))
 
         relu_at_equilibrium = self.lyapunov_relu.forward(x_equilibrium)
 
