@@ -175,12 +175,12 @@ def _add_constraint_to_program_by_layer(prog: gurobi_torch_mip.GurobiTorchMIP,
             _ = _add_constraint_by_neuron(
                 linear_layer.weight[j], bij, relu_layer, relu_input_lo[j],
                 relu_input_up[j])
-        prog.addMConstrs(
+        prog.addMConstr(
             [Ain_linear_input, Ain_neuron_output, Ain_neuron_binary],
             [linear_input_var, [relu_output_var[j]], [relu_activation_var[j]]],
             b=rhs_in,
             sense=gurobipy.GRB.LESS_EQUAL)
-        prog.addMConstrs(
+        prog.addMConstr(
             [Aeq_linear_input, Aeq_neuron_output, Aeq_neuron_binary],
             [linear_input_var, [relu_output_var[j]], [relu_activation_var[j]]],
             b=rhs_eq,

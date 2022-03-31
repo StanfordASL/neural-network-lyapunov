@@ -145,11 +145,11 @@ class TestUnicycleReLUModel(unittest.TestCase):
             if dut.thetadot_as_input:
                 network_input = torch.tensor([x_val[2], u_val[0], u_val[1]],
                                              dtype=self.dtype)
-                network_input_zero = torch.zeros((3,), dtype=self.dtype)
+                network_input_zero = torch.zeros((3, ), dtype=self.dtype)
             else:
                 network_input = torch.tensor([x_val[2], u_val[0]],
                                              dtype=self.dtype)
-                network_input_zero = torch.zeros((2,), dtype=self.dtype)
+                network_input_zero = torch.zeros((2, ), dtype=self.dtype)
             position_next = x_val[:2] + \
                 dut.dynamics_relu(network_input) - dut.dynamics_relu(
                     network_input_zero)
@@ -189,12 +189,12 @@ class TestUnicycleReLUModel(unittest.TestCase):
             dut.add_dynamics_constraint(mip, x_var, x_next_var, u_var, "slack",
                                         "binary")
             # Fix x_var to x_val, u_var to u_val
-            mip.addMConstrs([torch.eye(3, dtype=self.dtype)], [x_var],
-                            sense=gurobipy.GRB.EQUAL,
-                            b=x_val)
-            mip.addMConstrs([torch.eye(2, dtype=self.dtype)], [u_var],
-                            sense=gurobipy.GRB.EQUAL,
-                            b=u_val)
+            mip.addMConstr([torch.eye(3, dtype=self.dtype)], [x_var],
+                           sense=gurobipy.GRB.EQUAL,
+                           b=x_val)
+            mip.addMConstr([torch.eye(2, dtype=self.dtype)], [u_var],
+                           sense=gurobipy.GRB.EQUAL,
+                           b=u_val)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             mip.gurobi_model.optimize()
             self.assertEqual(mip.gurobi_model.status,
@@ -349,12 +349,12 @@ class TestUnicycleReLUZeroVelModel(unittest.TestCase):
             dut.add_dynamics_constraint(mip, x_var, x_next_var, u_var, "slack",
                                         "binary")
             # Fix x_var to x_val, u_var to u_val
-            mip.addMConstrs([torch.eye(3, dtype=self.dtype)], [x_var],
-                            sense=gurobipy.GRB.EQUAL,
-                            b=x_val)
-            mip.addMConstrs([torch.eye(2, dtype=self.dtype)], [u_var],
-                            sense=gurobipy.GRB.EQUAL,
-                            b=u_val)
+            mip.addMConstr([torch.eye(3, dtype=self.dtype)], [x_var],
+                           sense=gurobipy.GRB.EQUAL,
+                           b=x_val)
+            mip.addMConstr([torch.eye(2, dtype=self.dtype)], [u_var],
+                           sense=gurobipy.GRB.EQUAL,
+                           b=u_val)
             mip.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             mip.gurobi_model.optimize()
             self.assertEqual(mip.gurobi_model.status,

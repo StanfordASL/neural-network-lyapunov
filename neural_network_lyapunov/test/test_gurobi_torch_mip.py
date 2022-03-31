@@ -714,7 +714,7 @@ class TestGurobiTorchMIP(unittest.TestCase):
             torch.tensor(3, dtype=torch.float64)
         ])
 
-    def test_addMConstrs(self):
+    def test_addMConstr(self):
         dtype = torch.float64
         dut = gurobi_torch_mip.GurobiTorchMIP(dtype)
         x = dut.addVars(2, lb=0, vtype=gurobipy.GRB.CONTINUOUS)
@@ -729,9 +729,9 @@ class TestGurobiTorchMIP(unittest.TestCase):
             torch.tensor([[1., 2.], [3., 4.]], dtype=dtype),
             torch.tensor([[2, 3], [4, 5]], dtype=dtype)
         ]
-        _ = dut.addMConstrs(A1, [x, beta],
-                            b=torch.tensor([3, 7], dtype=dtype),
-                            sense=gurobipy.GRB.EQUAL)
+        _ = dut.addMConstr(A1, [x, beta],
+                           b=torch.tensor([3, 7], dtype=dtype),
+                           sense=gurobipy.GRB.EQUAL)
         dut.gurobi_model.update()
         self.assertEqual(
             dut.gurobi_model.getAttr(gurobipy.GRB.Attr.NumConstrs), 2)
@@ -774,9 +774,9 @@ class TestGurobiTorchMIP(unittest.TestCase):
             torch.tensor([[2., 3.], [1., 2.]], dtype=dtype),
             torch.tensor([[3.], [1.]], dtype=dtype)
         ]
-        dut.addMConstrs(A2, [y, [alpha[1]]],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        b=torch.tensor([2., 5.], dtype=dtype))
+        dut.addMConstr(A2, [y, [alpha[1]]],
+                       sense=gurobipy.GRB.LESS_EQUAL,
+                       b=torch.tensor([2., 5.], dtype=dtype))
         dut.gurobi_model.optimize()
         np.testing.assert_array_less(
             A2[0].detach().numpy() @ np.array([y[0].x, y[1].x]) +
@@ -811,9 +811,9 @@ class TestGurobiTorchMIP(unittest.TestCase):
             torch.tensor([[2], [1]], dtype=dtype),
             torch.tensor([[2, 3], [1, 2]], dtype=dtype)
         ]
-        dut.addMConstrs(A3, [[x[1]], beta],
-                        b=torch.tensor([-2, -4], dtype=dtype),
-                        sense=gurobipy.GRB.GREATER_EQUAL)
+        dut.addMConstr(A3, [[x[1]], beta],
+                       b=torch.tensor([-2, -4], dtype=dtype),
+                       sense=gurobipy.GRB.GREATER_EQUAL)
         dut.gurobi_model.optimize()
         np.testing.assert_array_less(
             np.array([-2., -4.]) - 1e-6,
@@ -1491,8 +1491,8 @@ class TestGurobiTorchMILP(unittest.TestCase):
                            sense=gurobipy.GRB.LESS_EQUAL,
                            rhs=a[0] + 2 * a[2] * a[1])
             dut.addLConstr([
-                torch.stack((torch.tensor(2., dtype=dtype), a[1] ** 2,
-                             torch.tensor(0.5, dtype=dtype))),
+                torch.stack((torch.tensor(2., dtype=dtype), a[1] **
+                             2, torch.tensor(0.5, dtype=dtype))),
                 torch.tensor([1., 1.], dtype=dtype)
             ], [x, alpha],
                            sense=gurobipy.GRB.EQUAL,

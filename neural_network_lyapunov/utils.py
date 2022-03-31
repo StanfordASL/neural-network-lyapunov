@@ -518,12 +518,12 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
                            ub=1.,
                            vtype=binary_var_type,
                            name="saturation_lower")
-        mip.addMConstrs([
+        mip.addMConstr([
             A_x.reshape((-1, 1)),
             A_y.reshape((-1, 1)), -A_beta.reshape((-1, 1))
         ], [[input_var], [output_var], beta],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        b=rhs - A_beta + (A_x + A_y) * lower_limit)
+                       sense=gurobipy.GRB.LESS_EQUAL,
+                       b=rhs - A_beta + (A_x + A_y) * lower_limit)
         return beta
     elif input_lower_bound >= lower_limit and input_upper_bound > upper_limit:
         # The input can saturate the upper limit. We need a binary variable to
@@ -540,12 +540,12 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
                            ub=1.,
                            vtype=binary_var_type,
                            name="saturation_upper")
-        mip.addMConstrs([
+        mip.addMConstr([
             -A_x.reshape((-1, 1)), -A_y.reshape((-1, 1)), -A_beta.reshape(
                 (-1, 1))
         ], [[input_var], [output_var], beta],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        b=rhs - A_beta - (A_x + A_y) * upper_limit)
+                       sense=gurobipy.GRB.LESS_EQUAL,
+                       b=rhs - A_beta - (A_x + A_y) * upper_limit)
         return beta
     else:
         # input_lower_bound < lower_limit < upper_limit < input_upper_bound. We
@@ -573,21 +573,21 @@ def add_saturation_as_mixed_integer_constraint(mip, input_var, output_var,
         # Now add the first constraint z - lower_limit = relu(x - lower_limit)
         A_x1, A_z1, A_beta1, rhs1 = replace_relu_with_mixed_integer_constraint(
             input_lower_bound - lower_limit, input_upper_bound - lower_limit)
-        mip.addMConstrs([
+        mip.addMConstr([
             A_x1.reshape((-1, 1)),
             A_z1.reshape((-1, 1)), -A_beta1.reshape((-1, 1))
         ], [[input_var], z, [beta[0]]],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        b=rhs1 - A_beta1 + (A_x1 + A_z1) * lower_limit)
+                       sense=gurobipy.GRB.LESS_EQUAL,
+                       b=rhs1 - A_beta1 + (A_x1 + A_z1) * lower_limit)
         # Now add the second constraint upper_limit - y = relu(upper_limit - y)
         A_z2, A_y2, A_beta2, rhs2 = replace_relu_with_mixed_integer_constraint(
             upper_limit - input_upper_bound, upper_limit - input_lower_bound)
-        mip.addMConstrs([
+        mip.addMConstr([
             -A_z2.reshape((-1, 1)), -A_y2.reshape((-1, 1)), -A_beta2.reshape(
                 (-1, 1))
         ], [z, [output_var], [beta[1]]],
-                        sense=gurobipy.GRB.LESS_EQUAL,
-                        b=rhs2 - A_beta2 - (A_z2 + A_y2) * upper_limit)
+                       sense=gurobipy.GRB.LESS_EQUAL,
+                       b=rhs2 - A_beta2 - (A_z2 + A_y2) * upper_limit)
         return beta
 
 

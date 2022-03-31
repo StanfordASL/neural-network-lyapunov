@@ -138,16 +138,16 @@ class FeedbackSystem:
         # Aout_slack * controller_slack -u_pre_sat
         # = relu_x_equilibrium- u* -Cout
         if isinstance(self.controller_network, torch.nn.Sequential):
-            prog.addMConstrs([
+            prog.addMConstr([
                 controller_mip_cnstr.Aout_slack.reshape(
                     (self.forward_system.u_dim, len(controller_slack))),
                 -torch.eye(self.forward_system.u_dim,
                            dtype=self.forward_system.dtype)
             ], [controller_slack, u_pre_sat],
-                             sense=gurobipy.GRB.EQUAL,
-                             b=relu_x_equilibrium - self.u_equilibrium -
-                             controller_mip_cnstr.Cout,
-                             name="controller_output")
+                            sense=gurobipy.GRB.EQUAL,
+                            b=relu_x_equilibrium - self.u_equilibrium -
+                            controller_mip_cnstr.Cout,
+                            name="controller_output")
 
         u_pre_sat_lo = controller_network_output_lo -\
             relu_x_equilibrium + self.u_equilibrium
@@ -238,14 +238,13 @@ class FeedbackSystem:
             bias = self.controller_network.bias
         else:
             bias = torch.zeros((self.forward_system.u_dim, ), dtype=self.dtype)
-        mip.addMConstrs([
+        mip.addMConstr([
             -torch.eye(self.forward_system.u_dim, dtype=self.dtype),
             self.controller_network.weight
         ], [u_pre_sat, x_var],
-                        b=-self.u_equilibrium + network_at_x_equilibrium -
-                        bias,
-                        sense=gurobipy.GRB.EQUAL,
-                        name="controller")
+                       b=-self.u_equilibrium + network_at_x_equilibrium - bias,
+                       sense=gurobipy.GRB.EQUAL,
+                       name="controller")
         controller_network_output_lo, controller_network_output_up =\
             mip_utils.propagate_bounds(
                 self.controller_network,
@@ -339,11 +338,11 @@ class FeedbackSystem:
                 (linear_inputs, relu_activations), linear_inputs_lo,
                 linear_inputs_up)
         if Ain_x is not None:
-            mip.addMConstrs([Ain_x, Ain_slack, Ain_binary],
-                            [x_var, controller_slack, controller_binary],
-                            b=rhs_in,
-                            sense=gurobipy.GRB.LESS_EQUAL,
-                            name="controller relu")
+            mip.addMConstr([Ain_x, Ain_slack, Ain_binary],
+                           [x_var, controller_slack, controller_binary],
+                           b=rhs_in,
+                           sense=gurobipy.GRB.LESS_EQUAL,
+                           name="controller relu")
 
     def add_dynamics_mip_constraint(self,
                                     mip,
@@ -421,16 +420,16 @@ class FeedbackSystem:
                     (forward_nn_linear_inputs, forward_relu_activations),
                     forward_nn_linear_inputs_lo, forward_nn_linear_inputs_up)
             if Ain_forward_nn_input is not None:
-                mip.addMConstrs([
+                mip.addMConstr([
                     Ain_forward_nn_input, Ain_forward_slack, Ain_forward_binary
                 ], [
                     forward_dynamics_return.nn_input,
                     forward_dynamics_return.slack,
                     forward_dynamics_return.binary
                 ],
-                                b=rhs_in_forward,
-                                sense=gurobipy.GRB.LESS_EQUAL,
-                                name="forward relu strengthened")
+                               b=rhs_in_forward,
+                               sense=gurobipy.GRB.LESS_EQUAL,
+                               name="forward relu strengthened")
 
         if (controller_mip_cnstr_return.nn_input is not None):
             self.strengthen_controller_mip_constraint(

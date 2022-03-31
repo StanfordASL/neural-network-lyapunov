@@ -246,7 +246,7 @@ class UnicycleReLUModel:
         #   −ϕ(0, 0, 0)
         assert (mip_cnstr_result.Aout_input is None)
         assert (mip_cnstr_result.Aout_binary is None)
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(2, dtype=self.dtype), -torch.eye(2, dtype=self.dtype),
             -mip_cnstr_result.Aout_slack
         ], [x_next_var[:2], x_var[:2], forward_slack],
@@ -443,7 +443,7 @@ class UnicycleReLUZeroVelModel(UnicycleReLUModel):
         assert (mip_cnstr_result.Aout_binary is None)
         assert (mip_cnstr_result_zero_vel.Aout_input is None)
         assert (mip_cnstr_result_zero_vel.Aout_binary is None)
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(2, dtype=self.dtype), -torch.eye(2, dtype=self.dtype),
             -mip_cnstr_result.Aout_slack, mip_cnstr_result_zero_vel.Aout_slack
         ], [x_next_var[:2], x_var[:2], forward_slack, forward_slack_zero_vel],

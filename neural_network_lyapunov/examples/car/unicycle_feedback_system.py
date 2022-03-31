@@ -115,7 +115,7 @@ class UnicycleFeedbackSystem(feedback_system.FeedbackSystem):
             torch.zeros((3, ), dtype=self.dtype))
         # Add the constraint u_pre_sat = ϕ(x) − ϕ(0) + [λᵤ |Rᵤ*[p_x, p_y]|₁, 0]
         # = relu_Aout_slack * relu_slack + relu_Cout - ϕ(0) + [λᵤ * sum(s), 0]
-        prog.addMConstrs([
+        prog.addMConstr([
             torch.eye(2, dtype=self.dtype), -controller_mip_cnstr.Aout_slack,
             -self.lambda_u * torch.cat((torch.ones(
                 (1, s_dim),

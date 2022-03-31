@@ -617,10 +617,9 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
             (_, beta, _, _, _) = dut.add_lyap_relu_output_constraint(milp, x)
             (z, cost_z_coeff) = dut.add_relu_gradient_times_xdot(
                 milp, xdot, beta, system.dx_lower, system.dx_upper)
-            milp.addMConstrs([torch.eye(system.x_dim, dtype=system.dtype)],
-                             [x],
-                             sense=gurobipy.GRB.EQUAL,
-                             b=x_val)
+            milp.addMConstr([torch.eye(system.x_dim, dtype=system.dtype)], [x],
+                            sense=gurobipy.GRB.EQUAL,
+                            b=x_val)
             milp.setObjective([cost_z_coeff], [z], 0., gurobipy.GRB.MAXIMIZE)
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, False)
             milp.gurobi_model.optimize()
@@ -794,10 +793,9 @@ class TestLyapunovContinuousTimeHybridSystem(unittest.TestCase):
                 milp, x_equilibrium, x)
             (z, z_coeff, xdot_coeff) = dut.add_sign_state_error_times_xdot(
                 milp, xdot, alpha, system.dx_lower, system.dx_upper)
-            milp.addMConstrs([torch.eye(system.x_dim, dtype=system.dtype)],
-                             [x],
-                             sense=gurobipy.GRB.EQUAL,
-                             b=x_val)
+            milp.addMConstr([torch.eye(system.x_dim, dtype=system.dtype)], [x],
+                            sense=gurobipy.GRB.EQUAL,
+                            b=x_val)
             milp.gurobi_model.setParam(gurobipy.GRB.Param.OutputFlag, 0)
             milp.gurobi_model.optimize()
             self.assertEqual(milp.gurobi_model.status, gurobipy.GRB.OPTIMAL)

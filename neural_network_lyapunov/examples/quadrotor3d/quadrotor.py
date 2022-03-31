@@ -338,7 +338,7 @@ class QuadrotorWithPixhawkReLUSystem:
         rpy_next = x_next_var[3:6]
         vel_rpy_next = vel_next + rpy_next
         vel_rpy_curr = vel_curr + rpy_curr
-        mip.addMConstrs(
+        mip.addMConstr(
             [
                 torch.eye(6, dtype=self.dtype),
                 -torch.eye(6, dtype=self.dtype), -mip_cnstr_result.Aout_slack
@@ -351,7 +351,7 @@ class QuadrotorWithPixhawkReLUSystem:
         # Now add the constraint pos[n+1] = pos[n] + (v[n] + v[n+1]) * dt / 2
         pos_next = x_next_var[:3]
         pos_curr = x_var[:3]
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(3, dtype=self.dtype), -torch.eye(3, dtype=self.dtype),
             -self.dt / 2 * torch.eye(3, dtype=self.dtype),
             -self.dt / 2 * torch.eye(3, dtype=self.dtype)
@@ -496,7 +496,7 @@ class QuadrotorReLUSystem:
         posdot_curr = x_var[6:9]
         posdot_curr_coeff = torch.zeros((9, 3), dtype=self.dtype)
         posdot_curr_coeff[3:6, :] = -torch.eye(3, dtype=self.dtype)
-        mip.addMConstrs(
+        mip.addMConstr(
             [
                 torch.eye(9, dtype=self.dtype), posdot_curr_coeff,
                 -mip_cnstr_result.Aout_slack
@@ -510,7 +510,7 @@ class QuadrotorReLUSystem:
         # pos[n+1] - pos[n] = (posdot[n+1] + posdot[n]) * dt / 2
         pos_next = x_next_var[:3]
         pos_curr = x_var[:3]
-        mip.addMConstrs([
+        mip.addMConstr([
             torch.eye(3, dtype=self.dtype), -torch.eye(3, dtype=self.dtype),
             -self.dt / 2 * torch.eye(3, dtype=self.dtype),
             -self.dt / 2 * torch.eye(3, dtype=self.dtype)

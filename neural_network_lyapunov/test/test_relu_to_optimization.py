@@ -843,9 +843,9 @@ class TestReLU(unittest.TestCase):
             binary_var_type=gurobipy.GRB.BINARY)
         # Add constraint z0 = Ax+b
         z0 = milp.addVars(x_dim, lb=-gurobipy.GRB.INFINITY)
-        milp.addMConstrs([torch.eye(x_dim, dtype=self.dtype), -A], [z0, x],
-                         sense=gurobipy.GRB.EQUAL,
-                         b=b)
+        milp.addMConstr([torch.eye(x_dim, dtype=self.dtype), -A], [z0, x],
+                        sense=gurobipy.GRB.EQUAL,
+                        b=b)
         z_lo, z_up, Wz_lo, Wz_up, z = dut._compute_Wz_bounds_optimization(
             milp.gurobi_model, z0, beta)
         # Take many sampled x, compute z and Wz for each sample
@@ -1066,10 +1066,10 @@ class TestReLU(unittest.TestCase):
                     torch.logical_and(
                         torch.abs(activation_sol) > 1E-6,
                         torch.abs(activation_sol - 1) > 1E-6)))
-        prog.addMConstrs([Ain_input, Ain_slack, Ain_binary],
-                         [x, slack, activation],
-                         sense=gurobipy.GRB.LESS_EQUAL,
-                         b=rhs_in)
+        prog.addMConstr([Ain_input, Ain_slack, Ain_binary],
+                        [x, slack, activation],
+                        sense=gurobipy.GRB.LESS_EQUAL,
+                        b=rhs_in)
         prog.gurobi_model.optimize()
         self.assertEqual(prog.gurobi_model.status, gurobipy.GRB.Status.OPTIMAL)
         strengthen_lp_obj = prog.gurobi_model.ObjVal
