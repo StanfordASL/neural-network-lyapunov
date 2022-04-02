@@ -7,6 +7,7 @@ import inspect
 import time
 import neural_network_lyapunov.hybrid_linear_system as hybrid_linear_system
 import neural_network_lyapunov.lyapunov as lyapunov
+import neural_network_lyapunov.barrier as barrier
 import neural_network_lyapunov.feedback_system as feedback_system
 import neural_network_lyapunov.utils as utils
 import neural_network_lyapunov.r_options as r_options
@@ -15,49 +16,18 @@ import neural_network_lyapunov.gurobi_torch_mip as gurobi_torch_mip
 
 class Trainer:
     """
-    We will train a ReLU network, such that the function
-    V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁ is a Lyapunov function that
-    certifies exponential/asymptotic convergence. Namely V(x) should satisfy
-    the following conditions
-    1. V(x) > 0 ∀ x ≠ x*
-    2. dV(x) ≤ -ε V(x) ∀ x for exponential convergence
-       dV(x) < 0 for asymptotic convergence
-    where dV(x) = V̇(x) for continuous time system, and
-    dV(x[n]) = V(x[n+1]) - V(x[n]) for discrete time system.
-    In order to find such V(x), we penalize a (weighted) sum of the following
-    loss
-    1. hinge(-V(xⁱ)) for sampled state xⁱ.
-    2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
-    3. -min_x V(x) - ε₂ |R*(x - x*)|₁
-    4. max_x dV(x) + ε V(x)
-    where ε₂ is a given positive scalar, and |R*(x - x*)|₁ is the 1-norm of
-    R*(x - x*).
-    hinge(z) = max(z + margin, 0) where margin is a given scalar.
+    We will train a Lyapunov function or/and a barrier function to prove the
+    stability or/and the safety of a dynamical system. If the dynamical system
+    has a controller, we can also train that controller such that the feedback
+    system is stable/safe.
     """
     def __init__(self):
-        """
-        @param lyapunov_hybrid_system This input should define a common
-        interface
-        lyapunov_positivity_as_milp() (which represents
-        minₓ V(x) - ε₂ |R*(x - x*)|₁)
-        lyapunov_positivity_loss_at_samples() (which represents
-        mean(hinge(-V(xⁱ))))
-        lyapunov_derivative_as_milp() (which represents maxₓ dV(x) + ε V(x))
-        lyapunov_derivative_loss_at_samples() (which represents
-        mean(hinge(dV(xⁱ) + ε V(xⁱ))).
-        One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
-        @param V_lambda λ in the documentation above.
-        @param x_equilibrium The equilibrium state.
-        @param R_options An ROptions object.
-        """
+
+        # properties for Lyapunov
         self.lyapunov_hybrid_system = None
         self.V_lambda = None
         self.x_equilibrium = None
         self.R_options = None
-        # The learning rate of the optimizer
-        self.learning_rate = 0.003
-        # Number of iterations in the training.
-        self.max_iterations = 1000
         # The weight of hinge(-V(xⁱ)) in the total loss
         self.lyapunov_positivity_sample_cost_weight = 1.
         # The margin in hinge(-V(xⁱ))
@@ -99,6 +69,23 @@ class Trainer:
         self.lyapunov_positivity_convergence_tol = 1E-6
         self.lyapunov_derivative_convergence_tol = 3e-5
 
+        ###################
+        # The properties for barrier.
+        self.barrier_system = None
+        self.barrier_x_star = None
+        self.barrier_c = None
+        self.barrier_epsilon = None
+        # We will require that the barrier function h(x)<=0 in all unsafe
+        # regions.
+        self.unsafe_regions = []
+        # We will require that the barrier function h(x)>=0 in all safe
+        # regions.
+        self.safe_regions = []
+
+        # The learning rate of the optimizer
+        self.learning_rate = 0.003
+        # Number of iterations in the training.
+        self.max_iterations = 1000
         # We support Adam or SGD.
         self.optimizer = "Adam"
 
@@ -173,8 +160,42 @@ class Trainer:
             V_lambda, x_equilibrium, R_options):
         """
         Set the Lyapunov function to be trained.
+        We will train a ReLU network, such that the function
+        V(x) = ReLU(x) - ReLU(x*) + λ|R*(x-x*)|₁ is a Lyapunov function that
+        certifies exponential/asymptotic convergence. Namely V(x) should
+        satisfy the following conditions
+        1. V(x) > 0 ∀ x ≠ x*
+        2. dV(x) ≤ -ε V(x) ∀ x for exponential convergence
+           dV(x) < 0 for asymptotic convergence
+        where dV(x) = V̇(x) for continuous time system, and
+        dV(x[n]) = V(x[n+1]) - V(x[n]) for discrete time system.
+        In order to find such V(x), we penalize a (weighted) sum of the
+        following loss
+        1. hinge(-V(xⁱ)) for sampled state xⁱ.
+        2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
+        3. -min_x V(x) - ε₂ |R*(x - x*)|₁
+        4. max_x dV(x) + ε V(x)
+        where ε₂ is a given positive scalar, and |R*(x - x*)|₁ is the 1-norm of
+        R*(x - x*).
+        hinge(z) = max(z + margin, 0) where margin is a given scalar.
+        @param lyapunov_hybrid_system This input should define a common
+        interface
+        lyapunov_positivity_as_milp() (which represents
+        minₓ V(x) - ε₂ |R*(x - x*)|₁)
+        lyapunov_positivity_loss_at_samples() (which represents
+        mean(hinge(-V(xⁱ))))
+        lyapunov_derivative_as_milp() (which represents maxₓ dV(x) + ε V(x))
+        lyapunov_derivative_loss_at_samples() (which represents
+        mean(hinge(dV(xⁱ) + ε V(xⁱ))).
+        One example of input type is lyapunov.LyapunovDiscreteTimeHybridSystem.
+        @param V_lambda λ in the documentation above.
+        @param x_equilibrium The equilibrium state.
+        @param R_options An ROptions object.
         """
         self.lyapunov_hybrid_system = lyapunov_hybrid_system
+        if (self.barrier_system is not None):
+            assert (self.barrier_system.system is
+                    self.lyapunov_hybrid_system.system)
         assert (isinstance(V_lambda, float))
         self.V_lambda = V_lambda
         assert (isinstance(x_equilibrium, torch.Tensor))
@@ -183,10 +204,24 @@ class Trainer:
         assert (isinstance(R_options, r_options.ROptions))
         self.R_options = R_options
 
-    def sample_loss(self, positivity_state_samples, derivative_state_samples,
-                    derivative_state_samples_next,
-                    lyapunov_positivity_sample_cost_weight,
-                    lyapunov_derivative_sample_cost_weight):
+    def add_barrier(self, barrier_system: barrier.Barrier, x_star, c,
+                    barrier_epsilon):
+        self.barrier_system = barrier_system
+        if (self.lyapunov_hybrid_system is not None):
+            assert (self.barrier_system.system is
+                    self.lyapunov_hybrid_system.system)
+        self.barrier_x_star = x_star
+        assert (isinstance(c, float))
+        self.barrier_c = c
+        assert (isinstance(barrier_epsilon, float))
+        assert (barrier_epsilon >= 0)
+        self.barrier_epsilon = barrier_epsilon
+
+    def lyapunov_sample_loss(self, positivity_state_samples,
+                             derivative_state_samples,
+                             derivative_state_samples_next,
+                             lyapunov_positivity_sample_cost_weight,
+                             lyapunov_derivative_sample_cost_weight):
         """
         Compute the cost as the summation of
         1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
@@ -230,6 +265,55 @@ class Trainer:
             derivative_sample_loss = torch.tensor(0., dtype=dtype)
 
         return positivity_sample_loss, derivative_sample_loss
+
+    def barrier_sample_loss(self, safe_state_samples: torch.Tensor,
+                            unsafe_state_samples: torch.Tensor,
+                            derivative_state_samples: torch.Tensor,
+                            safe_cost_weight: float, unsafe_cost_weight: float,
+                            derivative_cost_weight: float):
+        """
+        Compute the sum of these three losses
+        1. Loss of -h(x) on safe states.
+        2. Loss of h(x) on unsafe states.
+        3. Loss of -ε*hdot(x) - h(x) on derivative states.
+        """
+        dtype = self.barrier_system.system.dtype
+        assert (isinstance(safe_cost_weight, float))
+        assert (isinstance(unsafe_cost_weight, float))
+        assert (isinstance(derivative_cost_weight, float))
+        if safe_cost_weight != 0 and safe_state_samples.shape[0] > 0:
+            safe_sample_loss = safe_cost_weight * utils.loss_reduction(
+                torch.maximum(
+                    -self.barrier_system.value(safe_state_samples, self.
+                                               barrier_x_star, self.barrier_c),
+                    torch.tensor(0, dtype=dtype)), self.sample_loss_reduction)
+        else:
+            safe_sample_loss = torch.tensor(0, dtype=dtype)
+        if unsafe_cost_weight != 0 and unsafe_state_samples.shape[0] > 0:
+            unsafe_sample_loss = unsafe_cost_weight * utils.loss_reduction(
+                torch.maximum(
+                    self.barrier_system.value(unsafe_state_samples,
+                                              self.barrier_x_star,
+                                              self.barrier_c),
+                    torch.tensor(0, dtype=dtype)), self.sample_loss_reduction)
+        else:
+            unsafe_sample_loss = torch.tensor(0, dtype=dtype)
+        if derivative_cost_weight != 0 and derivative_state_samples.shape[
+                0] > 0:
+            derivative_state_samples_next = \
+                self.barrier_system.system.step_forward(
+                    derivative_state_samples)
+            derivative_sample_loss = derivative_cost_weight * self.\
+                barrier_system.derivative_loss_at_samples_and_next_states(
+                    self.barrier_x_star,
+                    self.barrier_c,
+                    self.barrier_epsilon,
+                    derivative_state_samples,
+                    derivative_state_samples_next,
+                    reduction=self.sample_loss_reduction)
+        else:
+            derivative_sample_loss = torch.tensor(0, dtype=dtype)
+        return safe_sample_loss, unsafe_sample_loss, derivative_sample_loss
 
     def solve_positivity_mip(self):
         dtype = self.lyapunov_hybrid_system.system.dtype
@@ -565,11 +649,13 @@ class Trainer:
             derivative_state_samples_in_pool = derivative_state_samples
             derivative_state_samples_next_in_pool = \
                 derivative_state_samples_next
-        positivity_sample_loss, derivative_sample_loss = self.sample_loss(
-            positivity_state_samples_in_pool, derivative_state_samples_in_pool,
-            derivative_state_samples_next_in_pool,
-            lyapunov_positivity_sample_cost_weight,
-            lyapunov_derivative_sample_cost_weight)
+        positivity_sample_loss, derivative_sample_loss = \
+            self.lyapunov_sample_loss(
+                positivity_state_samples_in_pool,
+                derivative_state_samples_in_pool,
+                derivative_state_samples_next_in_pool,
+                lyapunov_positivity_sample_cost_weight,
+                lyapunov_derivative_sample_cost_weight)
 
         loss = positivity_sample_loss + derivative_sample_loss + \
             positivity_mip_loss + derivative_mip_loss + gap_mip_loss
@@ -883,7 +969,7 @@ class Trainer:
             self.lyapunov_hybrid_system.system.step_forward(
                 derivative_state_samples_all)
         positivity_sample_initial_loss, derivative_sample_initial_loss = \
-            self.sample_loss(
+            self.lyapunov_sample_loss(
                 positivity_state_samples_all,
                 derivative_state_samples_all,
                 derivative_state_samples_next_all,
@@ -928,7 +1014,7 @@ class Trainer:
                     self.lyapunov_hybrid_system.system.step_forward(
                         derivative_state_batch)
                 positivity_sample_loss, derivative_sample_loss = \
-                    self.sample_loss(
+                    self.lyapunov_sample_loss(
                         positivity_state_batch, derivative_state_batch,
                         derivative_state_next_batch,
                         self.lyapunov_positivity_sample_cost_weight,
@@ -942,7 +1028,7 @@ class Trainer:
                 self.lyapunov_hybrid_system.system.step_forward(
                     derivative_state_samples_all)
             positivity_sample_epoch_loss, derivative_sample_epoch_loss = \
-                self.sample_loss(
+                self.lyapunov_sample_loss(
                     positivity_state_samples_all,
                     derivative_state_samples_all,
                     derivative_state_samples_next_all,

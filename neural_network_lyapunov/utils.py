@@ -1561,3 +1561,14 @@ def minkowski_sum(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         *([1, ny] + [1] *
           (len(x.shape) - 1))).reshape([nx * ny] + list(x.shape[1:]))
     return result
+
+
+def loss_reduction(sample_loss, reduction):
+    if reduction == "mean":
+        return torch.mean(sample_loss)
+    elif reduction == "max":
+        return torch.max(sample_loss)
+    elif reduction == "4norm":
+        return torch.norm(sample_loss, p=4)
+    else:
+        raise Exception("unknown reduction method")
