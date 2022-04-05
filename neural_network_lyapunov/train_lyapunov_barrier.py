@@ -81,6 +81,7 @@ class Trainer:
         # We will require that the barrier function h(x)>=0 in all safe
         # regions.
         self.safe_regions = []
+        self.barrier_value_mip_pool_solutions = 1
 
         # The learning rate of the optimizer
         self.learning_rate = 0.003
@@ -364,7 +365,7 @@ class Trainer:
         return lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
             positivity_mip_adversarial
 
-    def solve_derivative_mip(self):
+    def solve_lyap_derivative_mip(self):
         dtype = self.lyapunov_hybrid_system.system.dtype
         if self.derivative_mip_num_strengthen_pts == 0:
             lyapunov_derivative_as_milp_return = self.lyapunov_hybrid_system.\
@@ -518,33 +519,68 @@ class Trainer:
         x_min = torch.tensor([v.x for v in x], dtype=dtype)
         return V_max - V_min, V_min_milp, V_max_milp, x_min, x_max
 
-    class TotalLossReturn:
-        def __init__(self, loss: torch.Tensor,
-                     lyapunov_positivity_mip_obj: float,
-                     lyapunov_derivative_mip_obj: float,
-                     positivity_sample_loss: torch.Tensor,
-                     derivative_sample_loss: torch.Tensor, positivity_mip_loss,
-                     derivative_mip_loss: torch.Tensor,
-                     gap_mip_loss: torch.Tensor, positivity_state_samples,
-                     derivative_state_samples, derivative_state_samples_next):
-            self.loss = loss
-            self.lyapunov_positivity_mip_obj = lyapunov_positivity_mip_obj
-            self.lyapunov_derivative_mip_obj = lyapunov_derivative_mip_obj
-            self.positivity_sample_loss = positivity_sample_loss
-            self.derivative_sample_loss = derivative_sample_loss
-            self.positivity_mip_loss = positivity_mip_loss
-            self.derivative_mip_loss = derivative_mip_loss
-            self.gap_mip_loss = gap_mip_loss
-            self.positivity_state_samples = positivity_state_samples
-            self.derivative_state_samples = derivative_state_samples
-            self.derivative_state_samples_next = derivative_state_samples_next
+    def solve_barrier_value_mip(self, safe_flag):
+        dtype = self.barrier_system.system.dtype
+        regions = self.safe_regions if safe_flag else self.unsafe_regions
+        mip = [None] * len(regions)
+        mip_obj = [None] * len(regions)
+        mip_adversarial = [None] * len(regions)
 
-    def total_loss(self, positivity_state_samples, derivative_state_samples,
-                   derivative_state_samples_next,
-                   lyapunov_positivity_sample_cost_weight,
-                   lyapunov_derivative_sample_cost_weight,
-                   lyapunov_positivity_mip_cost_weight,
-                   lyapunov_derivative_mip_cost_weight,
+        for region_count, region in enumerate(regions):
+            mip[region_count], x = self.barrier_system.value_as_milp(
+                self.barrier_x_star, self.barrier_c, region, safe_flag)
+            mip[region_count].gurobi_model.setParam(
+                gurobipy.GRB.Param.OutputFlag, False)
+            if self.barrier_value_mip_pool_solutions > 1:
+                mip[region_count].gurobi_model.setParam(
+                    gurobipy.GRB.Param.PoolSearchMode, 2)
+                mip[region_count].gurobi_model.setParam(
+                    gurobipy.GRB.Param.PoolSolutions,
+                    self.barrier_value_mip_pool_solutions)
+            mip[region_count].gurobi_model.optimize()
+            mip_obj[region_count] = mip[region_count].gurobi_model.ObjVal
+            num_adversarial = np.min((self.barrier_value_mip_pool_solutions,
+                                      mip[region_count].gurobi_model.solCount))
+            mip_adversarial[region_count] = torch.empty(
+                (num_adversarial, self.barrier_system.system.x_dim),
+                dtype=dtype)
+            for solution_number in range(num_adversarial):
+                mip[region_count].gurobi_model.setParam(
+                    gurobipy.GRB.Param.SolutionNumber, solution_number)
+                mip_adversarial[region_count][solution_number] = torch.tensor(
+                    [v.xn for v in x], dtype=dtype)
+        return mip, mip_obj, mip_adversarial
+
+    class TotalLossReturn:
+        def __init__(self, loss: torch.Tensor, lyap_positivity_mip_obj: float,
+                     lyap_derivative_mip_obj: float,
+                     lyap_positivity_sample_loss: torch.Tensor,
+                     lyap_derivative_sample_loss: torch.Tensor,
+                     lyap_positivity_mip_loss,
+                     lyap_derivative_mip_loss: torch.Tensor,
+                     gap_mip_loss: torch.Tensor, lyap_positivity_state_samples,
+                     lyap_derivative_state_samples,
+                     lyap_derivative_state_samples_next):
+            self.loss = loss
+            self.lyap_positivity_mip_obj = lyap_positivity_mip_obj
+            self.lyap_derivative_mip_obj = lyap_derivative_mip_obj
+            self.lyap_positivity_sample_loss = lyap_positivity_sample_loss
+            self.lyap_derivative_sample_loss = lyap_derivative_sample_loss
+            self.lyap_positivity_mip_loss = lyap_positivity_mip_loss
+            self.lyap_derivative_mip_loss = lyap_derivative_mip_loss
+            self.gap_mip_loss = gap_mip_loss
+            self.lyap_positivity_state_samples = lyap_positivity_state_samples
+            self.lyap_derivative_state_samples = lyap_derivative_state_samples
+            self.lyap_derivative_state_samples_next = \
+                lyap_derivative_state_samples_next
+
+    def total_loss(self, positivity_state_samples,
+                   lyap_derivative_state_samples,
+                   lyap_derivative_state_samples_next,
+                   lyap_positivity_sample_cost_weight,
+                   lyap_derivative_sample_cost_weight,
+                   lyap_positivity_mip_cost_weight,
+                   lyap_derivative_mip_cost_weight,
                    boundary_value_gap_mip_cost_weight) -> TotalLossReturn:
         """
         Compute the total loss as the summation of
@@ -576,41 +612,42 @@ class Trainer:
         value_gap_mip_loss is boundary_value_gap_mip_cost_weight * cost5
         """
         dtype = self.lyapunov_hybrid_system.system.dtype
-        if lyapunov_positivity_mip_cost_weight is not None:
-            lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
+        if lyap_positivity_mip_cost_weight is not None:
+            lyap_positivity_mip, lyap_positivity_mip_obj,\
                 positivity_mip_adversarial = self.solve_positivity_mip()
         else:
-            lyapunov_positivity_mip = None
-            lyapunov_positivity_mip_obj = None
+            lyap_positivity_mip = None
+            lyap_positivity_mip_obj = None
             positivity_mip_adversarial = None
-        if lyapunov_derivative_mip_cost_weight is not None:
-            lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
-                derivative_mip_adversarial, derivative_mip_adversarial_next =\
-                self.solve_derivative_mip()
+        if lyap_derivative_mip_cost_weight is not None:
+            lyap_derivative_mip, lyap_derivative_mip_obj,\
+                lyap_derivative_mip_adversarial,\
+                lyap_derivative_mip_adversarial_next =\
+                self.solve_lyap_derivative_mip()
         else:
-            lyapunov_derivative_mip = None
-            lyapunov_derivative_mip_obj = None
-            derivative_mip_adversarial = None
-            derivative_mip_adversarial_next = None
+            lyap_derivative_mip = None
+            lyap_derivative_mip_obj = None
+            lyap_derivative_mip_adversarial = None
+            lyap_derivative_mip_adversarial_next = None
 
         loss = torch.tensor(0., dtype=dtype)
 
         positivity_mip_loss = 0.
-        if lyapunov_positivity_mip_cost_weight != 0 and\
-                lyapunov_positivity_mip_cost_weight is not None:
+        if lyap_positivity_mip_cost_weight != 0 and\
+                lyap_positivity_mip_cost_weight is not None:
             positivity_mip_loss = \
-                lyapunov_positivity_mip_cost_weight * \
-                lyapunov_positivity_mip.\
+                lyap_positivity_mip_cost_weight * \
+                lyap_positivity_mip.\
                 compute_objective_from_mip_data_and_solution(
                     solution_number=0, penalty=1e-13)
-        derivative_mip_loss = 0
-        if lyapunov_derivative_mip_cost_weight != 0\
-                and lyapunov_derivative_mip_cost_weight is not None:
-            mip_cost = lyapunov_derivative_mip.\
+        lyap_derivative_mip_loss = 0
+        if lyap_derivative_mip_cost_weight != 0\
+                and lyap_derivative_mip_cost_weight is not None:
+            mip_cost = lyap_derivative_mip.\
                 compute_objective_from_mip_data_and_solution(
                     solution_number=0, penalty=1e-13)
-            derivative_mip_loss = \
-                lyapunov_derivative_mip_cost_weight * mip_cost
+            lyap_derivative_mip_loss = \
+                lyap_derivative_mip_cost_weight * mip_cost
         gap_mip_loss = 0
         if boundary_value_gap_mip_cost_weight != 0:
             boundary_value_gap, V_min_milp, V_max_milp, x_min, x_max = \
@@ -624,48 +661,51 @@ class Trainer:
         # MIP separately. This is different from adding the most adversarial
         # state of the total loss.
         if self.add_positivity_adversarial_state and \
-                lyapunov_positivity_mip_cost_weight is not None:
+                lyap_positivity_mip_cost_weight is not None:
             positivity_state_samples = torch.cat(
                 (positivity_state_samples, positivity_mip_adversarial), dim=0)
         if self.add_derivative_adversarial_state and \
-                lyapunov_derivative_mip_cost_weight is not None:
-            derivative_state_samples = torch.cat(
-                (derivative_state_samples, derivative_mip_adversarial), dim=0)
-            derivative_state_samples_next = torch.cat(
-                (derivative_state_samples_next,
-                 derivative_mip_adversarial_next))
+                lyap_derivative_mip_cost_weight is not None:
+            lyap_derivative_state_samples = torch.cat(
+                (lyap_derivative_state_samples,
+                 lyap_derivative_mip_adversarial),
+                dim=0)
+            lyap_derivative_state_samples_next = torch.cat(
+                (lyap_derivative_state_samples_next,
+                 lyap_derivative_mip_adversarial_next))
 
         if positivity_state_samples.shape[0] > self.max_sample_pool_size:
             positivity_state_samples_in_pool = \
                 positivity_state_samples[-self.max_sample_pool_size:]
         else:
             positivity_state_samples_in_pool = positivity_state_samples
-        if derivative_state_samples.shape[0] > self.max_sample_pool_size:
-            derivative_state_samples_in_pool = \
-                derivative_state_samples[-self.max_sample_pool_size:]
-            derivative_state_samples_next_in_pool = \
-                derivative_state_samples_next[-self.max_sample_pool_size:]
+        if lyap_derivative_state_samples.shape[0] > self.max_sample_pool_size:
+            lyap_derivative_state_samples_in_pool = \
+                lyap_derivative_state_samples[-self.max_sample_pool_size:]
+            lyap_derivative_state_samples_next_in_pool = \
+                lyap_derivative_state_samples_next[-self.max_sample_pool_size:]
         else:
-            derivative_state_samples_in_pool = derivative_state_samples
-            derivative_state_samples_next_in_pool = \
-                derivative_state_samples_next
-        positivity_sample_loss, derivative_sample_loss = \
+            lyap_derivative_state_samples_in_pool = \
+                lyap_derivative_state_samples
+            lyap_derivative_state_samples_next_in_pool = \
+                lyap_derivative_state_samples_next
+        positivity_sample_loss, lyap_derivative_sample_loss = \
             self.lyapunov_sample_loss(
                 positivity_state_samples_in_pool,
-                derivative_state_samples_in_pool,
-                derivative_state_samples_next_in_pool,
-                lyapunov_positivity_sample_cost_weight,
-                lyapunov_derivative_sample_cost_weight)
+                lyap_derivative_state_samples_in_pool,
+                lyap_derivative_state_samples_next_in_pool,
+                lyap_positivity_sample_cost_weight,
+                lyap_derivative_sample_cost_weight)
 
-        loss = positivity_sample_loss + derivative_sample_loss + \
-            positivity_mip_loss + derivative_mip_loss + gap_mip_loss
+        loss = positivity_sample_loss + lyap_derivative_sample_loss + \
+            positivity_mip_loss + lyap_derivative_mip_loss + gap_mip_loss
 
         return Trainer.TotalLossReturn(
-            loss, lyapunov_positivity_mip_obj, lyapunov_derivative_mip_obj,
-            positivity_sample_loss, derivative_sample_loss,
-            positivity_mip_loss, derivative_mip_loss, gap_mip_loss,
-            positivity_state_samples, derivative_state_samples,
-            derivative_state_samples_next)
+            loss, lyap_positivity_mip_obj, lyap_derivative_mip_obj,
+            positivity_sample_loss, lyap_derivative_sample_loss,
+            positivity_mip_loss, lyap_derivative_mip_loss, gap_mip_loss,
+            positivity_state_samples, lyap_derivative_state_samples,
+            lyap_derivative_state_samples_next)
 
     def _save_network(self, iter_count):
         if self.save_network_path:
@@ -767,50 +807,50 @@ class Trainer:
                 self.lyapunov_derivative_mip_cost_weight,
                 self.boundary_value_gap_mip_cost_weight)
             positivity_state_samples = \
-                total_loss_return.positivity_state_samples
+                total_loss_return.lyap_positivity_state_samples
             derivative_state_samples = \
-                total_loss_return.derivative_state_samples
+                total_loss_return.lyap_derivative_state_samples
             derivative_state_samples_next = \
-                total_loss_return.derivative_state_samples_next
+                total_loss_return.lyap_derivative_state_samples_next
 
             if self.enable_wandb:
                 wandb.log({
                     "loss": total_loss_return.loss.item(),
                     "positivity MIP cost":
-                    total_loss_return.lyapunov_positivity_mip_obj,
+                    total_loss_return.lyap_positivity_mip_obj,
                     "derivative MIP cost":
-                    total_loss_return.lyapunov_derivative_mip_obj,
+                    total_loss_return.lyap_derivative_mip_obj,
                     "boundary gap MIP": total_loss_return.gap_mip_loss,
                     "time": time.time() - train_start_time
                 })
             if self.output_flag:
                 print(f"Iter {iter_count}, loss {total_loss_return.loss}, " +
                       "positivity cost " +
-                      f"{total_loss_return.lyapunov_positivity_mip_obj}, " +
+                      f"{total_loss_return.lyap_positivity_mip_obj}, " +
                       "derivative_cost " +
-                      f"{total_loss_return.lyapunov_derivative_mip_obj}")
-            if total_loss_return.lyapunov_positivity_mip_obj <=\
+                      f"{total_loss_return.lyap_derivative_mip_obj}")
+            if total_loss_return.lyap_positivity_mip_obj <=\
                 self.lyapunov_positivity_convergence_tol and\
-                total_loss_return.lyapunov_derivative_mip_obj <= \
+                total_loss_return.lyap_derivative_mip_obj <= \
                     self.lyapunov_derivative_convergence_tol:
                 return (True, total_loss_return.loss.item(),
-                        total_loss_return.lyapunov_positivity_mip_obj,
-                        total_loss_return.lyapunov_derivative_mip_obj)
-            if total_loss_return.lyapunov_positivity_mip_obj < \
+                        total_loss_return.lyap_positivity_mip_obj,
+                        total_loss_return.lyap_derivative_mip_obj)
+            if total_loss_return.lyap_positivity_mip_obj < \
                 self.lyapunov_positivity_convergence_tol and\
-                    total_loss_return.lyapunov_derivative_mip_obj <\
+                    total_loss_return.lyap_derivative_mip_obj <\
                     best_derivative_mip_cost:
                 best_training_params = [  # noqa
                     p.clone() for p in training_params
                 ]
                 best_derivative_mip_cost = \
-                    total_loss_return.lyapunov_derivative_mip_obj
+                    total_loss_return.lyap_derivative_mip_obj
             total_loss_return.loss.backward()
             optimizer.step()
             iter_count += 1
         return (False, total_loss_return.loss.item(),
-                total_loss_return.lyapunov_positivity_mip_obj,
-                total_loss_return.lyapunov_derivative_mip_obj)
+                total_loss_return.lyap_positivity_mip_obj,
+                total_loss_return.lyap_derivative_mip_obj)
 
     def train_lyapunov_on_samples(self, state_samples_all, num_epochs,
                                   batch_size):
@@ -858,8 +898,8 @@ class Trainer:
                     state_samples_next,
                     self.lyapunov_positivity_sample_cost_weight,
                     self.lyapunov_derivative_sample_cost_weight,
-                    lyapunov_positivity_mip_cost_weight=None,
-                    lyapunov_derivative_mip_cost_weight=None,
+                    lyap_positivity_mip_cost_weight=None,
+                    lyap_derivative_mip_cost_weight=None,
                     boundary_value_gap_mip_cost_weight=0)
                 total_loss_return.loss.backward()
                 optimizer.step()
@@ -878,8 +918,8 @@ class Trainer:
                 test_state_samples_next,
                 self.lyapunov_positivity_sample_cost_weight,
                 self.lyapunov_derivative_sample_cost_weight,
-                lyapunov_positivity_mip_cost_weight=None,
-                lyapunov_derivative_mip_cost_weight=None,
+                lyap_positivity_mip_cost_weight=None,
+                lyap_derivative_mip_cost_weight=None,
                 boundary_value_gap_mip_cost_weight=0)
             test_loss = test_loss_return.loss
             print(f"epoch {epoch}, training loss " +
@@ -1087,7 +1127,8 @@ class Trainer:
             lyapunov_positivity_mip, lyapunov_positivity_mip_obj,\
                 positivity_mip_adversarial = self.solve_positivity_mip()
             lyapunov_derivative_mip, lyapunov_derivative_mip_obj,\
-                derivative_mip_adversarial, _ = self.solve_derivative_mip()
+                derivative_mip_adversarial, _ = \
+                self.solve_lyap_derivative_mip()
             if not np.isinf(options.adversarial_cluster_radius):
                 positivity_mip_adversarial,\
                     positivity_mip_adversarial_repeatition =\
