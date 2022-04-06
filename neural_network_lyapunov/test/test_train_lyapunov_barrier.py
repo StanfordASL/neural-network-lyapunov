@@ -52,7 +52,7 @@ def setup_state_samples_all(mesh_size):
 
 class TestTrainerMIP(unittest.TestCase):
     """
-    Test solve_positivity_mip() and solve_derivative_mip() function in
+    Test solve_positivity_mip() and solve_lyap_derivative_mip() function in
     Trainer
     """
     def setUp(self):
@@ -128,12 +128,12 @@ class TestTrainerMIP(unittest.TestCase):
                         np.array([v.xn for v in positivity_return[1]]),
                         positivity_mip_adversarial[i].detach().numpy())
 
-    def test_solve_derivative_mip(self):
+    def test_solve_lyap_derivative_mip(self):
         for num_solutions in (1, 10, 1000):
             self.dut.lyapunov_derivative_mip_pool_solutions = num_solutions
             derivative_mip, derivative_mip_obj, derivative_mip_adversarial,\
                 derivative_mip_adversarial_next = \
-                self.dut.solve_derivative_mip()
+                self.dut.solve_lyap_derivative_mip()
             self.assertLessEqual(derivative_mip_adversarial.shape[0],
                                  num_solutions)
             np.testing.assert_allclose(
@@ -240,25 +240,27 @@ class TestTrainer(unittest.TestCase):
             dut.lyapunov_derivative_mip_cost_weight,
             dut.boundary_value_gap_mip_cost_weight)
 
-        self.assertEqual(positivity_state_samples.shape[0] + 1,
-                         total_loss_return.positivity_state_samples.shape[0])
-        self.assertEqual(derivative_state_samples.shape[0] + 1,
-                         total_loss_return.derivative_state_samples.shape[0])
+        self.assertEqual(
+            positivity_state_samples.shape[0] + 1,
+            total_loss_return.lyap_positivity_state_samples.shape[0])
+        self.assertEqual(
+            derivative_state_samples.shape[0] + 1,
+            total_loss_return.lyap_derivative_state_samples.shape[0])
         self.assertEqual(
             derivative_state_samples_next.shape[0] + 1,
-            total_loss_return.derivative_state_samples_next.shape[0])
+            total_loss_return.lyap_derivative_state_samples_next.shape[0])
         self.assertAlmostEqual(total_loss_return.loss.item(),
-                               (total_loss_return.positivity_sample_loss +
-                                total_loss_return.derivative_sample_loss +
-                                total_loss_return.positivity_mip_loss +
-                                total_loss_return.derivative_mip_loss +
+                               (total_loss_return.lyap_positivity_sample_loss +
+                                total_loss_return.lyap_derivative_sample_loss +
+                                total_loss_return.lyap_positivity_mip_loss +
+                                total_loss_return.lyap_derivative_mip_loss +
                                 total_loss_return.gap_mip_loss).item())
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
                 x_equilibrium,
-                total_loss_return.positivity_state_samples[
+                total_loss_return.lyap_positivity_state_samples[
                     -dut.max_sample_pool_size:],
                 V_lambda, dut.lyapunov_positivity_epsilon,
                 R=R_options.R(), margin=dut.lyapunov_positivity_sample_margin)
@@ -266,9 +268,9 @@ class TestTrainer(unittest.TestCase):
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
                 V_lambda, dut.lyapunov_derivative_epsilon,
-                total_loss_return.derivative_state_samples[
+                total_loss_return.lyap_derivative_state_samples[
                     -dut.max_sample_pool_size:],
-                total_loss_return.derivative_state_samples_next[
+                total_loss_return.lyap_derivative_state_samples_next[
                     -dut.max_sample_pool_size:],
                 x_equilibrium, dut.lyapunov_derivative_eps_type,
                 R=R_options.R(), margin=dut.lyapunov_derivative_sample_margin)
@@ -317,9 +319,9 @@ class TestTrainer(unittest.TestCase):
         self.assertAlmostEqual(total_loss_return.loss.item(),
                                loss_expected.item(),
                                places=4)
-        self.assertAlmostEqual(total_loss_return.lyapunov_positivity_mip_obj,
+        self.assertAlmostEqual(total_loss_return.lyap_positivity_mip_obj,
                                lyapunov_positivity_mip.gurobi_model.ObjVal)
-        self.assertAlmostEqual(total_loss_return.lyapunov_derivative_mip_obj,
+        self.assertAlmostEqual(total_loss_return.lyap_derivative_mip_obj,
                                lyapunov_derivative_mip.gurobi_model.ObjVal)
 
     def solve_boundary_gap_mip_tester(self, dut):
@@ -457,6 +459,48 @@ class TestTrainerBarrier(unittest.TestCase):
             dut.sample_loss_reduction) * safe_cost_weight
         self.assertAlmostEqual(safe_sample_loss.item(),
                                safe_sample_loss_expected.item())
+
+    def test_solve_barrier_value_mip(self):
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_barrier(self.barrier_system,
+                        x_star=(self.system.x_lo * 0.25 +
+                                self.system.x_up * 0.75),
+                        c=0.1,
+                        barrier_epsilon=0.3)
+        dut.safe_regions = [gurobi_torch_mip.MixedIntegerConstraintsReturn()]
+        dut.safe_regions[0].Ain_input = -torch.eye(2, dtype=self.dtype)
+        dut.safe_regions[
+            0].rhs_in = self.system.x_lo * 0.3 + self.system.x_up * 0.7
+        dut.unsafe_regions = [None, None]
+        dut.unsafe_regions[0] = gurobi_torch_mip.MixedIntegerConstraintsReturn(
+        )
+        dut.unsafe_regions[0].Ain_input = torch.tensor([[1, 0]],
+                                                       dtype=self.dtype)
+        dut.unsafe_regions[0].rhs_in = torch.tensor(
+            [self.system.x_lo[0] * 0.9 + self.system.x_up[0] * 0.1],
+            dtype=self.dtype)
+        dut.unsafe_regions[1] = gurobi_torch_mip.MixedIntegerConstraintsReturn(
+        )
+        dut.unsafe_regions[1].Ain_input = torch.tensor([[0, 1]],
+                                                       dtype=self.dtype)
+        dut.unsafe_regions[1].rhs_in = torch.tensor(
+            [self.system.x_lo[1] * 0.8 + self.system.x_up[1] * 0.2],
+            dtype=self.dtype)
+        dut.barrier_value_mip_pool_solutions = 5
+
+        # safe region
+        mip, mip_obj, mip_adversarial = dut.solve_barrier_value_mip(
+            safe_flag=True)
+        self.assertEqual(len(mip), len(dut.safe_regions))
+        self.assertEqual(len(mip_obj), len(dut.safe_regions))
+        self.assertEqual(len(mip_adversarial), len(dut.safe_regions))
+
+        # unsafe region
+        mip, mip_obj, mip_adversarial = dut.solve_barrier_value_mip(
+            safe_flag=False)
+        self.assertEqual(len(mip), len(dut.unsafe_regions))
+        self.assertEqual(len(mip_obj), len(dut.unsafe_regions))
+        self.assertEqual(len(mip_adversarial), len(dut.unsafe_regions))
 
 
 class TestTrainValueApproximator(unittest.TestCase):
