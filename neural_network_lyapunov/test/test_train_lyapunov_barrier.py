@@ -502,6 +502,23 @@ class TestTrainerBarrier(unittest.TestCase):
         self.assertEqual(len(mip_obj), len(dut.unsafe_regions))
         self.assertEqual(len(mip_adversarial), len(dut.unsafe_regions))
 
+    def test_solve_barrier_derivative_mip(self):
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_barrier(self.barrier_system,
+                        x_star=(self.system.x_lo * 0.25 +
+                                self.system.x_up * 0.75),
+                        c=0.1,
+                        barrier_epsilon=0.3)
+        dut.barrier_derivative_mip_pool_solutions = 10
+        dut.add_adversarial_state_only = True
+        milp, mip_obj, adversarial = dut.solve_barrier_derivative_mip()
+        self.assertGreater(adversarial.shape[0], 1)
+        np.testing.assert_array_less(
+            0,
+            dut.barrier_system.derivative(
+                adversarial, dut.barrier_x_star, dut.barrier_c,
+                dut.barrier_epsilon).detach().numpy())
+
 
 class TestTrainValueApproximator(unittest.TestCase):
     def setUp(self):
