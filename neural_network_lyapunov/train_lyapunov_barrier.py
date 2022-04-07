@@ -82,6 +82,7 @@ class Trainer:
         # regions.
         self.safe_regions = []
         self.barrier_value_mip_pool_solutions = 1
+        self.barrier_derivative_mip_pool_solutions = 1
 
         # The learning rate of the optimizer
         self.learning_rate = 0.003
@@ -119,6 +120,10 @@ class Trainer:
 
         # All the Lyapunov derivative MIP params (except pool solutions).
         self.lyapunov_derivative_mip_params = {
+            gurobipy.GRB.Param.OutputFlag: False
+        }
+
+        self.barrier_derivative_mip_params = {
             gurobipy.GRB.Param.OutputFlag: False
         }
 
@@ -550,6 +555,37 @@ class Trainer:
                 mip_adversarial[region_count][solution_number] = torch.tensor(
                     [v.xn for v in x], dtype=dtype)
         return mip, mip_obj, mip_adversarial
+
+    def solve_barrier_derivative_mip(self):
+        dtype = self.barrier_system.system.dtype
+        barrier_deriv_return = self.barrier_system.derivative_as_milp(
+            self.barrier_x_star, self.barrier_c, self.barrier_epsilon)
+        if self.barrier_derivative_mip_pool_solutions > 1:
+            barrier_deriv_return.milp.gurobi_model.setParam(
+                    gurobipy.GRB.Param.PoolSearchMode, 2)
+            barrier_deriv_return.milp.gurobi_model.setParam(
+                gurobipy.GRB.Param.PoolSolutions,
+                self.barrier_derivative_mip_pool_solutions)
+        for param, val in self.barrier_derivative_mip_params.items():
+            barrier_deriv_return.milp.gurobi_model.setParam(param, val)
+        barrier_deriv_return.milp.gurobi_model.optimize()
+        barrier_deriv_mip_obj = barrier_deriv_return.milp.gurobi_model.ObjVal
+        num_adversarial = np.min(
+            (self.barrier_derivative_mip_pool_solutions,
+             barrier_deriv_return.milp.gurobi_model.solCount))
+        mip_adversarial = []
+        for solution_number in range(num_adversarial):
+            barrier_deriv_return.milp.gurobi_model.setParam(
+                gurobipy.GRB.Param.SolutionNumber, solution_number)
+            if not self.add_adversarial_state_only or (
+                    self.add_adversarial_state_only
+                    and barrier_deriv_return.milp.gurobi_model.PoolObjVal > 0):
+                mip_adversarial.append(
+                    torch.tensor([v.xn for v in barrier_deriv_return.x],
+                                 dtype=dtype))
+        mip_adversarial = torch.stack(mip_adversarial)
+        return barrier_deriv_return.milp, barrier_deriv_mip_obj,\
+            mip_adversarial
 
     class TotalLossReturn:
         def __init__(self, loss: torch.Tensor, lyap_positivity_mip_obj: float,
