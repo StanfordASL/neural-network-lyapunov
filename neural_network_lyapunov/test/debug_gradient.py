@@ -41,14 +41,14 @@ def compute_total_loss(system, x_equilibrium, relu_layer_width, params_val,
     dut.lyapunov_derivative_epsilon = lyapunov_derivative_epsilon
     total_loss = dut.total_loss(state_samples, state_samples_next)
     if requires_grad:
-        total_loss[0].backward()
+        total_loss.loss.backward()
         grad = np.concatenate([
             p.grad.detach().numpy().reshape((-1, )) for p in relu.parameters()
         ],
                               axis=0)
         return grad
     else:
-        return total_loss[0].item()
+        return total_loss.loss.item()
 
 
 def compute_milp_cost_given_relu(system, x_equilibrium, relu_layer_width,
