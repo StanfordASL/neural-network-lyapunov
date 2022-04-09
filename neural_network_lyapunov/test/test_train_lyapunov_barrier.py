@@ -242,25 +242,26 @@ class TestTrainer(unittest.TestCase):
 
         self.assertEqual(
             positivity_state_samples.shape[0] + 1,
-            total_loss_return.lyap_positivity_state_samples.shape[0])
+            total_loss_return.lyap_loss.positivity_state_samples.shape[0])
         self.assertEqual(
             derivative_state_samples.shape[0] + 1,
-            total_loss_return.lyap_derivative_state_samples.shape[0])
+            total_loss_return.lyap_loss.derivative_state_samples.shape[0])
         self.assertEqual(
             derivative_state_samples_next.shape[0] + 1,
-            total_loss_return.lyap_derivative_state_samples_next.shape[0])
-        self.assertAlmostEqual(total_loss_return.loss.item(),
-                               (total_loss_return.lyap_positivity_sample_loss +
-                                total_loss_return.lyap_derivative_sample_loss +
-                                total_loss_return.lyap_positivity_mip_loss +
-                                total_loss_return.lyap_derivative_mip_loss +
-                                total_loss_return.gap_mip_loss).item())
+            total_loss_return.lyap_loss.derivative_state_samples_next.shape[0])
+        self.assertAlmostEqual(
+            total_loss_return.loss.item(),
+            (total_loss_return.lyap_loss.positivity_sample_loss +
+             total_loss_return.lyap_loss.derivative_sample_loss +
+             total_loss_return.lyap_loss.positivity_mip_loss +
+             total_loss_return.lyap_loss.derivative_mip_loss +
+             total_loss_return.lyap_loss.gap_mip_loss).item())
         # Compute hinge(-V(x)) for sampled state x
         loss_expected = 0.
         loss_expected += dut.lyapunov_positivity_sample_cost_weight *\
             lyapunov_hybrid_system.lyapunov_positivity_loss_at_samples(
                 x_equilibrium,
-                total_loss_return.lyap_positivity_state_samples[
+                total_loss_return.lyap_loss.positivity_state_samples[
                     -dut.max_sample_pool_size:],
                 V_lambda, dut.lyapunov_positivity_epsilon,
                 R=R_options.R(), margin=dut.lyapunov_positivity_sample_margin)
@@ -268,9 +269,9 @@ class TestTrainer(unittest.TestCase):
             lyapunov_hybrid_system.\
             lyapunov_derivative_loss_at_samples_and_next_states(
                 V_lambda, dut.lyapunov_derivative_epsilon,
-                total_loss_return.lyap_derivative_state_samples[
+                total_loss_return.lyap_loss.derivative_state_samples[
                     -dut.max_sample_pool_size:],
-                total_loss_return.lyap_derivative_state_samples_next[
+                total_loss_return.lyap_loss.derivative_state_samples_next[
                     -dut.max_sample_pool_size:],
                 x_equilibrium, dut.lyapunov_derivative_eps_type,
                 R=R_options.R(), margin=dut.lyapunov_derivative_sample_margin)
@@ -319,9 +320,9 @@ class TestTrainer(unittest.TestCase):
         self.assertAlmostEqual(total_loss_return.loss.item(),
                                loss_expected.item(),
                                places=4)
-        self.assertAlmostEqual(total_loss_return.lyap_positivity_mip_obj,
+        self.assertAlmostEqual(total_loss_return.lyap_loss.positivity_mip_obj,
                                lyapunov_positivity_mip.gurobi_model.ObjVal)
-        self.assertAlmostEqual(total_loss_return.lyap_derivative_mip_obj,
+        self.assertAlmostEqual(total_loss_return.lyap_loss.derivative_mip_obj,
                                lyapunov_derivative_mip.gurobi_model.ObjVal)
 
     def solve_boundary_gap_mip_tester(self, dut):
