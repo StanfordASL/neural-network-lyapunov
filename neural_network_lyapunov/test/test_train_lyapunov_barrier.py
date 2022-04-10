@@ -520,6 +520,55 @@ class TestTrainerBarrier(unittest.TestCase):
                 adversarial, dut.barrier_x_star, dut.barrier_c,
                 dut.barrier_epsilon).detach().numpy())
 
+    def test_barrier_loss(self):
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_barrier(self.barrier_system,
+                        x_star=(self.system.x_lo * 0.25 +
+                                self.system.x_up * 0.75),
+                        c=0.1,
+                        barrier_epsilon=0.3)
+        dut.safe_regions = [gurobi_torch_mip.MixedIntegerConstraintsReturn()]
+        dut.safe_regions[0].Ain = torch.eye(2, dtype=self.dtype)
+        dut.safe_regions[0].rhs = (self.system.x_lo + self.system.x_up) / 2
+        safe_state_samples = utils.uniform_sample_in_box(
+            self.system.x_lo, (self.system.x_lo + self.system.x_up) / 2, 100)
+
+        dut.unsafe_regions = [gurobi_torch_mip.MixedIntegerConstraintsReturn()]
+        dut.unsafe_regions[0].Ain_input = -torch.eye(2, dtype=self.dtype)
+        dut.unsafe_regions[0].rhs_in = -(self.system.x_lo * 0.25 +
+                                         self.system.x_up * 0.75)
+        num_unsafe_state_samples = 200
+        unsafe_state_samples = utils.uniform_sample_in_box(
+            self.system.x_lo * 0.25 + self.system.x_up * 0.75,
+            self.system.x_up, num_unsafe_state_samples)
+        num_derivative_state_samples = 300
+        derivative_state_samples = utils.uniform_sample_in_box(
+            self.system.x_lo, self.system.x_up, num_derivative_state_samples)
+
+        safe_sample_cost_weight = 2.
+        unsafe_sample_cost_weight = 3.
+        derivative_sample_cost_weight = 4.
+        safe_mip_cost_weight = 5.
+        unsafe_mip_cost_weight = 6.
+        derivative_mip_cost_weight = 7.
+
+        barrier_loss = dut.compute_barrier_loss(
+            safe_state_samples, unsafe_state_samples, derivative_state_samples,
+            safe_sample_cost_weight, unsafe_sample_cost_weight,
+            derivative_sample_cost_weight, safe_mip_cost_weight,
+            unsafe_mip_cost_weight, derivative_mip_cost_weight)
+        self.assertEqual(len(barrier_loss.safe_mip_obj), len(dut.safe_regions))
+        self.assertEqual(len(barrier_loss.safe_mip_loss),
+                         len(dut.safe_regions))
+        self.assertEqual(len(barrier_loss.unsafe_mip_obj),
+                         len(dut.unsafe_regions))
+        self.assertEqual(len(barrier_loss.unsafe_mip_loss),
+                         len(dut.unsafe_regions))
+        self.assertGreater(barrier_loss.unsafe_state_samples.shape[0],
+                           num_unsafe_state_samples)
+        self.assertGreater(barrier_loss.derivative_state_samples.shape[0],
+                           num_derivative_state_samples)
+
 
 class TestTrainValueApproximator(unittest.TestCase):
     def setUp(self):

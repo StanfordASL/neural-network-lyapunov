@@ -623,6 +623,86 @@ class Trainer:
             assert (isinstance(barrier_loss, Trainer.BarrierLoss))
             self.barrier_loss = barrier_loss
 
+    def compute_barrier_loss(self, safe_state_samples, unsafe_state_samples,
+                             derivative_state_samples, safe_sample_cost_weight,
+                             unsafe_sample_cost_weight,
+                             derivative_sample_cost_weight,
+                             safe_mip_cost_weight, unsafe_mip_cost_weight,
+                             derivative_mip_cost_weight) -> BarrierLoss:
+        barrier_loss = Trainer.BarrierLoss()
+
+        if safe_mip_cost_weight is not None:
+            safe_mip, barrier_loss.safe_mip_obj, safe_mip_adversarial = \
+                self.solve_barrier_value_mip(safe_flag=True)
+            if safe_mip_cost_weight != 0:
+                barrier_loss.safe_mip_loss = [
+                    safe_mip_cost_weight *
+                    mip.compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1e-13) for mip in safe_mip
+                ]
+        else:
+            barrier_loss.safe_mip_loss = None
+            barrier_loss.safe_mip_obj = None
+            safe_mip_adversarial = None
+
+        if unsafe_mip_cost_weight is not None:
+            unsafe_mip, barrier_loss.unsafe_mip_obj, unsafe_mip_adversarial = \
+                self.solve_barrier_value_mip(safe_flag=False)
+            if unsafe_mip_cost_weight != 0:
+                barrier_loss.unsafe_mip_loss = [
+                    unsafe_mip_cost_weight *
+                    mip.compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1e-13) for mip in unsafe_mip
+                ]
+        else:
+            barrier_loss.unsafe_mip_loss = None
+            barrier_loss.unsafe_mip_obj = None
+            unsafe_mip_adversarial = None
+
+        if derivative_mip_cost_weight is not None:
+            derivative_mip, barrier_loss.derivative_mip_obj, \
+                derivative_mip_adversarial = self.solve_barrier_derivative_mip(
+                )
+            if derivative_mip_cost_weight != 0:
+                barrier_loss.derivative_mip_loss = derivative_mip_cost_weight \
+                    * derivative_mip.\
+                    compute_objective_from_mip_data_and_solution(
+                        solution_number=0, penalty=1e-13)
+        else:
+            barrier_loss.derivative_mip_loss = None
+            barrier_loss.derivative_mip_obj = None
+            derivative_mip_adversarial = None
+
+        barrier_loss.safe_state_samples = safe_state_samples
+        barrier_loss.unsafe_state_samples = unsafe_state_samples
+        barrier_loss.derivative_state_samples = derivative_state_samples
+        if safe_mip_cost_weight is not None and \
+            safe_mip_adversarial is not None and \
+                len(safe_mip_adversarial) > 0:
+            barrier_loss.safe_state_samples = torch.cat(
+                (safe_state_samples, torch.cat(safe_mip_adversarial, dim=0)),
+                dim=0)
+        if unsafe_mip_cost_weight is not None and \
+            unsafe_mip_adversarial is not None and \
+                len(unsafe_mip_adversarial) > 0:
+            barrier_loss.unsafe_state_samples = torch.cat(
+                (unsafe_state_samples, torch.cat(unsafe_mip_adversarial,
+                                                 dim=0)),
+                dim=0)
+        if derivative_mip_cost_weight is not None and \
+                derivative_mip_adversarial is not None:
+            barrier_loss.derivative_state_samples = torch.cat(
+                (derivative_state_samples, derivative_mip_adversarial), dim=0)
+        barrier_loss.safe_sample_loss, barrier_loss.unsafe_sample_loss, \
+            barrier_loss.derivative_sample_loss = self.barrier_sample_loss(
+                barrier_loss.safe_state_samples[-self.max_sample_pool_size:],
+                barrier_loss.unsafe_state_samples[-self.max_sample_pool_size:],
+                barrier_loss.derivative_state_samples[
+                    -self.max_sample_pool_size:],
+                safe_sample_cost_weight, unsafe_sample_cost_weight,
+                derivative_sample_cost_weight)
+        return barrier_loss
+
     def total_loss(self, positivity_state_samples,
                    lyap_derivative_state_samples,
                    lyap_derivative_state_samples_next,
