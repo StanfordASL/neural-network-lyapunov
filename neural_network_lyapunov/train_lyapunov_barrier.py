@@ -83,6 +83,12 @@ class Trainer:
         self.safe_regions = []
         self.barrier_value_mip_pool_solutions = 1
         self.barrier_derivative_mip_pool_solutions = 1
+        self.safe_sample_cost_weight = 0.
+        self.unsafe_sample_cost_weight = 0.
+        self.barrier_derivative_sample_cost_weight = 0.
+        self.safe_mip_cost_weight = None
+        self.unsafe_mip_cost_weight = None
+        self.barrier_derivative_mip_cost_weight = None
 
         # The learning rate of the optimizer
         self.learning_rate = 0.003
@@ -623,6 +629,139 @@ class Trainer:
             assert (isinstance(barrier_loss, Trainer.BarrierLoss))
             self.barrier_loss = barrier_loss
 
+    def compute_lyapunov_loss(self, positivity_state_samples,
+                              lyap_derivative_state_samples,
+                              lyap_derivative_state_samples_next,
+                              lyap_positivity_sample_cost_weight,
+                              lyap_derivative_sample_cost_weight,
+                              lyap_positivity_mip_cost_weight,
+                              lyap_derivative_mip_cost_weight,
+                              boundary_value_gap_mip_cost_weight) -> LyapLoss:
+        """
+        Compute the total loss as the summation of
+        1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
+        2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
+        3. -min_x V(x) - ε₂ |x - x*|₁
+        4. max_x dV(x) + ε V(x)
+        5. max_(x, y) V(x) - V(y) s.t x∈∂ℬ, y∈∂ℬ
+        Cost 5 is added to enlarge the verified region-of-attraction (as the
+        largest sub-level set inside the verified region ℬ).
+        @param positivity_state_samples All sample states on which we compute
+        the violation of Lyapunov positivity constraint.
+        @param derivative_state_samples All sample states on which we compute
+        the violation of Lyapunov derivative constraint.
+        @param derivative_state_samples_next. The next state(s) of the sampled
+        state. derivative_state_samples_next contains next state(s) of
+        derivative_state_samples[i].
+        @return loss, positivity_mip_objective, derivative_mip_objective,
+        positivity_sample_loss, derivative_sample_loss, positivity_mip_loss,
+        derivative_mip_loss
+        positivity_mip_objective is the objective value
+        min_x V(x) - ε₂ |x - x*|₁. We want this value to be non-negative.
+        derivative_mip_objective is the objective value max_x dV(x) + ε V(x).
+        We want this value to be non-positive.
+        positivity_sample_loss is weight * cost1
+        derivative_sample_loss is weight * cost2
+        positivity_mip_loss is weight * cost3
+        derivative_mip_loss is weight * cost4
+        value_gap_mip_loss is boundary_value_gap_mip_cost_weight * cost5
+        """
+        dtype = self.lyapunov_hybrid_system.system.dtype
+        lyap_loss = Trainer.LyapLoss()
+        if self.lyapunov_hybrid_system is None:
+            return lyap_loss
+        if lyap_positivity_mip_cost_weight is not None:
+            lyap_positivity_mip, lyap_loss.positivity_mip_obj,\
+                positivity_mip_adversarial = self.solve_positivity_mip()
+        else:
+            lyap_positivity_mip = None
+            lyap_loss.positivity_mip_obj = None
+            positivity_mip_adversarial = None
+        if lyap_derivative_mip_cost_weight is not None:
+            lyap_derivative_mip, lyap_loss.derivative_mip_obj,\
+                lyap_derivative_mip_adversarial,\
+                lyap_derivative_mip_adversarial_next =\
+                self.solve_lyap_derivative_mip()
+        else:
+            lyap_derivative_mip = None
+            lyap_loss.derivative_mip_obj = None
+            lyap_derivative_mip_adversarial = None
+            lyap_derivative_mip_adversarial_next = None
+
+        lyap_loss.positivity_mip_loss = torch.tensor(0., dtype=dtype)
+        if lyap_positivity_mip_cost_weight != 0 and\
+                lyap_positivity_mip_cost_weight is not None:
+            lyap_loss.positivity_mip_loss = \
+                lyap_positivity_mip_cost_weight * \
+                lyap_positivity_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    solution_number=0, penalty=1e-13)
+        lyap_loss.derivative_mip_loss = torch.tensor(0, dtype=dtype)
+        if lyap_derivative_mip_cost_weight != 0\
+                and lyap_derivative_mip_cost_weight is not None:
+            mip_cost = lyap_derivative_mip.\
+                compute_objective_from_mip_data_and_solution(
+                    solution_number=0, penalty=1e-13)
+            lyap_loss.derivative_mip_loss = \
+                lyap_derivative_mip_cost_weight * mip_cost
+        lyap_loss.gap_mip_loss = 0
+        if boundary_value_gap_mip_cost_weight != 0:
+            boundary_value_gap, V_min_milp, V_max_milp, x_min, x_max = \
+                self.solve_boundary_gap_mip()
+            print(f"boundary_value_gap: {V_max_milp - V_min_milp}")
+            lyap_loss.gap_mip_loss = \
+                boundary_value_gap_mip_cost_weight * boundary_value_gap
+
+        # We add the most adverisal states of the positivity MIP and derivative
+        # MIP to the training set. Note we solve positivity MIP and derivative
+        # MIP separately. This is different from adding the most adversarial
+        # state of the total loss.
+        lyap_loss.positivity_state_samples = positivity_state_samples
+        lyap_loss.derivative_state_samples = lyap_derivative_state_samples
+        lyap_loss.derivative_state_samples_next = \
+            lyap_derivative_state_samples_next
+        if self.add_positivity_adversarial_state and \
+                lyap_positivity_mip_cost_weight is not None:
+            lyap_loss.positivity_state_samples = torch.cat(
+                (positivity_state_samples, positivity_mip_adversarial), dim=0)
+        if self.add_derivative_adversarial_state and \
+                lyap_derivative_mip_cost_weight is not None:
+            lyap_loss.derivative_state_samples = torch.cat(
+                (lyap_derivative_state_samples,
+                 lyap_derivative_mip_adversarial),
+                dim=0)
+            lyap_loss.derivative_state_samples_next = torch.cat(
+                (lyap_derivative_state_samples_next,
+                 lyap_derivative_mip_adversarial_next))
+
+        if lyap_loss.positivity_state_samples.shape[
+                0] > self.max_sample_pool_size:
+            positivity_state_samples_in_pool = \
+                lyap_loss.positivity_state_samples[-self.max_sample_pool_size:]
+        else:
+            positivity_state_samples_in_pool = \
+                lyap_loss.positivity_state_samples
+        if lyap_loss.derivative_state_samples.shape[
+                0] > self.max_sample_pool_size:
+            lyap_derivative_state_samples_in_pool = \
+                lyap_loss.derivative_state_samples[-self.max_sample_pool_size:]
+            lyap_derivative_state_samples_next_in_pool = \
+                lyap_loss.derivative_state_samples_next[
+                    -self.max_sample_pool_size:]
+        else:
+            lyap_derivative_state_samples_in_pool = \
+                lyap_loss.derivative_state_samples
+            lyap_derivative_state_samples_next_in_pool = \
+                lyap_loss.derivative_state_samples_next
+        lyap_loss.positivity_sample_loss, lyap_loss.derivative_sample_loss = \
+            self.lyapunov_sample_loss(
+                positivity_state_samples_in_pool,
+                lyap_derivative_state_samples_in_pool,
+                lyap_derivative_state_samples_next_in_pool,
+                lyap_positivity_sample_cost_weight,
+                lyap_derivative_sample_cost_weight)
+        return lyap_loss
+
     def compute_barrier_loss(self, safe_state_samples, unsafe_state_samples,
                              derivative_state_samples, safe_sample_cost_weight,
                              unsafe_sample_cost_weight,
@@ -630,6 +769,8 @@ class Trainer:
                              safe_mip_cost_weight, unsafe_mip_cost_weight,
                              derivative_mip_cost_weight) -> BarrierLoss:
         barrier_loss = Trainer.BarrierLoss()
+        if self.barrier_system is None:
+            return barrier_loss
 
         if safe_mip_cost_weight is not None:
             safe_mip, barrier_loss.safe_mip_obj, safe_mip_adversarial = \
@@ -710,136 +851,48 @@ class Trainer:
                    lyap_derivative_sample_cost_weight,
                    lyap_positivity_mip_cost_weight,
                    lyap_derivative_mip_cost_weight,
-                   boundary_value_gap_mip_cost_weight) -> TotalLossReturn:
-        """
-        Compute the total loss as the summation of
-        1. hinge(-V(xⁱ) + ε₂ |xⁱ - x*|₁) for sampled state xⁱ.
-        2. hinge(dV(xⁱ) + ε V(xⁱ)) for sampled state xⁱ.
-        3. -min_x V(x) - ε₂ |x - x*|₁
-        4. max_x dV(x) + ε V(x)
-        5. max_(x, y) V(x) - V(y) s.t x∈∂ℬ, y∈∂ℬ
-        Cost 5 is added to enlarge the verified region-of-attraction (as the
-        largest sub-level set inside the verified region ℬ).
-        @param positivity_state_samples All sample states on which we compute
-        the violation of Lyapunov positivity constraint.
-        @param derivative_state_samples All sample states on which we compute
-        the violation of Lyapunov derivative constraint.
-        @param derivative_state_samples_next. The next state(s) of the sampled
-        state. derivative_state_samples_next contains next state(s) of
-        derivative_state_samples[i].
-        @return loss, positivity_mip_objective, derivative_mip_objective,
-        positivity_sample_loss, derivative_sample_loss, positivity_mip_loss,
-        derivative_mip_loss
-        positivity_mip_objective is the objective value
-        min_x V(x) - ε₂ |x - x*|₁. We want this value to be non-negative.
-        derivative_mip_objective is the objective value max_x dV(x) + ε V(x).
-        We want this value to be non-positive.
-        positivity_sample_loss is weight * cost1
-        derivative_sample_loss is weight * cost2
-        positivity_mip_loss is weight * cost3
-        derivative_mip_loss is weight * cost4
-        value_gap_mip_loss is boundary_value_gap_mip_cost_weight * cost5
-        """
-        dtype = self.lyapunov_hybrid_system.system.dtype
-        lyap_loss = Trainer.LyapLoss()
-        barrier_loss = Trainer.BarrierLoss()
-        if lyap_positivity_mip_cost_weight is not None:
-            lyap_positivity_mip, lyap_loss.positivity_mip_obj,\
-                positivity_mip_adversarial = self.solve_positivity_mip()
-        else:
-            lyap_positivity_mip = None
-            lyap_loss.positivity_mip_obj = None
-            positivity_mip_adversarial = None
-        if lyap_derivative_mip_cost_weight is not None:
-            lyap_derivative_mip, lyap_loss.derivative_mip_obj,\
-                lyap_derivative_mip_adversarial,\
-                lyap_derivative_mip_adversarial_next =\
-                self.solve_lyap_derivative_mip()
-        else:
-            lyap_derivative_mip = None
-            lyap_loss.derivative_mip_obj = None
-            lyap_derivative_mip_adversarial = None
-            lyap_derivative_mip_adversarial_next = None
+                   boundary_value_gap_mip_cost_weight, safe_state_samples,
+                   unsafe_state_samples, barrier_derivative_state_samples,
+                   safe_sample_cost_weight, unsafe_sample_cost_weight,
+                   barrier_derivative_sample_cost_weight, safe_mip_cost_weight,
+                   unsafe_mip_cost_weight,
+                   barrier_derivative_mip_cost_weight) -> TotalLossReturn:
+        lyap_loss = self.compute_lyapunov_loss(
+            positivity_state_samples, lyap_derivative_state_samples,
+            lyap_derivative_state_samples_next,
+            lyap_positivity_sample_cost_weight,
+            lyap_derivative_sample_cost_weight,
+            lyap_positivity_mip_cost_weight, lyap_derivative_mip_cost_weight,
+            boundary_value_gap_mip_cost_weight)
 
-        loss = torch.tensor(0., dtype=dtype)
+        barrier_loss = self.compute_barrier_loss(
+            safe_state_samples, unsafe_state_samples,
+            barrier_derivative_state_samples, safe_sample_cost_weight,
+            unsafe_sample_cost_weight, barrier_derivative_sample_cost_weight,
+            safe_mip_cost_weight, unsafe_mip_cost_weight,
+            barrier_derivative_mip_cost_weight)
 
-        lyap_loss.positivity_mip_loss = torch.tensor(0., dtype=dtype)
-        if lyap_positivity_mip_cost_weight != 0 and\
-                lyap_positivity_mip_cost_weight is not None:
-            lyap_loss.positivity_mip_loss = \
-                lyap_positivity_mip_cost_weight * \
-                lyap_positivity_mip.\
-                compute_objective_from_mip_data_and_solution(
-                    solution_number=0, penalty=1e-13)
-        lyap_loss.derivative_mip_loss = torch.tensor(0, dtype=dtype)
-        if lyap_derivative_mip_cost_weight != 0\
-                and lyap_derivative_mip_cost_weight is not None:
-            mip_cost = lyap_derivative_mip.\
-                compute_objective_from_mip_data_and_solution(
-                    solution_number=0, penalty=1e-13)
-            lyap_loss.derivative_mip_loss = \
-                lyap_derivative_mip_cost_weight * mip_cost
-        lyap_loss.gap_mip_loss = 0
-        if boundary_value_gap_mip_cost_weight != 0:
-            boundary_value_gap, V_min_milp, V_max_milp, x_min, x_max = \
-                self.solve_boundary_gap_mip()
-            print(f"boundary_value_gap: {V_max_milp - V_min_milp}")
-            lyap_loss.gap_mip_loss = \
-                boundary_value_gap_mip_cost_weight * boundary_value_gap
+        def add_loss(total_loss, individual_loss):
+            if individual_loss is not None:
+                total_loss += individual_loss
 
-        # We add the most adverisal states of the positivity MIP and derivative
-        # MIP to the training set. Note we solve positivity MIP and derivative
-        # MIP separately. This is different from adding the most adversarial
-        # state of the total loss.
-        lyap_loss.positivity_state_samples = positivity_state_samples
-        lyap_loss.derivative_state_samples = lyap_derivative_state_samples
-        lyap_loss.derivative_state_samples_next = \
-            lyap_derivative_state_samples_next
-        if self.add_positivity_adversarial_state and \
-                lyap_positivity_mip_cost_weight is not None:
-            lyap_loss.positivity_state_samples = torch.cat(
-                (positivity_state_samples, positivity_mip_adversarial), dim=0)
-        if self.add_derivative_adversarial_state and \
-                lyap_derivative_mip_cost_weight is not None:
-            lyap_loss.derivative_state_samples = torch.cat(
-                (lyap_derivative_state_samples,
-                 lyap_derivative_mip_adversarial),
-                dim=0)
-            lyap_loss.derivative_state_samples_next = torch.cat(
-                (lyap_derivative_state_samples_next,
-                 lyap_derivative_mip_adversarial_next))
+        loss = torch.tensor(0, dtype=self.dtype())
+        add_loss(loss, lyap_loss.positivity_sample_loss)
+        add_loss(loss, lyap_loss.derivative_sample_loss)
+        add_loss(loss, lyap_loss.positivity_mip_loss)
+        add_loss(loss, lyap_loss.derivative_mip_loss)
+        add_loss(loss, lyap_loss.gap_mip_loss)
 
-        if lyap_loss.positivity_state_samples.shape[
-                0] > self.max_sample_pool_size:
-            positivity_state_samples_in_pool = \
-                lyap_loss.positivity_state_samples[-self.max_sample_pool_size:]
-        else:
-            positivity_state_samples_in_pool = \
-                lyap_loss.positivity_state_samples
-        if lyap_loss.derivative_state_samples.shape[
-                0] > self.max_sample_pool_size:
-            lyap_derivative_state_samples_in_pool = \
-                lyap_loss.derivative_state_samples[-self.max_sample_pool_size:]
-            lyap_derivative_state_samples_next_in_pool = \
-                lyap_loss.derivative_state_samples_next[
-                    -self.max_sample_pool_size:]
-        else:
-            lyap_derivative_state_samples_in_pool = \
-                lyap_loss.derivative_state_samples
-            lyap_derivative_state_samples_next_in_pool = \
-                lyap_loss.derivative_state_samples_next
-        lyap_loss.positivity_sample_loss, lyap_loss.derivative_sample_loss = \
-            self.lyapunov_sample_loss(
-                positivity_state_samples_in_pool,
-                lyap_derivative_state_samples_in_pool,
-                lyap_derivative_state_samples_next_in_pool,
-                lyap_positivity_sample_cost_weight,
-                lyap_derivative_sample_cost_weight)
-
-        loss = lyap_loss.positivity_sample_loss + \
-            lyap_loss.derivative_sample_loss + \
-            lyap_loss.positivity_mip_loss + lyap_loss.derivative_mip_loss +\
-            lyap_loss.gap_mip_loss
+        add_loss(loss, barrier_loss.safe_sample_loss)
+        add_loss(loss, barrier_loss.unsafe_sample_loss)
+        add_loss(loss, barrier_loss.derivative_sample_loss)
+        if barrier_loss.safe_mip_loss is not None and len(
+                barrier_loss.safe_mip_loss) > 1:
+            loss += torch.sum(torch.stack(barrier_loss.safe_mip_loss))
+        if barrier_loss.unsafe_mip_loss is not None and len(
+                barrier_loss.unsafe_mip_loss) > 1:
+            loss += torch.sum(torch.stack(barrier_loss.unsafe_mip_loss))
+        add_loss(loss, barrier_loss.derivative_mip_loss)
 
         return Trainer.TotalLossReturn(loss, lyap_loss, barrier_loss)
 
@@ -886,7 +939,10 @@ class Trainer:
                 self.R_options.variables()
         return training_params
 
-    def train(self, state_samples_all):
+    def train(self,
+              state_samples_all,
+              safe_state_samples=None,
+              unsafe_state_samples=None):
         train_start_time = time.time()
         if self.output_flag:
             self.print()
@@ -894,16 +950,24 @@ class Trainer:
         assert (state_samples_all.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
         positivity_state_samples = state_samples_all.clone()
-        derivative_state_samples = state_samples_all.clone()
+        lyap_derivative_state_samples = state_samples_all.clone()
+        if safe_state_samples is None:
+            safe_state_samples = torch.empty((0, self.x_dim()),
+                                             dtype=self.dtype())
+        if unsafe_state_samples is None:
+            unsafe_state_samples = torch.empty((0, self.x_dim()),
+                                               dtype=self.dtype())
+        barrier_derivative_state_samples = state_samples_all.clone()
         if (state_samples_all.shape[0] > 0):
-            derivative_state_samples_next = torch.stack([
+            lyap_derivative_state_samples_next = torch.stack([
                 self.lyapunov_hybrid_system.system.step_forward(
-                    derivative_state_samples[i])
-                for i in range(derivative_state_samples.shape[0])
+                    lyap_derivative_state_samples[i])
+                for i in range(lyap_derivative_state_samples.shape[0])
             ],
-                                                        dim=0)
+                                                             dim=0)
         else:
-            derivative_state_samples_next = torch.empty_like(state_samples_all)
+            lyap_derivative_state_samples_next = torch.empty_like(
+                state_samples_all)
         iter_count = 0
         training_params = self._training_params()
 
@@ -927,26 +991,31 @@ class Trainer:
                 # If we train a feedback system, then we will modify the
                 # controller in each iteration, hence the next sample state
                 # changes in each iteration.
-                if (derivative_state_samples.shape[0] > 0):
-                    derivative_state_samples_next =\
+                if (lyap_derivative_state_samples.shape[0] > 0):
+                    lyap_derivative_state_samples_next =\
                         self.lyapunov_hybrid_system.system.step_forward(
-                            derivative_state_samples)
+                            lyap_derivative_state_samples)
                 else:
-                    derivative_state_samples_next = torch.empty_like(
-                        derivative_state_samples)
+                    lyap_derivative_state_samples_next = torch.empty_like(
+                        lyap_derivative_state_samples)
             total_loss_return = self.total_loss(
-                positivity_state_samples, derivative_state_samples,
-                derivative_state_samples_next,
+                positivity_state_samples, lyap_derivative_state_samples,
+                lyap_derivative_state_samples_next,
                 self.lyapunov_positivity_sample_cost_weight,
                 self.lyapunov_derivative_sample_cost_weight,
                 self.lyapunov_positivity_mip_cost_weight,
                 self.lyapunov_derivative_mip_cost_weight,
-                self.boundary_value_gap_mip_cost_weight)
+                self.boundary_value_gap_mip_cost_weight, safe_state_samples,
+                unsafe_state_samples, barrier_derivative_state_samples,
+                self.safe_sample_cost_weight, self.unsafe_sample_cost_weight,
+                self.barrier_derivative_sample_cost_weight,
+                self.safe_mip_cost_weight, self.unsafe_mip_cost_weight,
+                self.barrier_derivative_mip_cost_weight)
             positivity_state_samples = \
                 total_loss_return.lyap_loss.positivity_state_samples
-            derivative_state_samples = \
+            lyap_derivative_state_samples = \
                 total_loss_return.lyap_loss.derivative_state_samples
-            derivative_state_samples_next = \
+            lyap_derivative_state_samples_next = \
                 total_loss_return.lyap_loss.derivative_state_samples_next
 
             if self.enable_wandb:
@@ -989,39 +1058,78 @@ class Trainer:
                 total_loss_return.lyap_loss.positivity_mip_obj,
                 total_loss_return.lyap_loss.derivative_mip_obj)
 
-    def train_lyapunov_on_samples(self, state_samples_all, num_epochs,
-                                  batch_size):
-        """
-        Train a ReLU network on given state samples (not the adversarial states
-        found by MIP). The loss function is the weighted sum of the lyapunov
-        positivity condition violation and the lyapunov derivative condition
-        violation on these samples. We stop the training when either the
-        maximum iteration is reached, or when many consecutive iterations the
-        MIP costs keeps increasing (which means the network overfits to the
-        training data). Return the best network (the one with the minimal
-        MIP loss) found so far.
-        @param state_samples_all A torch tensor, state_samples_all[i] is the
-        i'th sample
-        """
+    def x_dim(self):
+        if self.lyapunov_hybrid_system is not None:
+            return self.lyapunov_hybrid_system.system.x_dim
+        elif self.barrier_system is not None:
+            return self.barrier_system.system.x_dim
+
+    def dtype(self):
+        if self.lyapunov_hybrid_system is not None:
+            return self.lyapunov_hybrid_system.system.dtype
+        elif self.barrier_system is not None:
+            return self.barrier_system.system.dtype
+
+    def train_on_samples(self, state_samples_all, safe_samples, unsafe_samples,
+                         num_epochs, batch_size):
         assert (isinstance(state_samples_all, torch.Tensor))
         assert (state_samples_all.shape[1] ==
                 self.lyapunov_hybrid_system.system.x_dim)
+        if safe_samples is None:
+            safe_samples = torch.empty((0, self.x_dim()), dtype=self.dtype())
+        if unsafe_samples is None:
+            unsafe_samples = torch.empty((0, self.x_dim()), dtype=self.dtype())
+
         best_loss = np.inf
         training_params = self._training_params()
         optimizer = torch.optim.Adam(training_params, lr=self.learning_rate)
-        dataset = torch.utils.data.TensorDataset(state_samples_all)
-        train_set_size = int(len(dataset) * 0.8)
-        test_set_size = len(dataset) - train_set_size
-        train_dataset, test_dataset = torch.utils.data.random_split(
-            dataset, [train_set_size, test_set_size])
-        data_loader = torch.utils.data.DataLoader(train_dataset,
-                                                  batch_size=batch_size,
-                                                  shuffle=True)
-        test_state_samples = test_dataset[:][0]
+
+        def split_data(states):
+            dataset = torch.utils.data.TensorDataset(states)
+            train_set_size = int(len(dataset) * 0.8)
+            test_set_size = len(dataset) - train_set_size
+            train_dataset, test_dataset = torch.utils.data.random_split(
+                dataset, [train_set_size, test_set_size])
+            data_loader = torch.utils.data.DataLoader(train_dataset,
+                                                      batch_size=batch_size,
+                                                      shuffle=True)
+            test_state_samples = test_dataset[:][0]
+            return data_loader, test_state_samples
+
+        data_loader, test_state_samples = split_data(state_samples_all)
+        if safe_samples.shape[0] > 0:
+            safe_data_loader, test_safe_state_samples = split_data(
+                safe_samples)
+        else:
+            safe_data_loader = None
+            test_safe_state_samples = torch.empty((0, self.x_dim()),
+                                                  dtype=self.dtype())
+        if unsafe_samples.shape[0] > 0:
+            unsafe_data_loader, test_unsafe_state_samples = split_data(
+                unsafe_samples)
+        else:
+            unsafe_data_loader = None
+            test_unsafe_state_samples = torch.empty((0, self.x_dim()),
+                                                    dtype=self.dtype())
         for epoch in range(num_epochs):
             running_loss = 0.
-            for _, batch_data in enumerate(data_loader):
+            if safe_data_loader is None and unsafe_data_loader is None:
+                data_loaders = data_loader
+            else:
+                data_loaders = zip(data_loader, safe_data_loader,
+                                   unsafe_data_loader)
+            for _, batch_data in enumerate(data_loaders):
                 state_samples_batch = batch_data[0]
+                if safe_data_loader is not None:
+                    safe_state_samples_batch = batch_data[1]
+                else:
+                    safe_state_samples_batch = torch.empty((0, self.x_dim()),
+                                                           dtype=self.dtype())
+                if unsafe_data_loader is not None:
+                    unsafe_state_samples_batch = batch_data[2]
+                else:
+                    unsafe_state_samples_batch = torch.empty(
+                        (0, self.x_dim()), dtype=self.dtype())
                 optimizer.zero_grad()
                 state_samples_next = torch.stack([
                     self.lyapunov_hybrid_system.system.step_forward(
@@ -1037,7 +1145,17 @@ class Trainer:
                     self.lyapunov_derivative_sample_cost_weight,
                     lyap_positivity_mip_cost_weight=None,
                     lyap_derivative_mip_cost_weight=None,
-                    boundary_value_gap_mip_cost_weight=0)
+                    boundary_value_gap_mip_cost_weight=0,
+                    safe_state_samples=safe_state_samples_batch,
+                    unsafe_state_samples=unsafe_state_samples_batch,
+                    barrier_derivative_state_samples=state_samples_batch,
+                    safe_sample_cost_weight=self.safe_sample_cost_weight,
+                    unsafe_sample_cost_weight=self.unsafe_sample_cost_weight,
+                    barrier_derivative_sample_cost_weight=self.
+                    barrier_derivative_sample_cost_weight,
+                    safe_mip_cost_weight=None,
+                    unsafe_mip_cost_weight=None,
+                    barrier_derivative_mip_cost_weight=None)
                 total_loss_return.loss.backward()
                 optimizer.step()
                 running_loss += total_loss_return.loss.item()
@@ -1057,27 +1175,75 @@ class Trainer:
                 self.lyapunov_derivative_sample_cost_weight,
                 lyap_positivity_mip_cost_weight=None,
                 lyap_derivative_mip_cost_weight=None,
-                boundary_value_gap_mip_cost_weight=0)
+                boundary_value_gap_mip_cost_weight=0,
+                safe_state_samples=test_safe_state_samples,
+                unsafe_state_samples=test_unsafe_state_samples,
+                barrier_derivative_state_samples=test_state_samples,
+                safe_sample_cost_weight=self.safe_sample_cost_weight,
+                unsafe_sample_cost_weight=self.unsafe_sample_cost_weight,
+                barrier_derivative_sample_cost_weight=self.
+                barrier_derivative_sample_cost_weight,
+                safe_mip_cost_weight=None,
+                unsafe_mip_cost_weight=None,
+                barrier_derivative_mip_cost_weight=None)
             test_loss = test_loss_return.loss
             print(f"epoch {epoch}, training loss " +
                   f"{running_loss / len(data_loader)}, test loss " +
                   f"{test_loss.item()}")
             if test_loss.item() < best_loss:
                 best_loss = test_loss.item()
-                best_lyapunov_relu = copy.deepcopy(
-                    self.lyapunov_hybrid_system.lyapunov_relu)
-                if isinstance(self.lyapunov_hybrid_system.system,
-                              feedback_system.FeedbackSystem):
+                if self.lyapunov_hybrid_system is not None:
+                    best_lyapunov_relu = copy.deepcopy(
+                        self.lyapunov_hybrid_system.lyapunov_relu)
+                if self.barrier_system is not None:
+                    best_barrier_relu = copy.deepcopy(
+                        self.barrier_system.barrier_relu)
+                if self.lyapunov_hybrid_system is not None and isinstance(
+                        self.lyapunov_hybrid_system.system,
+                        feedback_system.FeedbackSystem):
                     best_controller_relu = copy.deepcopy(
                         self.lyapunov_hybrid_system.system.controller_network)
+                if self.barrier_system is not None and isinstance(
+                        self.barrier_system.system,
+                        feedback_system.FeedbackSystem):
+                    best_controller_relu = copy.deepcopy(
+                        self.barrier_system.system.controller_network)
 
         print(f"best loss {best_loss}")
-        self.lyapunov_hybrid_system.lyapunov_relu.load_state_dict(
-            best_lyapunov_relu.state_dict())
-        if isinstance(self.lyapunov_hybrid_system.system,
-                      feedback_system.FeedbackSystem):
-            self.lyapunov_hybrid_system.system.controller_network.\
-                load_state_dict(best_controller_relu.state_dict())
+        if self.lyapunov_hybrid_system is not None:
+            self.lyapunov_hybrid_system.lyapunov_relu.load_state_dict(
+                best_lyapunov_relu.state_dict())
+            if isinstance(self.lyapunov_hybrid_system.system,
+                          feedback_system.FeedbackSystem):
+                self.lyapunov_hybrid_system.system.controller_network.\
+                    load_state_dict(best_controller_relu.state_dict())
+        if self.barrier_system is not None:
+            self.barrier_system.barrier_relu.load_state_dict(
+                best_barrier_relu.state_dict())
+            if isinstance(self.barrier_system.system,
+                          feedback_system.FeedbackSystem):
+                self.barrier_system.system.controller_network.load_state_dict(
+                    best_controller_relu.state_dict())
+
+    def train_lyapunov_on_samples(self, state_samples_all, num_epochs,
+                                  batch_size):
+        """
+        Train a ReLU network on given state samples (not the adversarial states
+        found by MIP). The loss function is the weighted sum of the lyapunov
+        positivity condition violation and the lyapunov derivative condition
+        violation on these samples. We stop the training when either the
+        maximum iteration is reached, or when many consecutive iterations the
+        MIP costs keeps increasing (which means the network overfits to the
+        training data). Return the best network (the one with the minimal
+        MIP loss) found so far.
+        @param state_samples_all A torch tensor, state_samples_all[i] is the
+        i'th sample
+        """
+        return self.train_on_samples(state_samples_all,
+                                     safe_samples=None,
+                                     unsafe_samples=None,
+                                     num_epochs=num_epochs,
+                                     batch_size=batch_size)
 
     class AdversarialTrainingOptions:
         def __init__(self):
