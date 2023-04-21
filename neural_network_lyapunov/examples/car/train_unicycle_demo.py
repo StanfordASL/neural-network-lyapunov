@@ -1,3 +1,8 @@
+"""
+Do not run this code!!!!!
+
+Dubins car cannot be stabilized by a continuous controller.
+"""
 import neural_network_lyapunov.examples.car.unicycle as unicycle
 import neural_network_lyapunov.examples.car.unicycle_feedback_system as\
     unicycle_feedback_system

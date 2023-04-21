@@ -1,3 +1,8 @@
+"""
+Do not run this code!!!
+
+Dubins car cannot be stabilized by a continuous controller.
+"""
 import neural_network_lyapunov.examples.car.acceleration_car as\
     acceleration_car
 import neural_network_lyapunov.utils as utils
