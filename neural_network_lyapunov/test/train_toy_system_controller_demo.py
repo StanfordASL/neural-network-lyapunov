@@ -82,7 +82,7 @@ if __name__ == "__main__":
     dut = train_lyapunov_barrier.Trainer()
     dut.add_lyapunov(
         lyapunov_hybrid_system, V_lambda, x_equilibrium,
-        r_options.FixedROptions(torch.eye(2, dtype=torch.float64)))
+        r_options.FixedROptions(torch.eye(args.dimension, dtype=torch.float64)))
     dut.lyapunov_positivity_mip_pool_solutions = 1
     dut.lyapunov_derivative_mip_pool_solutions = 1
     dut.lyapunov_derivative_convergence_tol = 5E-5
