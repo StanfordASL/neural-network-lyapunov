@@ -906,7 +906,6 @@ def leaky_relu_interval(negative_slope, x_lo, x_up):
     [output_lo, output_up]
     """
     assert (x_up > x_lo)
-    assert (type(x_lo) == type(x_up))
     if (negative_slope >= 0):
         if x_lo >= 0:
             if isinstance(x_lo, torch.Tensor):

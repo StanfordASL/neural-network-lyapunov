@@ -153,9 +153,10 @@ def train_cost_approximator(lyapunov_relu, V_lambda, R, states, costs,
 
 
 if __name__ == "__main__":
-    raise Exception("Dubins car cannot be stabilized by a continuous controller, refer" +
-                    "to https://arxiv.org/pdf/math/9902026.pdf for a proof. Using" +
-                    "neural-network controllers is doomed to fail for Dubins car.")
+    raise Exception("Dubins car cannot be stabilized by a continuous controller," +
+                    " refer to https://arxiv.org/pdf/math/9902026.pdf for a proof." +
+                    " Using neural-network controllers is doomed to fail for Dubins" +
+                    " car.")
     parser = argparse.ArgumentParser(description="Unicycle training demo")
     parser.add_argument("--generate_dynamics_data", action="store_true")
     parser.add_argument("--load_dynamics_data",

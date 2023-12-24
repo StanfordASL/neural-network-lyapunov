@@ -90,10 +90,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     traj = np.load(args.file)
-    assert(isinstance(traj, np.ndarray))
-    assert(len(traj.shape) == 2)
-    assert(traj.shape[0] >= 6)
-    assert(traj.shape[1] >= 2)
+    assert (isinstance(traj, np.ndarray))
+    assert (len(traj.shape) == 2)
+    assert (traj.shape[0] >= 6)
+    assert (traj.shape[1] >= 2)
 
     mesh_pub = rospy.Publisher('animated_mesh', Marker, queue_size=10)
     traj_line_pub = rospy.Publisher('traj_line', Marker, queue_size=10)

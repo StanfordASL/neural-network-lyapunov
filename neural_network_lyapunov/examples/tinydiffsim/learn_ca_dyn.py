@@ -65,7 +65,7 @@ def generate_dataset(cfg, mb, actuation_mask):
                 j += 1
             else:
                 tau[i] = 0
-        assert(j == u_dim)
+        assert (j == u_dim)
 
         mb.q = q
         mb.qd = qd
