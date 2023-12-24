@@ -323,7 +323,7 @@ def td3(env_fn, actor_critic=MLPActorCritic,
         mean_ret = 0.
         for j in range(num_test_episodes):
             o, d, ep_ret, ep_len = test_env.reset(), False, 0, 0
-            while not(d or (ep_len == max_ep_len)):
+            while not (d or (ep_len == max_ep_len)):
                 # Take deterministic actions at test time (noise_scale=0)
                 o, r, d, _ = test_env.step(get_action(o, 0))
                 ep_ret += r

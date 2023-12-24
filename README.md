@@ -16,21 +16,15 @@ We can synthesize neural-network controllers with Lyapunov stability guarantees.
 ## Python requirements
 We use python 3 in this project. You could first install the packages in requirements.txt.
 
-## Install gurobi
-Please download gurobi from https://www.gurobi.com/products/gurobi-optimizer/. We require at least gurobi 9.5. After downloading the software, please install its Python API by following https://www.gurobi.com/documentation/9.0/quickstart_mac/the_grb_python_interface_f.html
+## Installation
+Please run
+```
+pip install -e .
+```
+to install the package together with the dependencies.
 
-To check your gurobi installation, type the following command in your terminal:
-```
-$ python3 -c "import gurobipy"
-```
-There should be no error thrown when executing the command.
-
-## Setup environment variable
-In the terminal, please run
-```
-$ python3 setup.py
-```
-It will print out the command to setup the environment variables. Execute that command in your terminal.
+## Setup gurobi
+Please refer to https://support.gurobi.com/hc/en-us/articles/360044290292-How-do-I-install-Gurobi-for-Python- on setting up Gurobi. Note that by default Gurobi ships with a limited license that has size limits on the optimization problem. Please refer to https://support.gurobi.com/hc/en-us/articles/360051597492 on using your own academic or commential license.
 
 ## Run a toy example
 You could run
