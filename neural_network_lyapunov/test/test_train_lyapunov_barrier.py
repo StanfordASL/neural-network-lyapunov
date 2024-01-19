@@ -232,13 +232,23 @@ class TestTrainer(unittest.TestCase):
         positivity_state_samples = state_samples_all.clone()
         derivative_state_samples = state_samples_all.clone()
         derivative_state_samples_next = state_samples_next.clone()
+        safe_state_samples = torch.empty((0, dut.x_dim()), dtype=dut.dtype())
+        unsafe_state_samples = torch.empty((0, dut.x_dim()), dtype=dut.dtype())
+        barrier_derivative_state_samples = torch.empty((0, dut.x_dim()),
+                                                       dtype=dut.dtype())
+
         total_loss_return = dut.total_loss(
             positivity_state_samples, derivative_state_samples,
             state_samples_next, dut.lyapunov_positivity_sample_cost_weight,
             dut.lyapunov_derivative_sample_cost_weight,
             dut.lyapunov_positivity_mip_cost_weight,
             dut.lyapunov_derivative_mip_cost_weight,
-            dut.boundary_value_gap_mip_cost_weight)
+            dut.boundary_value_gap_mip_cost_weight, safe_state_samples,
+            unsafe_state_samples, barrier_derivative_state_samples,
+            dut.safe_sample_cost_weight, dut.unsafe_sample_cost_weight,
+            dut.barrier_derivative_sample_cost_weight,
+            dut.safe_mip_cost_weight, dut.unsafe_mip_cost_weight,
+            dut.barrier_derivative_mip_cost_weight)
 
         self.assertEqual(
             positivity_state_samples.shape[0] + 1,
@@ -520,7 +530,7 @@ class TestTrainerBarrier(unittest.TestCase):
                 adversarial, dut.barrier_x_star, dut.barrier_c,
                 dut.barrier_epsilon).detach().numpy())
 
-    def test_barrier_loss(self):
+    def test_barrier_loss1(self):
         dut = train_lyapunov_barrier.Trainer()
         dut.add_barrier(self.barrier_system,
                         x_star=(self.system.x_lo * 0.25 +
@@ -568,6 +578,38 @@ class TestTrainerBarrier(unittest.TestCase):
                            num_unsafe_state_samples)
         self.assertGreater(barrier_loss.derivative_state_samples.shape[0],
                            num_derivative_state_samples)
+
+    def test_barrier_loss2(self):
+        dut = train_lyapunov_barrier.Trainer()
+        dut.add_barrier(self.barrier_system,
+                        x_star=(self.system.x_lo * 0.25 +
+                                self.system.x_up * 0.75),
+                        c=0.1,
+                        barrier_epsilon=0.3)
+
+        safe_state_samples = torch.empty((0, self.barrier_system.system.x_dim),
+                                         dtype=self.dtype)
+        unsafe_state_samples = torch.empty(
+            (0, self.barrier_system.system.x_dim), dtype=self.dtype)
+        derivative_state_samples = torch.empty(
+            (0, self.barrier_system.system.x_dim), dtype=self.dtype)
+        safe_sample_cost_weight = 1.
+        unsafe_sample_cost_weight = 2.
+        derivative_sample_cost_weight = 3.
+        safe_mip_cost_weight = None
+        unsafe_mip_cost_weight = None
+        derivative_mip_cost_weight = None
+        barrier_loss = dut.compute_barrier_loss(
+            safe_state_samples, unsafe_state_samples, derivative_state_samples,
+            safe_sample_cost_weight, unsafe_sample_cost_weight,
+            derivative_sample_cost_weight, safe_mip_cost_weight,
+            unsafe_mip_cost_weight, derivative_mip_cost_weight)
+        self.assertEqual(barrier_loss.safe_sample_loss.item(), 0)
+        self.assertEqual(barrier_loss.unsafe_sample_loss.item(), 0)
+        self.assertEqual(barrier_loss.derivative_sample_loss.item(), 0)
+        self.assertIsNone(barrier_loss.safe_mip_loss)
+        self.assertIsNone(barrier_loss.unsafe_mip_loss)
+        self.assertIsNone(barrier_loss.derivative_mip_loss)
 
 
 class TestTrainValueApproximator(unittest.TestCase):
