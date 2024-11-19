@@ -69,6 +69,32 @@ def value_iteration(nx, r, u_optimal, epsilon=0.0001, discount_factor=0.95):
     return V, policy
 
 
+def greedy_policy(s, u, network, V_lambda, R, dt=0.1):
+    n_state = 5000
+    n_action = 100
+    dp_states = s[:, np.random.randint(s.shape[1], size=n_state)]
+    dp_actions = np.zeros((2, n_state))
+    plant = unicycle.Unicycle(torch.float64)
+    for i in range(n_state):
+        if i % 100 == 0:
+            print("DP state ", i)
+        si = dp_states[:,i]
+        actions = u[:,np.random.randint(u.shape[1], size=n_action)]
+        V = np.zeros(n_action)
+        for j in range(n_action):
+            s_next = plant.next_pose(si, actions[:, j], dt)
+            r = unicycle_traj_opt.cost_trajectory(1, actions[:, j])
+            with torch.no_grad():
+                V_next = network(torch.from_numpy(s_next)) - network(
+                    torch.zeros((3,), dtype=torch.float64)) + V_lambda * torch.norm(R @ torch.from_numpy(s_next).T, p=1, dim=0).reshape(
+                        (-1, 1))
+            V[j] = r[0] + V_next.detach().numpy()[0][0]
+        ind = np.argmin(V)
+        dp_actions[:, i] = actions[:, ind]
+    return dp_states, dp_actions
+
+
+
 def calculate_r_complete(
     ns,
     n0,
@@ -282,12 +308,12 @@ if __name__ == "__main__":
     epsilon = 1e-4
 
     nT = args.nT
-    u_lo = np.array([-3, -0.25 * np.pi])
-    u_up = np.array([6, 0.25 * np.pi])
+    u_lo = np.array([0, -0.15 * np.pi])
+    u_up = np.array([1, 0.15 * np.pi])
     x_lo = np.array([-1, -1, -1.05 * np.pi])
     x_up = np.array([1, 1, 1.05 * np.pi])
     dt_min = 0.001
-    dt_max = 0.07
+    dt_max = 0.1
     prog, initial_val_constraint, final_val_constraint, x, u, dt =\
         unicycle_traj_opt.construct_traj_opt(
             nT, u_lo, u_up, dt_min, dt_max)
@@ -301,6 +327,9 @@ if __name__ == "__main__":
                              np.linspace(x_lo[1], x_up[1], n_grid_xy),
                              np.linspace(x_lo[2], x_up[2], n_grid_angle)))
     # ss = s.copy()
+    a = np.array(np.meshgrid(np.linspace(u_lo[0], u_up[0], n_grid_xy),
+                             np.linspace(u_lo[1], u_up[1], n_grid_angle)))
+    a = a.reshape((2, n_grid_xy * n_grid_angle))
     s = s.reshape((3, n_grid_xy * n_grid_xy * n_grid_angle))
     ns = s.shape[1]
     n0 = math.ceil(u_up[0] * dt_max * (nT - 1) /
@@ -339,16 +368,16 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".npy")
-        policy = np.load(
-            folder_name + "policy_" +
-            str(nT) +
-            "_" +
-            str(n_grid_xy) +
-            "_" +
-            str(n_grid_angle) +
-            "_" +
-            str(dt_max) +
-            ".npy")
+        # policy = np.load(
+        #     folder_name + "policy_" +
+        #     str(nT) +
+        #     "_" +
+        #     str(n_grid_xy) +
+        #     "_" +
+        #     str(n_grid_angle) +
+        #     "_" +
+        #     str(dt_max) +
+        #     ".npy")
         # plot_u(policy, 18)
     else:
         if args.load_r:
@@ -473,6 +502,9 @@ if __name__ == "__main__":
                                      negative_slope=0.01,
                                      bias=True,
                                      dtype=torch.float64)
+    controller_lambda_u = 4
+    controller_Ru = torch.tensor([[1, -1], [0, 1], [1, 0], [1, 1], [0.5, 0.9]],
+                                 dtype=torch.float64)
     R = torch.cat((torch.eye(3, dtype=torch.float64),
                    torch.tensor([[1, -1, 0], [-1, -1, 1], [0, 1, 1]],
                                 dtype=torch.float64)),
@@ -480,28 +512,8 @@ if __name__ == "__main__":
 
     if args.train_approximator:
         traj_opt_states = torch.from_numpy(s.T)
-        traj_opt_controls = torch.from_numpy(policy)
+        # traj_opt_controls = torch.from_numpy(policy)
         traj_opt_costs = torch.from_numpy(V.T.reshape(-1, 1))
-        train_unicycle_demo.train_controller_approximator(controller_relu,
-                                                          traj_opt_states,
-                                                          traj_opt_controls,
-                                                          num_epochs=400,
-                                                          lr=0.001)
-        utils.save_controller_model(
-            controller_relu,
-            torch.from_numpy(x_lo),
-            torch.from_numpy(x_up),
-            torch.from_numpy(u_lo),
-            torch.from_numpy(u_up),
-            "neural_network_lyapunov/examples/car/data/controller_" +
-            str(nT) +
-            "_" +
-            str(n_grid_xy) +
-            "_" +
-            str(n_grid_angle) +
-            "_" +
-            str(dt_max) +
-            ".pt")
         train_unicycle_demo.train_cost_approximator(lyapunov_relu,
                                                     V_lambda,
                                                     R,
@@ -525,9 +537,38 @@ if __name__ == "__main__":
             "_" +
             str(dt_max) +
             ".pt")
+        dp_states, dp_actions = greedy_policy(s, a, lyapunov_relu, V_lambda, R, dt_max)
+        dp_states = torch.from_numpy(dp_states.T)
+        dp_actions = torch.from_numpy(dp_actions.T)
+        train_unicycle_demo.train_controller_approximator(controller_relu,
+                                                          dp_states,
+                                                          dp_actions,
+                                                          controller_lambda_u,
+                                                          controller_Ru,
+                                                          num_epochs=300,
+                                                          lr=0.001)
+        Ru_options = r_options.SearchRwithSVDOptions(controller_Ru.shape,
+                                                     np.array([0.1, 0.2]))
+        Ru_options.set_variable_value(controller_Ru.detach().numpy())
+        train_unicycle_demo.save_controller_model(
+            controller_relu,
+            torch.from_numpy(x_lo),
+            torch.from_numpy(x_up),
+            torch.from_numpy(u_lo),
+            torch.from_numpy(u_up),
+            controller_lambda_u,
+            Ru_options,
+            "neural_network_lyapunov/examples/car/data/controller_" +
+            str(nT) +
+            "_" +
+            str(n_grid_xy) +
+            "_" +
+            str(n_grid_angle) +
+            "_" +
+            str(dt_max) +
+            ".pt")
     else:
-        controller_relu.load_state_dict(
-            torch.load(
+        controller_data = torch.load(
                 "neural_network_lyapunov/examples/car/data/controller_" +
                 str(nT) +
                 "_" +
@@ -536,9 +577,19 @@ if __name__ == "__main__":
                 str(n_grid_angle) +
                 "_" +
                 str(dt_max) +
-                ".pt"))
-        lyapunov_relu.load_state_dict(
-            torch.load(
+                ".pt")
+
+        controller_relu = utils.setup_relu(
+            controller_data["linear_layer_width"],
+            params=None,
+            negative_slope=controller_data["negative_slope"],
+            bias=controller_data["bias"],
+            dtype=torch.float64)
+        controller_relu.load_state_dict(controller_data["state_dict"])
+        controller_lambda_u = controller_data["lambda_u"]
+        controller_Ru = controller_data["Ru"]
+
+        lyapunov_data = torch.load(
                 "neural_network_lyapunov/examples/car/data/cost_" +
                 str(nT) +
                 "_" +
@@ -547,7 +598,16 @@ if __name__ == "__main__":
                 str(n_grid_angle) +
                 "_" +
                 str(dt_max) +
-                ".pt"))
+                ".pt")
+        lyapunov_relu = utils.setup_relu(
+            lyapunov_data["linear_layer_width"],
+            params=None,
+            negative_slope=lyapunov_data["negative_slope"],
+            bias=lyapunov_data["bias"],
+            dtype=torch.float64)
+        lyapunov_relu.load_state_dict(lyapunov_data["state_dict"])
+        V_lambda = lyapunov_data["V_lambda"]
+        R = lyapunov_data["R"]
 
     plant = unicycle.Unicycle(torch.float64)
     x0 = np.array([0.5, 0.5, 0.5 * np.pi])  # Choose your initial state
